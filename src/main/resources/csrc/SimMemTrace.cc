@@ -7,7 +7,20 @@
 #include <unistd.h>
 
 class MemTraceReader;
+
+// Global singleton instance of MemTraceReader
 static std::unique_ptr<MemTraceReader> reader;
+
+struct MemTraceLine {
+  bool valid = false;
+  unsigned long cycle = 0;
+  char loadstore[10];
+  int core_id = 0;
+  int thread_id = 0;
+  unsigned long address = 0;
+  unsigned long data = 0;
+  int data_size = 0;
+};
 
 class MemTraceReader {
 public:
@@ -26,31 +39,23 @@ public:
     infile.close();
     printf("MemTraceReader destroyed\n");
   }
-  bool tick();
+  MemTraceLine tick();
 
   std::ifstream infile;
 };
 
-// Returns true if there is no more memory trace left to read.
-bool MemTraceReader::tick() {
-  std::string line;
-  long cycle = 0;
-  char loadstore[10]{0};
-  int core_id = 0;
-  int thread_id = 0;
-  unsigned long address = 0;
-  unsigned long data = 0;
-  int data_size = 0;
+MemTraceLine MemTraceReader::tick() {
+  MemTraceLine line;
 
-  if (!(infile >> cycle >> loadstore >> core_id >> thread_id
-        >> std::hex >>
-        address >> data >> std::dec >> data_size
-        )) {
-    return true;
+  line.valid = false;
+  if (infile >> line.cycle >> line.loadstore >> line.core_id >>
+      line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
+      line.data_size) {
+    line.valid = true;
+    printf("cycle: %ld\n", line.cycle);
   }
 
-  printf("cycle: %ld\n", cycle);
-  return false;
+  return line;
 }
 
 extern "C" void memtrace_init(const char *filename) {
@@ -60,13 +65,11 @@ extern "C" void memtrace_init(const char *filename) {
 
 extern "C" void memtrace_tick(unsigned char *trace_read_valid,
                               unsigned char trace_read_ready,
-                              char *trace_read_bits) {
-  *trace_read_bits = 42;
+                              unsigned long *trace_read_bits) {
+  auto line = reader->tick();
 
-  *trace_read_valid = 0;
-  if (reader->tick()) {
-    *trace_read_valid = 1;
-  }
+  *trace_read_valid = line.valid;
+  *trace_read_bits = line.cycle;
 
   return;
 }

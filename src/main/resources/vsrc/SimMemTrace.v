@@ -1,4 +1,4 @@
-`define DATA_WIDTH 8
+`define DATA_WIDTH 64
 
 import "DPI-C" function void memtrace_init(
     input  string  filename
@@ -8,7 +8,7 @@ import "DPI-C" function void memtrace_tick
 (
     output bit     trace_read_valid,
     input  bit     trace_read_ready,
-    output byte    trace_read_bits
+    output longint trace_read_bits
 );
 
 module SimMemTrace  (
@@ -21,7 +21,7 @@ module SimMemTrace  (
 );
 
     bit __in_valid;
-    byte __in_bits;
+    longint __in_bits;
     string __uartlog;
     int __uartno;
 
@@ -39,10 +39,10 @@ module SimMemTrace  (
     // Evaluate the signals on the positive edge
     always @(posedge clock) begin
         if (reset) begin
-            __in_valid = 0;
+            __in_valid = 1'b0;
 
-            __in_valid_reg <= 0;
-            __in_bits_reg <= 0;
+            __in_valid_reg <= 1'b0;
+            __in_bits_reg <= `DATA_WIDTH'b0;
         end else begin
             memtrace_tick(
                 __in_valid,

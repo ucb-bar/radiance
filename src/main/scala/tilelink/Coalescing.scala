@@ -32,9 +32,9 @@ with HasBlackBoxResource {
     val reset = Input(Bool())
 
     val trace_read = new Bundle {
-      val ready = Input(Bool())
       val valid = Output(Bool())
-      val bits = Output(UInt(8.W))
+      val ready = Input(Bool())
+      val bits = Output(UInt(64.W))
     }
   })
 
@@ -52,5 +52,5 @@ extends UnitTest(timeout) {
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
 
-  io.finished := sim.io.trace_read.valid
+  io.finished := !sim.io.trace_read.valid
 }
