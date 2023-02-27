@@ -27,7 +27,7 @@ module SimMemTrace  (
 
     initial begin
         $value$plusargs("uartlog=%s", __uartlog);
-        memtrace_init(__uartlog);
+        memtrace_init("vecadd.core1.thread4.trace");
     end
 
     reg __in_valid_reg;
