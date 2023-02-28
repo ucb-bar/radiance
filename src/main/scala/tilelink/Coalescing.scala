@@ -25,8 +25,23 @@ class CoalescingUnit(txns: Int = 5000)(implicit p: Parameters) extends LazyModul
   }
 }
 
-class SimMemTrace()(implicit p: Parameters) extends BlackBox
-with HasBlackBoxResource {
+class MemTraceDriver(implicit p: Parameters) extends Module with UnitTestModule {
+  val sim = Module(new SimMemTrace)
+  sim.io.clock := clock
+  sim.io.reset := reset.asBool
+  sim.io.trace_read.ready := true.B
+
+  when (sim.io.trace_read.valid) {
+    println("sim.io.valid!")
+  }
+
+  // TODO: generate TL request here
+
+  // we're finished when there is no more memtrace to read
+  io.finished := !sim.io.trace_read.valid
+}
+
+class SimMemTrace extends BlackBox with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -45,13 +60,11 @@ with HasBlackBoxResource {
 
 class CoalescingUnitTest(txns: Int = 5000, timeout: Int = 500000)(implicit p: Parameters)
 extends UnitTest(timeout) {
-  val dut = Module(LazyModule(new CoalescingUnit(txns)).module)
+  // val dut = Module(LazyModule(new CoalescingUnit(txns)).module)
   // dut.io.start := io.start
 
-  val sim = Module(new SimMemTrace)
-  sim.io.clock := clock
-  sim.io.reset := reset.asBool
-  sim.io.trace_read.ready := true.B
+  val driver = Module(new MemTraceDriver)
+  driver.io.start := io.start
 
-  io.finished := !sim.io.trace_read.valid
+  io.finished := driver.io.finished
 }
