@@ -65,11 +65,13 @@ extern "C" void memtrace_init(const char *filename) {
 
 extern "C" void memtrace_tick(unsigned char *trace_read_valid,
                               unsigned char trace_read_ready,
-                              unsigned long *trace_read_bits) {
+                              unsigned long *trace_read_cycle,
+                              unsigned long *trace_read_address) {
   auto line = reader->tick();
 
   *trace_read_valid = line.valid;
-  *trace_read_bits = line.cycle;
+  *trace_read_cycle = line.cycle;
+  *trace_read_address = line.address;
 
   return;
 }

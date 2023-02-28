@@ -34,7 +34,8 @@ with HasBlackBoxResource {
     val trace_read = new Bundle {
       val valid = Output(Bool())
       val ready = Input(Bool())
-      val bits = Output(UInt(64.W))
+      val cycle = Output(UInt(64.W))
+      val address = Output(UInt(64.W))
     }
   })
 

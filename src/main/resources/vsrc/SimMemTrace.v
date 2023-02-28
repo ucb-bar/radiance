@@ -8,7 +8,8 @@ import "DPI-C" function void memtrace_tick
 (
     output bit     trace_read_valid,
     input  bit     trace_read_ready,
-    output longint trace_read_bits
+    output longint trace_read_cycle,
+    output longint trace_read_address
 );
 
 module SimMemTrace  (
@@ -17,11 +18,13 @@ module SimMemTrace  (
 
     output                   trace_read_valid,
     input                    trace_read_ready,
-    output [`DATA_WIDTH-1:0] trace_read_bits
+    output [`DATA_WIDTH-1:0] trace_read_cycle,
+    output [`DATA_WIDTH-1:0] trace_read_address
 );
 
     bit __in_valid;
-    longint __in_bits;
+    longint __in_cycle;
+    longint __in_address;
     string __uartlog;
     int __uartno;
 
@@ -31,10 +34,12 @@ module SimMemTrace  (
     end
 
     reg __in_valid_reg;
-    reg [`DATA_WIDTH-1:0] __in_bits_reg;
+    reg [`DATA_WIDTH-1:0] __in_cycle_reg;
+    reg [`DATA_WIDTH-1:0] __in_address_reg;
 
-    assign trace_read_valid  = __in_valid_reg;
-    assign trace_read_bits   = __in_bits_reg;
+    assign trace_read_valid   = __in_valid_reg;
+    assign trace_read_cycle   = __in_cycle_reg;
+    assign trace_read_address = __in_address_reg;
 
     // Evaluate the signals on the positive edge
     always @(posedge clock) begin
@@ -42,16 +47,18 @@ module SimMemTrace  (
             __in_valid = 1'b0;
 
             __in_valid_reg <= 1'b0;
-            __in_bits_reg <= `DATA_WIDTH'b0;
+            __in_cycle_reg <= `DATA_WIDTH'b0;
         end else begin
             memtrace_tick(
                 __in_valid,
                 trace_read_ready,
-                __in_bits
+                __in_cycle,
+                __in_address
             );
 
-            __in_valid_reg  <= __in_valid;
-            __in_bits_reg   <= __in_bits;
+            __in_valid_reg   <= __in_valid;
+            __in_cycle_reg   <= __in_cycle;
+            __in_address_reg <= __in_address;
         end
     end
 
