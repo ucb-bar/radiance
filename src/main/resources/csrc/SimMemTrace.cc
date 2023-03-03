@@ -1,5 +1,6 @@
 #include <vpi_user.h>
 #include <svdpi.h>
+#include <vector>
 #include <memory>
 #include <string>
 #include <fstream>
@@ -27,51 +28,79 @@ public:
   MemTraceReader(const std::string &filename) {
     char cwd[4096];
     if (getcwd(cwd, sizeof(cwd))) {
-        printf("MemTraceReader: current working dir: %s\n", cwd);
+      printf("MemTraceReader: current working dir: %s\n", cwd);
     }
 
     infile.open(filename);
     if (infile.fail()) {
-        fprintf(stderr, "failed to open file %s\n", filename);
+      fprintf(stderr, "failed to open file %s\n", filename);
     }
   }
+
   ~MemTraceReader() {
     infile.close();
     printf("MemTraceReader destroyed\n");
   }
+
+  void parse();
   MemTraceLine tick();
 
   std::ifstream infile;
+  std::vector<MemTraceLine> trace;
+  std::vector<MemTraceLine>::const_iterator curr_line;
+  long cycle = 0;
 };
+
+// Parse trace file in its entirety and store it into internal structure.
+// TODO: might block for a long time when the trace gets big, check if need to
+// be broken down
+void MemTraceReader::parse() {
+  MemTraceLine line;
+
+  printf("MemTraceReader: started parsing\n");
+
+  // TODO: line.valid is useless now
+  line.valid = false;
+  while (infile >> line.cycle >> line.loadstore >> line.core_id >>
+         line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
+         line.data_size) {
+    line.valid = true;
+    trace.push_back(line);
+  }
+  curr_line = trace.cbegin();
+
+  printf("MemTraceReader: finished parsing\n");
+}
 
 MemTraceLine MemTraceReader::tick() {
   MemTraceLine line;
-
-  line.valid = false;
-  if (infile >> line.cycle >> line.loadstore >> line.core_id >>
-      line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
-      line.data_size) {
-    line.valid = true;
-    printf("cycle: %ld\n", line.cycle);
+  if (curr_line == trace.cend()) {
+    return line;
   }
 
+  line = *curr_line;
+  printf("cycle: %ld\n", line.cycle);
+  curr_line++;
   return line;
 }
 
 extern "C" void memtrace_init(const char *filename) {
   reader = std::make_unique<MemTraceReader>(filename);
   printf("memtrace_init: filename=[%s]\n", filename);
+
+  // parse file upfront
+  reader->parse();
 }
 
 extern "C" void memtrace_tick(unsigned char *trace_read_valid,
                               unsigned char trace_read_ready,
                               unsigned long *trace_read_cycle,
                               unsigned long *trace_read_address) {
-  auto line = reader->tick();
+  if (!trace_read_ready)
+    return;
 
+  auto line = reader->tick();
   *trace_read_valid = line.valid;
   *trace_read_cycle = line.cycle;
   *trace_read_address = line.address;
-
-  return;
 }
