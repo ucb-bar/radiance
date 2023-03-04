@@ -1,55 +1,29 @@
+#ifndef NO_VPI
 #include <vpi_user.h>
 #include <svdpi.h>
-#include <vector>
-#include <memory>
+#endif
 #include <string>
-#include <fstream>
 #include <cstdio>
+#include <cassert>
 #include <unistd.h>
+#include "SimMemTrace.h"
 
-class MemTraceReader;
-
-// Global singleton instance of MemTraceReader
-static std::unique_ptr<MemTraceReader> reader;
-
-struct MemTraceLine {
-  bool valid = false;
-  unsigned long cycle = 0;
-  char loadstore[10];
-  int core_id = 0;
-  int thread_id = 0;
-  unsigned long address = 0;
-  unsigned long data = 0;
-  int data_size = 0;
-};
-
-class MemTraceReader {
-public:
-  MemTraceReader(const std::string &filename) {
-    char cwd[4096];
-    if (getcwd(cwd, sizeof(cwd))) {
-      printf("MemTraceReader: current working dir: %s\n", cwd);
-    }
-
-    infile.open(filename);
-    if (infile.fail()) {
-      fprintf(stderr, "failed to open file %s\n", filename);
-    }
+MemTraceReader::MemTraceReader(const std::string &filename) {
+  char cwd[4096];
+  if (getcwd(cwd, sizeof(cwd))) {
+    printf("MemTraceReader: current working dir: %s\n", cwd);
   }
 
-  ~MemTraceReader() {
-    infile.close();
-    printf("MemTraceReader destroyed\n");
+  infile.open(filename);
+  if (infile.fail()) {
+    fprintf(stderr, "failed to open file %s\n", filename.c_str());
   }
+}
 
-  void parse();
-  MemTraceLine tick();
-
-  std::ifstream infile;
-  std::vector<MemTraceLine> trace;
-  std::vector<MemTraceLine>::const_iterator curr_line;
-  long cycle = 0;
-};
+MemTraceReader::~MemTraceReader() {
+  infile.close();
+  printf("MemTraceReader destroyed\n");
+}
 
 // Parse trace file in its entirety and store it into internal structure.
 // TODO: might block for a long time when the trace gets big, check if need to
@@ -59,12 +33,9 @@ void MemTraceReader::parse() {
 
   printf("MemTraceReader: started parsing\n");
 
-  // TODO: line.valid is useless now
-  line.valid = false;
   while (infile >> line.cycle >> line.loadstore >> line.core_id >>
          line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
          line.data_size) {
-    line.valid = true;
     trace.push_back(line);
   }
   curr_line = trace.cbegin();
@@ -74,20 +45,27 @@ void MemTraceReader::parse() {
 
 MemTraceLine MemTraceReader::tick() {
   MemTraceLine line;
-  if (curr_line == trace.cend()) {
+
+  if (finished()) {
+    cycle++;
     return line;
   }
 
   line = *curr_line;
-  printf("cycle: %ld\n", line.cycle);
-  curr_line++;
+  assert(line.cycle >= cycle && "missed some trace lines past their cycles");
+  while (line.cycle == cycle) {
+    printf("cycle: %ld\n", cycle);
+    line = *(++curr_line);
+  }
+
+  cycle++;
   return line;
 }
 
 extern "C" void memtrace_init(const char *filename) {
-  reader = std::make_unique<MemTraceReader>(filename);
   printf("memtrace_init: filename=[%s]\n", filename);
 
+  reader = std::make_unique<MemTraceReader>(filename);
   // parse file upfront
   reader->parse();
 }
@@ -95,12 +73,20 @@ extern "C" void memtrace_init(const char *filename) {
 extern "C" void memtrace_tick(unsigned char *trace_read_valid,
                               unsigned char trace_read_ready,
                               unsigned long *trace_read_cycle,
-                              unsigned long *trace_read_address) {
-  if (!trace_read_ready)
+                              unsigned long *trace_read_address,
+                              unsigned char *trace_read_finished) {
+  // printf("memtrace_tick()\n");
+  if (!trace_read_ready) {
     return;
+  }
 
   auto line = reader->tick();
   *trace_read_valid = line.valid;
   *trace_read_cycle = line.cycle;
   *trace_read_address = line.address;
+  // This means finished and valid will go up at the same cycle.  Need to
+  // handle this without skipping the last line.
+  *trace_read_finished = reader->finished();
+
+  return;
 }
