@@ -36,33 +36,47 @@ void MemTraceReader::parse() {
   while (infile >> line.cycle >> line.loadstore >> line.core_id >>
          line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
          line.data_size) {
+    line.valid = true;
     trace.push_back(line);
   }
-  curr_line = trace.cbegin();
+  read_pos = trace.cbegin();
 
   printf("MemTraceReader: finished parsing\n");
 }
 
-MemTraceLine MemTraceReader::tick() {
+// Try to read a memory request that might have happened at a given cycle, on
+// given thread.  In case no request happened at that point, return an empty
+// line with .valid = false.
+MemTraceLine MemTraceReader::read_trace_at(const long cycle,
+                                           const int thread_id) {
   MemTraceLine line;
+  line.valid = false;
 
   printf("tick(): cycle=%ld\n", cycle);
 
   if (finished()) {
-    cycle++;
     return line;
   }
 
-  // Fire all requests that happend at this cycle.  This is at most #lane
-  // requests.
-  line = *curr_line;
-  assert(line.cycle >= cycle && "missed some trace lines past their cycles");
-  while (line.cycle == cycle) {
-    printf("fire! cycle=%ld\n", cycle);
-    line = *(++curr_line);
+  line = *read_pos;
+  // It should always be guaranteed that the next line is not read yet.
+  if (line.cycle < cycle) {
+    fprintf(stderr, "line.cycle=%ld, cycle=%ld\n", line.cycle, cycle);
+    assert(false && "some trace lines are left unread in the past");
   }
 
-  cycle++;
+  if (line.cycle > cycle) {
+    // It's not ready to read this line yet.
+    return MemTraceLine{};
+  } else if (line.cycle == cycle) {
+    printf("fire! cycle=%ld, valid=%d\n", cycle, line.valid);
+    // FIXME! Currently thread_id is assumed to be in round-robin order, e.g.
+    // 0->1->2->3->0->..., both in the trace file and the order the caller calls
+    // this function.  If this is not true, we cannot simply monotonically
+    // increment read_pos.
+    ++read_pos;
+  }
+
   return line;
 }
 
@@ -74,20 +88,20 @@ extern "C" void memtrace_init(const char *filename) {
   reader->parse();
 }
 
-extern "C" void memtrace_tick(unsigned char trace_read_ready,
-                              unsigned long trace_read_cycle,
-                              int trace_read_thread_id,
-                              unsigned char *trace_read_valid,
-                              unsigned long *trace_read_address,
-                              unsigned char *trace_read_finished) {
-  printf("memtrace_tick(cycle=%ld, tid=%d)\n", trace_read_cycle,
+extern "C" void memtrace_query(unsigned char trace_read_ready,
+                               unsigned long trace_read_cycle,
+                               int trace_read_thread_id,
+                               unsigned char *trace_read_valid,
+                               unsigned long *trace_read_address,
+                               unsigned char *trace_read_finished) {
+  printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
          trace_read_thread_id);
 
   if (!trace_read_ready) {
     return;
   }
 
-  auto line = reader->tick();
+  auto line = reader->read_trace_at(trace_read_cycle, trace_read_thread_id);
   *trace_read_valid = line.valid;
   *trace_read_address = line.address;
   // This means finished and valid will go up at the same cycle.  Need to

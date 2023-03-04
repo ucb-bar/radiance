@@ -23,19 +23,18 @@ public:
   MemTraceReader(const std::string &filename);
   ~MemTraceReader();
   void parse();
-  MemTraceLine tick();
-  bool finished() const { return curr_line == trace.cend(); }
+  MemTraceLine read_trace_at(const long cycle, const int thread_id);
+  bool finished() const { return read_pos == trace.cend(); }
 
   std::ifstream infile;
   std::vector<MemTraceLine> trace;
-  std::vector<MemTraceLine>::const_iterator curr_line;
-  long cycle = 0;
+  std::vector<MemTraceLine>::const_iterator read_pos;
 };
 
 extern "C" void memtrace_init(const char *filename);
-extern "C" void memtrace_tick(unsigned char trace_read_ready,
-                              unsigned long trace_read_cycle,
-                              int trace_read_thread_id,
-                              unsigned char *trace_read_valid,
-                              unsigned long *trace_read_address,
-                              unsigned char *trace_read_finished);
+extern "C" void memtrace_query(unsigned char trace_read_ready,
+                               unsigned long trace_read_cycle,
+                               int trace_read_thread_id,
+                               unsigned char *trace_read_valid,
+                               unsigned long *trace_read_address,
+                               unsigned char *trace_read_finished);
