@@ -44,9 +44,9 @@ void MemTraceReader::parse() {
   printf("MemTraceReader: finished parsing\n");
 }
 
-// Try to read a memory request that might have happened at a given cycle, on
-// given thread.  In case no request happened at that point, return an empty
-// line with .valid = false.
+// Try to read a memory request that might have happened at a given cycle, on a
+// given SIMD lane (= "thread").  In case no request happened at that point,
+// return an empty line with .valid = false.
 MemTraceLine MemTraceReader::read_trace_at(const long cycle,
                                            const int thread_id) {
   MemTraceLine line;
@@ -59,14 +59,16 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
   }
 
   line = *read_pos;
-  // It should always be guaranteed that the next line is not read yet.
+  // It should always be guaranteed that we consumed all of the past lines, and
+  // the next line is in the future.
   if (line.cycle < cycle) {
     fprintf(stderr, "line.cycle=%ld, cycle=%ld\n", line.cycle, cycle);
     assert(false && "some trace lines are left unread in the past");
   }
 
   if (line.cycle > cycle) {
-    // It's not ready to read this line yet.
+    // We haven't reached the cycle mark specified in this line yet, so we don't
+    // read it right now.
     return MemTraceLine{};
   } else if (line.cycle == cycle) {
     printf("fire! cycle=%ld, valid=%d\n", cycle, line.valid);
@@ -88,6 +90,7 @@ extern "C" void memtrace_init(const char *filename) {
   reader->parse();
 }
 
+// TODO: accept core_id as well
 extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long trace_read_cycle,
                                int trace_read_thread_id,
