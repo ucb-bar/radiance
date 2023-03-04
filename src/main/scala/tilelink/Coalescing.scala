@@ -8,52 +8,145 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.unittest._
 
-class CoalescingUnit(txns: Int = 5000)(implicit p: Parameters)
-    extends LazyModule {
-  val fuzz = LazyModule(new TLFuzzer(txns))
-  val model = LazyModule(new TLRAMModel("Xbar"))
-  val xbar = LazyModule(new TLXbar)
 
-  xbar.node := TLDelayer(0.1) := model.node := fuzz.node
-  (0 until 1) foreach { n =>
-    val ram = LazyModule(new TLRAM(AddressSet(0x0 + 0x400 * n, 0x3ff)))
-    ram.node := TLFragmenter(4, 256) := TLDelayer(0.1) := xbar.node
-  }
+class CoalescingLogic(threads : Int = 1)(implicit p: Parameters)
+    extends LazyModule {
+
+        val node = TLIdentityNode()
+
+        // Creating N number of Manager node
+        val beatBytes = 8
+        val seqparam = Seq(TLSlaveParameters.v1(
+                          address = Seq(AddressSet(0x0000, 0xffffff)),
+                          //resources = device.reg,
+                          regionType = RegionType.UNCACHED,
+                          executable = true,
+                          supportsArithmetic = TransferSizes(1, beatBytes),
+                          supportsLogical = TransferSizes(1, beatBytes),
+                          supportsGet = TransferSizes(1, beatBytes),
+                          supportsPutFull = TransferSizes(1, beatBytes),
+                          supportsPutPartial = TransferSizes(1, beatBytes),
+                          supportsHint = TransferSizes(1, beatBytes),
+                          fifoId = Some(0))
+                          )
+        val vec_node_entry = Seq.tabulate(threads){
+              _ => TLManagerNode(Seq(TLSlavePortParameters.v1(seqparam, beatBytes)))
+        }
+        //Assign each vec_node to the identity node
+        vec_node_entry.foreach { n => n := node }
+
+
+
+        lazy val module = new Impl
+        class Impl extends LazyModuleImp(this) {
+
+            //Example 1: accessing the entire A channel data for Thread 0
+            val (tl_in_0, edge0) = vec_node_entry(0).in(0)
+            dontTouch(tl_in_0.a)
+
+            // Example 2: accssing the entire A channel data for Thread 1
+            val (tl_in_1, edge1) = vec_node_entry(1).in(0)
+            dontTouch(tl_in_1.a)
+        }
+    }
+
+
+
+class CoalescingEntry(txns: Int = 5000)(implicit p: Parameters)
+    extends LazyModule {
+
+
+  val node = TLIdentityNode()
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // io.finished := fuzz.module.io.finished
-  }
-}
 
-class MemTraceDriver(implicit p: Parameters) extends LazyModule {
-  // TODO: generate TL request here
-  // testchipip provides TLHelper.makeClientNode convenience wrapper for this.
-  val clients = Seq(
-    TLMasterParameters.v1(
-      name = "MemTraceDriver",
-      sourceId = IdRange(0, 1 /*FIXME*/ )
-    )
-  )
-  val node = TLClientNode(Seq(TLMasterPortParameters.v1(clients)))
-
-  lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) with UnitTestModule {
-    val sim = Module(new SimMemTrace)
-    sim.io.clock := clock
-    sim.io.reset := reset.asBool
-    sim.io.trace_read.ready := true.B
-
-    when(sim.io.trace_read.valid) {
-      println("sim.io.valid!")
+    (node.in zip node.out) foreach { 
+      case((in, edgeIn), (out, edgeOut)) =>
+          out.a <> in.a
+          in.d  <> out.d
+          dontTouch(in.a)
+          dontTouch(in.d)
     }
 
-    // we're finished when there is no more memtrace to read
-    io.finished := !sim.io.trace_read.valid
   }
+
 }
 
-class SimMemTrace extends BlackBox with HasBlackBoxResource {
+class MemTraceDriver(threads : Int = 1)(implicit p: Parameters) extends LazyModule {
+  
+
+  // Create N client nodes together
+  val vec_trace_node = Seq.tabulate(threads) { i =>
+    
+    val clients = Seq(TLMasterParameters.v1(
+                      name = "MemTraceDriver" + i.toString,
+                      sourceId = IdRange(0,4)
+                        )
+                      )
+    TLClientNode(Seq(TLMasterPortParameters.v1(clients)))
+  }
+  
+
+  // Combine N outgoing client node into 1 idenity node for diplomatic connection
+  val node = TLIdentityNode()
+  vec_trace_node.foreach{ thread_node => 
+      node := thread_node
+  }
+
+
+  lazy val module = new MemTraceDriverImp(this, "YourTraceFileName", threads)
+
+}
+
+
+class MemTraceDriverImp(outer: MemTraceDriver, trace_file: String, threads : Int) (implicit p: Parameters) extends LazyModuleImp(outer) with UnitTestModule {
+
+
+    // Creating N indepdent behaving thread modules
+    val vec_sim = Seq.tabulate(threads) { i =>
+      val ith_file_name = trace_file + (i+1).toString
+      Module(new SimMemTrace(trace_file=ith_file_name))
+    }
+
+    // Connect each sim module to its respective TL connection
+    vec_sim.zipWithIndex.foreach{
+      case (sim, i) =>
+        sim.io.clock := clock
+        sim.io.reset := reset.asBool
+        sim.io.trace_read.ready := true.B
+
+        when(sim.io.trace_read.valid) {
+            println("sim.io.valid!")
+        }
+
+        val (tl_out, edgesOut) = outer.vec_trace_node(i).out(0)
+        tl_out.a.valid := sim.io.trace_read.valid
+        tl_out.a.bits := edgesOut.Put(
+                          fromSource = 0.U,
+                          toAddress = 0.U,
+                          // 64 bits = 8 bytes = 2**(3) bytes
+                          lgSize = 3.U,
+                          data = (i+100).U)._2
+        //tl_out.a.bits.mask := 0xf.U
+        dontTouch(tl_out.a)
+
+        tl_out.d.ready := true.B  
+
+    }
+    
+
+  
+
+    // FIXME, current this simulation terminates when thread 0 terminates
+    // we're finished when there is no more memtrace to read
+    io.finished := !vec_sim(0).io.trace_read.valid
+
+  }
+
+
+
+class SimMemTrace(val trace_file: String) extends BlackBox(Map("TRACE_FILE" -> trace_file)) with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -70,12 +163,29 @@ class SimMemTrace extends BlackBox with HasBlackBoxResource {
   addResource("/csrc/SimMemTrace.cc")
 }
 
+
+class CoalConnectTrace(txns: Int)(implicit p: Parameters) extends LazyModule {
+
+    val coal_entry = LazyModule(new CoalescingEntry(txns))
+    val coal_logic = LazyModule(new CoalescingLogic(threads=2))
+    val driver = LazyModule(new MemTraceDriver(threads=2))
+
+    coal_logic.node :=* coal_entry.node :=* driver.node
+
+    lazy val module = new Impl
+    class Impl extends LazyModuleImp(this) with UnitTestModule {
+    driver.module.io.start := io.start
+    io.finished := driver.module.io.finished
+  }
+
+}
+
 class CoalescingUnitTest(txns: Int = 5000, timeout: Int = 500000)(implicit
     p: Parameters
 ) extends UnitTest(timeout) {
-  val coal = Module(LazyModule(new CoalescingUnit(txns)).module)
-  val driver = Module(LazyModule(new MemTraceDriver).module)
-  driver.io.start := io.start
 
-  io.finished := driver.io.finished
+  val dut = Module(LazyModule(new CoalConnectTrace(txns)).module)
+  dut.io.start := io.start
+  io.finished := dut.io.finished
+
 }
