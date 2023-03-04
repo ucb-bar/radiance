@@ -76,37 +76,15 @@ class CoalescingEntry(txns: Int = 5000)(implicit p: Parameters)
 class MemTraceDriver(threads : Int = 1)(implicit p: Parameters) extends LazyModule {
   
 
-  // Create N client nodes together
-  val vec_trace_node = Seq.tabulate(threads) { i =>
-    
-    val clients = Seq(TLMasterParameters.v1(
-                      name = "MemTraceDriver" + i.toString,
-                      sourceId = IdRange(0,4)
-                        )
-                      )
-    TLClientNode(Seq(TLMasterPortParameters.v1(clients)))
-  }
-  
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with UnitTestModule {
+    val sim = Module(new SimMemTrace(2))
+    sim.io.clock := clock
+    sim.io.reset := reset.asBool
+    sim.io.trace_read.ready := true.B
 
-  // Combine N outgoing client node into 1 idenity node for diplomatic connection
-  val node = TLIdentityNode()
-  vec_trace_node.foreach{ thread_node => 
-      node := thread_node
-  }
-
-
-  lazy val module = new MemTraceDriverImp(this, "YourTraceFileName", threads)
-
-}
-
-
-class MemTraceDriverImp(outer: MemTraceDriver, trace_file: String, threads : Int) (implicit p: Parameters) extends LazyModuleImp(outer) with UnitTestModule {
-
-
-    // Creating N indepdent behaving thread modules
-    val vec_sim = Seq.tabulate(threads) { i =>
-      val ith_file_name = trace_file + (i+1).toString
-      Module(new SimMemTrace(trace_file=ith_file_name))
+    when(sim.io.trace_read.valid) {
+      println("sim.io.valid!")
     }
 
     // Connect each sim module to its respective TL connection
@@ -140,13 +118,12 @@ class MemTraceDriverImp(outer: MemTraceDriver, trace_file: String, threads : Int
 
     // FIXME, current this simulation terminates when thread 0 terminates
     // we're finished when there is no more memtrace to read
-    io.finished := !vec_sim(0).io.trace_read.valid
-
+    io.finished := sim.io.trace_read.finished
   }
 
-
-
-class SimMemTrace(val trace_file: String) extends BlackBox(Map("TRACE_FILE" -> trace_file)) with HasBlackBoxResource {
+class SimMemTrace(num_threads: Int)
+    extends BlackBox(Map("NUM_THREADS" -> num_threads))
+    with HasBlackBoxResource {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -155,12 +132,14 @@ class SimMemTrace(val trace_file: String) extends BlackBox(Map("TRACE_FILE" -> t
       val valid = Output(Bool())
       val ready = Input(Bool())
       val cycle = Output(UInt(64.W))
-      val address = Output(UInt(64.W))
+      val address = Output(UInt((64 * num_threads).W))
+      val finished = Output(Bool())
     }
   })
 
   addResource("/vsrc/SimMemTrace.v")
   addResource("/csrc/SimMemTrace.cc")
+  addResource("/csrc/SimMemTrace.h")
 }
 
 
