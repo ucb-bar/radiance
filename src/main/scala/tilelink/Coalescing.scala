@@ -129,9 +129,8 @@ class SimMemTrace(num_threads: Int)
     val reset = Input(Bool())
 
     val trace_read = new Bundle {
-      val valid = Output(Bool())
       val ready = Input(Bool())
-      val cycle = Output(UInt(64.W))
+      val valid = Output(Bool())
       val address = Output(UInt((64 * num_threads).W))
       val finished = Output(Bool())
     }

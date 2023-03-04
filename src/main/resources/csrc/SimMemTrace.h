@@ -33,8 +33,9 @@ public:
 };
 
 extern "C" void memtrace_init(const char *filename);
-extern "C" void memtrace_tick(unsigned char *trace_read_valid,
-                              unsigned char trace_read_ready,
-                              unsigned long *trace_read_cycle,
+extern "C" void memtrace_tick(unsigned char trace_read_ready,
+                              unsigned long trace_read_cycle,
+                              int trace_read_thread_id,
+                              unsigned char *trace_read_valid,
                               unsigned long *trace_read_address,
                               unsigned char *trace_read_finished);

@@ -46,15 +46,19 @@ void MemTraceReader::parse() {
 MemTraceLine MemTraceReader::tick() {
   MemTraceLine line;
 
+  printf("tick(): cycle=%ld\n", cycle);
+
   if (finished()) {
     cycle++;
     return line;
   }
 
+  // Fire all requests that happend at this cycle.  This is at most #lane
+  // requests.
   line = *curr_line;
   assert(line.cycle >= cycle && "missed some trace lines past their cycles");
   while (line.cycle == cycle) {
-    printf("cycle: %ld\n", cycle);
+    printf("fire! cycle=%ld\n", cycle);
     line = *(++curr_line);
   }
 
@@ -70,19 +74,21 @@ extern "C" void memtrace_init(const char *filename) {
   reader->parse();
 }
 
-extern "C" void memtrace_tick(unsigned char *trace_read_valid,
-                              unsigned char trace_read_ready,
-                              unsigned long *trace_read_cycle,
+extern "C" void memtrace_tick(unsigned char trace_read_ready,
+                              unsigned long trace_read_cycle,
+                              int trace_read_thread_id,
+                              unsigned char *trace_read_valid,
                               unsigned long *trace_read_address,
                               unsigned char *trace_read_finished) {
-  // printf("memtrace_tick()\n");
+  printf("memtrace_tick(cycle=%ld, tid=%d)\n", trace_read_cycle,
+         trace_read_thread_id);
+
   if (!trace_read_ready) {
     return;
   }
 
   auto line = reader->tick();
   *trace_read_valid = line.valid;
-  *trace_read_cycle = line.cycle;
   *trace_read_address = line.address;
   // This means finished and valid will go up at the same cycle.  Need to
   // handle this without skipping the last line.
