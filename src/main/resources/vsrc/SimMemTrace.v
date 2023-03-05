@@ -19,7 +19,7 @@ import "DPI-C" function void memtrace_query
   output bit     trace_read_finished
 );
 
-module SimMemTrace #(parameter NUM_THREADS = 4) (
+module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
   input              clock,
   input              reset,
 
@@ -57,7 +57,7 @@ module SimMemTrace #(parameter NUM_THREADS = 4) (
 
   initial begin
       /* $value$plusargs("uartlog=%s", __uartlog); */
-      memtrace_init("vecadd.core1.thread4.trace");
+      memtrace_init(FILENAME);
   end
 
   // Evaluate the signals on the positive edge

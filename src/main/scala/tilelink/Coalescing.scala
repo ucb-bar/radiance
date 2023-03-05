@@ -87,30 +87,30 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
 class TraceReq extends Bundle {
   val valid = Bool()
   val address = UInt(64.W)
-  val finished = Bool()
 }
 
 class MemTraceDriverImp(
     outer: MemTraceDriver,
     numThreads: Int
-) extends LazyModuleImp(outer) {
-  val io = IO(new Bundle with UnitTestIO {
-    val reqs = Output(Vec(numThreads, new TraceReq))
-  })
+) extends LazyModuleImp(outer)
+    with UnitTestModule {
   val sim = Module(new SimMemTrace(filename = "vecadd.core1.thread4.trace", 4))
-  (0 to numThreads - 1).map(i =>
-    // Split sim.io.trace_read.address, which is flattened across all lanes,
-    // back to each lane's value.
-    io.reqs(i).address := (sim.io.trace_read.address >> (64 * i))
-  )
   sim.io.clock := clock
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
 
+  // Split sim.io.trace_read.address, which is flattened across all lanes,
+  // back to each lane's value.
+  val reqs = Wire(Vec(numThreads, new TraceReq))
+  (0 to numThreads - 1).map { i =>
+    reqs(i).valid := (sim.io.trace_read.valid >> i)
+    reqs(i).address := (sim.io.trace_read.address >> (64 * i))
+  }
+
   // Connect each sim module to its respective TL connection
   (0 to numThreads - 1).map { i =>
     val (tl_out, edge) = outer.thread_nodes(i).out(0)
-    tl_out.a.valid := sim.io.trace_read.valid
+    tl_out.a.valid := reqs(i).valid
     // TODO: placeholders, use actual value from trace
     tl_out.a.bits := edge
       .Put(
@@ -118,12 +118,12 @@ class MemTraceDriverImp(
         toAddress = 0.U,
         // 64 bits = 8 bytes = 2**(3) bytes
         lgSize = 3.U,
-        data = (i + 100).U
+        // data = (i + 100).U
+        data = reqs(i).address
       )
       ._2
     // tl_out.a.bits.mask := 0xf.U
     dontTouch(tl_out.a)
-
     tl_out.d.ready := true.B
   }
 
@@ -132,7 +132,7 @@ class MemTraceDriverImp(
 
 class SimMemTrace(val filename: String, numThreads: Int)
     extends BlackBox(
-      Map("filename" -> filename, "numThreads" -> numThreads)
+      Map("FILENAME" -> filename, "NUM_THREADS" -> numThreads)
     )
     with HasBlackBoxResource {
   val io = IO(new Bundle {
