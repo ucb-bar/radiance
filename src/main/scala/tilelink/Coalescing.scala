@@ -8,13 +8,10 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.unittest._
 
-class CoalescingLogic(numThreads: Int = 1)(implicit p: Parameters)
+class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
     extends LazyModule {
-  val node = TLIdentityNode()
-
-  // Creating N number of Manager node
   val beatBytes = 8
-  val seqparam = Seq(
+  val seqParam = Seq(
     TLSlaveParameters.v1(
       address = Seq(AddressSet(0x0000, 0xffffff)),
       // resources = device.reg,
@@ -30,40 +27,28 @@ class CoalescingLogic(numThreads: Int = 1)(implicit p: Parameters)
     )
   )
   val entryNodes = Seq.tabulate(numThreads) { _ =>
-    TLManagerNode(Seq(TLSlavePortParameters.v1(seqparam, beatBytes)))
+    TLManagerNode(Seq(TLSlavePortParameters.v1(seqParam, beatBytes)))
   }
+
+  val node = TLIdentityNode()
   entryNodes.foreach { n => n := node }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     // Example 1: accessing the entire A channel data for Thread 0
-    val (tl_in_0, edge0) = entryNodes(0).in(0)
-    dontTouch(tl_in_0.a)
+    val (tlIn0, edge0) = entryNodes(0).in(0)
+    dontTouch(tlIn0.a)
 
     // Example 2: accssing the entire A channel data for Thread 1
-    val (tl_in_1, edge1) = entryNodes(1).in(0)
-    dontTouch(tl_in_1.a)
-  }
-}
-
-class CoalescingEntry(implicit p: Parameters) extends LazyModule {
-  val node = TLIdentityNode()
-
-  lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) {
-    (node.in zip node.out) foreach { case ((in, _), (out, _)) =>
-      out.a <> in.a
-      in.d <> out.d
-      dontTouch(in.a)
-      dontTouch(in.d)
-    }
+    val (tlIn1, edge1) = entryNodes(1).in(0)
+    dontTouch(tlIn1.a)
   }
 }
 
 class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
     extends LazyModule {
   // Create N client nodes together
-  val thread_nodes = Seq.tabulate(numThreads) { i =>
+  val threadNodes = Seq.tabulate(numThreads) { i =>
     val clients = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
@@ -76,8 +61,8 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
   // Combine N outgoing client node into 1 idenity node for diplomatic
   // connection.
   val node = TLIdentityNode()
-  thread_nodes.foreach { thread_node =>
-    node := thread_node
+  threadNodes.foreach { threadNode =>
+    node := threadNode
   }
 
   lazy val module = new MemTraceDriverImp(this, numThreads)
@@ -102,18 +87,18 @@ class MemTraceDriverImp(
 
   // Split output of SimMemTrace, which is flattened across all lanes,
   // back to each thread's.
-  val thread_reqs = Wire(Vec(numThreads, new TraceReq))
-  thread_reqs.zipWithIndex.foreach { case (req, i) =>
+  val threadReqs = Wire(Vec(numThreads, new TraceReq))
+  threadReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := (sim.io.trace_read.valid >> i)
     req.address := (sim.io.trace_read.address >> (64 * i))
   }
 
   // Connect each sim module to its respective TL connection
-  (outer.thread_nodes zip thread_reqs).foreach { case (node, req) =>
-    val (tl_out, edge) = node.out(0)
-    tl_out.a.valid := req.valid
+  (outer.threadNodes zip threadReqs).foreach { case (node, req) =>
+    val (tlOut, edge) = node.out(0)
+    tlOut.a.valid := req.valid
     // TODO: placeholders, use actual value from trace
-    tl_out.a.bits := edge
+    tlOut.a.bits := edge
       .Put(
         fromSource = 0.U,
         toAddress = 0.U,
@@ -124,8 +109,8 @@ class MemTraceDriverImp(
       )
       ._2
     // tl_out.a.bits.mask := 0xf.U
-    dontTouch(tl_out.a)
-    tl_out.d.ready := true.B
+    dontTouch(tlOut.a)
+    tlOut.d.ready := true.B
   }
 
   io.finished := sim.io.trace_read.finished
@@ -156,12 +141,11 @@ class SimMemTrace(val filename: String, numThreads: Int)
 }
 
 class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
-  val coal_entry = LazyModule(new CoalescingEntry)
   // TODO: use parameters for numThreads
-  val coal_logic = LazyModule(new CoalescingLogic(numThreads = 4))
+  val coal = LazyModule(new CoalescingUnit(numThreads = 4))
   val driver = LazyModule(new MemTraceDriver(numThreads = 4))
 
-  coal_logic.node :=* coal_entry.node :=* driver.node
+  coal.node :=* driver.node
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
