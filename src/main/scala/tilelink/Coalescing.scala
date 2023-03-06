@@ -29,20 +29,19 @@ class CoalescingLogic(numThreads: Int = 1)(implicit p: Parameters)
       fifoId = Some(0)
     )
   )
-  val vec_node_entry = Seq.tabulate(numThreads) { _ =>
+  val entryNodes = Seq.tabulate(numThreads) { _ =>
     TLManagerNode(Seq(TLSlavePortParameters.v1(seqparam, beatBytes)))
   }
-  // Assign each vec_node to the identity node
-  vec_node_entry.foreach { n => n := node }
+  entryNodes.foreach { n => n := node }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     // Example 1: accessing the entire A channel data for Thread 0
-    val (tl_in_0, edge0) = vec_node_entry(0).in(0)
+    val (tl_in_0, edge0) = entryNodes(0).in(0)
     dontTouch(tl_in_0.a)
 
     // Example 2: accssing the entire A channel data for Thread 1
-    val (tl_in_1, edge1) = vec_node_entry(1).in(0)
+    val (tl_in_1, edge1) = entryNodes(1).in(0)
     dontTouch(tl_in_1.a)
   }
 }
@@ -75,7 +74,7 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
   }
 
   // Combine N outgoing client node into 1 idenity node for diplomatic
-  // connection
+  // connection.
   val node = TLIdentityNode()
   thread_nodes.foreach { thread_node =>
     node := thread_node
@@ -94,23 +93,25 @@ class MemTraceDriverImp(
     numThreads: Int
 ) extends LazyModuleImp(outer)
     with UnitTestModule {
-  val sim = Module(new SimMemTrace(filename = "vecadd.core1.thread4.trace", 4))
+  val sim = Module(
+    new SimMemTrace(filename = "vecadd.core1.thread4.trace", numThreads)
+  )
   sim.io.clock := clock
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
 
-  // Split sim.io.trace_read.address, which is flattened across all lanes,
-  // back to each lane's value.
-  val reqs = Wire(Vec(numThreads, new TraceReq))
-  (0 to numThreads - 1).map { i =>
-    reqs(i).valid := (sim.io.trace_read.valid >> i)
-    reqs(i).address := (sim.io.trace_read.address >> (64 * i))
+  // Split output of SimMemTrace, which is flattened across all lanes,
+  // back to each thread's.
+  val thread_reqs = Wire(Vec(numThreads, new TraceReq))
+  thread_reqs.zipWithIndex.foreach { case (req, i) =>
+    req.valid := (sim.io.trace_read.valid >> i)
+    req.address := (sim.io.trace_read.address >> (64 * i))
   }
 
   // Connect each sim module to its respective TL connection
-  (0 to numThreads - 1).map { i =>
-    val (tl_out, edge) = outer.thread_nodes(i).out(0)
-    tl_out.a.valid := reqs(i).valid
+  (outer.thread_nodes zip thread_reqs).foreach { case (node, req) =>
+    val (tl_out, edge) = node.out(0)
+    tl_out.a.valid := req.valid
     // TODO: placeholders, use actual value from trace
     tl_out.a.bits := edge
       .Put(
@@ -119,7 +120,7 @@ class MemTraceDriverImp(
         // 64 bits = 8 bytes = 2**(3) bytes
         lgSize = 3.U,
         // data = (i + 100).U
-        data = reqs(i).address
+        data = req.address
       )
       ._2
     // tl_out.a.bits.mask := 0xf.U
@@ -156,6 +157,7 @@ class SimMemTrace(val filename: String, numThreads: Int)
 
 class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
   val coal_entry = LazyModule(new CoalescingEntry)
+  // TODO: use parameters for numThreads
   val coal_logic = LazyModule(new CoalescingLogic(numThreads = 4))
   val driver = LazyModule(new MemTraceDriver(numThreads = 4))
 
