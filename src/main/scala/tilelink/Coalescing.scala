@@ -39,8 +39,8 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
   val clientParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
-      sourceId = IdRange(0, 1),
-      visibility = Seq(AddressSet(0x0000, 0xffffff))
+      sourceId = IdRange(0, 1)
+      // visibility = Seq(AddressSet(0x0000, 0xffffff))
     )
   )
   val coalescerNode = TLClientNode(
@@ -49,28 +49,44 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    (node.in zip node.out) foreach { case ((tlIn, _), (tlOut, edgeOut)) =>
-      // out.a <> in.a
-      // out.a.bits.data := in.a.bits.data + 0xFF.U
-      // out.a.bits.data := 0xFF.U
-      // dontTouch(out.a.bits.data)
-      tlOut.a.bits := edgeOut
-        .Get(
-          // FIXME: When using TLRAM, unlike TLTestRAM, D requests do not come
-          // around immediately, so need to keep track of inflight requests and
-          // allocate sourceId accordingly.
-          fromSource = 0.U,
-          toAddress = tlIn.a.bits.data, // should be aligned to 2**lgSize
-          // 64 bits = 8 bytes = 2**(3) bytes
-          lgSize = 0.U,
-          // data = (i + 100).U
-          // data = tlIn.a.bits.data + 0xFF.U
-        )
-        ._2
-      tlIn.d <> tlOut.d
+    // Per-lane FIFO that buffers incoming requests.
+    val addressWidth = node.in(0)._1.a.bits.address.getWidth.W
+    val fifos = Seq.tabulate(numThreads) { _ =>
+      Module(new Queue(UInt(addressWidth), 4 /* FIXME hardcoded */ ))
+    }
 
-      dontTouch(tlOut.a)
-      dontTouch(tlOut.d)
+    // Override IdentityNode implementation so that we wire node output to the
+    // FIFO output, instead of directly passing through node input
+    // (see IdentityNode.instantiate()).
+    ((node.in zip node.out) zip fifos) foreach {
+      case (((tlIn, _), (tlOut, edgeOut)), fifo) =>
+        fifo.io.enq.valid := tlIn.a.valid
+        fifo.io.enq.bits := tlIn.a.bits.address
+        fifo.io.deq.ready := true.B
+
+        tlOut.a.valid := fifo.io.deq.valid
+        // FIXME: generate Get or Put according to read/write
+        tlOut.a.bits := edgeOut
+          .Get(
+            // FIXME: When using TLRAM, unlike TLTestRAM, D responses do not come
+            // around immediately, so need to keep track of inflight requests and
+            // allocate sourceId accordingly.
+            fromSource = 0.U,
+            // `toAddress` should be aligned to 2**lgSize
+            toAddress = fifo.io.deq.bits,
+            // 64 bits = 8 bytes = 2**(3) bytes
+            lgSize = 0.U
+            // data = (i + 100).U
+            // data = tlIn.a.bits.data + 0xFF.U
+          )
+          ._2
+        tlIn.d <> tlOut.d
+
+        val fifoInput = tlIn.a
+        dontTouch(fifoInput)
+        dontTouch(tlIn.a)
+        dontTouch(tlOut.a)
+        dontTouch(tlOut.d)
     }
     val (tlCoal, _) = coalescerNode.out(0)
     dontTouch(tlCoal.a)
@@ -84,8 +100,8 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, numThreads),
-        visibility = Seq(AddressSet(0x0000, 0xffffff))
+        sourceId = IdRange(0, numThreads)
+        // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
     TLClientNode(Seq(TLMasterPortParameters.v1(clientParam)))
@@ -120,23 +136,23 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   }
 
   // Connect each thread to its respective TL node.
-  (outer.threadNodes zip threadReqs).foreach { case (node, req) =>
-    val (tlOut, edge) = node.out(0)
-    tlOut.a.valid := req.valid
-    // TODO: placeholders, use actual value from trace
-    tlOut.a.bits := edge
-      .Put(
-        fromSource = 0.U,
-        toAddress = 0.U,
-        // 64 bits = 8 bytes = 2**(3) bytes
-        lgSize = 3.U,
-        // data = (i + 100).U
-        data = req.address
-      )
-      ._2
-    // tl_out.a.bits.mask := 0xf.U
-    dontTouch(tlOut.a)
-    tlOut.d.ready := true.B
+  (outer.threadNodes zip threadReqs).zipWithIndex.foreach {
+    case ((node, req), i) =>
+      val (tlOut, edge) = node.out(0)
+      tlOut.a.valid := req.valid
+      // TODO: placeholders, use actual value from trace
+      tlOut.a.bits := edge
+        .Put(
+          fromSource = 0.U,
+          toAddress = req.address,
+          // 64 bits = 8 bytes = 2**(3) bytes
+          lgSize = 3.U,
+          data = (i + 100).U
+        )
+        ._2
+      // tl_out.a.bits.mask := 0xf.U
+      dontTouch(tlOut.a)
+      tlOut.d.ready := true.B
   }
 
   io.finished := sim.io.trace_read.finished
