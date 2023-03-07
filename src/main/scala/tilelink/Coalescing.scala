@@ -49,13 +49,28 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // // Example 1: accessing the entire A channel data for Thread 0
-    // val (tlIn0, edge0) = threadNodes(0).in(0)
-    // dontTouch(tlIn0.a)
-
-    // // Example 2: accssing the entire A channel data for Thread 1
-    // val (tlIn1, edge1) = threadNodes(1).in(0)
-    // dontTouch(tlIn1.a)
+    (node.in zip node.out) foreach { case ((tlIn, _), (tlOut, edgeOut)) =>
+      // out.a <> in.a
+      // out.a.bits.data := in.a.bits.data + 0xFF.U
+      // out.a.bits.data := 0xFF.U
+      // dontTouch(out.a.bits.data)
+      tlOut.a.bits := edgeOut
+        .Put(
+          fromSource = 0.U,
+          toAddress = 0.U,
+          // 64 bits = 8 bytes = 2**(3) bytes
+          lgSize = 3.U,
+          // data = (i + 100).U
+          data = tlIn.a.bits.data + 0xFF.U
+        )
+        ._2
+      tlIn.d <> tlOut.d
+    }
+    node.out.foreach { case (tl, _) =>
+      dontTouch(tl.a)
+    }
+    val (tlCoal, _) = coalescerNode.out(0)
+    dontTouch(tlCoal.a)
   }
 }
 
@@ -166,6 +181,7 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
   // TODO: swap this out with a memtrace logger
   val rams = Seq.tabulate(numThreads + 1) { _ =>
     LazyModule(
+      // TODO: properly propagate beatBytes?
       new TLTestRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
     )
   }
