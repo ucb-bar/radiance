@@ -55,19 +55,22 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
       // out.a.bits.data := 0xFF.U
       // dontTouch(out.a.bits.data)
       tlOut.a.bits := edgeOut
-        .Put(
+        .Get(
+          // FIXME: When using TLRAM, unlike TLTestRAM, D requests do not come
+          // around immediately, so need to keep track of inflight requests and
+          // allocate sourceId accordingly.
           fromSource = 0.U,
-          toAddress = 0.U,
+          toAddress = tlIn.a.bits.data, // should be aligned to 2**lgSize
           // 64 bits = 8 bytes = 2**(3) bytes
-          lgSize = 3.U,
+          lgSize = 0.U,
           // data = (i + 100).U
-          data = tlIn.a.bits.data + 0xFF.U
+          // data = tlIn.a.bits.data + 0xFF.U
         )
         ._2
       tlIn.d <> tlOut.d
-    }
-    node.out.foreach { case (tl, _) =>
-      dontTouch(tl.a)
+
+      dontTouch(tlOut.a)
+      dontTouch(tlOut.d)
     }
     val (tlCoal, _) = coalescerNode.out(0)
     dontTouch(tlCoal.a)
