@@ -52,7 +52,7 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
   MemTraceLine line;
   line.valid = false;
 
-  printf("tick(): cycle=%ld\n", cycle);
+  // printf("tick(): cycle=%ld\n", cycle);
 
   if (finished()) {
     return line;
@@ -62,7 +62,7 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
   // It should always be guaranteed that we consumed all of the past lines, and
   // the next line is in the future.
   if (line.cycle < cycle) {
-    fprintf(stderr, "line.cycle=%ld, cycle=%ld\n", line.cycle, cycle);
+    // fprintf(stderr, "line.cycle=%ld, cycle=%ld\n", line.cycle, cycle);
     assert(false && "some trace lines are left unread in the past");
   }
 
@@ -97,8 +97,8 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
                                unsigned char *trace_read_finished) {
-  printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
-         trace_read_thread_id);
+  // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
+  //        trace_read_thread_id);
 
   if (!trace_read_ready) {
     return;
