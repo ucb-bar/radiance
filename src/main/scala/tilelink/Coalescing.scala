@@ -46,7 +46,7 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
   val clientParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
-      sourceId = IdRange(0, 1)
+      sourceId = IdRange(0, 0xFFFF)
       // visibility = Seq(AddressSet(0x0000, 0xffffff))
     )
   )
@@ -111,8 +111,7 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        //Id range is indepdent from numThreads, IdRange determines the number of inflight reqs
-        sourceId = IdRange(0, 4)
+        sourceId = IdRange(0, 0xFFFF)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
@@ -162,19 +161,23 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
 
   }
 
+  // To prevent collision of sourceId with a current in-flight message,
+  // just use a counter that increments indefinitely as the sourceId of new
+  // messages.
+  val sourceIdCounter = Reg(UInt(64.W))
+  sourceIdCounter := sourceIdCounter + 1.U
 
   // Connect each thread to its respective TL node.
   (outer.threadNodes zip threadReqs).zipWithIndex.foreach {
     case ((node, req), i) =>
       val (tlOut, edge) = node.out(0)
       tlOut.a.valid := req.valid
-      // TODO: placeholders, use actual value from trace
-      tlOut.a.bits := edge
-        .Put(
-          // FIXME: When using TLRAM, unlike TLTestRAM, D responses do not come
-          // around immediately, so need to keep track of inflight requests and
-          // allocate sourceId accordingly.
-          fromSource = 0.U,
+      
+      tlOut.a.bits := DontCare
+      tlOut.a.bits.data := 0.U
+      when (req.is_store) {
+        tlOut.a.bits := edge.Put(
+          fromSource = sourceIdCounter,
           toAddress = req.address,
           // 64 bits = 8 bytes = 2**(3) bytes
           lgSize = 3.U,
@@ -202,8 +205,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   dontTouch(clkcount) 
 }
 
-
-
 class SimMemTrace(val filename: String, numThreads: Int)
     extends BlackBox(
       Map("FILENAME" -> filename, "NUM_THREADS" -> numThreads)
@@ -213,6 +214,8 @@ class SimMemTrace(val filename: String, numThreads: Int)
     val clock = Input(Clock())
     val reset = Input(Bool())
 
+    // These names have to match declarations in the Verilog code, eg.
+    // trace_read_address.
     val trace_read = new Bundle {
       val ready = Input(Bool())
       val valid = Output(UInt(numThreads.W))
@@ -245,7 +248,7 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
   val rams = Seq.tabulate(numThreads + 1) { _ =>
     LazyModule(
       // TODO: properly propagate beatBytes?
-      new TLTestRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
+      new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
     )
   }
   // Connect all (N+1) outputs of coal to separate TestRAM modules
