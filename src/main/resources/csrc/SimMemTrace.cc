@@ -3,6 +3,7 @@
 #include <svdpi.h>
 #endif
 #include <string>
+#include <string.h> 
 #include <cstdio>
 #include <cassert>
 #include <unistd.h>
@@ -66,16 +67,23 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
     assert(false && "some trace lines are left unread in the past");
   }
 
+  if (line.thread_id != thread_id) {
+    line.valid = false;
+  }
   if (line.cycle > cycle) {
     // We haven't reached the cycle mark specified in this line yet, so we don't
     // read it right now.
     return MemTraceLine{};
-  } else if (line.cycle == cycle) {
-    printf("fire! cycle=%ld, valid=%d\n", cycle, line.valid);
+  } else if (line.cycle == cycle && line.thread_id == thread_id) {
+    printf("fire! cycle=%ld, valid=%d, %s \n", cycle, line.valid, line.loadstore);
+
     // FIXME! Currently thread_id is assumed to be in round-robin order, e.g.
     // 0->1->2->3->0->..., both in the trace file and the order the caller calls
     // this function.  If this is not true, we cannot simply monotonically
     // increment read_pos.
+
+    // Only advance pointer when cycle and threa_id both match
+    // now increaseing sequence is fine (0, 1, 3), but unordered is not fine (0, 3, 1)
     ++read_pos;
   }
 
@@ -96,6 +104,9 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                int trace_read_thread_id,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
+                               unsigned char *trace_read_is_store,
+                               int *trace_read_store_mask,
+                               unsigned long *trace_read_data,
                                unsigned char *trace_read_finished) {
   // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
   //        trace_read_thread_id);
@@ -107,6 +118,9 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
   auto line = reader->read_trace_at(trace_read_cycle, trace_read_thread_id);
   *trace_read_valid = line.valid;
   *trace_read_address = line.address;
+  *trace_read_is_store = strcmp(line.loadstore, "STORE") == 0 ;
+  *trace_read_store_mask = line.data_size;
+  *trace_read_data = line.data;
   // This means finished and valid will go up at the same cycle.  Need to
   // handle this without skipping the last line.
   *trace_read_finished = reader->finished();

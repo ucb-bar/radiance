@@ -100,7 +100,8 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, numThreads)
+        //Id range is indepdent from numThreads, IdRange determines the number of inflight reqs
+        sourceId = IdRange(0, 4)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
@@ -117,6 +118,15 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
   lazy val module = new MemTraceDriverImp(this, numThreads)
 }
 
+
+class TraceReq extends Bundle {
+  val valid = Bool()
+  val address = UInt(64.W)
+  val is_store = Bool()
+  val mask = UInt(8.W)
+  val data = UInt(64.W)
+}
+
 class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
     extends LazyModuleImp(outer)
     with UnitTestModule {
@@ -129,39 +139,58 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
 
   // Split output of SimMemTrace, which is flattened across all threads,
   // back to each thread's.
+
+  // Maybe this part can be improved, since now we are still mannually shifting everything
   val threadReqs = Wire(Vec(numThreads, new TraceReq))
   threadReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := (sim.io.trace_read.valid >> i)
     req.address := (sim.io.trace_read.address >> (64 * i))
+    req.is_store := (sim.io.trace_read.is_store >> i)
+    req.mask := (sim.io.trace_read.store_mask >> (8 * i))
+    req.data := (sim.io.trace_read.data >> (64 * i))
+
   }
+
 
   // Connect each thread to its respective TL node.
   (outer.threadNodes zip threadReqs).zipWithIndex.foreach {
     case ((node, req), i) =>
       val (tlOut, edge) = node.out(0)
       tlOut.a.valid := req.valid
-      // TODO: placeholders, use actual value from trace
-      tlOut.a.bits := edge
-        .Put(
+      
+      tlOut.a.bits := DontCare
+      tlOut.a.bits.data := 0.U
+      when (req.is_store) {
+        tlOut.a.bits := edge.Put(
           fromSource = 0.U,
           toAddress = req.address,
           // 64 bits = 8 bytes = 2**(3) bytes
           lgSize = 3.U,
-          data = (i + 100).U
-        )
-        ._2
+          data = req.data
+        )._2
+      }.otherwise {
+        tlOut.a.bits := edge.Get(
+          fromSource = 0.U,
+          toAddress = req.address,
+          // 64 bits = 8 bytes = 2**(3) bytes
+          lgSize = 3.U,
+        )._2
+      }
+        
       // tl_out.a.bits.mask := 0xf.U
       dontTouch(tlOut.a)
       tlOut.d.ready := true.B
   }
 
   io.finished := sim.io.trace_read.finished
+
+  // Clock Counter, for debugging purpose
+  val clkcount = RegInit(0.U(64.W))
+  clkcount := clkcount + 1.U
+  dontTouch(clkcount) 
 }
 
-class TraceReq extends Bundle {
-  val valid = Bool()
-  val address = UInt(64.W)
-}
+
 
 class SimMemTrace(val filename: String, numThreads: Int)
     extends BlackBox(
@@ -179,6 +208,9 @@ class SimMemTrace(val filename: String, numThreads: Int)
       // single wide 1D array.
       // TODO: assumes 64-bit address.
       val address = Output(UInt((64 * numThreads).W))
+      val is_store = Output(UInt(numThreads.W))
+      val store_mask = Output(UInt((8 * numThreads).W))
+      val data = Output(UInt((64 * numThreads).W))
       val finished = Output(Bool())
     }
   })

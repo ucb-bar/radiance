@@ -37,4 +37,8 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                int trace_read_thread_id,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
-                               unsigned char *trace_read_finished);
+                               unsigned char *trace_read_is_store,
+                               int *trace_read_store_mask,
+                               unsigned long *trace_read_data,
+                               unsigned char *trace_read_finished
+                               );
