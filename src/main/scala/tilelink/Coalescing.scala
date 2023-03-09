@@ -10,8 +10,8 @@ import freechips.rocketchip.devices.tilelink.TLTestRAM
 import freechips.rocketchip.util.ShiftQueue
 import freechips.rocketchip.unittest._
 
-class CoalRegEntry(val addressWidth: Int) extends Bundle {
-  val source = UInt(64.W)
+class CoalRegEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
+  val source = UInt(sourceWidth.W)
   val address = UInt(addressWidth.W)
   val data = UInt(64.W /* FIXME hardcoded */ )
 }
@@ -57,8 +57,9 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     // Per-lane FIFO that buffers incoming requests
+    val sourceWidth = node.in(0)._1.params.sourceBits
     val addressWidth = node.in(0)._1.params.addressBits
-    val coalRegEntry = new CoalRegEntry(addressWidth)
+    val coalRegEntry = new CoalRegEntry(sourceWidth, addressWidth)
     val fifos = Seq.tabulate(numThreads) { _ =>
       Module(
         new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
@@ -77,6 +78,8 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
 
         fifo.io.enq.valid := tlIn.a.valid
         fifo.io.enq.bits := newReq
+        // FIXME: deq.ready should respect the ready state of the downstream
+        // module, e.g. Xbar or NoC.
         fifo.io.deq.ready := true.B
         val head = fifo.io.deq.bits
 
@@ -99,6 +102,7 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
         dontTouch(tlOut.a)
         dontTouch(tlOut.d)
     }
+
     val (tlCoal, _) = coalescerNode.out(0)
     dontTouch(tlCoal.a)
   }
