@@ -7,7 +7,14 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.devices.tilelink.TLTestRAM
+import freechips.rocketchip.util.ShiftQueue
 import freechips.rocketchip.unittest._
+
+class CoalRegEntry(val addressWidth: Int) extends Bundle {
+  val source = UInt(64.W)
+  val address = UInt(addressWidth.W)
+  val data = UInt(64.W /* FIXME hardcoded */ )
+}
 
 class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
     extends LazyModule {
@@ -49,31 +56,37 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // Per-lane FIFO that buffers incoming requests.
-    val addressWidth = node.in(0)._1.a.bits.address.getWidth.W
+    // Per-lane FIFO that buffers incoming requests
+    val addressWidth = node.in(0)._1.params.addressBits
+    val coalRegEntry = new CoalRegEntry(addressWidth)
     val fifos = Seq.tabulate(numThreads) { _ =>
-      Module(new Queue(UInt(addressWidth), 4 /* FIXME hardcoded */ ))
+      Module(
+        new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
+      )
     }
 
     // Override IdentityNode implementation so that we wire node output to the
-    // FIFO output, instead of directly passing through node input
-    // (see IdentityNode.instantiate()).
+    // FIFO output, instead of directly passing through node input.
+    // See IdentityNode definition in `diplomacy/Nodes.scala`.
     ((node.in zip node.out) zip fifos) foreach {
       case (((tlIn, _), (tlOut, edgeOut)), fifo) =>
+        val newReq = Wire(coalRegEntry)
+        newReq.source := tlIn.a.bits.source
+        newReq.address := tlIn.a.bits.address
+        newReq.data := tlIn.a.bits.data
+
         fifo.io.enq.valid := tlIn.a.valid
-        fifo.io.enq.bits := tlIn.a.bits.address
+        fifo.io.enq.bits := newReq
         fifo.io.deq.ready := true.B
+        val head = fifo.io.deq.bits
 
         tlOut.a.valid := fifo.io.deq.valid
         // FIXME: generate Get or Put according to read/write
         tlOut.a.bits := edgeOut
           .Get(
-            // FIXME: When using TLRAM, unlike TLTestRAM, D responses do not come
-            // around immediately, so need to keep track of inflight requests and
-            // allocate sourceId accordingly.
-            fromSource = 0.U,
+            fromSource = head.source,
             // `toAddress` should be aligned to 2**lgSize
-            toAddress = fifo.io.deq.bits,
+            toAddress = head.address,
             // 64 bits = 8 bytes = 2**(3) bytes
             lgSize = 0.U
             // data = (i + 100).U
@@ -82,8 +95,6 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
           ._2
         tlIn.d <> tlOut.d
 
-        val fifoInput = tlIn.a
-        dontTouch(fifoInput)
         dontTouch(tlIn.a)
         dontTouch(tlOut.a)
         dontTouch(tlOut.d)
@@ -157,11 +168,12 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
     case ((node, req), i) =>
       val (tlOut, edge) = node.out(0)
       tlOut.a.valid := req.valid
-      
-      tlOut.a.bits := DontCare
-      tlOut.a.bits.data := 0.U
-      when (req.is_store) {
-        tlOut.a.bits := edge.Put(
+      // TODO: placeholders, use actual value from trace
+      tlOut.a.bits := edge
+        .Put(
+          // FIXME: When using TLRAM, unlike TLTestRAM, D responses do not come
+          // around immediately, so need to keep track of inflight requests and
+          // allocate sourceId accordingly.
           fromSource = 0.U,
           toAddress = req.address,
           // 64 bits = 8 bytes = 2**(3) bytes
