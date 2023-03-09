@@ -189,7 +189,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
         )._2
       }.otherwise {
         tlOut.a.bits := edge.Get(
-          fromSource = 0.U,
+          fromSource = sourceIdCounter,
           toAddress = req.address,
           // 64 bits = 8 bytes = 2**(3) bytes
           lgSize = 3.U,
