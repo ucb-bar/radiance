@@ -43,15 +43,14 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   // Master node that actually generates coalesced requests.
   // This and the IdentityNode will be the two outward-facing nodes that the
   // downstream, either L1 or the system bus, will connect to.
-  protected val clientParam = Seq(
+  protected val coalParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
-      sourceId = IdRange(0, 0xffff)
-      // visibility = Seq(AddressSet(0x0000, 0xffffff))
+      sourceId = IdRange(0, 0x10)
     )
   )
   protected val coalescerNode = TLClientNode(
-    Seq(TLMasterPortParameters.v1(clientParam))
+    Seq(TLMasterPortParameters.v1(coalParam))
   )
 
   // Connect master node as the first of the N+1-th inward edges of the
@@ -113,37 +112,52 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         dontTouch(tlOut.d)
     }
 
-    // Generate coalesced requests.
+    // Generate coalesced requests
     // FIXME: currently generating bogus coalesced requests
+    val coalSourceId = RegInit(0.U(4.W /* FIXME hardcoded */ ))
+    coalSourceId := coalSourceId + 1.U
+
     val (tlCoal, edgeCoal) = coalescerNode.out(0)
     tlCoal.a.valid := true.B
     val (legal, bits) = edgeCoal.Get(
-      fromSource = 0.U,
+      fromSource = coalSourceId,
       // `toAddress` should be aligned to 2**lgSize
-      toAddress = 0xabcd00.U,
+      toAddress = (0xabcd.U + coalSourceId) << 4,
       // 64 bits = 8 bytes = 2**(3) bytes
       lgSize = 3.U
     )
     assert(legal, "unhandled illegal TL req gen")
     tlCoal.a.bits := bits
+    tlCoal.b.ready := true.B
+    tlCoal.c.valid := false.B
+    tlCoal.d.ready := true.B
+    tlCoal.e.valid := false.B
 
+    // Debug signals
     val coalReqValid = Wire(Bool())
     coalReqValid := tlCoal.a.valid
     dontTouch(coalReqValid)
+    val coalReqAddress = Wire(UInt(tlCoal.params.addressBits.W))
+    coalReqAddress := tlCoal.a.bits.address
+    dontTouch(coalReqAddress)
     val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
     coalRespData := tlCoal.d.bits.data
     dontTouch(coalRespData)
 
-    // Now, for the coalescer response flow, instantiate a reservation station
-    // that records for each unanswered coalesced requests which lane the
-    // request originated from, what were their original sourceIds, etc.
+    dontTouch(tlCoal.a)
+    dontTouch(tlCoal.d)
+
+    // Now, for the coalescer response flow, instantiate a reservation
+    // station-like structure that records for each unanswered coalesced
+    // requests which lane the request originated from, what were their
+    // original sourceIds, etc.
     // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
     // table structure
     val responseQueue = Module(
       new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
     )
     (node.in zip node.out)(0) match {
-      case ((tlIn, edgeIn), (tlOut, edgeOut)) =>
+      case ((tlIn, edgeIn), (tlOut, _)) =>
         assert(
           edgeIn.master.masters(0).name == "CoalescerNode",
           "First edge is not connected to the coalescer master node"
@@ -252,10 +266,12 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     val bits = Mux(req.is_store, pbits, gbits)
     assert(legal, "unhandled illegal TL req gen")
     tlOut.a.bits := bits
-
-    // tl_out.a.bits.mask := 0xf.U
-    dontTouch(tlOut.a)
+    tlOut.b.ready := true.B
+    tlOut.c.valid := false.B
     tlOut.d.ready := true.B
+    tlOut.e.valid := false.B
+
+    dontTouch(tlOut.a)
   }
 
   io.finished := sim.io.trace_read.finished
