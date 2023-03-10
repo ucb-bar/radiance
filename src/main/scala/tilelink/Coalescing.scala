@@ -183,16 +183,19 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
         tlOut.a.bits := edge.Put(
           fromSource = sourceIdCounter,
           toAddress = req.address,
-          // 64 bits = 8 bytes = 2**(3) bytes
-          lgSize = 3.U,
+          // Memory trace addresses are not aligned in word addresses (e.g.
+          // read of size 1 at 0x1007) so leave lgSize to 0.
+          // TODO: We need to build an issue logic that aligns addresses at
+          // word boundaries and uses masks.
+          // NOTE: this is in byte size, not bits
+          lgSize = 0.U,
           data = req.data
         )._2
       }.otherwise {
         tlOut.a.bits := edge.Get(
           fromSource = sourceIdCounter,
           toAddress = req.address,
-          // 64 bits = 8 bytes = 2**(3) bytes
-          lgSize = 3.U,
+          lgSize = 0.U
         )._2
       }
         
