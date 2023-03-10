@@ -77,12 +77,11 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // See IdentityNode definition in `diplomacy/Nodes.scala`.
     (node.in zip node.out).zipWithIndex.foreach {
       case (((_, edgeIn), _), 0) =>
-        // First node is coalescerNode; do nothing
+        // No need to do anything on the edge from coalescerNode
         assert(
           edgeIn.master.masters(0).name == "CoalescerNode",
           "First edge is not connected to the coalescer master node"
         )
-        0
       case (((tlIn, _), (tlOut, edgeOut)), i) =>
         val fifo = fifos(i - 1)
         val newReq = Wire(coalRegEntry)
@@ -99,17 +98,17 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
         tlOut.a.valid := fifo.io.deq.valid
         // FIXME: generate Get or Put according to read/write
-        tlOut.a.bits := edgeOut
-          .Get(
-            fromSource = head.source,
-            // `toAddress` should be aligned to 2**lgSize
-            toAddress = head.address,
-            // 64 bits = 8 bytes = 2**(3) bytes
-            lgSize = 0.U
-            // data = (i + 100).U
-            // data = tlIn.a.bits.data + 0xFF.U
-          )
-          ._2
+        val (legal, bits) = edgeOut.Get(
+          fromSource = head.source,
+          // `toAddress` should be aligned to 2**lgSize
+          toAddress = head.address,
+          // 64 bits = 8 bytes = 2**(3) bytes
+          lgSize = 0.U
+          // data = (i + 100).U
+          // data = tlIn.a.bits.data + 0xFF.U
+        )
+        assert(legal, "unhandled illegal TL req gen")
+        tlOut.a.bits := bits
         tlIn.d <> tlOut.d
 
         dontTouch(tlIn.a)
@@ -121,15 +120,15 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
     // FIXME: currently generating bogus coalesced requests
     tlCoal.a.valid := true.B
-    tlCoal.a.bits := edgeCoal
-      .Get(
-        fromSource = 0.U,
-        // `toAddress` should be aligned to 2**lgSize
-        toAddress = 0xabcd00.U,
-        // 64 bits = 8 bytes = 2**(3) bytes
-        lgSize = 3.U
-      )
-      ._2
+    val (legal, bits) = edgeCoal.Get(
+      fromSource = 0.U,
+      // `toAddress` should be aligned to 2**lgSize
+      toAddress = 0xabcd00.U,
+      // 64 bits = 8 bytes = 2**(3) bytes
+      lgSize = 3.U
+    )
+    assert(legal, "unhandled illegal TL req gen")
+    tlCoal.a.bits := bits
 
     val coalRespValid = Wire(Bool())
     coalRespValid := tlCoal.a.valid
@@ -205,31 +204,26 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     val (tlOut, edge) = node.out(0)
     tlOut.a.valid := req.valid
 
-    tlOut.a.bits := DontCare
-    tlOut.a.bits.data := 0.U
-    when(req.is_store) {
-      tlOut.a.bits := edge
-        .Put(
-          fromSource = sourceIdCounter,
-          toAddress = req.address,
-          // Memory trace addresses are not aligned in word addresses (e.g.
-          // read of size 1 at 0x1007) so leave lgSize to 0.
-          // TODO: We need to build an issue logic that aligns addresses at
-          // word boundaries and uses masks.
-          // NOTE: this is in byte size, not bits
-          lgSize = 0.U,
-          data = req.data
-        )
-        ._2
-    }.otherwise {
-      tlOut.a.bits := edge
-        .Get(
-          fromSource = sourceIdCounter,
-          toAddress = req.address,
-          lgSize = 0.U
-        )
-        ._2
-    }
+    val (plegal, pbits) = edge.Put(
+      fromSource = sourceIdCounter,
+      toAddress = req.address,
+      // Memory trace addresses are not aligned in word addresses (e.g.
+      // read of size 1 at 0x1007) so leave lgSize to 0.
+      // TODO: We need to build an issue logic that aligns addresses at
+      // word boundaries and uses masks.
+      // NOTE: this is in byte size, not bits
+      lgSize = 0.U,
+      data = req.data
+    )
+    val (glegal, gbits) = edge.Get(
+      fromSource = sourceIdCounter,
+      toAddress = req.address,
+      lgSize = 0.U
+    )
+    val legal = Mux(req.is_store, plegal, glegal)
+    val bits = Mux(req.is_store, pbits, gbits)
+    assert(legal, "unhandled illegal TL req gen")
+    tlOut.a.bits := bits
 
     // tl_out.a.bits.mask := 0xf.U
     dontTouch(tlOut.a)
