@@ -6,18 +6,29 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.devices.tilelink.TLTestRAM
+// import freechips.rocketchip.devices.tilelink.TLTestRAM
 import freechips.rocketchip.util.ShiftQueue
 import freechips.rocketchip.unittest._
 
-class CoalRegEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
-  val source = UInt(sourceWidth.W)
-  val address = UInt(addressWidth.W)
-  val data = UInt(64.W /* FIXME hardcoded */ )
-}
-
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     extends LazyModule {
+
+  // Describes uncoalesced memory request that originated from a single lane
+  class UncoalReq(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
+    val source = UInt(sourceWidth.W)
+    val address = UInt(addressWidth.W)
+    val data = UInt(64.W /* FIXME hardcoded */ )
+  }
+
+  class InflightCoalReqTableEntry(val sourceWidth: Int) extends Bundle {
+    // Bit flags that show which lanes got coalesced into this request
+    val fromLane = UInt(numLanes.W)
+    // sourceId of the original requests before getting coalesced.  We need to
+    // know this in order to respond to the original per-lane TL requests with
+    // matching sourceIds
+    val sourceIds = Vec(numLanes, UInt(sourceWidth.W))
+  }
+
   // val beatBytes = 8
   // val seqParam = Seq(
   //   TLSlaveParameters.v1(
@@ -40,13 +51,17 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   // upstream node will connect to.
   val node = TLIdentityNode()
 
+  // Number of maximum in-flight coalesced requests.  The upper bound of this
+  // value would be the sourceId range of a single lane.
+  val numInflightCoalRequests = 4
+
   // Master node that actually generates coalesced requests.
   // This and the IdentityNode will be the two outward-facing nodes that the
   // downstream, either L1 or the system bus, will connect to.
   protected val coalParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
-      sourceId = IdRange(0, 0x10)
+      sourceId = IdRange(0, numInflightCoalRequests)
     )
   )
   protected val coalescerNode = TLClientNode(
@@ -62,7 +77,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // Instantiate per-lane queue that buffers incoming requests.
     val sourceWidth = node.in(0)._1.params.sourceBits
     val addressWidth = node.in(0)._1.params.addressBits
-    val coalRegEntry = new CoalRegEntry(sourceWidth, addressWidth)
+    val coalRegEntry = new UncoalReq(sourceWidth, addressWidth)
     val queues = Seq.tabulate(numLanes) { _ =>
       Module(
         new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
@@ -114,31 +129,80 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
     // Generate coalesced requests
     // FIXME: currently generating bogus coalesced requests
-    val coalSourceId = RegInit(0.U(4.W /* FIXME hardcoded */ ))
+    val coalSourceId = RegInit(0.U(2.W /* FIXME hardcoded */ ))
     coalSourceId := coalSourceId + 1.U
 
     val (tlCoal, edgeCoal) = coalescerNode.out(0)
-    tlCoal.a.valid := true.B
+    val coalReqAddress = Wire(UInt(tlCoal.params.addressBits.W))
+    // TODO: bogus address
+    coalReqAddress := (0xabcd.U + coalSourceId) << 4
+    val coalReqValid = Wire(Bool())
+    coalReqValid := true.B
+
     val (legal, bits) = edgeCoal.Get(
       fromSource = coalSourceId,
       // `toAddress` should be aligned to 2**lgSize
-      toAddress = (0xabcd.U + coalSourceId) << 4,
+      toAddress = coalReqAddress,
       // 64 bits = 8 bytes = 2**(3) bytes
       lgSize = 3.U
     )
     assert(legal, "unhandled illegal TL req gen")
+    tlCoal.a.valid := coalReqValid
     tlCoal.a.bits := bits
     tlCoal.b.ready := true.B
     tlCoal.c.valid := false.B
     tlCoal.d.ready := true.B
     tlCoal.e.valid := false.B
 
-    // Debug signals
-    val coalReqValid = Wire(Bool())
-    coalReqValid := tlCoal.a.valid
+    // Populate inflight coalesced request table for use in un-coalescing
+    // responses back to the individual lanes that they originated from.
+    val inflightCoalReqTableEntry = new InflightCoalReqTableEntry(sourceWidth)
+    val inflightCoalReqTable = Module(
+      new Queue(inflightCoalReqTableEntry, numInflightCoalRequests)
+    )
+    val tableEntry = Wire(inflightCoalReqTableEntry)
+    // TODO: bogus fromLane
+    tableEntry.fromLane := coalSourceId & ((2 << numLanes) - 1).U
+    // FIXME: I'm positive this is not the right way to do this
+    tableEntry.sourceIds(0) := 0.U
+    tableEntry.sourceIds(1) := 0.U
+    tableEntry.sourceIds(2) := 0.U
+    tableEntry.sourceIds(3) := 0.U
+    dontTouch(tableEntry)
+
+    inflightCoalReqTable.io.enq.valid := coalReqValid
+    inflightCoalReqTable.io.enq.bits := tableEntry
+    inflightCoalReqTable.io.deq.ready := false.B
+
+    dontTouch(inflightCoalReqTable.io.deq.valid)
+    dontTouch(inflightCoalReqTable.io.deq.bits)
+
+    // Now, for the coalescer response flow, instantiate a reservation
+    // station-like structure that records for each unanswered coalesced
+    // requests which lane the request originated from, what their original
+    // sourceId were, etc.
+    // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
+    // table structure
+    // val inflightCoalReqTable = Reg(
+    //   Vec(NumInflightCoalRequests, new InflightCoalReqEntry(sourceWidth))
+    // )
+    (node.in zip node.out)(0) match {
+      case ((tlIn, edgeIn), (tlOut, _)) =>
+        assert(
+          edgeIn.master.masters(0).name == "CoalescerNode",
+          "First edge is not connected to the coalescer master node"
+        )
+
+        tlOut.a <> tlIn.a
+        // No need to drop any incoming coalesced responses, so just passthrough
+        // to master node
+        tlIn.d <> tlOut.d
+        dontTouch(tlIn.d)
+        dontTouch(tlOut.d)
+    }
+
+    // Debug
     dontTouch(coalReqValid)
-    val coalReqAddress = Wire(UInt(tlCoal.params.addressBits.W))
-    coalReqAddress := tlCoal.a.bits.address
     dontTouch(coalReqAddress)
     val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
     coalRespData := tlCoal.d.bits.data
@@ -146,38 +210,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
     dontTouch(tlCoal.a)
     dontTouch(tlCoal.d)
-
-    // Now, for the coalescer response flow, instantiate a reservation
-    // station-like structure that records for each unanswered coalesced
-    // requests which lane the request originated from, what were their
-    // original sourceIds, etc.
-    // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
-    // table structure
-    val responseQueue = Module(
-      new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
-    )
-    (node.in zip node.out)(0) match {
-      case ((tlIn, edgeIn), (tlOut, _)) =>
-        assert(
-          edgeIn.master.masters(0).name == "CoalescerNode",
-          "First edge is not connected to the coalescer master node"
-        )
-        val resp = Wire(coalRegEntry)
-        resp.source := tlOut.d.bits.source
-        resp.address := 0.U
-        resp.data := tlOut.d.bits.data
-
-        responseQueue.io.enq.valid := tlOut.d.valid
-        responseQueue.io.enq.bits := resp
-        responseQueue.io.deq.ready := true.B
-
-        dontTouch(responseQueue.io.deq.valid)
-        dontTouch(responseQueue.io.deq.bits)
-
-        tlIn.d.valid := false.B
-        dontTouch(tlIn.d)
-        dontTouch(tlOut.d)
-    }
   }
 }
 
