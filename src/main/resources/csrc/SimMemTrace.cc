@@ -35,7 +35,7 @@ void MemTraceReader::parse() {
   printf("MemTraceReader: started parsing\n");
 
   while (infile >> line.cycle >> line.loadstore >> line.core_id >>
-         line.thread_id >> std::hex >> line.address >> line.data >> std::dec >>
+         line.lane_id >> std::hex >> line.address >> line.data >> std::dec >>
          line.data_size) {
     line.valid = true;
     trace.push_back(line);
@@ -49,7 +49,7 @@ void MemTraceReader::parse() {
 // given SIMD lane (= "thread").  In case no request happened at that point,
 // return an empty line with .valid = false.
 MemTraceLine MemTraceReader::read_trace_at(const long cycle,
-                                           const int thread_id) {
+                                           const int lane_id) {
   MemTraceLine line;
   line.valid = false;
 
@@ -67,17 +67,17 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
     assert(false && "some trace lines are left unread in the past");
   }
 
-  if (line.thread_id != thread_id) {
+  if (line.lane_id != lane_id) {
     line.valid = false;
   }
   if (line.cycle > cycle) {
     // We haven't reached the cycle mark specified in this line yet, so we don't
     // read it right now.
     return MemTraceLine{};
-  } else if (line.cycle == cycle && line.thread_id == thread_id) {
+  } else if (line.cycle == cycle && line.lane_id == lane_id) {
     printf("fire! cycle=%ld, valid=%d, %s \n", cycle, line.valid, line.loadstore);
 
-    // FIXME! Currently thread_id is assumed to be in round-robin order, e.g.
+    // FIXME! Currently lane_id is assumed to be in round-robin order, e.g.
     // 0->1->2->3->0->..., both in the trace file and the order the caller calls
     // this function.  If this is not true, we cannot simply monotonically
     // increment read_pos.
@@ -101,7 +101,7 @@ extern "C" void memtrace_init(const char *filename) {
 // TODO: accept core_id as well
 extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long trace_read_cycle,
-                               int trace_read_thread_id,
+                               int trace_read_lane_id,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
                                unsigned char *trace_read_is_store,
@@ -109,13 +109,13 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long *trace_read_data,
                                unsigned char *trace_read_finished) {
   // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
-  //        trace_read_thread_id);
+  //        trace_read_lane_id);
 
   if (!trace_read_ready) {
     return;
   }
 
-  auto line = reader->read_trace_at(trace_read_cycle, trace_read_thread_id);
+  auto line = reader->read_trace_at(trace_read_cycle, trace_read_lane_id);
   *trace_read_valid = line.valid;
   *trace_read_address = line.address;
   *trace_read_is_store = strcmp(line.loadstore, "STORE") == 0 ;

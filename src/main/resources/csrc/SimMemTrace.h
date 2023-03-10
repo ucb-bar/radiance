@@ -12,7 +12,7 @@ struct MemTraceLine {
   long cycle = 0;
   char loadstore[10];
   int core_id = 0;
-  int thread_id = 0;
+  int lane_id = 0;
   unsigned long address = 0;
   unsigned long data = 0;
   int data_size = 0;
@@ -23,7 +23,7 @@ public:
   MemTraceReader(const std::string &filename);
   ~MemTraceReader();
   void parse();
-  MemTraceLine read_trace_at(const long cycle, const int thread_id);
+  MemTraceLine read_trace_at(const long cycle, const int lane_id);
   bool finished() const { return read_pos == trace.cend(); }
 
   std::ifstream infile;
@@ -34,7 +34,7 @@ public:
 extern "C" void memtrace_init(const char *filename);
 extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long trace_read_cycle,
-                               int trace_read_thread_id,
+                               int trace_read_lane_id,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
                                unsigned char *trace_read_is_store,

@@ -16,7 +16,7 @@ class CoalRegEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
   val data = UInt(64.W /* FIXME hardcoded */ )
 }
 
-class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
+class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     extends LazyModule {
   // val beatBytes = 8
   // val seqParam = Seq(
@@ -63,7 +63,7 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
     val sourceWidth = node.in(0)._1.params.sourceBits
     val addressWidth = node.in(0)._1.params.addressBits
     val coalRegEntry = new CoalRegEntry(sourceWidth, addressWidth)
-    val fifos = Seq.tabulate(numThreads) { _ =>
+    val fifos = Seq.tabulate(numLanes) { _ =>
       Module(
         new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
       )
@@ -108,18 +108,33 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
         dontTouch(tlOut.d)
     }
 
-    // val (tlIn, edgeIn) = coalescerNode.in(0)
-    // tlIn.d.bits.data := 0.U
+    val (tlCoal, edgeCoal) = coalescerNode.out(0)
 
-    val (tlCoal, _) = coalescerNode.out(0)
-    dontTouch(tlCoal.a)
+    // FIXME: currently generating bogus coalesced requests
+    tlCoal.a.valid := true.B
+    tlCoal.a.bits := edgeCoal
+      .Get(
+        fromSource = 0.U,
+        // `toAddress` should be aligned to 2**lgSize
+        toAddress = 0xabcd00.U,
+        // 64 bits = 8 bytes = 2**(3) bytes
+        lgSize = 3.U
+      )
+      ._2
+
+    val coalRespValid = Wire(Bool())
+    coalRespValid := tlCoal.a.valid
+    val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
+    coalRespData := tlCoal.d.bits.data
+    dontTouch(coalRespValid)
+    dontTouch(coalRespData)
   }
 }
 
-class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
+class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters)
     extends LazyModule {
   // Create N client nodes together
-  val threadNodes = Seq.tabulate(numThreads) { i =>
+  val laneNodes = Seq.tabulate(numLanes) { i =>
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
@@ -133,11 +148,9 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
   // Combine N outgoing client node into 1 idenity node for diplomatic
   // connection.
   val node = TLIdentityNode()
-  threadNodes.foreach { threadNode =>
-    node := threadNode
-  }
+  laneNodes.foreach { l => node := l }
 
-  lazy val module = new MemTraceDriverImp(this, numThreads)
+  lazy val module = new MemTraceDriverImp(this, numLanes)
 }
 
 class TraceReq extends Bundle {
@@ -148,22 +161,22 @@ class TraceReq extends Bundle {
   val data = UInt(64.W)
 }
 
-class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
+class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     extends LazyModuleImp(outer)
     with UnitTestModule {
   val sim = Module(
-    new SimMemTrace(filename = "vecadd.core1.thread4.trace", numThreads)
+    new SimMemTrace(filename = "vecadd.core1.thread4.trace", numLanes)
   )
   sim.io.clock := clock
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
 
-  // Split output of SimMemTrace, which is flattened across all threads,
-  // back to each thread's.
+  // Split output of SimMemTrace, which is flattened across all lanes,
+  // back to each lane's.
 
   // Maybe this part can be improved, since now we are still mannually shifting everything
-  val threadReqs = Wire(Vec(numThreads, new TraceReq))
-  threadReqs.zipWithIndex.foreach { case (req, i) =>
+  val laneReqs = Wire(Vec(numLanes, new TraceReq))
+  laneReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := (sim.io.trace_read.valid >> i)
     req.address := (sim.io.trace_read.address >> (64 * i))
     req.is_store := (sim.io.trace_read.is_store >> i)
@@ -178,8 +191,8 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   val sourceIdCounter = Reg(UInt(64.W))
   sourceIdCounter := sourceIdCounter + 1.U
 
-  // Connect each thread to its respective TL node.
-  (outer.threadNodes zip threadReqs).foreach { case (node, req) =>
+  // Connect each lane to its respective TL node.
+  (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
     val (tlOut, edge) = node.out(0)
     tlOut.a.valid := req.valid
 
@@ -222,9 +235,9 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   dontTouch(clkcount)
 }
 
-class SimMemTrace(val filename: String, numThreads: Int)
+class SimMemTrace(val filename: String, numLanes: Int)
     extends BlackBox(
-      Map("FILENAME" -> filename, "NUM_THREADS" -> numThreads)
+      Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
     )
     with HasBlackBoxResource {
   val io = IO(new Bundle {
@@ -235,14 +248,14 @@ class SimMemTrace(val filename: String, numThreads: Int)
     // trace_read_address.
     val trace_read = new Bundle {
       val ready = Input(Bool())
-      val valid = Output(UInt(numThreads.W))
+      val valid = Output(UInt(numLanes.W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.
       // TODO: assumes 64-bit address.
-      val address = Output(UInt((64 * numThreads).W))
-      val is_store = Output(UInt(numThreads.W))
-      val store_mask = Output(UInt((8 * numThreads).W))
-      val data = Output(UInt((64 * numThreads).W))
+      val address = Output(UInt((64 * numLanes).W))
+      val is_store = Output(UInt(numLanes.W))
+      val store_mask = Output(UInt((8 * numLanes).W))
+      val data = Output(UInt((64 * numLanes).W))
       val finished = Output(Bool())
     }
   })
@@ -253,16 +266,16 @@ class SimMemTrace(val filename: String, numThreads: Int)
 }
 
 class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
-  // TODO: use parameters for numThreads
-  val numThreads = 4
-  val coal = LazyModule(new CoalescingUnit(numThreads))
-  val driver = LazyModule(new MemTraceDriver(numThreads))
+  // TODO: use parameters for numLanes
+  val numLanes = 4
+  val coal = LazyModule(new CoalescingUnit(numLanes))
+  val driver = LazyModule(new MemTraceDriver(numLanes))
 
   coal.node :=* driver.node
 
   // Use TLTestRAM as bogus downstream TL manager nodes
   // TODO: swap this out with a memtrace logger
-  val rams = Seq.tabulate(numThreads + 1) { _ =>
+  val rams = Seq.tabulate(numLanes + 1) { _ =>
     LazyModule(
       // TODO: properly propagate beatBytes?
       new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)

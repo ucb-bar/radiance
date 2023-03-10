@@ -1,5 +1,5 @@
 `define DATA_WIDTH 64
-`define MAX_NUM_THREADS 32
+`define MAX_NUM_LANES 32
 `define MASK_WIDTH 8
 
 import "DPI-C" function void memtrace_init(
@@ -23,26 +23,26 @@ import "DPI-C" function void memtrace_query
   output bit     trace_read_finished
 );
 
-module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
+module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   input              clock,
   input              reset,
 
   // These have to match the IO port of the Chisel wrapper module.
   input                    trace_read_ready,
-  output [NUM_THREADS-1:0] trace_read_valid,
-  output [`DATA_WIDTH*NUM_THREADS-1:0] trace_read_address,
+  output [NUM_LANES-1:0] trace_read_valid,
+  output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_address,
 
-  output [NUM_THREADS-1:0] trace_read_is_store,
-  output [NUM_THREADS*`MASK_WIDTH-1:0] trace_read_store_mask,
-  output [`DATA_WIDTH*NUM_THREADS-1:0] trace_read_data,
+  output [NUM_LANES-1:0] trace_read_is_store,
+  output [NUM_LANES*`MASK_WIDTH-1:0] trace_read_store_mask,
+  output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_data,
   output                   trace_read_finished
 );
-  bit __in_valid[NUM_THREADS-1:0];
-  longint __in_address[NUM_THREADS-1:0];
+  bit __in_valid[NUM_LANES-1:0];
+  longint __in_address[NUM_LANES-1:0];
 
-  bit __in_is_store[NUM_THREADS-1:0];
-  int __in_store_mask [NUM_THREADS-1:0];
-  longint __in_data[NUM_THREADS-1:0];
+  bit __in_is_store[NUM_LANES-1:0];
+  int __in_store_mask [NUM_LANES-1:0];
+  longint __in_data[NUM_LANES-1:0];
 
   bit __in_finished;
   string __uartlog;
@@ -54,18 +54,18 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
   assign next_cycle_counter = cycle_counter + 1'b1;
 
   // registers that stage outputs of the C parser
-  reg [NUM_THREADS-1:0] __in_valid_reg;
-  reg [`DATA_WIDTH-1:0] __in_address_reg [NUM_THREADS-1:0];
+  reg [NUM_LANES-1:0] __in_valid_reg;
+  reg [`DATA_WIDTH-1:0] __in_address_reg [NUM_LANES-1:0];
 
-  reg [NUM_THREADS-1:0] __in_is_store_reg;
-  reg [`MASK_WIDTH-1:0] __in_store_mask_reg [NUM_THREADS-1:0];
-  reg [`DATA_WIDTH-1:0] __in_data_reg [NUM_THREADS-1:0];
+  reg [NUM_LANES-1:0] __in_is_store_reg;
+  reg [`MASK_WIDTH-1:0] __in_store_mask_reg [NUM_LANES-1:0];
+  reg [`DATA_WIDTH-1:0] __in_data_reg [NUM_LANES-1:0];
   reg __in_finished_reg;
 
   genvar g;
 
   generate
-    for (g = 0; g < NUM_THREADS; g = g + 1) begin
+    for (g = 0; g < NUM_LANES; g = g + 1) begin
       assign trace_read_valid[g] = __in_valid_reg[g];
       assign trace_read_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g]  = __in_address_reg[g];
 
@@ -86,7 +86,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
 
     // Setting reset value
     if (reset) begin
-      for (integer tid = 0; tid < NUM_THREADS; tid = tid + 1) begin
+      for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         __in_valid[tid] = 1'b0;
         __in_address[tid] = `DATA_WIDTH'b0;
         
@@ -100,7 +100,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
       cycle_counter <= `DATA_WIDTH'b0;
 
       // setting default value for register to avoid latches
-      for (integer tid = 0; tid < NUM_THREADS; tid = tid + 1) begin
+      for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         __in_valid_reg[tid] <= 1'b0;
         __in_address_reg[tid] <= `DATA_WIDTH'b0;
 
@@ -114,7 +114,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
       cycle_counter <= next_cycle_counter;
 
       // Getting values from C function into pseudeo register
-      for (integer tid = 0; tid < NUM_THREADS; tid = tid + 1) begin
+      for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         memtrace_query(
           trace_read_ready,
           // Since parsed results are latched to the output on the next
@@ -135,7 +135,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_THREADS = 4) (
       end
 
       // Connect values from pseudo register into verilog register 
-      for (integer tid = 0; tid < NUM_THREADS; tid = tid + 1) begin
+      for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         __in_valid_reg[tid]   <= __in_valid[tid];
         __in_address_reg[tid] <= __in_address[tid];
 
