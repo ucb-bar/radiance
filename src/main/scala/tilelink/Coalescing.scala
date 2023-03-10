@@ -20,32 +20,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     val data = UInt(64.W /* FIXME hardcoded */ )
   }
 
-  class InflightCoalReqTableEntry(val sourceWidth: Int) extends Bundle {
-    // Bit flags that show which lanes got coalesced into this request
-    val fromLane = UInt(numLanes.W)
-    // sourceId of the original requests before getting coalesced.  We need to
-    // know this in order to respond to the original per-lane TL requests with
-    // matching sourceIds
-    val sourceIds = Vec(numLanes, UInt(sourceWidth.W))
-  }
-
-  // val beatBytes = 8
-  // val seqParam = Seq(
-  //   TLSlaveParameters.v1(
-  //     address = Seq(AddressSet(0x0000, 0xffffff)),
-  //     // resources = device.reg,
-  //     regionType = RegionType.UNCACHED,
-  //     executable = true,
-  //     supportsArithmetic = TransferSizes(1, beatBytes),
-  //     supportsLogical = TransferSizes(1, beatBytes),
-  //     supportsGet = TransferSizes(1, beatBytes),
-  //     supportsPutFull = TransferSizes(1, beatBytes),
-  //     supportsPutPartial = TransferSizes(1, beatBytes),
-  //     supportsHint = TransferSizes(1, beatBytes),
-  //     fifoId = Some(0)
-  //   )
-  // )
-
   // Identity node that captures the incoming TL requests and passes them
   // through the other end, dropping coalesced requests.  This is what the
   // upstream node will connect to.
@@ -156,10 +130,12 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
     // Populate inflight coalesced request table for use in un-coalescing
     // responses back to the individual lanes that they originated from.
-    val inflightCoalReqTableEntry = new InflightCoalReqTableEntry(sourceWidth)
-    val inflightCoalReqTable = Module(
-      new Queue(inflightCoalReqTableEntry, numInflightCoalRequests)
-    )
+    val inflightCoalReqTableEntry =
+      new InflightCoalReqTableEntry(numLanes, sourceWidth)
+    val inflightCoalReqTable =
+      Module(
+        new InflightCoalReqTable(numLanes, sourceWidth, numInflightCoalRequests)
+      )
     val tableEntry = Wire(inflightCoalReqTableEntry)
     // TODO: bogus fromLane
     tableEntry.fromLane := coalSourceId & ((2 << numLanes) - 1).U
@@ -211,6 +187,34 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     dontTouch(tlCoal.a)
     dontTouch(tlCoal.d)
   }
+}
+
+class InflightCoalReqTable(
+    val numLanes: Int,
+    val sourceWidth: Int,
+    val entries: Int = 4
+) extends Module {
+  private val inflightCoalReqEntryT =
+    new InflightCoalReqTableEntry(numLanes, sourceWidth)
+
+  val io = IO(new Bundle {
+    val enq = Flipped(EnqIO(inflightCoalReqEntryT))
+    val deq = Flipped(DeqIO(inflightCoalReqEntryT))
+  })
+
+  val table = Module(new Queue(inflightCoalReqEntryT, entries))
+  table.io.enq <> io.enq
+  io.deq <> table.io.deq
+}
+
+class InflightCoalReqTableEntry(val numLanes: Int, val sourceWidth: Int)
+    extends Bundle {
+  // Bit flags that show which lanes got coalesced into this request
+  val fromLane = UInt(numLanes.W)
+  // sourceId of the original requests before getting coalesced.  We need to
+  // know this in order to respond to the original per-lane TL requests with
+  // matching sourceIds
+  val sourceIds = Vec(numLanes, UInt(sourceWidth.W))
 }
 
 class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters)
