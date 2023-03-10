@@ -60,11 +60,11 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // Per-lane FIFO that buffers incoming requests
+    // Instantiate per-lane queue that buffers incoming requests.
     val sourceWidth = node.in(0)._1.params.sourceBits
     val addressWidth = node.in(0)._1.params.addressBits
     val coalRegEntry = new CoalRegEntry(sourceWidth, addressWidth)
-    val fifos = Seq.tabulate(numLanes) { _ =>
+    val queues = Seq.tabulate(numLanes) { _ =>
       Module(
         new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
       )
@@ -73,7 +73,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     println(s"============= node edges: ${node.in.length}")
 
     // Override IdentityNode implementation so that we wire node output to the
-    // FIFO output, instead of directly passing through node input.
+    // queue output, instead of directly passing through node input.
     // See IdentityNode definition in `diplomacy/Nodes.scala`.
     (node.in zip node.out).zipWithIndex.foreach {
       case (((_, edgeIn), _), 0) =>
@@ -83,29 +83,26 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
           "First edge is not connected to the coalescer master node"
         )
       case (((tlIn, _), (tlOut, edgeOut)), i) =>
-        val fifo = fifos(i - 1)
+        val queue = queues(i - 1)
         val newReq = Wire(coalRegEntry)
         newReq.source := tlIn.a.bits.source
         newReq.address := tlIn.a.bits.address
         newReq.data := tlIn.a.bits.data
 
-        fifo.io.enq.valid := tlIn.a.valid
-        fifo.io.enq.bits := newReq
+        queue.io.enq.valid := tlIn.a.valid
+        queue.io.enq.bits := newReq
         // FIXME: deq.ready should respect the ready state of the downstream
         // module, e.g. Xbar or NoC.
-        fifo.io.deq.ready := true.B
-        val head = fifo.io.deq.bits
+        queue.io.deq.ready := true.B
+        val head = queue.io.deq.bits
 
-        tlOut.a.valid := fifo.io.deq.valid
+        tlOut.a.valid := queue.io.deq.valid
         // FIXME: generate Get or Put according to read/write
         val (legal, bits) = edgeOut.Get(
           fromSource = head.source,
           // `toAddress` should be aligned to 2**lgSize
           toAddress = head.address,
-          // 64 bits = 8 bytes = 2**(3) bytes
           lgSize = 0.U
-          // data = (i + 100).U
-          // data = tlIn.a.bits.data + 0xFF.U
         )
         assert(legal, "unhandled illegal TL req gen")
         tlOut.a.bits := bits
@@ -116,9 +113,9 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         dontTouch(tlOut.d)
     }
 
-    val (tlCoal, edgeCoal) = coalescerNode.out(0)
-
+    // Generate coalesced requests.
     // FIXME: currently generating bogus coalesced requests
+    val (tlCoal, edgeCoal) = coalescerNode.out(0)
     tlCoal.a.valid := true.B
     val (legal, bits) = edgeCoal.Get(
       fromSource = 0.U,
@@ -130,12 +127,43 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     assert(legal, "unhandled illegal TL req gen")
     tlCoal.a.bits := bits
 
-    val coalRespValid = Wire(Bool())
-    coalRespValid := tlCoal.a.valid
+    val coalReqValid = Wire(Bool())
+    coalReqValid := tlCoal.a.valid
+    dontTouch(coalReqValid)
     val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
     coalRespData := tlCoal.d.bits.data
-    dontTouch(coalRespValid)
     dontTouch(coalRespData)
+
+    // Now, for the coalescer response flow, instantiate a reservation station
+    // that records for each unanswered coalesced requests which lane the
+    // request originated from, what were their original sourceIds, etc.
+    // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
+    // table structure
+    val responseQueue = Module(
+      new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
+    )
+    (node.in zip node.out)(0) match {
+      case ((tlIn, edgeIn), (tlOut, edgeOut)) =>
+        assert(
+          edgeIn.master.masters(0).name == "CoalescerNode",
+          "First edge is not connected to the coalescer master node"
+        )
+        val resp = Wire(coalRegEntry)
+        resp.source := tlOut.d.bits.source
+        resp.address := 0.U
+        resp.data := tlOut.d.bits.data
+
+        responseQueue.io.enq.valid := tlOut.d.valid
+        responseQueue.io.enq.bits := resp
+        responseQueue.io.deq.ready := true.B
+
+        dontTouch(responseQueue.io.deq.valid)
+        dontTouch(responseQueue.io.deq.bits)
+
+        tlIn.d.valid := false.B
+        dontTouch(tlIn.d)
+        dontTouch(tlOut.d)
+    }
   }
 }
 
@@ -196,7 +224,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
   // To prevent collision of sourceId with a current in-flight message,
   // just use a counter that increments indefinitely as the sourceId of new
   // messages.
-  val sourceIdCounter = Reg(UInt(64.W))
+  val sourceIdCounter = RegInit(0.U(64.W))
   sourceIdCounter := sourceIdCounter + 1.U
 
   // Connect each lane to its respective TL node.
