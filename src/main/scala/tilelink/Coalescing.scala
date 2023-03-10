@@ -43,16 +43,19 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
   // Master node that actually generates coalesced requests.
   // This and the IdentityNode will be the two outward-facing nodes that the
   // downstream, either L1 or the system bus, will connect to.
-  val clientParam = Seq(
+  protected val clientParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
-      sourceId = IdRange(0, 0xFFFF)
+      sourceId = IdRange(0, 0xffff)
       // visibility = Seq(AddressSet(0x0000, 0xffffff))
     )
   )
-  val coalescerNode = TLClientNode(
+  protected val coalescerNode = TLClientNode(
     Seq(TLMasterPortParameters.v1(clientParam))
   )
+
+  // Connect master node as the N+1-th inward edge of the IdentityNode
+  node :=* coalescerNode
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
@@ -65,6 +68,8 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
         new ShiftQueue(coalRegEntry, 4 /* FIXME hardcoded */ )
       )
     }
+
+    println(s"============= node edges: ${node.in.length}")
 
     // Override IdentityNode implementation so that we wire node output to the
     // FIFO output, instead of directly passing through node input.
@@ -103,6 +108,9 @@ class CoalescingUnit(numThreads: Int = 1)(implicit p: Parameters)
         dontTouch(tlOut.d)
     }
 
+    // val (tlIn, edgeIn) = coalescerNode.in(0)
+    // tlIn.d.bits.data := 0.U
+
     val (tlCoal, _) = coalescerNode.out(0)
     dontTouch(tlCoal.a)
   }
@@ -115,7 +123,7 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, 0xFFFF)
+        sourceId = IdRange(0, 0xffff)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
@@ -131,7 +139,6 @@ class MemTraceDriver(numThreads: Int = 1)(implicit p: Parameters)
 
   lazy val module = new MemTraceDriverImp(this, numThreads)
 }
-
 
 class TraceReq extends Bundle {
   val valid = Bool()
@@ -172,15 +179,15 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   sourceIdCounter := sourceIdCounter + 1.U
 
   // Connect each thread to its respective TL node.
-  (outer.threadNodes zip threadReqs).zipWithIndex.foreach {
-    case ((node, req), i) =>
-      val (tlOut, edge) = node.out(0)
-      tlOut.a.valid := req.valid
-      
-      tlOut.a.bits := DontCare
-      tlOut.a.bits.data := 0.U
-      when (req.is_store) {
-        tlOut.a.bits := edge.Put(
+  (outer.threadNodes zip threadReqs).foreach { case (node, req) =>
+    val (tlOut, edge) = node.out(0)
+    tlOut.a.valid := req.valid
+
+    tlOut.a.bits := DontCare
+    tlOut.a.bits.data := 0.U
+    when(req.is_store) {
+      tlOut.a.bits := edge
+        .Put(
           fromSource = sourceIdCounter,
           toAddress = req.address,
           // Memory trace addresses are not aligned in word addresses (e.g.
@@ -190,18 +197,21 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
           // NOTE: this is in byte size, not bits
           lgSize = 0.U,
           data = req.data
-        )._2
-      }.otherwise {
-        tlOut.a.bits := edge.Get(
+        )
+        ._2
+    }.otherwise {
+      tlOut.a.bits := edge
+        .Get(
           fromSource = sourceIdCounter,
           toAddress = req.address,
           lgSize = 0.U
-        )._2
-      }
-        
-      // tl_out.a.bits.mask := 0xf.U
-      dontTouch(tlOut.a)
-      tlOut.d.ready := true.B
+        )
+        ._2
+    }
+
+    // tl_out.a.bits.mask := 0xf.U
+    dontTouch(tlOut.a)
+    tlOut.d.ready := true.B
   }
 
   io.finished := sim.io.trace_read.finished
@@ -209,7 +219,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numThreads: Int)
   // Clock Counter, for debugging purpose
   val clkcount = RegInit(0.U(64.W))
   clkcount := clkcount + 1.U
-  dontTouch(clkcount) 
+  dontTouch(clkcount)
 }
 
 class SimMemTrace(val filename: String, numThreads: Int)
@@ -259,8 +269,7 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
     )
   }
   // Connect all (N+1) outputs of coal to separate TestRAM modules
-  (0 until numThreads).foreach { i => rams(i).node := coal.node }
-  rams(numThreads).node := coal.coalescerNode
+  rams.foreach { r => r.node := coal.node }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
