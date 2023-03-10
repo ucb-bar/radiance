@@ -54,7 +54,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     Seq(TLMasterPortParameters.v1(clientParam))
   )
 
-  // Connect master node as the N+1-th inward edge of the IdentityNode
+  // Connect master node as the first of the N+1-th inward edges of the
+  // IdentityNode
   node :=* coalescerNode
 
   lazy val module = new Impl
@@ -74,8 +75,16 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // Override IdentityNode implementation so that we wire node output to the
     // FIFO output, instead of directly passing through node input.
     // See IdentityNode definition in `diplomacy/Nodes.scala`.
-    ((node.in zip node.out) zip fifos) foreach {
-      case (((tlIn, _), (tlOut, edgeOut)), fifo) =>
+    (node.in zip node.out).zipWithIndex.foreach {
+      case (((_, edgeIn), _), 0) =>
+        // First node is coalescerNode; do nothing
+        assert(
+          edgeIn.master.masters(0).name == "CoalescerNode",
+          "First edge is not connected to the coalescer master node"
+        )
+        0
+      case (((tlIn, _), (tlOut, edgeOut)), i) =>
+        val fifo = fifos(i - 1)
         val newReq = Wire(coalRegEntry)
         newReq.source := tlIn.a.bits.source
         newReq.address := tlIn.a.bits.address
