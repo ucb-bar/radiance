@@ -109,7 +109,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // TODO: bogus address
     coalReqAddress := (0xabcd.U + coalSourceId) << 4
     val coalReqValid = Wire(Bool())
-    coalReqValid := true.B
+    // FIXME: copy lane 1's valid signal
+    coalReqValid := node.in(1)._1.a.valid
 
     val (legal, bits) = edgeCoal.Get(
       fromSource = coalSourceId,
@@ -202,20 +203,17 @@ class InflightCoalReqTable(
     val lookup = Flipped(Decoupled(UInt(sourceWidth.W)))
   })
 
-  // val table = Module(new Queue(inflightCoalReqEntryT, entries))
-  // table.io.enq <> io.enq
-  // table.io.deq.ready := false.B
-
-  io.enq.ready := true.B
-  io.lookup.ready := true.B
-
   val table = Mem(
     entries,
     new Bundle {
       val valid = Bool()
-      val entry = new InflightCoalReqTableEntry(numLanes, sourceWidth)
+      val bits = new InflightCoalReqTableEntry(numLanes, sourceWidth)
     }
   )
+
+  when(reset.asBool) {
+    (0 until entries).foreach(i => table(i).valid := false.B)
+  }
 
   val full = Wire(Bool())
   full := (0 until entries)
@@ -224,16 +222,26 @@ class InflightCoalReqTable(
 
   // Instantiate simple cascade of muxes that indicate what is the current
   // minimum index that has an empty spot in the table.
-  val cascadeMinIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
+  val cascadeEmptyIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
   (0 until entries - 1).reverse.foreach { i =>
     val empty = !table(i).valid
     assert(i + 1 < entries)
     // If entry with a lower index is empty, it always takes priority
-    cascadeMinIndex(i) := Mux(empty, i.U, cascadeMinIndex(i + 1))
+    cascadeEmptyIndex(i) := Mux(empty, i.U, cascadeEmptyIndex(i + 1))
   }
-  val chosenEmptyIndex = cascadeMinIndex(0)
+  val chosenEmptyIndex = cascadeEmptyIndex(0)
   dontTouch(chosenEmptyIndex)
   dontTouch(full)
+
+  val enqFire = io.enq.ready && io.enq.valid
+  when(enqFire) {
+    val entry = table(chosenEmptyIndex)
+    entry.valid := true.B
+    entry.bits := io.enq.bits
+  }
+
+  io.enq.ready := !full
+  io.lookup.ready := true.B
 }
 
 class InflightCoalReqTableEntry(val numLanes: Int, val sourceWidth: Int)
