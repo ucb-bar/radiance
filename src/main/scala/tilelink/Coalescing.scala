@@ -150,8 +150,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     inflightCoalReqTable.io.enq.bits := tableEntry
 
     // Look up the table with incoming coalesced responses
-    inflightCoalReqTable.io.lookup.valid := tlCoal.d.valid
-    inflightCoalReqTable.io.lookup.bits := tlCoal.d.bits.source
+    inflightCoalReqTable.io.lookup.ready := tlCoal.d.valid
+    inflightCoalReqTable.io.lookupSourceId := tlCoal.d.bits.source
 
     // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
     // table structure
@@ -200,7 +200,9 @@ class InflightCoalReqTable(
 
   val io = IO(new Bundle {
     val enq = Flipped(EnqIO(inflightCoalReqEntryT))
-    val lookup = Flipped(Decoupled(UInt(sourceWidth.W)))
+    val lookup = Decoupled(UInt(sourceWidth.W))
+    // TODO: put this inside decoupledIO
+    val lookupSourceId = Input(UInt(sourceWidth.W))
   })
 
   val table = Mem(
@@ -220,6 +222,8 @@ class InflightCoalReqTable(
     .map { i => table(i).valid }
     .reduce { (v0, v1) => v0 && v1 }
 
+  // Enqueue logic
+  //
   // Instantiate simple cascade of muxes that indicate what is the current
   // minimum index that has an empty spot in the table.
   val cascadeEmptyIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
@@ -242,27 +246,35 @@ class InflightCoalReqTable(
 
   io.enq.ready := !full
 
-  //
+  // Currently, we assume coalescer never blocks generating coalesced requests.
+  // If this ever happens, it means the table is insufficiently large to keep
+  // track of the maximum number of in-flight requests and should be enlarged
+  // in size.
+  // assert(!full, "coalescer is blocking responses")
+
   // Lookup logic
   //
-  io.lookup.ready := true.B
-
   // Same deal as cascadeEmptyIndex, but for finding a respSourceId match
   // FIXME: tree structure may be better. Any library for instantiating CAM?
   val cascadeMatchIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
   (0 until entries - 1).reverse.foreach { i =>
-    val match_ = table(i).bits.respSourceId === io.lookup.bits
+    val match_ = table(i).bits.respSourceId === io.lookupSourceId
     assert(i + 1 < entries)
     // If entry with a lower index is empty, it always takes priority
     cascadeMatchIndex(i) := Mux(match_, i.U, cascadeMatchIndex(i + 1))
   }
   val matchIndex = cascadeMatchIndex(0)
   val matchValid = Wire(Bool())
-  matchValid := table(matchIndex).bits.respSourceId === io.lookup.bits
-
-  // TODO: how to communicate matchValid?
+  matchValid := table(matchIndex).bits.respSourceId === io.lookupSourceId
+  io.lookup.valid := matchValid
+  // TODO: return something actually useful
+  io.lookup.bits := table(matchIndex).bits.respSourceId
 
   val lookupFire = io.lookup.ready && io.lookup.valid
+  when(lookupFire) {
+    // As soon as a lookup returns a match, dequeue that entry
+    table(matchIndex).valid := false.B
+  }
   dontTouch(io.lookup)
   dontTouch(matchIndex)
   dontTouch(matchValid)
