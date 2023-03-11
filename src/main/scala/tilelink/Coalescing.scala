@@ -13,7 +13,7 @@ import freechips.rocketchip.unittest._
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     extends LazyModule {
 
-  // Describes uncoalesced memory request that originated from a single lane
+  // Describes original, uncoalesced memory requests on each lane
   class UncoalReq(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
     val source = UInt(sourceWidth.W)
     val address = UInt(addressWidth.W)
@@ -21,8 +21,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   }
 
   // Identity node that captures the incoming TL requests and passes them
-  // through the other end, dropping coalesced requests.  This is what the
-  // upstream node will connect to.
+  // through the other end, dropping coalesced requests.  This node is what
+  // will be visible from the external nodes.
   val node = TLIdentityNode()
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
@@ -30,8 +30,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   val numInflightCoalRequests = 4
 
   // Master node that actually generates coalesced requests.
-  // This and the IdentityNode will be the two outward-facing nodes that the
-  // downstream, either L1 or the system bus, will connect to.
   protected val coalParam = Seq(
     TLMasterParameters.v1(
       name = "CoalescerNode",
@@ -137,26 +135,23 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         new InflightCoalReqTable(numLanes, sourceWidth, numInflightCoalRequests)
       )
     val tableEntry = Wire(inflightCoalReqTableEntry)
-    // TODO: bogus fromLane
+    tableEntry.respSourceId := coalSourceId
+    // TODO: bogus fromLane.  Take the lowest numLane bits off of coalSourceId
     tableEntry.fromLane := coalSourceId & ((2 << numLanes) - 1).U
     // FIXME: I'm positive this is not the right way to do this
-    tableEntry.sourceIds(0) := 0.U
-    tableEntry.sourceIds(1) := 0.U
-    tableEntry.sourceIds(2) := 0.U
-    tableEntry.sourceIds(3) := 0.U
+    tableEntry.reqSourceIds(0) := 0.U
+    tableEntry.reqSourceIds(1) := 0.U
+    tableEntry.reqSourceIds(2) := 0.U
+    tableEntry.reqSourceIds(3) := 0.U
     dontTouch(tableEntry)
 
     inflightCoalReqTable.io.enq.valid := coalReqValid
     inflightCoalReqTable.io.enq.bits := tableEntry
-    inflightCoalReqTable.io.deq.ready := false.B
 
-    dontTouch(inflightCoalReqTable.io.deq.valid)
-    dontTouch(inflightCoalReqTable.io.deq.bits)
+    // Look up the table with incoming coalesced responses
+    inflightCoalReqTable.io.lookup.valid := tlCoal.d.valid
+    inflightCoalReqTable.io.lookup.bits := tlCoal.d.bits.source
 
-    // Now, for the coalescer response flow, instantiate a reservation
-    // station-like structure that records for each unanswered coalesced
-    // requests which lane the request originated from, what their original
-    // sourceId were, etc.
     // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
     // table structure
     // val inflightCoalReqTable = Reg(
@@ -189,32 +184,69 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   }
 }
 
+// InflightCoalReqTable is a reservation station-like structure that records
+// for each unanswered coalesced request which lane the request originated
+// from, what their original sourceId were, etc.  We use this info to split
+// the coalesced response back to individual responses for each lanes with
+// the right metadata.
 class InflightCoalReqTable(
     val numLanes: Int,
     val sourceWidth: Int,
-    val entries: Int = 4
+    val entries: Int
 ) extends Module {
   private val inflightCoalReqEntryT =
     new InflightCoalReqTableEntry(numLanes, sourceWidth)
 
   val io = IO(new Bundle {
     val enq = Flipped(EnqIO(inflightCoalReqEntryT))
-    val deq = Flipped(DeqIO(inflightCoalReqEntryT))
+    val lookup = Flipped(Decoupled(UInt(sourceWidth.W)))
   })
 
-  val table = Module(new Queue(inflightCoalReqEntryT, entries))
-  table.io.enq <> io.enq
-  io.deq <> table.io.deq
+  // val table = Module(new Queue(inflightCoalReqEntryT, entries))
+  // table.io.enq <> io.enq
+  // table.io.deq.ready := false.B
+
+  io.enq.ready := true.B
+  io.lookup.ready := true.B
+
+  val table = Mem(
+    entries,
+    new Bundle {
+      val valid = Bool()
+      val entry = new InflightCoalReqTableEntry(numLanes, sourceWidth)
+    }
+  )
+
+  val full = Wire(Bool())
+  full := (0 until entries)
+    .map { i => table(i).valid }
+    .reduce { (v0, v1) => v0 & v1 }
+
+  // Instantiate simple cascade of muxes that indicate what is the current
+  // minimum index that has an empty spot in the table.
+  val cascadeMinIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
+  (0 until entries - 1).reverse.foreach { i =>
+    val empty = !table(i).valid
+    assert(i + 1 < entries)
+    // If entry with a lower index is empty, it always takes priority
+    cascadeMinIndex(i) := Mux(empty, i.U, cascadeMinIndex(i + 1))
+  }
+  val chosenEmptyIndex = cascadeMinIndex(0)
+  dontTouch(chosenEmptyIndex)
+  dontTouch(full)
 }
 
 class InflightCoalReqTableEntry(val numLanes: Int, val sourceWidth: Int)
     extends Bundle {
+  // sourceId of the coalesced response that just came back.  This will be the
+  // key that queries the table.
+  val respSourceId = UInt(sourceWidth.W)
   // Bit flags that show which lanes got coalesced into this request
   val fromLane = UInt(numLanes.W)
   // sourceId of the original requests before getting coalesced.  We need to
-  // know this in order to respond to the original per-lane TL requests with
-  // matching sourceIds
-  val sourceIds = Vec(numLanes, UInt(sourceWidth.W))
+  // remember this in order to answer the right outstanding TL request on each
+  // lane.
+  val reqSourceIds = Vec(numLanes, UInt(sourceWidth.W))
 }
 
 class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters)
