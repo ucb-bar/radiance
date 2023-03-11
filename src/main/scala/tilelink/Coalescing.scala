@@ -218,7 +218,7 @@ class InflightCoalReqTable(
   val full = Wire(Bool())
   full := (0 until entries)
     .map { i => table(i).valid }
-    .reduce { (v0, v1) => v0 & v1 }
+    .reduce { (v0, v1) => v0 && v1 }
 
   // Instantiate simple cascade of muxes that indicate what is the current
   // minimum index that has an empty spot in the table.
@@ -241,7 +241,31 @@ class InflightCoalReqTable(
   }
 
   io.enq.ready := !full
+
+  //
+  // Lookup logic
+  //
   io.lookup.ready := true.B
+
+  // Same deal as cascadeEmptyIndex, but for finding a respSourceId match
+  // FIXME: tree structure may be better. Any library for instantiating CAM?
+  val cascadeMatchIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
+  (0 until entries - 1).reverse.foreach { i =>
+    val match_ = table(i).bits.respSourceId === io.lookup.bits
+    assert(i + 1 < entries)
+    // If entry with a lower index is empty, it always takes priority
+    cascadeMatchIndex(i) := Mux(match_, i.U, cascadeMatchIndex(i + 1))
+  }
+  val matchIndex = cascadeMatchIndex(0)
+  val matchValid = Wire(Bool())
+  matchValid := table(matchIndex).bits.respSourceId === io.lookup.bits
+
+  // TODO: how to communicate matchValid?
+
+  val lookupFire = io.lookup.ready && io.lookup.valid
+  dontTouch(io.lookup)
+  dontTouch(matchIndex)
+  dontTouch(matchValid)
 }
 
 class InflightCoalReqTableEntry(val numLanes: Int, val sourceWidth: Int)
