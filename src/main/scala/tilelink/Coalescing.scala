@@ -153,11 +153,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     inflightCoalReqTable.io.lookup.ready := tlCoal.d.valid
     inflightCoalReqTable.io.lookupSourceId := tlCoal.d.bits.source
 
-    // FIXME: Reuse ShiftQueue(coalRegEntry) for now, but swap out to actual
-    // table structure
-    // val inflightCoalReqTable = Reg(
-    //   Vec(NumInflightCoalRequests, new InflightCoalReqEntry(sourceWidth))
-    // )
     (node.in zip node.out)(0) match {
       case ((tlIn, edgeIn), (tlOut, _)) =>
         assert(
