@@ -38,19 +38,64 @@ class CoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val inflightCoalReqTableEntry =
     new InflightCoalReqTableEntry(numLanes, sourceWidth)
 
-  it should "whatever" in {
+  it should "stop enqueueing when full" in {
     test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>
-      // val tableEntry = new InflightCoalReqTableEntry(numLanes, sourceWidth)
-      val respSourceId = 0.U
+      for (i <- 0 until entries) {
+        c.io.enq.ready.expect(true.B)
+        c.io.enq.valid.poke(true.B)
+        c.io.enq.bits.fromLane.poke(0.U)
+        c.io.enq.bits.respSourceId.poke(i.U)
+        c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+
+        c.clock.step()
+      }
+
+      c.io.enq.ready.expect(false.B)
       c.io.enq.valid.poke(true.B)
       c.io.enq.bits.fromLane.poke(0.U)
-      c.io.enq.bits.respSourceId.poke(respSourceId)
+      c.io.enq.bits.respSourceId.poke(0.U)
       c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+
       c.clock.step()
-      c.io.lookup.ready.poke(true.B)
-      c.io.lookupSourceId.poke(respSourceId)
-      c.io.lookup.valid.expect(true.B)
-      c.io.lookup.bits.expect(respSourceId)
+      c.io.enq.ready.expect(false.B)
     }
+  }
+  it should "lookup matching entry" in {
+    test(new InflightCoalReqTable(numLanes, sourceWidth, entries))
+      .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { c =>
+        c.reset.poke(true.B)
+        c.clock.step(10)
+        c.reset.poke(false.B)
+
+        // enqueue one entry to not match at 0th index
+        c.io.enq.ready.expect(true.B)
+        c.io.enq.valid.poke(true.B)
+        c.io.enq.bits.fromLane.poke(0.U)
+        c.io.enq.bits.respSourceId.poke(0.U)
+        c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+
+        c.clock.step()
+
+        val targetSourceId = 1.U
+        c.io.enq.ready.expect(true.B)
+        c.io.enq.valid.poke(true.B)
+        c.io.enq.bits.fromLane.poke(0.U)
+        c.io.enq.bits.respSourceId.poke(targetSourceId)
+        c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+
+        c.clock.step()
+
+        c.io.lookup.ready.poke(true.B)
+        c.io.lookupSourceId.poke(targetSourceId)
+        c.io.lookup.valid.expect(true.B)
+        c.io.lookup.bits.expect(targetSourceId)
+
+        c.clock.step()
+
+        // test if matching entry dequeues after 1 cycle
+        c.io.lookup.ready.poke(true.B)
+        c.io.lookupSourceId.poke(targetSourceId)
+        c.io.lookup.valid.expect(false.B)
+      }
   }
 }

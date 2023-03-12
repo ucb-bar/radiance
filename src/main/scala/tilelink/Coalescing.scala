@@ -258,9 +258,10 @@ class InflightCoalReqTable(
     // If entry with a lower index is empty, it always takes priority
     cascadeMatchIndex(i) := Mux(match_, i.U, cascadeMatchIndex(i + 1))
   }
-  val matchIndex = cascadeMatchIndex(0)
-  val matchValid = Wire(Bool())
-  matchValid := table(matchIndex).bits.respSourceId === io.lookupSourceId
+  val matchIndex = Wire(UInt())
+  matchIndex := cascadeMatchIndex(0)
+  val matchValid = table(matchIndex).valid &&
+    (table(matchIndex).bits.respSourceId === io.lookupSourceId)
   io.lookup.valid := matchValid
   // TODO: return something actually useful
   io.lookup.bits := table(matchIndex).bits.respSourceId
@@ -272,7 +273,6 @@ class InflightCoalReqTable(
   }
   dontTouch(io.lookup)
   dontTouch(matchIndex)
-  dontTouch(matchValid)
 }
 
 class InflightCoalReqTableEntry(val numLanes: Int, val sourceWidth: Int)
