@@ -58,6 +58,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
     println(s"============= node edges: ${node.in.length}")
 
+    // Per-lane TL request generation
+    //
     // Override IdentityNode implementation so that we wire node output to the
     // queue output, instead of directly passing through node input.
     // See IdentityNode definition in `diplomacy/Nodes.scala`.
@@ -94,6 +96,18 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         tlOut.a.bits := bits
         tlIn.d <> tlOut.d
 
+        // Debug only
+        val inflightCounter = RegInit(UInt(32.W), 0.U)
+        when (tlOut.a.valid) {
+          // don't inc/dec on simultaneous req/resp
+          when (!tlOut.d.valid) {
+            inflightCounter := inflightCounter + 1.U
+          }
+        }.elsewhen(tlOut.d.valid) {
+          inflightCounter := inflightCounter - 1.U
+        }
+
+        dontTouch(inflightCounter)
         dontTouch(tlIn.a)
         dontTouch(tlOut.a)
         dontTouch(tlOut.d)
@@ -109,7 +123,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // TODO: bogus address
     coalReqAddress := (0xabcd.U + coalSourceId) << 4
     val coalReqValid = Wire(Bool())
-    // FIXME: copy lane 1's valid signal
+    // FIXME: copy lane 1's valid signal.  This is completely bogus
     coalReqValid := node.in(1)._1.a.valid
 
     val (legal, bits) = edgeCoal.Get(
@@ -258,6 +272,7 @@ class InflightCoalReqTable(
     // If entry with a lower index is empty, it always takes priority
     cascadeMatchIndex(i) := Mux(match_, i.U, cascadeMatchIndex(i + 1))
   }
+  // width will be inferred after cascadeMatchIndex
   val matchIndex = Wire(UInt())
   matchIndex := cascadeMatchIndex(0)
   val matchValid = table(matchIndex).valid &&
