@@ -98,9 +98,9 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
         // Debug only
         val inflightCounter = RegInit(UInt(32.W), 0.U)
-        when (tlOut.a.valid) {
+        when(tlOut.a.valid) {
           // don't inc/dec on simultaneous req/resp
-          when (!tlOut.d.valid) {
+          when(!tlOut.d.valid) {
             inflightCounter := inflightCounter + 1.U
           }
         }.elsewhen(tlOut.d.valid) {
@@ -231,6 +231,9 @@ class InflightCoalReqTable(
     .map { i => table(i).valid }
     .reduce { (v0, v1) => v0 && v1 }
 
+  val enqFire = io.enq.ready && io.enq.valid
+  val lookupFire = io.lookup.ready && io.lookup.valid
+
   // Enqueue logic
   //
   // Instantiate simple cascade of muxes that indicate what is the current
@@ -246,14 +249,8 @@ class InflightCoalReqTable(
   dontTouch(chosenEmptyIndex)
   dontTouch(full)
 
-  val enqFire = io.enq.ready && io.enq.valid
-  when(enqFire) {
-    val entry = table(chosenEmptyIndex)
-    entry.valid := true.B
-    entry.bits := io.enq.bits
-  }
-
   io.enq.ready := !full
+  // actual write will happen down below
 
   // Currently, we assume coalescer never blocks generating coalesced requests.
   // If this ever happens, it means the table is insufficiently large to keep
@@ -281,11 +278,23 @@ class InflightCoalReqTable(
   // TODO: return something actually useful
   io.lookup.bits := table(matchIndex).bits.respSourceId
 
-  val lookupFire = io.lookup.ready && io.lookup.valid
   when(lookupFire) {
     // As soon as a lookup returns a match, dequeue that entry
     table(matchIndex).valid := false.B
   }
+
+  when(enqFire) {
+    // When we're enqueueing and looking up at the same time, we want to reuse
+    // the current matching entry for writing the new incoming entry
+    // to prevent having to write to two locations at the same cycle.
+    // TODO: This might or might not be an issue w.r.t. write ports of the
+    // registers, double-check
+    val indexToWrite = Mux(lookupFire, matchIndex, chosenEmptyIndex)
+    val entryToWrite = table(indexToWrite)
+    entryToWrite.valid := true.B
+    entryToWrite.bits := io.enq.bits
+  }
+
   dontTouch(io.lookup)
   dontTouch(matchIndex)
 }

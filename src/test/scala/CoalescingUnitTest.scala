@@ -40,16 +40,19 @@ class CoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "stop enqueueing when full" in {
     test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>
+      // fill up the table
       for (i <- 0 until entries) {
+        val sourceId = i
         c.io.enq.ready.expect(true.B)
         c.io.enq.valid.poke(true.B)
         c.io.enq.bits.fromLane.poke(0.U)
-        c.io.enq.bits.respSourceId.poke(i.U)
+        c.io.enq.bits.respSourceId.poke(sourceId.U)
         c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
-
+        c.io.lookup.ready.poke(false.B)
         c.clock.step()
       }
 
+      // now cannot enqueue any more
       c.io.enq.ready.expect(false.B)
       c.io.enq.valid.poke(true.B)
       c.io.enq.bits.fromLane.poke(0.U)
@@ -58,11 +61,32 @@ class CoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
       c.clock.step()
       c.io.enq.ready.expect(false.B)
+
+      // try to lookup all existing entries
+      for (i <- 0 until entries) {
+        val sourceId = i
+        c.io.enq.valid.poke(false.B)
+        c.io.lookup.ready.poke(true.B)
+        c.io.lookupSourceId.poke(sourceId)
+        c.io.lookup.valid.expect(true.B)
+        c.io.lookup.bits.expect(sourceId)
+        c.clock.step()
+      }
+
+      // now the table should be empty
+      for (i <- 0 until entries) {
+        val sourceId = i
+        c.io.enq.valid.poke(false.B)
+        c.io.lookup.ready.poke(true.B)
+        c.io.lookupSourceId.poke(sourceId)
+        c.io.lookup.valid.expect(false.B)
+        c.clock.step()
+      }
     }
   }
   it should "lookup matching entry" in {
     test(new InflightCoalReqTable(numLanes, sourceWidth, entries))
-      .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { c =>
+      .withAnnotations(Seq(WriteVcdAnnotation)) { c =>
         c.reset.poke(true.B)
         c.clock.step(10)
         c.reset.poke(false.B)
@@ -97,5 +121,35 @@ class CoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         c.io.lookupSourceId.poke(targetSourceId)
         c.io.lookup.valid.expect(false.B)
       }
+  }
+  it should "handle lookup and enqueue at the same time" in {
+    test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>
+      // fill up the table
+      val targetSourceId = 1.U
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.fromLane.poke(0.U)
+      c.io.enq.bits.respSourceId.poke(0.U)
+      c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+      c.clock.step()
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.fromLane.poke(0.U)
+      c.io.enq.bits.respSourceId.poke(targetSourceId)
+      c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+      c.clock.step()
+
+      // do both enqueue and lookup at the same cycle
+      val enqSourceId = 2.U
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.fromLane.poke(0.U)
+      c.io.enq.bits.respSourceId.poke(enqSourceId)
+      c.io.enq.bits.reqSourceIds.foreach { id => id.poke(0.U) }
+      c.io.lookup.ready.poke(true.B)
+      c.io.lookupSourceId.poke(targetSourceId)
+
+      c.clock.step()
+    }
   }
 }
