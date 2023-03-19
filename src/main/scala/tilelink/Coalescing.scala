@@ -22,7 +22,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
   // Identity node that captures the incoming TL requests and passes them
   // through the other end, dropping coalesced requests.  This node is what
-  // will be visible from the external nodes.
+  // will be visible to upstream and downstream nodes.
   val node = TLIdentityNode()
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
@@ -40,8 +40,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     Seq(TLMasterPortParameters.v1(coalParam))
   )
 
-  // Connect master node as the first of the N+1-th inward edges of the
-  // IdentityNode
+  // Connect master node as the first inward edge of the IdentityNode
   node :=* coalescerNode
 
   lazy val module = new Impl
@@ -170,13 +169,13 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     (node.in zip node.out)(0) match {
       case ((tlIn, edgeIn), (tlOut, _)) =>
         assert(
-          edgeIn.master.masters(0).name == "CoalescerNode",
+          edgeIn.master.masters.length == 1 &&
+            edgeIn.master.masters(0).name == "CoalescerNode",
           "First edge is not connected to the coalescer master node"
         )
 
+        // TODO: do we need to do anything here?
         tlOut.a <> tlIn.a
-        // No need to drop any incoming coalesced responses, so just passthrough
-        // to master node
         tlIn.d <> tlOut.d
         dontTouch(tlIn.d)
         dontTouch(tlOut.d)
@@ -196,9 +195,9 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
 // InflightCoalReqTable is a reservation station-like structure that records
 // for each unanswered coalesced request which lane the request originated
-// from, what their original sourceId were, etc.  We use this info to split
-// the coalesced response back to individual responses for each lanes with
-// the right metadata.
+// from, what their original TileLink sourceId were, etc.  We use this info to
+// split the coalesced response back to individual per-lane responses with the
+// right metadata.
 class InflightCoalReqTable(
     val numLanes: Int,
     val sourceWidth: Int,
@@ -380,11 +379,9 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
       toAddress = req.address,
-      // Memory trace addresses are not aligned in word addresses (e.g.
-      // read of size 1 at 0x1007) so leave lgSize to 0.
-      // TODO: We need to build an issue logic that aligns addresses at
-      // word boundaries and uses masks.
-      // NOTE: this is in byte size, not bits
+      // Memory trace addresses are not necessarily aligned to word boundaries
+      // so leave lgSize to 0
+      // NOTE: this is in bytes not bits
       lgSize = 0.U,
       data = req.data
     )
