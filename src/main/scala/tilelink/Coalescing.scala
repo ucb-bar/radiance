@@ -147,10 +147,10 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     val tableEntry = Wire(inflightCoalReqTable.entryT)
     tableEntry.respSourceId := coalSourceId
     tableEntry.lanes.foreach { l =>
-      l.foreach { perLaneReq =>
+      l.foreach { singleLaneReq =>
         // TODO: this part needs the actual coalescing logic to work
-        perLaneReq.offset := 2.U
-        perLaneReq.size := 2.U
+        singleLaneReq.offset := 2.U
+        singleLaneReq.size := 2.U
       }
     }
     dontTouch(tableEntry)
@@ -206,7 +206,8 @@ class InflightCoalReqTable(
     new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits)
 
   val io = IO(new Bundle {
-    val enq = Flipped(EnqIO(entryT))
+    val enq = Flipped(Decoupled(entryT))
+    // TODO: return actual stuff
     val lookup = Decoupled(UInt(sourceWidth.W))
     // TODO: put this inside decoupledIO
     val lookupSourceId = Input(UInt(sourceWidth.W))
@@ -233,73 +234,38 @@ class InflightCoalReqTable(
   full := (0 until entries)
     .map { i => table(i).valid }
     .reduce { (v0, v1) => v0 && v1 }
-
-  val enqFire = io.enq.ready && io.enq.valid
-  val lookupFire = io.lookup.ready && io.lookup.valid
+  // Inflight table should never be full.  It should have enough number of
+  // entries to keep track of all core-side requests for every lane, for every
+  // per-lane srcId, for every new coalesced srcId.
+  assert(!full, "table is blocking coalescer")
+  dontTouch(full)
 
   // Enqueue logic
   //
-  // Instantiate simple cascade of muxes that indicate what is the current
-  // minimum index that has an empty spot in the table.
-  val cascadeEmptyIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
-  (0 until entries - 1).reverse.foreach { i =>
-    val empty = !table(i).valid
-    assert(i + 1 < entries)
-    // If entry with a lower index is empty, it always takes priority
-    cascadeEmptyIndex(i) := Mux(empty, i.U, cascadeEmptyIndex(i + 1))
-  }
-  val chosenEmptyIndex = cascadeEmptyIndex(0)
-  dontTouch(chosenEmptyIndex)
-  dontTouch(full)
-
   io.enq.ready := !full
-  // actual write will happen down below
-
-  // Currently, we assume coalescer never blocks generating coalesced requests.
-  // If this ever happens, it means the table is insufficiently large to keep
-  // track of the maximum number of in-flight requests and should be enlarged
-  // in size.
-  // assert(!full, "coalescer is blocking responses")
-
-  // Lookup logic
-  //
-  // Same deal as cascadeEmptyIndex, but for finding a respSourceId match
-  // FIXME: tree structure may be better. Any library for instantiating CAM?
-  val cascadeMatchIndex = Seq.tabulate(entries) { i => WireInit(i.U) }
-  (0 until entries - 1).reverse.foreach { i =>
-    val match_ = table(i).bits.respSourceId === io.lookupSourceId
-    assert(i + 1 < entries)
-    // If entry with a lower index is empty, it always takes priority
-    cascadeMatchIndex(i) := Mux(match_, i.U, cascadeMatchIndex(i + 1))
-  }
-  // width will be inferred after cascadeMatchIndex
-  val matchIndex = Wire(UInt())
-  matchIndex := cascadeMatchIndex(0)
-  val matchValid = table(matchIndex).valid &&
-    (table(matchIndex).bits.respSourceId === io.lookupSourceId)
-  io.lookup.valid := matchValid
-  // TODO: return something actually useful
-  io.lookup.bits := table(matchIndex).bits.respSourceId
-
-  when(lookupFire) {
-    // As soon as a lookup returns a match, dequeue that entry
-    table(matchIndex).valid := false.B
-  }
-
+  val enqFire = io.enq.ready && io.enq.valid
   when(enqFire) {
-    // When we're enqueueing and looking up at the same time, we want to reuse
-    // the current matching entry for writing the new incoming entry
-    // to prevent having to write to two locations at the same cycle.
-    // TODO: This might or might not be an issue w.r.t. write ports of the
-    // registers, double-check
-    val indexToWrite = Mux(lookupFire, matchIndex, chosenEmptyIndex)
-    val entryToWrite = table(indexToWrite)
+    // TODO: should we handle enqueueing and looking up the same entry in the same cycle?
+    val entryToWrite = table(io.enq.bits.respSourceId)
+    assert(
+      !entryToWrite.valid,
+      "tried to enqueue to an already occupied entry"
+    )
     entryToWrite.valid := true.B
     entryToWrite.bits := io.enq.bits
   }
 
+  // Lookup logic
+  //
+  io.lookup.valid := table(io.lookupSourceId).valid
+  io.lookup.bits := table(io.lookupSourceId).bits.respSourceId
+  val lookupFire = io.lookup.ready && io.lookup.valid
+  // Dequeue as soon as lookup succeeds
+  when(lookupFire) {
+    table(io.lookupSourceId).valid := false.B
+  }
+
   dontTouch(io.lookup)
-  dontTouch(matchIndex)
 }
 
 class InflightCoalReqTableEntry(
@@ -308,6 +274,7 @@ class InflightCoalReqTableEntry(
     val offsetBits: Int,
     val sizeBits: Int
 ) extends Bundle {
+  // srcId will be positionally encoded in a lane
   class PerLaneRequest extends Bundle {
     val offset = UInt(offsetBits.W)
     val size = UInt(sizeBits.W)
