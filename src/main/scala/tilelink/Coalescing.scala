@@ -36,7 +36,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   // Connect master node as the first inward edge of the IdentityNode
   node :=* coalescerNode
 
-  class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
+  class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int)
+      extends Bundle {
     val source = UInt(sourceWidth.W)
     val address = UInt(addressWidth.W)
     val data = UInt(64.W /* FIXME hardcoded */ ) // write data
@@ -46,12 +47,12 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     val data = UInt(64.W /* FIXME hardcoded */ ) // read data
   }
 
-
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // Instantiate per-lane queue that buffers incoming requests.
-    val sourceWidth = node.in(0)._1.params.sourceBits
-    val addressWidth = node.in(0)._1.params.addressBits
+    // node.in(0) is from coalescer TL master node; 1~N are from cores
+    // assert(node.in.length >= 2)
+    val sourceWidth = node.in(1)._1.params.sourceBits
+    val addressWidth = node.in(1)._1.params.addressBits
     val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth)
     val reqQueues = Seq.tabulate(numLanes) { _ =>
       Module(
@@ -65,7 +66,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
       )
     }
 
-    // Per-lane TL request generation
+    // Per-lane request and response queues
     //
     // Override IdentityNode implementation so that we wire node output to the
     // queue output, instead of directly passing through node input.
@@ -85,6 +86,8 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         req.source := tlIn.a.bits.source
         req.address := tlIn.a.bits.address
         req.data := tlIn.a.bits.data
+
+        println(s"============ req.source width=${req.source.widthOption.get}")
 
         reqQueue.io.enq.valid := tlIn.a.valid
         reqQueue.io.enq.bits := req
@@ -108,19 +111,23 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         // This queue will serialize non-coalesced responses along with
         // coalesced responses and serve them back to the core side.
         val respQueue = respQueues(i - 1)
+        val resp = Wire(respQueueEntryT)
+        resp.source := tlOut.d.bits.source
+        resp.data := tlOut.d.bits.data
 
         // TODO: actually enqueue
-        respQueue.io.enq.valid := false.B
-        respQueue.io.enq.bits := DontCare
+        respQueue.io.enq.valid := tlOut.d.valid
+        respQueue.io.enq.bits := resp
         // TODO: deq.ready should respect upstream ready
         respQueue.io.deq.ready := true.B
 
         tlIn.d.valid := respQueue.io.deq.valid
         val respHead = respQueue.io.deq.bits
-        // FIXME: generate Get or Put according to read/write
         val respBits = edgeIn.AccessAck(
+          // FIXME: actual data here
           toSource = respHead.source,
-          lgSize = 0.U
+          lgSize = 0.U,
+          data = respHead.data
         )
         tlIn.d.bits := respBits
 
@@ -139,6 +146,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
 
         dontTouch(inflightCounter)
         dontTouch(tlIn.a)
+        dontTouch(tlIn.d)
         dontTouch(tlOut.a)
         dontTouch(tlOut.d)
     }
@@ -353,7 +361,7 @@ class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, 0xffff)
+        sourceId = IdRange(0, 0x10)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
