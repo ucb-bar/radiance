@@ -10,8 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.{ShiftQueue, MultiPortQueue}
 import freechips.rocketchip.unittest._
 
-class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
-    extends LazyModule {
+class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
 
   // Identity node that captures the incoming TL requests and passes them
   // through the other end, dropping coalesced requests.  This node is what
@@ -39,17 +38,17 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
   lazy val module = new CoalescingUnitImp(this, numLanes)
 }
 
-class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
-    extends LazyModuleImp(outer) {
-  class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int)
-      extends Bundle {
+class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
+  val wordSize = 4
+
+  class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
     val source = UInt(sourceWidth.W)
     val address = UInt(addressWidth.W)
     val data = UInt(64.W /* FIXME hardcoded */ ) // write data
   }
   class RespQueueEntry(val sourceWidth: Int) extends Bundle {
     val source = UInt(sourceWidth.W)
-    val data = UInt(64.W /* FIXME hardcoded */ ) // read data
+    val data = UInt(wordSize.W /* TODO double-word? */ ) // read data
   }
 
   // node.in(0) is from coalescer TL master node; 1~N are from cores
@@ -234,8 +233,24 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
   // Look up the table with incoming coalesced responses
   inflightTable.io.lookup.ready := tlCoal.d.valid
   inflightTable.io.lookupSourceId := tlCoal.d.bits.source
-  val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
+  val coalDataWidth = tlCoal.params.dataBits
+  val coalRespData = Wire(UInt(coalDataWidth.W))
   coalRespData := tlCoal.d.bits.data
+
+  // Un-coalescing logic
+  //
+  // FIXME: `size` should be UInt, not Int
+  def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, size: Int): UInt = {
+    val sizeMask = (1.U << size) - 1.U
+    assert(dataWidth % size == 0, "coalesced data width not evenly divisible by size")
+    val chunks = Wire(Vec(dataWidth / size, UInt(size.W)))
+    val offsets = (0 until dataWidth / size)
+    (chunks zip offsets).foreach { case (c, o) =>
+      // Take [(off-1)*size:off*size]
+      c := (data >> (dataWidth - (o + 1) * size)) & sizeMask
+    }
+    chunks(offset)
+  }
 
   // Un-coalesce responses back to individual lanes and queue them up
   val found = inflightTable.io.lookup.bits
@@ -245,7 +260,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
     val respQueue = respQueues(i)
     assert(
       respQueue.io.enq(respQueueCoalPortOffset).ready,
-      s"respQueue: enq port for ${i}-th coalesced response is blocked"
+      s"respQueue: enq port for 0-th coalesced response is blocked"
     )
     dontTouch(respQueue.io.enq(respQueueCoalPortOffset).ready)
     respQueue.io.enq(respQueueCoalPortOffset).valid := false.B
@@ -255,13 +270,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
       respQueue.io.enq(respQueueCoalPortOffset).valid := l.valid
       respQueue.io.enq(respQueueCoalPortOffset).bits.source := 0.U
 
-      // Un-coalescing logic
-      //
       // FIXME: disregard size enum for now
-      val sizeMask = (1.U << 4) - 1.U
-      val dataWidth = tlCoal.params.dataBits
+      val size = wordSize
       respQueue.io.enq(respQueueCoalPortOffset).bits.data :=
-        (coalRespData >> (dataWidth - 4)) & sizeMask
+        getCoalescedDataChunk(coalRespData, coalDataWidth, l.reqs(0).offset, size)
+      // chunks(l.reqs(0).offset)
     }
 
     when(l.valid) {
@@ -404,8 +417,7 @@ class InflightCoalReqTableEntry(
   val lanes = Vec(numLanes, new PerLane)
 }
 
-class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters)
-    extends LazyModule {
+class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
   // Create N client nodes together
   val laneNodes = Seq.tabulate(numLanes) { i =>
     val clientParam = Seq(
@@ -559,8 +571,7 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class CoalescingUnitTest(timeout: Int = 500000)(implicit p: Parameters)
-    extends UnitTest(timeout) {
+class CoalescingUnitTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
   val dut = Module(LazyModule(new CoalConnectTrace).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
