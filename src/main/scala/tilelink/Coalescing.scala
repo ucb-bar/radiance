@@ -94,12 +94,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // queues between input and output edges to buffer requests and responses.
   // See IdentityNode definition in `diplomacy/Nodes.scala`.
   (outer.node.in zip outer.node.out).zipWithIndex.foreach {
-    case (((_, edgeIn), _), 0) =>
-      // No need to do anything on the edge from coalescerNode
+    case (((tlIn, edgeIn), (tlOut, _)), 0) =>
       assert(
         edgeIn.master.masters(0).name == "CoalescerNode",
         "First edge is not connected to the coalescer master node"
       )
+      // Edge from the coalescer TL master node should simply bypass the identity node,
+      // except for connecting the outgoing edge to the inflight table, which is done
+      // down below.
+      tlOut.a <> tlIn.a
+      tlIn.d <> tlOut.d
     case (((tlIn, edgeIn), (tlOut, edgeOut)), i) =>
       // Request queue
       //
@@ -176,7 +180,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   }
 
   // Generate coalesced requests
-  // FIXME: currently generating bogus coalesced requests
   val coalSourceId = RegInit(0.U(2.W /* FIXME hardcoded */ ))
   coalSourceId := coalSourceId + 1.U
 
@@ -243,10 +246,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, size: Int): UInt = {
     val sizeMask = (1.U << size) - 1.U
     assert(dataWidth % size == 0, "coalesced data width not evenly divisible by size")
-    val chunks = Wire(Vec(dataWidth / size, UInt(size.W)))
-    val offsets = (0 until dataWidth / size)
+    val numChunks = dataWidth / size
+    val chunks = Wire(Vec(numChunks, UInt(size.W)))
+    val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
-      // Take [(off-1)*size:off*size]
+      // Take [(off-1)*size:off*size] starting from MSB
       c := (data >> (dataWidth - (o + 1) * size)) & sizeMask
     }
     chunks(offset)
@@ -282,21 +286,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         printf(s"lane ${i} req 0 is valid!\n")
       }
     }
-  }
-
-  (outer.node.in zip outer.node.out)(0) match {
-    case ((tlIn, edgeIn), (tlOut, _)) =>
-      assert(
-        edgeIn.master.masters.length == 1 &&
-          edgeIn.master.masters(0).name == "CoalescerNode",
-        "First edge is not connected to the coalescer master node"
-      )
-
-      // TODO: do we need to do anything here?
-      tlOut.a <> tlIn.a
-      tlIn.d <> tlOut.d
-      dontTouch(tlIn.d)
-      dontTouch(tlOut.d)
   }
 
   // Debug
