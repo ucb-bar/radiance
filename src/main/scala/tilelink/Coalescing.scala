@@ -253,7 +253,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       // Take [(off-1)*size:off*size] starting from MSB
       c := (data >> (dataWidth - (o + 1) * size)) & sizeMask
     }
-    chunks(offset)
+    chunks(offset) // MUX
   }
 
   // Un-coalesce responses back to individual lanes and queue them up
