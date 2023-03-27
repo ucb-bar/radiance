@@ -115,7 +115,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         resp.source := tlOut.d.bits.source
         resp.data := tlOut.d.bits.data
 
-        // TODO: actually enqueue
         respQueue.io.enq.valid := tlOut.d.valid
         respQueue.io.enq.bits := resp
         // TODO: deq.ready should respect upstream ready
@@ -124,7 +123,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
         tlIn.d.valid := respQueue.io.deq.valid
         val respHead = respQueue.io.deq.bits
         val respBits = edgeIn.AccessAck(
-          // FIXME: actual data here
           toSource = respHead.source,
           lgSize = 0.U,
           data = respHead.data
@@ -205,13 +203,23 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // Look up the table with incoming coalesced responses
     inflightTable.io.lookup.ready := tlCoal.d.valid
     inflightTable.io.lookupSourceId := tlCoal.d.bits.source
+    val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
+    coalRespData := tlCoal.d.bits.data
 
     when(inflightTable.io.lookup.valid) {
       val found = inflightTable.io.lookup.bits
       found.lanes.zipWithIndex.foreach { case (l, i) =>
+        val respQueue = respQueues(i)
+        respQueue.io.enq.valid := l.valid
+        respQueue.io.enq.bits.source := 0.U // FIXME: only looking at 0th entry
+        // FIXME: disregard size enum for now
+        val sizeMask = (1.U << 4) - 1.U
+        val dataWidth = tlCoal.params.dataBits
+        // FIXME: handle multi-head input to the queue
+        respQueue.io.enq.bits.data := (coalRespData >> (dataWidth - 4)) & sizeMask
+
         when(l.valid) {
           when(l.reqs(0).valid) {
-            reqQueues(0).entries
             printf(s"lane ${i} req 0 is valid!\n")
           }
         }
@@ -236,8 +244,6 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
     // Debug
     dontTouch(coalReqValid)
     dontTouch(coalReqAddress)
-    val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
-    coalRespData := tlCoal.d.bits.data
     dontTouch(coalRespData)
 
     dontTouch(tlCoal.a)
