@@ -7,7 +7,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 // import freechips.rocketchip.devices.tilelink.TLTestRAM
-import freechips.rocketchip.util.ShiftQueue
+import freechips.rocketchip.util.{ShiftQueue, MultiPortQueue}
 import freechips.rocketchip.unittest._
 
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters)
@@ -64,15 +64,32 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
   }
   val respQueueEntryT = new RespQueueEntry(sourceWidth)
   val respQueues = Seq.tabulate(numLanes) { _ =>
+    // Module(
+    //   new ShiftQueue(respQueueEntryT, 8 /* FIXME depth hardcoded */ )
+    // )
     Module(
-      new ShiftQueue(respQueueEntryT, 8 /* FIXME hardcoded */ )
+      new MultiPortQueue(
+        respQueueEntryT,
+        // enq_lanes = 1 + M, where 1 is the response for the original per-lane
+        // requests that didn't get coalesced, and M is the number of coalescer
+        // nodes.
+        2,
+        // deq_lanes = 1 because we're serializing all responses to 1 port that
+        // goes back to the core.
+        1,
+        2,
+        4 /* FIXME depth hardcoded */
+      )
     )
   }
+  // Port 0: from original responses
+  // Port 1~M: from M coalescer nodes
+  val respQueueCoalPortOffset = 1
 
   // Per-lane request and response queues
   //
-  // Override IdentityNode implementation so that we wire node output to the
-  // queue output, instead of directly passing through node input.
+  // Override IdentityNode implementation so that we can instantiate
+  // queues between input and output edges to buffer requests and responses.
   // See IdentityNode definition in `diplomacy/Nodes.scala`.
   (outer.node.in zip outer.node.out).zipWithIndex.foreach {
     case (((_, edgeIn), _), 0) =>
@@ -118,13 +135,15 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
       resp.source := tlOut.d.bits.source
       resp.data := tlOut.d.bits.data
 
-      respQueue.io.enq.valid := tlOut.d.valid
-      respQueue.io.enq.bits := resp
+      // Originally non-coalesced responses.  Coalesced (but split) responses
+      // will also be enqueued into the same queue.
+      respQueue.io.enq(0).valid := tlOut.d.valid
+      respQueue.io.enq(0).bits := resp
       // TODO: deq.ready should respect upstream ready
-      respQueue.io.deq.ready := true.B
+      respQueue.io.deq(0).ready := true.B
 
-      tlIn.d.valid := respQueue.io.deq.valid
-      val respHead = respQueue.io.deq.bits
+      tlIn.d.valid := respQueue.io.deq(0).valid
+      val respHead = respQueue.io.deq(0).bits
       val respBits = edgeIn.AccessAck(
         toSource = respHead.source,
         lgSize = 0.U,
@@ -213,22 +232,26 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
   val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
   coalRespData := tlCoal.d.bits.data
 
-  when(inflightTable.io.lookup.valid) {
-    val found = inflightTable.io.lookup.bits
-    found.lanes.zipWithIndex.foreach { case (l, i) =>
-      val respQueue = respQueues(i)
-      respQueue.io.enq.valid := l.valid
-      respQueue.io.enq.bits.source := 0.U // FIXME: only looking at 0th entry
+  val found = inflightTable.io.lookup.bits
+  found.lanes.zipWithIndex.foreach { case (l, i) =>
+    val respQueue = respQueues(i)
+    respQueue.io.enq(respQueueCoalPortOffset).valid := false.B
+    respQueue.io.enq(respQueueCoalPortOffset).bits := DontCare
+
+    when(inflightTable.io.lookup.valid) {
+      respQueue.io.enq(respQueueCoalPortOffset).valid := l.valid
+      // FIXME: only looking at 0th entry
+      respQueue.io.enq(respQueueCoalPortOffset).bits.source := 0.U
       // FIXME: disregard size enum for now
       val sizeMask = (1.U << 4) - 1.U
       val dataWidth = tlCoal.params.dataBits
-      // FIXME: handle multi-head input to the queue
-      respQueue.io.enq.bits.data := (coalRespData >> (dataWidth - 4)) & sizeMask
+      respQueue.io.enq(respQueueCoalPortOffset).bits.data :=
+        (coalRespData >> (dataWidth - 4)) & sizeMask
+    }
 
-      when(l.valid) {
-        when(l.reqs(0).valid) {
-          printf(s"lane ${i} req 0 is valid!\n")
-        }
+    when(l.valid) {
+      when(l.reqs(0).valid) {
+        printf(s"lane ${i} req 0 is valid!\n")
       }
     }
   }
@@ -257,7 +280,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
   dontTouch(tlCoal.d)
 }
 
-// InflightCoalReqTable is a reservation station-like structure that records
+// InflightCoalReqTable is a table structure that records
 // for each unanswered coalesced request which lane the request originated
 // from, what their original TileLink sourceId were, etc.  We use this info to
 // split the coalesced response back to individual per-lane responses with the
@@ -267,8 +290,8 @@ class InflightCoalReqTable(
     val sourceWidth: Int,
     val entries: Int
 ) extends Module {
-  val offsetBits = 4 // FIXME
-  val sizeBits = 2 // FIXME
+  val offsetBits = 4 // FIXME hardcoded
+  val sizeBits = 2 // FIXME hardcoded
   val entryT =
     new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits)
 
