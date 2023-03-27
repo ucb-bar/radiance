@@ -78,12 +78,15 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
         // goes back to the core.
         1,
         2,
-        4 /* FIXME depth hardcoded */
+        // XXX queue depth is set to an arbitrarily high value that doesn't
+        // make queue block up in the middle of the simulation.  Ideally there
+        // should be a more logical way to set this, or we should handle
+        // response queue blocking.
+        12
       )
     )
   }
-  // Port 0: from original responses
-  // Port 1~M: from M coalescer nodes
+  val respQueueNoncoalPort = 0
   val respQueueCoalPortOffset = 1
 
   // Per-lane request and response queues
@@ -106,8 +109,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
       req.source := tlIn.a.bits.source
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
-
-      println(s"============ req.source width=${req.source.widthOption.get}")
 
       reqQueue.io.enq.valid := tlIn.a.valid
       reqQueue.io.enq.bits := req
@@ -137,13 +138,17 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
 
       // Originally non-coalesced responses.  Coalesced (but split) responses
       // will also be enqueued into the same queue.
-      respQueue.io.enq(0).valid := tlOut.d.valid
-      respQueue.io.enq(0).bits := resp
+      assert(
+        respQueue.io.enq(respQueueNoncoalPort).ready,
+        "respQueue: enq port for noncoalesced response is blocked"
+      )
+      respQueue.io.enq(respQueueNoncoalPort).valid := tlOut.d.valid
+      respQueue.io.enq(respQueueNoncoalPort).bits := resp
       // TODO: deq.ready should respect upstream ready
-      respQueue.io.deq(0).ready := true.B
+      respQueue.io.deq(respQueueNoncoalPort).ready := true.B
 
-      tlIn.d.valid := respQueue.io.deq(0).valid
-      val respHead = respQueue.io.deq(0).bits
+      tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
+      val respHead = respQueue.io.deq(respQueueNoncoalPort).bits
       val respBits = edgeIn.AccessAck(
         toSource = respHead.source,
         lgSize = 0.U,
@@ -232,16 +237,26 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int)
   val coalRespData = Wire(UInt(tlCoal.params.dataBits.W))
   coalRespData := tlCoal.d.bits.data
 
+  // Un-coalesce responses back to individual lanes and queue them up
   val found = inflightTable.io.lookup.bits
   found.lanes.zipWithIndex.foreach { case (l, i) =>
+    // FIXME: only looking at 0th srcId entry
+
     val respQueue = respQueues(i)
+    assert(
+      respQueue.io.enq(respQueueCoalPortOffset).ready,
+      s"respQueue: enq port for ${i}-th coalesced response is blocked"
+    )
+    dontTouch(respQueue.io.enq(respQueueCoalPortOffset).ready)
     respQueue.io.enq(respQueueCoalPortOffset).valid := false.B
     respQueue.io.enq(respQueueCoalPortOffset).bits := DontCare
 
     when(inflightTable.io.lookup.valid) {
       respQueue.io.enq(respQueueCoalPortOffset).valid := l.valid
-      // FIXME: only looking at 0th entry
       respQueue.io.enq(respQueueCoalPortOffset).bits.source := 0.U
+
+      // Un-coalescing logic
+      //
       // FIXME: disregard size enum for now
       val sizeMask = (1.U << 4) - 1.U
       val dataWidth = tlCoal.params.dataBits
