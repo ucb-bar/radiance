@@ -38,18 +38,19 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModu
   lazy val module = new CoalescingUnitImp(this, numLanes)
 }
 
+class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
+  val source = UInt(sourceWidth.W)
+  val address = UInt(addressWidth.W)
+  val data = UInt(64.W /* FIXME hardcoded */ ) // write data
+}
+
+class RespQueueEntry(val sourceWidth: Int, val dataWidth: Int) extends Bundle {
+  val source = UInt(sourceWidth.W)
+  val data = UInt(dataWidth.W) // read data
+}
+
 class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
   val wordSize = 4
-
-  class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
-    val source = UInt(sourceWidth.W)
-    val address = UInt(addressWidth.W)
-    val data = UInt(64.W /* FIXME hardcoded */ ) // write data
-  }
-  class RespQueueEntry(val sourceWidth: Int) extends Bundle {
-    val source = UInt(sourceWidth.W)
-    val data = UInt(wordSize.W /* TODO double-word? */ ) // read data
-  }
 
   // node.in(0) is from coalescer TL master node; 1~N are from cores
   // assert(node.in.length >= 2)
@@ -61,7 +62,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       new ShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
     )
   }
-  val respQueueEntryT = new RespQueueEntry(sourceWidth)
+  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize)
   val respQueues = Seq.tabulate(numLanes) { _ =>
     // Module(
     //   new ShiftQueue(respQueueEntryT, 8 /* FIXME depth hardcoded */ )
@@ -207,14 +208,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   tlCoal.e.valid := false.B
 
   // Construct new entry for the inflight table
-  val inflightTable = Module(
-    new InflightCoalReqTable(
-      numLanes,
-      sourceWidth,
-      outer.numInflightCoalRequests
-    )
-  )
-  val newEntry = Wire(inflightTable.entryT)
+  // FIXME: don't instantiate inflight table entry type here.  It leaks the table's impl
+  // detail outside to the coalescer
+  val offsetBits = 4 // FIXME hardcoded
+  val sizeBits = 2 // FIXME hardcoded
+  val newEntry = Wire(new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits))
   newEntry.respSourceId := coalSourceId
   newEntry.lanes.foreach { l =>
     l.valid := false.B
@@ -229,16 +227,71 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   newEntry.lanes(2).valid := true.B
   dontTouch(newEntry)
 
-  // Populate inflight coalesced request table
-  inflightTable.io.enq.valid := coalReqValid
-  inflightTable.io.enq.bits := newEntry
+  val coalDataWidth = tlCoal.params.dataBits
+  val uncoalescer = Module(
+    new UncoalescingUnit(numLanes, sourceWidth, coalDataWidth, outer.numInflightCoalRequests)
+  )
+
+  uncoalescer.io.coalReqValid := coalReqValid
+  uncoalescer.io.newEntry := newEntry
+  uncoalescer.io.coalRespValid := tlCoal.d.valid
+  uncoalescer.io.coalRespSrcId := tlCoal.d.bits.source
+  uncoalescer.io.coalRespData := tlCoal.d.bits.data
+
+  // Queue up uncoalesced responses into each lane's response queue
+  (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, resp) =>
+    assert(
+      q.io.enq(respQueueCoalPortOffset).ready,
+      s"respQueue: enq port for 0-th coalesced response is blocked"
+    )
+    q.io.enq(respQueueCoalPortOffset).valid := resp.valid
+    q.io.enq(respQueueCoalPortOffset).bits := resp.bits
+    // dontTouch(q.io.enq(respQueueCoalPortOffset))
+  }
+
+  // Debug
+  dontTouch(coalReqValid)
+  dontTouch(coalReqAddress)
+  val coalRespData = tlCoal.d.bits.data
+  dontTouch(coalRespData)
+
+  dontTouch(tlCoal.a)
+  dontTouch(tlCoal.d)
+}
+
+class UncoalescingUnit(
+    val numLanes: Int,
+    val sourceWidth: Int,
+    val coalDataWidth: Int,
+    val numInflightCoalRequests: Int
+) extends Module {
+  val inflightTable = Module(
+    new InflightCoalReqTable(numLanes, sourceWidth, numInflightCoalRequests)
+  )
+  val wordSize = 4 // FIXME duplicate
+
+  val io = IO(new Bundle {
+    val coalReqValid = Input(Bool())
+    val newEntry = Input(inflightTable.entryT)
+    val coalRespValid = Input(Bool())
+    val coalRespSrcId = Input(UInt(sourceWidth.W))
+    val coalRespData = Input(UInt(coalDataWidth.W))
+    val uncoalResps = Output(Vec(numLanes, ValidIO(new RespQueueEntry(sourceWidth, wordSize))))
+  })
+
+  // Populate inflight table
+  inflightTable.io.enq.valid := io.coalReqValid
+  inflightTable.io.enq.bits := io.newEntry
 
   // Look up the table with incoming coalesced responses
-  inflightTable.io.lookup.ready := tlCoal.d.valid
-  inflightTable.io.lookupSourceId := tlCoal.d.bits.source
-  val coalDataWidth = tlCoal.params.dataBits
-  val coalRespData = Wire(UInt(coalDataWidth.W))
-  coalRespData := tlCoal.d.bits.data
+  inflightTable.io.lookup.ready := io.coalRespValid
+  inflightTable.io.lookupSourceId := io.coalRespSrcId
+
+  assert(
+    !((io.coalReqValid === true.B) && (io.coalRespValid === true.B) &&
+      (io.newEntry.respSourceId === io.coalRespSrcId)),
+    "inflight table: enqueueing and looking up the same srcId at the same cycle is not handled"
+  )
 
   // Un-coalescing logic
   //
@@ -256,29 +309,23 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     chunks(offset) // MUX
   }
 
-  // Un-coalesce responses back to individual lanes and queue them up
+  // Un-coalesce responses back to individual lanes
   val found = inflightTable.io.lookup.bits
   found.lanes.zipWithIndex.foreach { case (l, i) =>
     // FIXME: only looking at 0th srcId entry
 
-    val respQueue = respQueues(i)
-    assert(
-      respQueue.io.enq(respQueueCoalPortOffset).ready,
-      s"respQueue: enq port for 0-th coalesced response is blocked"
-    )
-    dontTouch(respQueue.io.enq(respQueueCoalPortOffset).ready)
-    respQueue.io.enq(respQueueCoalPortOffset).valid := false.B
-    respQueue.io.enq(respQueueCoalPortOffset).bits := DontCare
+    val uncoalResp = io.uncoalResps(i)
+    uncoalResp.valid := false.B
+    uncoalResp.bits := DontCare
 
     when(inflightTable.io.lookup.valid) {
-      respQueue.io.enq(respQueueCoalPortOffset).valid := l.valid
-      respQueue.io.enq(respQueueCoalPortOffset).bits.source := 0.U
+      uncoalResp.valid := l.valid
+      uncoalResp.bits.source := 0.U
 
       // FIXME: disregard size enum for now
-      val size = wordSize
-      respQueue.io.enq(respQueueCoalPortOffset).bits.data :=
-        getCoalescedDataChunk(coalRespData, coalDataWidth, l.reqs(0).offset, size)
-      // chunks(l.reqs(0).offset)
+      val size = 4
+      uncoalResp.bits.data :=
+        getCoalescedDataChunk(io.coalRespData, coalDataWidth, l.reqs(0).offset, size)
     }
 
     when(l.valid) {
@@ -287,14 +334,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       }
     }
   }
-
-  // Debug
-  dontTouch(coalReqValid)
-  dontTouch(coalReqAddress)
-  dontTouch(coalRespData)
-
-  dontTouch(tlCoal.a)
-  dontTouch(tlCoal.d)
 }
 
 // InflightCoalReqTable is a table structure that records
@@ -302,11 +341,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 // from, what their original TileLink sourceId were, etc.  We use this info to
 // split the coalesced response back to individual per-lane responses with the
 // right metadata.
-class InflightCoalReqTable(
-    val numLanes: Int,
-    val sourceWidth: Int,
-    val entries: Int
-) extends Module {
+class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries: Int)
+    extends Module {
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val entryT =

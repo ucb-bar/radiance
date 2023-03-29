@@ -2,11 +2,14 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.util.MultiPortQueue
+import freechips.rocketchip.config._
 
 class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "MultiPortQueue"
 
+  // This is really just to figure out how MultiPortQueue works
   it should "serialize at dequeue end" in {
     test(new MultiPortQueue(UInt(4.W), 3, 1, 3, 6))
       .withAnnotations(Seq(WriteVcdAnnotation)) { c =>
@@ -28,7 +31,21 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
-class CoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
+class CoalescingUnitChiselTest extends AnyFlatSpec with ChiselScalatestTester {
+  behavior of "coalescing unit"
+  val numLanes = 4
+
+  it should "work" in {
+    implicit val p = Parameters((site, here, up) => { i => i })
+    test(new CoalescingUnitTest(timeout = 50)) { c =>
+      for (_ <- 0 until 100) {
+        c.clock.step()
+      }
+    }
+  }
+}
+
+class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "inflight coalesced request table"
   val numLanes = 4
   val sourceWidth = 2
