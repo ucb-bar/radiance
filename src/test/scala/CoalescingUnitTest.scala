@@ -32,58 +32,75 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
   val numLanes = 4
+  val numPerLaneReqs = 2
   val sourceWidth = 2
   // 16B coalescing size
   val coalDataWidth = 128
   val numInflightCoalRequests = 4
 
   it should "work" in {
-    test(new UncoalescingUnit(numLanes, sourceWidth, coalDataWidth, numInflightCoalRequests))
-      // vcs helps with simulation time, but sometimes errors with
-      // "mutation occurred during iteration" java error
-      // .withAnnotations(Seq(VcsBackendAnnotation))
-      { c =>
-        val sourceId = 0.U
-        c.io.coalReqValid.poke(true.B)
-        c.io.newEntry.source.poke(sourceId)
-        c.io.newEntry.lanes.foreach { l => l.valid.poke(false.B) }
-        c.io.newEntry.lanes(0).valid.poke(true.B)
-        c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
-        c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
-        c.io.newEntry.lanes(0).reqs(0).size.poke(2.U)
-        c.io.newEntry.lanes(2).valid.poke(true.B)
-        c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
-        c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
-        c.io.newEntry.lanes(2).reqs(0).size.poke(1.U)
+    test(
+      new UncoalescingUnit(
+        numLanes,
+        numPerLaneReqs,
+        sourceWidth,
+        coalDataWidth,
+        numInflightCoalRequests
+      )
+    )
+    // vcs helps with simulation time, but sometimes errors with
+    // "mutation occurred during iteration" java error
+    // .withAnnotations(Seq(VcsBackendAnnotation))
+    { c =>
+      val sourceId = 0.U
+      c.io.coalReqValid.poke(true.B)
+      c.io.newEntry.source.poke(sourceId)
+      c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
+      c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
+      c.io.newEntry.lanes(0).reqs(0).size.poke(2.U)
+      c.io.newEntry.lanes(0).reqs(1).valid.poke(true.B)
+      c.io.newEntry.lanes(0).reqs(1).offset.poke(1.U)
+      c.io.newEntry.lanes(0).reqs(1).size.poke(2.U)
+      c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
+      c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
+      c.io.newEntry.lanes(2).reqs(0).size.poke(1.U)
+      c.io.newEntry.lanes(2).reqs(1).valid.poke(true.B)
+      c.io.newEntry.lanes(2).reqs(1).offset.poke(0.U)
+      c.io.newEntry.lanes(2).reqs(1).size.poke(2.U)
 
-        c.clock.step()
+      c.clock.step()
 
-        c.io.coalReqValid.poke(false.B)
+      c.io.coalReqValid.poke(false.B)
 
-        c.clock.step()
+      c.clock.step()
 
-        c.io.coalRespValid.poke(true.B)
-        c.io.coalRespSrcId.poke(sourceId)
-        val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
-        c.io.coalRespData.poke(lit.U)
+      c.io.coalRespValid.poke(true.B)
+      c.io.coalRespSrcId.poke(sourceId)
+      val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
+      c.io.coalRespData.poke(lit.U)
 
-        // table lookup is combinational at the same cycle
-        c.io.uncoalResps(0).valid.expect(true.B)
-        c.io.uncoalResps(1).valid.expect(false.B)
-        c.io.uncoalResps(2).valid.expect(true.B)
-        c.io.uncoalResps(3).valid.expect(false.B)
+      // table lookup is combinational at the same cycle
+      c.io.uncoalResps(0)(0).valid.expect(true.B)
+      c.io.uncoalResps(1)(0).valid.expect(false.B)
+      c.io.uncoalResps(2)(0).valid.expect(true.B)
+      c.io.uncoalResps(3)(0).valid.expect(false.B)
 
-        c.io.uncoalResps(0).bits.data.expect(0x89abcdefL.U)
-        c.io.uncoalResps(0).bits.source.expect(0.U)
-        c.io.uncoalResps(2).bits.data.expect(0x5ca1ab1eL.U)
-        c.io.uncoalResps(2).bits.source.expect(0.U)
-      }
+      c.io.uncoalResps(0)(0).bits.data.expect(0x89abcdefL.U)
+      c.io.uncoalResps(0)(0).bits.source.expect(0.U)
+      c.io.uncoalResps(0)(1).bits.data.expect(0x89abcdefL.U)
+      c.io.uncoalResps(0)(1).bits.source.expect(0.U)
+      c.io.uncoalResps(2)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(2)(0).bits.source.expect(0.U)
+      c.io.uncoalResps(2)(1).bits.data.expect(0x01234567L.U)
+      c.io.uncoalResps(2)(1).bits.source.expect(0.U)
+    }
   }
 }
 
 class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "inflight coalesced request table"
   val numLanes = 4
+  val numPerLaneReqs = 2
   val sourceWidth = 2
   val entries = 4
 
@@ -91,7 +108,7 @@ class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val sizeBits = 2
 
   val inflightCoalReqTableEntry =
-    new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits)
+    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
 
   // it should "stop enqueueing when full" in {
   //   test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>

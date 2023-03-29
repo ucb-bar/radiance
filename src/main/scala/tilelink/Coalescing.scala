@@ -62,22 +62,27 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       new ShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
     )
   }
+
+  // The maximum number of requests from a single lane that can go into a
+  // coalesced request.  Upper bound is 2**sourceWidth.
+  val numPerLaneReqs = 2
+
   val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8)
   val respQueues = Seq.tabulate(numLanes) { _ =>
-    // Module(
-    //   new ShiftQueue(respQueueEntryT, 8 /* FIXME depth hardcoded */ )
-    // )
     Module(
       new MultiPortQueue(
         respQueueEntryT,
         // enq_lanes = 1 + M, where 1 is the response for the original per-lane
-        // requests that didn't get coalesced, and M is the number of coalescer
-        // nodes.
-        2,
+        // requests that didn't get coalesced, and M is the maximum number of
+        // single-lane requests that can go into a coalesced request.
+        // (`numPerLaneReqs`).
+        1 + numPerLaneReqs,
         // deq_lanes = 1 because we're serializing all responses to 1 port that
         // goes back to the core.
         1,
-        2,
+        // lanes. Has to be at least max(enq_lanes, deq_lanes)
+        1 + numPerLaneReqs,
+        // Depth of each lane queue.
         // XXX queue depth is set to an arbitrarily high value that doesn't
         // make queue block up in the middle of the simulation.  Ideally there
         // should be a more logical way to set this, or we should handle
@@ -210,25 +215,32 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // detail outside to the coalescer
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
-  val newEntry = Wire(new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits))
+  val newEntry = Wire(
+    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
+  )
   newEntry.source := coalSourceId
   newEntry.lanes.foreach { l =>
-    l.valid := false.B
     l.reqs.foreach { r =>
       // TODO: this part needs the actual coalescing logic to work
-      r.valid := true.B
+      r.valid := false.B
       r.offset := 1.U
       r.size := 2.U
     }
   }
-  newEntry.lanes(0).valid := true.B
-  newEntry.lanes(2).valid := true.B
+  newEntry.lanes(0).reqs(0).valid := true.B
+  newEntry.lanes(2).reqs(0).valid := true.B
   dontTouch(newEntry)
 
   // Uncoalescer module sncoalesces responses back to each lane
   val coalDataWidth = tlCoal.params.dataBits
   val uncoalescer = Module(
-    new UncoalescingUnit(numLanes, sourceWidth, coalDataWidth, outer.numInflightCoalRequests)
+    new UncoalescingUnit(
+      numLanes,
+      numPerLaneReqs,
+      sourceWidth,
+      coalDataWidth,
+      outer.numInflightCoalRequests
+    )
   )
 
   uncoalescer.io.coalReqValid := coalReqValid
@@ -238,14 +250,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   uncoalescer.io.coalRespData := tlCoal.d.bits.data
 
   // Queue up uncoalesced responses into each lane's response queue
-  (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, resp) =>
-    assert(
-      q.io.enq(respQueueCoalPortOffset).ready,
-      s"respQueue: enq port for 0-th coalesced response is blocked"
-    )
-    q.io.enq(respQueueCoalPortOffset).valid := resp.valid
-    q.io.enq(respQueueCoalPortOffset).bits := resp.bits
-  // dontTouch(q.io.enq(respQueueCoalPortOffset))
+  (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, lanes) =>
+    lanes.zipWithIndex.foreach { case (resp, i) =>
+      assert(
+        q.io.enq(respQueueCoalPortOffset + i).ready,
+        s"respQueue: enq port for 0-th coalesced response is blocked"
+      )
+      q.io.enq(respQueueCoalPortOffset + i).valid := resp.valid
+      q.io.enq(respQueueCoalPortOffset + i).bits := resp.bits
+      // dontTouch(q.io.enq(respQueueCoalPortOffset))
+    }
   }
 
   // Debug
@@ -260,12 +274,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
 class UncoalescingUnit(
     val numLanes: Int,
+    val numPerLaneReqs: Int,
     val sourceWidth: Int,
     val coalDataWidth: Int,
     val numInflightCoalRequests: Int
 ) extends Module {
   val inflightTable = Module(
-    new InflightCoalReqTable(numLanes, sourceWidth, numInflightCoalRequests)
+    new InflightCoalReqTable(numLanes, numPerLaneReqs, sourceWidth, numInflightCoalRequests)
   )
   val wordSize = 4 // FIXME duplicate
 
@@ -275,7 +290,9 @@ class UncoalescingUnit(
     val coalRespValid = Input(Bool())
     val coalRespSrcId = Input(UInt(sourceWidth.W))
     val coalRespData = Input(UInt(coalDataWidth.W))
-    val uncoalResps = Output(Vec(numLanes, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8))))
+    val uncoalResps = Output(
+      Vec(numLanes, Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8))))
+    )
   })
 
   // Populate inflight table
@@ -311,25 +328,26 @@ class UncoalescingUnit(
 
   // Un-coalesce responses back to individual lanes
   val found = inflightTable.io.lookup.bits
-  found.lanes.zipWithIndex.foreach { case (l, i) =>
-    // FIXME: only looking at 0th srcId entry
+  (found.lanes zip io.uncoalResps).foreach { case (lane, ioLane) =>
+    lane.reqs.zipWithIndex.foreach { case (req, i) =>
+      val ioReq = ioLane(i)
 
-    val uncoalResp = io.uncoalResps(i)
-    uncoalResp.valid := false.B
-    uncoalResp.bits := DontCare
+      // FIXME: only looking at 0th srcId entry
 
-    when(inflightTable.io.lookup.valid) {
-      uncoalResp.valid := l.valid
-      uncoalResp.bits.source := 0.U
+      ioReq.valid := false.B
+      ioReq.bits := DontCare
 
-      // FIXME: disregard size enum for now
-      val byteSize = 4
-      uncoalResp.bits.data :=
-        getCoalescedDataChunk(io.coalRespData, coalDataWidth, l.reqs(0).offset, byteSize)
-    }
+      when(inflightTable.io.lookup.valid) {
+        ioReq.valid := req.valid
+        ioReq.bits.source := 0.U
 
-    when(l.valid) {
-      when(l.reqs(0).valid) {
+        // FIXME: disregard size enum for now
+        val byteSize = 4
+        ioReq.bits.data :=
+          getCoalescedDataChunk(io.coalRespData, coalDataWidth, req.offset, byteSize)
+      }
+
+      when(req.valid) {
         printf(s"lane ${i} req 0 is valid!\n")
       }
     }
@@ -341,12 +359,16 @@ class UncoalescingUnit(
 // from, what their original TileLink sourceId were, etc.  We use this info to
 // split the coalesced response back to individual per-lane responses with the
 // right metadata.
-class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries: Int)
-    extends Module {
+class InflightCoalReqTable(
+    val numLanes: Int,
+    val numPerLaneReqs: Int,
+    val sourceWidth: Int,
+    val entries: Int
+) extends Module {
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val entryT =
-    new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits)
+    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
 
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(entryT))
@@ -362,6 +384,7 @@ class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries:
       val valid = Bool()
       val bits = new InflightCoalReqTableEntry(
         numLanes,
+        numPerLaneReqs,
         sourceWidth,
         offsetBits,
         sizeBits
@@ -373,7 +396,6 @@ class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries:
     (0 until entries).foreach { i =>
       table(i).valid := false.B
       table(i).bits.lanes.foreach { l =>
-        l.valid := false.B
         l.reqs.foreach { r =>
           r.offset := 0.U
           r.size := 0.U
@@ -422,6 +444,8 @@ class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries:
 
 class InflightCoalReqTableEntry(
     val numLanes: Int,
+    // Maximum number of requests from a single lane that can get coalesced into a single request
+    val numPerLaneReqs: Int,
     val sourceWidth: Int,
     val offsetBits: Int,
     val sizeBits: Int
@@ -432,9 +456,8 @@ class InflightCoalReqTableEntry(
     val size = UInt(sizeBits.W)
   }
   class PerLane extends Bundle {
-    val valid = Bool()
-    // srcId is positionally encoded
-    val reqs = Vec(1 << sourceWidth, new CoreReq)
+    // FIXME: if numPerLaneReqs != 2 ** sourceWidth, we need to store srcId as well
+    val reqs = Vec(numPerLaneReqs, new CoreReq)
   }
   // sourceId of the coalesced response that just came back.  This will be the
   // key that queries the table.
