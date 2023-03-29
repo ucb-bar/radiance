@@ -7,7 +7,7 @@ import chisel3.util._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 // import freechips.rocketchip.devices.tilelink.TLTestRAM
-import freechips.rocketchip.util.{ShiftQueue, MultiPortQueue}
+import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
@@ -59,7 +59,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth)
   val reqQueues = Seq.tabulate(numLanes) { _ =>
     Module(
-      new ShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
+      new CoalShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
     )
   }
 
@@ -87,7 +87,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         // make queue block up in the middle of the simulation.  Ideally there
         // should be a more logical way to set this, or we should handle
         // response queue blocking.
-        12
+        8
       )
     )
   }
@@ -258,7 +258,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       )
       q.io.enq(respQueueCoalPortOffset + i).valid := resp.valid
       q.io.enq(respQueueCoalPortOffset + i).bits := resp.bits
-      // dontTouch(q.io.enq(respQueueCoalPortOffset))
+    // dontTouch(q.io.enq(respQueueCoalPortOffset))
     }
   }
 
@@ -346,10 +346,6 @@ class UncoalescingUnit(
         ioReq.bits.data :=
           getCoalescedDataChunk(io.coalRespData, coalDataWidth, req.offset, byteSize)
       }
-
-      when(req.valid) {
-        printf(s"lane ${i} req 0 is valid!\n")
-      }
     }
   }
 }
@@ -382,13 +378,8 @@ class InflightCoalReqTable(
     entries,
     new Bundle {
       val valid = Bool()
-      val bits = new InflightCoalReqTableEntry(
-        numLanes,
-        numPerLaneReqs,
-        sourceWidth,
-        offsetBits,
-        sizeBits
-      )
+      val bits =
+        new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
     }
   )
 
@@ -465,6 +456,64 @@ class InflightCoalReqTableEntry(
   val lanes = Vec(numLanes, new PerLane)
 }
 
+// Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
+// queue entry and its valid signal are exposed as output IO.
+class CoalShiftQueue[T <: Data](gen: T,
+                            val entries: Int,
+                            pipe: Boolean = false,
+                            flow: Boolean = false)
+    extends Module {
+  val io = IO(new QueueIO(gen, entries) {
+    val mask = Output(UInt(entries.W))
+    val elts = Output(Vec(entries, gen))
+  })
+
+  private val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
+  private val elts = Reg(Vec(entries, gen))
+
+  for (i <- 0 until entries) {
+    def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
+
+    val wdata = if (i == entries-1) io.enq.bits else Mux(valid(i+1), elts(i+1), io.enq.bits)
+    val wen =
+      Mux(io.deq.ready,
+          paddedValid(i+1) || io.enq.fire() && ((i == 0 && !flow).B || valid(i)),
+          io.enq.fire() && paddedValid(i-1) && !valid(i))
+    when (wen) { elts(i) := wdata }
+
+    valid(i) :=
+      Mux(io.deq.ready,
+          paddedValid(i+1) || io.enq.fire() && ((i == 0 && !flow).B || valid(i)),
+          io.enq.fire() && paddedValid(i-1) || valid(i))
+  }
+
+  io.enq.ready := !valid(entries-1)
+  io.deq.valid := valid(0)
+  io.deq.bits := elts.head
+
+  if (flow) {
+    when (io.enq.valid) { io.deq.valid := true.B }
+    when (!valid(0)) { io.deq.bits := io.enq.bits }
+  }
+
+  if (pipe) {
+    when (io.deq.ready) { io.enq.ready := true.B }
+  }
+
+  io.mask := valid.asUInt
+  io.elts := elts
+  io.count := PopCount(io.mask)
+}
+
+object CoalShiftQueue
+{
+  def apply[T <: Data](enq: DecoupledIO[T], entries: Int = 2, pipe: Boolean = false, flow: Boolean = false): DecoupledIO[T] = {
+    val q = Module(new CoalShiftQueue(enq.bits.cloneType, entries, pipe, flow))
+    q.io.enq <> enq
+    q.io.deq
+  }
+}
+
 class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
   // Create N client nodes together
   val laneNodes = Seq.tabulate(numLanes) { i =>
@@ -527,7 +576,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
   // Connect each lane to its respective TL node.
   (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
     val (tlOut, edge) = node.out(0)
-    tlOut.a.valid := req.valid
 
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
@@ -545,7 +593,8 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
-    assert(legal, "unhandled illegal TL req gen")
+    assert(legal, "illegal TL req gen")
+    tlOut.a.valid := req.valid
     tlOut.a.bits := bits
     tlOut.b.ready := true.B
     tlOut.c.valid := false.B
