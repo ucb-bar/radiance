@@ -2,9 +2,7 @@ import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.util.MultiPortQueue
-import freechips.rocketchip.config._
 
 class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "MultiPortQueue"
@@ -31,17 +29,55 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
-class CoalescingUnitChiselTest extends AnyFlatSpec with ChiselScalatestTester {
-  behavior of "coalescing unit"
+class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
+  behavior of "uncoalescer"
   val numLanes = 4
+  val sourceWidth = 2
+  // 16B coalescing size
+  val coalDataWidth = 128
+  val numInflightCoalRequests = 4
 
   it should "work" in {
-    implicit val p = Parameters((site, here, up) => { i => i })
-    test(new CoalescingUnitTest(timeout = 50)) { c =>
-      for (_ <- 0 until 100) {
+    test(new UncoalescingUnit(numLanes, sourceWidth, coalDataWidth, numInflightCoalRequests))
+      // vcs helps with simulation time, but sometimes errors with
+      // "mutation occurred during iteration" java error
+      // .withAnnotations(Seq(VcsBackendAnnotation))
+      { c =>
+        val sourceId = 0.U
+        c.io.coalReqValid.poke(true.B)
+        c.io.newEntry.source.poke(sourceId)
+        c.io.newEntry.lanes.foreach { l => l.valid.poke(false.B) }
+        c.io.newEntry.lanes(0).valid.poke(true.B)
+        c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
+        c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
+        c.io.newEntry.lanes(0).reqs(0).size.poke(2.U)
+        c.io.newEntry.lanes(2).valid.poke(true.B)
+        c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
+        c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
+        c.io.newEntry.lanes(2).reqs(0).size.poke(1.U)
+
         c.clock.step()
+
+        c.io.coalReqValid.poke(false.B)
+
+        c.clock.step()
+
+        c.io.coalRespValid.poke(true.B)
+        c.io.coalRespSrcId.poke(sourceId)
+        val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
+        c.io.coalRespData.poke(lit.U)
+
+        // table lookup is combinational at the same cycle
+        c.io.uncoalResps(0).valid.expect(true.B)
+        c.io.uncoalResps(1).valid.expect(false.B)
+        c.io.uncoalResps(2).valid.expect(true.B)
+        c.io.uncoalResps(3).valid.expect(false.B)
+
+        c.io.uncoalResps(0).bits.data.expect(0x89abcdefL.U)
+        c.io.uncoalResps(0).bits.source.expect(0.U)
+        c.io.uncoalResps(2).bits.data.expect(0x5ca1ab1eL.U)
+        c.io.uncoalResps(2).bits.source.expect(0.U)
       }
-    }
   }
 }
 

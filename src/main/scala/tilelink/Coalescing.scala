@@ -44,9 +44,9 @@ class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle 
   val data = UInt(64.W /* FIXME hardcoded */ ) // write data
 }
 
-class RespQueueEntry(val sourceWidth: Int, val dataWidth: Int) extends Bundle {
+class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int) extends Bundle {
   val source = UInt(sourceWidth.W)
-  val data = UInt(dataWidth.W) // read data
+  val data = UInt(dataWidthInBits.W) // read data
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
@@ -62,7 +62,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       new ShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
     )
   }
-  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize)
+  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8)
   val respQueues = Seq.tabulate(numLanes) { _ =>
     // Module(
     //   new ShiftQueue(respQueueEntryT, 8 /* FIXME depth hardcoded */ )
@@ -140,8 +140,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       resp.source := tlOut.d.bits.source
       resp.data := tlOut.d.bits.data
 
-      // Originally non-coalesced responses.  Coalesced (but split) responses
-      // will also be enqueued into the same queue.
+      // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
+      // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
       assert(
         respQueue.io.enq(respQueueNoncoalPort).ready,
         "respQueue: enq port for noncoalesced response is blocked"
@@ -159,8 +159,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         data = respHead.data
       )
       tlIn.d.bits := respBits
-
-      // tlIn.d <> tlOut.d
 
       // Debug only
       val inflightCounter = RegInit(UInt(32.W), 0.U)
@@ -213,7 +211,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val newEntry = Wire(new InflightCoalReqTableEntry(numLanes, sourceWidth, offsetBits, sizeBits))
-  newEntry.respSourceId := coalSourceId
+  newEntry.source := coalSourceId
   newEntry.lanes.foreach { l =>
     l.valid := false.B
     l.reqs.foreach { r =>
@@ -227,6 +225,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   newEntry.lanes(2).valid := true.B
   dontTouch(newEntry)
 
+  // Uncoalescer module sncoalesces responses back to each lane
   val coalDataWidth = tlCoal.params.dataBits
   val uncoalescer = Module(
     new UncoalescingUnit(numLanes, sourceWidth, coalDataWidth, outer.numInflightCoalRequests)
@@ -246,7 +245,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     )
     q.io.enq(respQueueCoalPortOffset).valid := resp.valid
     q.io.enq(respQueueCoalPortOffset).bits := resp.bits
-    // dontTouch(q.io.enq(respQueueCoalPortOffset))
+  // dontTouch(q.io.enq(respQueueCoalPortOffset))
   }
 
   // Debug
@@ -276,7 +275,7 @@ class UncoalescingUnit(
     val coalRespValid = Input(Bool())
     val coalRespSrcId = Input(UInt(sourceWidth.W))
     val coalRespData = Input(UInt(coalDataWidth.W))
-    val uncoalResps = Output(Vec(numLanes, ValidIO(new RespQueueEntry(sourceWidth, wordSize))))
+    val uncoalResps = Output(Vec(numLanes, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8))))
   })
 
   // Populate inflight table
@@ -289,22 +288,23 @@ class UncoalescingUnit(
 
   assert(
     !((io.coalReqValid === true.B) && (io.coalRespValid === true.B) &&
-      (io.newEntry.respSourceId === io.coalRespSrcId)),
+      (io.newEntry.source === io.coalRespSrcId)),
     "inflight table: enqueueing and looking up the same srcId at the same cycle is not handled"
   )
 
   // Un-coalescing logic
   //
   // FIXME: `size` should be UInt, not Int
-  def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, size: Int): UInt = {
-    val sizeMask = (1.U << size) - 1.U
-    assert(dataWidth % size == 0, "coalesced data width not evenly divisible by size")
-    val numChunks = dataWidth / size
-    val chunks = Wire(Vec(numChunks, UInt(size.W)))
+  def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, byteSize: Int): UInt = {
+    val bitSize = byteSize * 8
+    val sizeMask = (1.U << bitSize) - 1.U
+    assert(dataWidth % bitSize == 0, "coalesced data width not evenly divisible by size")
+    val numChunks = dataWidth / bitSize
+    val chunks = Wire(Vec(numChunks, UInt(bitSize.W)))
     val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
       // Take [(off-1)*size:off*size] starting from MSB
-      c := (data >> (dataWidth - (o + 1) * size)) & sizeMask
+      c := (data >> (dataWidth - (o + 1) * bitSize)) & sizeMask
     }
     chunks(offset) // MUX
   }
@@ -323,9 +323,9 @@ class UncoalescingUnit(
       uncoalResp.bits.source := 0.U
 
       // FIXME: disregard size enum for now
-      val size = 4
+      val byteSize = 4
       uncoalResp.bits.data :=
-        getCoalescedDataChunk(io.coalRespData, coalDataWidth, l.reqs(0).offset, size)
+        getCoalescedDataChunk(io.coalRespData, coalDataWidth, l.reqs(0).offset, byteSize)
     }
 
     when(l.valid) {
@@ -398,7 +398,7 @@ class InflightCoalReqTable(val numLanes: Int, val sourceWidth: Int, val entries:
   val enqFire = io.enq.ready && io.enq.valid
   when(enqFire) {
     // TODO: handle enqueueing and looking up the same entry in the same cycle?
-    val entryToWrite = table(io.enq.bits.respSourceId)
+    val entryToWrite = table(io.enq.bits.source)
     assert(
       !entryToWrite.valid,
       "tried to enqueue to an already occupied entry"
@@ -438,7 +438,7 @@ class InflightCoalReqTableEntry(
   }
   // sourceId of the coalesced response that just came back.  This will be the
   // key that queries the table.
-  val respSourceId = UInt(sourceWidth.W)
+  val source = UInt(sourceWidth.W)
   val lanes = Vec(numLanes, new PerLane)
 }
 
