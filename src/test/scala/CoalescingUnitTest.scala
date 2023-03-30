@@ -29,6 +29,58 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
+class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
+  behavior of "request queues"
+
+  it should "work like normal shiftqueue when no invalidate" in {
+    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.deq.ready.poke(false.B)
+
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x12.U)
+      c.clock.step()
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x34.U)
+      c.clock.step()
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x56.U)
+      c.clock.step()
+
+      c.io.enq.valid.poke(false.B)
+
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x12.U)
+      c.clock.step()
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x34.U)
+      c.clock.step()
+      // enqueue in the middle
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x78.U)
+      c.clock.step()
+      c.io.enq.valid.poke(false.B)
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x56.U)
+      c.clock.step()
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x78.U)
+      c.clock.step()
+
+      // should be emptied
+      c.io.deq.valid.expect(false.B)
+    }
+  }
+}
+
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
   val numLanes = 4

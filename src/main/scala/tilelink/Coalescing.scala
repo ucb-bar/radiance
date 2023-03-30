@@ -458,46 +458,62 @@ class InflightCoalReqTableEntry(
 
 // Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
 // queue entry and its valid signal are exposed as output IO.
-class CoalShiftQueue[T <: Data](gen: T,
-                            val entries: Int,
-                            pipe: Boolean = false,
-                            flow: Boolean = false)
-    extends Module {
+class CoalShiftQueue[T <: Data](
+    gen: T,
+    val entries: Int,
+    pipe: Boolean = false,
+    flow: Boolean = false
+) extends Module {
   val io = IO(new QueueIO(gen, entries) {
+    val invalidate = Input(UInt(entries.W))
     val mask = Output(UInt(entries.W))
     val elts = Output(Vec(entries, gen))
   })
 
   private val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
+  // Need to maintain a wptr because we can't simply tell where the queue tail
+  // is by just looking for invalid slots, because there may be holes in the middle
+  private val wptr = RegInit(UInt(entries.W), 1.U)
   private val elts = Reg(Vec(entries, gen))
 
   for (i <- 0 until entries) {
     def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
 
-    val wdata = if (i == entries-1) io.enq.bits else Mux(valid(i+1), elts(i+1), io.enq.bits)
-    val wen =
-      Mux(io.deq.ready,
-          paddedValid(i+1) || io.enq.fire() && ((i == 0 && !flow).B || valid(i)),
-          io.enq.fire() && paddedValid(i-1) && !valid(i))
-    when (wen) { elts(i) := wdata }
+    // val wdata = if (i == entries - 1) io.enq.bits else Mux(valid(i + 1), elts(i + 1), io.enq.bits)
+    val wdata = if (i == entries - 1) io.enq.bits else Mux(wptr(i), io.enq.bits, elts(i + 1))
+    val wen = Mux(
+      io.deq.ready,
+      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || valid(i)),
+      io.enq.fire && paddedValid(i - 1) && !valid(i)
+    )
+    when(wen) { elts(i) := wdata }
 
-    valid(i) :=
-      Mux(io.deq.ready,
-          paddedValid(i+1) || io.enq.fire() && ((i == 0 && !flow).B || valid(i)),
-          io.enq.fire() && paddedValid(i-1) || valid(i))
+    valid(i) := Mux(
+      io.deq.ready,
+      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || valid(i)),
+      io.enq.fire && paddedValid(i - 1) || valid(i)
+    )
   }
 
-  io.enq.ready := !valid(entries-1)
+  when(io.enq.fire) {
+    when(!io.deq.fire) {
+      wptr := wptr << 1.U
+    }
+  }.elsewhen(io.deq.fire) {
+    wptr := wptr >> 1.U
+  }
+
+  io.enq.ready := !valid(entries - 1)
   io.deq.valid := valid(0)
   io.deq.bits := elts.head
 
   if (flow) {
-    when (io.enq.valid) { io.deq.valid := true.B }
-    when (!valid(0)) { io.deq.bits := io.enq.bits }
+    when(io.enq.valid) { io.deq.valid := true.B }
+    when(!valid(0)) { io.deq.bits := io.enq.bits }
   }
 
   if (pipe) {
-    when (io.deq.ready) { io.enq.ready := true.B }
+    when(io.deq.ready) { io.enq.ready := true.B }
   }
 
   io.mask := valid.asUInt
@@ -505,9 +521,13 @@ class CoalShiftQueue[T <: Data](gen: T,
   io.count := PopCount(io.mask)
 }
 
-object CoalShiftQueue
-{
-  def apply[T <: Data](enq: DecoupledIO[T], entries: Int = 2, pipe: Boolean = false, flow: Boolean = false): DecoupledIO[T] = {
+object CoalShiftQueue {
+  def apply[T <: Data](
+      enq: DecoupledIO[T],
+      entries: Int = 2,
+      pipe: Boolean = false,
+      flow: Boolean = false
+  ): DecoupledIO[T] = {
     val q = Module(new CoalShiftQueue(enq.bits.cloneType, entries, pipe, flow))
     q.io.enq <> enq
     q.io.deq
