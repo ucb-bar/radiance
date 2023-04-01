@@ -158,16 +158,28 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.enq.valid.poke(true.B)
       c.io.enq.bits.poke(0x34.U)
       c.clock.step()
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x56.U)
+      c.clock.step()
       c.io.enq.valid.poke(false.B)
 
-      c.io.invalidate.poke(0x1.U)
+      // invalidate two entries at head
+      c.io.invalidate.poke(0x3.U)
       c.clock.step()
+      c.io.invalidate.poke(0x0.U)
       c.io.deq.ready.poke(false.B)
-      // 0x12 should be dequeued
+      // 0x12 should be dequeued now
+      c.clock.step()
+      // 0x34 should be dequeued now
       c.clock.step()
       c.io.deq.ready.poke(true.B)
       c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34.U)
+      c.io.deq.bits.expect(0x56.U)
+      c.clock.step()
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(false.B)
     }
   }
 }

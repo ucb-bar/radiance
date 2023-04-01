@@ -495,10 +495,11 @@ class CoalShiftQueue[T <: Data](
     else if (i == entries) false.B
     else Mux(io.invalidate(i), false.B, paddedValid(i))
 
+  val shift = io.deq.ready || (used =/= 0.U) && !valid(0)
   for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.enq.bits else Mux(!used(i + 1), io.enq.bits, elts(i + 1))
     val wen = Mux(
-      io.deq.ready,
+      shift,
       (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
       // enqueue to the first empty slot above the top
       (io.enq.fire && paddedUsed(i - 1) && !used(i)) || !paddedValidAfterInvalidate(i)
@@ -506,7 +507,7 @@ class CoalShiftQueue[T <: Data](
     when(wen) { elts(i) := wdata }
 
     valid(i) := Mux(
-      io.deq.ready,
+      shift,
       (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
       // TODO: handle enqueueing to invalidated tail?
       (io.enq.fire && paddedUsed(i - 1) && !used(i)) || paddedValidAfterInvalidate(i)
