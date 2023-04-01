@@ -50,17 +50,18 @@ class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int) extends Bun
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
+  // Make sure IdentityNode is connected to an upstream node, not just the
+  // coalescer TL master node
+  assert(outer.node.in.length >= 2)
+
   val wordSize = 4
 
-  // node.in(0) is from coalescer TL master node; 1~N are from cores
-  // assert(node.in.length >= 2)
+  val reqQueueDepth = 4 // FIXME test
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   val addressWidth = outer.node.in(1)._1.params.addressBits
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth)
   val reqQueues = Seq.tabulate(numLanes) { _ =>
-    Module(
-      new CoalShiftQueue(reqQueueEntryT, 4 /* FIXME hardcoded */ )
-    )
+    Module(new CoalShiftQueue(reqQueueEntryT, reqQueueDepth))
   }
 
   // The maximum number of requests from a single lane that can go into a
@@ -458,6 +459,7 @@ class InflightCoalReqTableEntry(
 
 // Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
 // queue entry and its valid signal are exposed as output IO.
+// TODO: support invalidate and deadline
 class CoalShiftQueue[T <: Data](
     gen: T,
     val entries: Int,
@@ -471,36 +473,46 @@ class CoalShiftQueue[T <: Data](
   })
 
   private val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
-  // Need to maintain a wptr because we can't simply tell where the queue tail
-  // is by just looking for invalid slots, because there may be holes in the middle
-  private val wptr = RegInit(UInt(entries.W), 1.U)
+  // "Used" flag is 1 for every entry between the current queue head and tail,
+  // even if that entry has been invalidated:
+  //
+  //  used: 000011111
+  // valid: 000011011
+  //            │ │ └─ head
+  //            │ └────invalidated
+  //            └──────tail
+  //
+  // Need this because we can't tell where to enqueue simply by looking at the
+  // valid bits.
+  private val used = RegInit(UInt(entries.W), 0.U)
   private val elts = Reg(Vec(entries, gen))
 
   for (i <- 0 until entries) {
     def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
+    def paddedUsed(i: Int) = if (i == -1) true.B else if (i == entries) false.B else used(i)
 
-    // val wdata = if (i == entries - 1) io.enq.bits else Mux(valid(i + 1), elts(i + 1), io.enq.bits)
-    val wdata = if (i == entries - 1) io.enq.bits else Mux(wptr(i), io.enq.bits, elts(i + 1))
+    val wdata = if (i == entries - 1) io.enq.bits else Mux(!used(i + 1), io.enq.bits, elts(i + 1))
     val wen = Mux(
       io.deq.ready,
-      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || valid(i)),
-      io.enq.fire && paddedValid(i - 1) && !valid(i)
+      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || used(i)),
+      // enqueue to the first empty slot above the top
+      io.enq.fire && paddedUsed(i - 1) && !valid(i)
     )
     when(wen) { elts(i) := wdata }
 
     valid(i) := Mux(
       io.deq.ready,
       paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || valid(i)),
-      io.enq.fire && paddedValid(i - 1) || valid(i)
+      io.enq.fire && paddedUsed(i - 1) || valid(i)
     )
   }
 
   when(io.enq.fire) {
     when(!io.deq.fire) {
-      wptr := wptr << 1.U
+      used := (used << 1.U) | 1.U
     }
   }.elsewhen(io.deq.fire) {
-    wptr := wptr >> 1.U
+    used := used >> 1.U
   }
 
   io.enq.ready := !valid(entries - 1)
