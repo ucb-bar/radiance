@@ -459,11 +459,12 @@ class InflightCoalReqTableEntry(
 
 // Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
 // queue entry and its valid signal are exposed as output IO.
+// If `pipe` is true, support enqueueing to a full queue when also dequeueing.
 // TODO: support invalidate and deadline
 class CoalShiftQueue[T <: Data](
     gen: T,
     val entries: Int,
-    pipe: Boolean = false,
+    pipe: Boolean = true,
     flow: Boolean = false
 ) extends Module {
   val io = IO(new QueueIO(gen, entries) {
@@ -487,23 +488,28 @@ class CoalShiftQueue[T <: Data](
   private val used = RegInit(UInt(entries.W), 0.U)
   private val elts = Reg(Vec(entries, gen))
 
-  for (i <- 0 until entries) {
-    def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
-    def paddedUsed(i: Int) = if (i == -1) true.B else if (i == entries) false.B else used(i)
+  def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
+  def paddedUsed(i: Int) = if (i == -1) true.B else if (i == entries) false.B else used(i)
+  def paddedValidAfterInvalidate(i: Int) =
+    if (i == -1) true.B
+    else if (i == entries) false.B
+    else Mux(io.invalidate(i), false.B, paddedValid(i))
 
+  for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.enq.bits else Mux(!used(i + 1), io.enq.bits, elts(i + 1))
     val wen = Mux(
       io.deq.ready,
-      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || used(i)),
+      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
       // enqueue to the first empty slot above the top
-      io.enq.fire && paddedUsed(i - 1) && !valid(i)
+      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || !paddedValidAfterInvalidate(i)
     )
     when(wen) { elts(i) := wdata }
 
     valid(i) := Mux(
       io.deq.ready,
-      paddedValid(i + 1) || io.enq.fire && ((i == 0 && !flow).B || valid(i)),
-      io.enq.fire && paddedUsed(i - 1) || valid(i)
+      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
+      // TODO: handle enqueueing to invalidated tail?
+      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || paddedValidAfterInvalidate(i)
     )
   }
 
@@ -516,9 +522,10 @@ class CoalShiftQueue[T <: Data](
   }
 
   io.enq.ready := !valid(entries - 1)
-  io.deq.valid := valid(0)
+  io.deq.valid := paddedValidAfterInvalidate(0)
   io.deq.bits := elts.head
 
+  assert(!flow, "flow-through is not implemented")
   if (flow) {
     when(io.enq.valid) { io.deq.valid := true.B }
     when(!valid(0)) { io.deq.bits := io.enq.bits }

@@ -1,6 +1,7 @@
 import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 
@@ -82,6 +83,8 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "work when enqueing and dequeueing simultaneously" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.invalidate.poke(0.U)
+
       // prepare
       c.io.deq.ready.poke(false.B)
       c.io.enq.ready.expect(true.B)
@@ -106,6 +109,65 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.deq.ready.poke(true.B)
       c.io.enq.valid.poke(false.B)
       c.io.deq.valid.expect(false.B)
+    }
+  }
+
+  it should "invalidate entry being dequeued combinationally" in {
+    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.invalidate.poke(0.U)
+
+      // prepare
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x12.U)
+      c.clock.step()
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x34.U)
+      c.clock.step()
+      c.io.enq.valid.poke(false.B)
+
+      // invalidate should work for the entry just being dequeued at the same
+      // cycle
+      c.io.invalidate.poke(0x1.U)
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(false.B)
+      c.clock.step()
+      // rest are unchanged
+      c.io.invalidate.poke(0.U)
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x34.U)
+    }
+  }
+
+  it should "dequeue invalidated entries by itself" in {
+    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.invalidate.poke(0.U)
+
+      // prepare
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x12.U)
+      c.clock.step()
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x34.U)
+      c.clock.step()
+      c.io.enq.valid.poke(false.B)
+
+      c.io.invalidate.poke(0x1.U)
+      c.clock.step()
+      c.io.deq.ready.poke(false.B)
+      // 0x12 should be dequeued
+      c.clock.step()
+      c.io.deq.ready.poke(true.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x34.U)
     }
   }
 }
