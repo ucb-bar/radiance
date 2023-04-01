@@ -460,7 +460,8 @@ class InflightCoalReqTableEntry(
 // Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
 // queue entry and its valid signal are exposed as output IO.
 // If `pipe` is true, support enqueueing to a full queue when also dequeueing.
-// TODO: support invalidate and deadline
+//
+// TODO: support deadline
 class CoalShiftQueue[T <: Data](
     gen: T,
     val entries: Int,
@@ -522,7 +523,12 @@ class CoalShiftQueue[T <: Data](
   }
 
   io.enq.ready := !valid(entries - 1)
-  io.deq.valid := validAfterInv(0)
+  // We don't want to invalidate deq.valid response right away even when
+  // io.invalidate(head) is true.
+  // Coalescing unit consumes queue head's validity, and produces its new
+  // validity.  Deasserting deq.valid right away will result in a combinational
+  // cycle.
+  io.deq.valid := valid(0)
   io.deq.bits := elts.head
 
   assert(!flow, "flow-through is not implemented")
@@ -538,19 +544,6 @@ class CoalShiftQueue[T <: Data](
   io.mask := valid.asUInt
   io.elts := elts
   io.count := PopCount(io.mask)
-}
-
-object CoalShiftQueue {
-  def apply[T <: Data](
-      enq: DecoupledIO[T],
-      entries: Int = 2,
-      pipe: Boolean = false,
-      flow: Boolean = false
-  ): DecoupledIO[T] = {
-    val q = Module(new CoalShiftQueue(enq.bits.cloneType, entries, pipe, flow))
-    q.io.enq <> enq
-    q.io.deq
-  }
 }
 
 class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {

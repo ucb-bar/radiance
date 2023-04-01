@@ -111,7 +111,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "invalidate entry being dequeued combinationally" in {
+  it should "invalidate head being dequeued" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
       c.io.invalidate.poke(0.U)
 
@@ -128,13 +128,14 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
       c.io.enq.valid.poke(false.B)
 
-      // invalidate should work for the entry just being dequeued at the same
-      // cycle
+      // invalidate should work for the head just being dequeued at the same
+      // cycle.  However, it should not change deq.valid right away to avoid
+      // combinational cycles (see definition).
       c.io.invalidate.poke(0x1.U)
       c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(false.B)
+      c.io.deq.valid.expect(true.B)
       c.clock.step()
-      // rest are unchanged
+      // 0x12 should have been dequeued
       c.io.invalidate.poke(0.U)
       c.io.deq.ready.poke(true.B)
       c.io.deq.valid.expect(true.B)
