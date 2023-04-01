@@ -488,29 +488,28 @@ class CoalShiftQueue[T <: Data](
   private val used = RegInit(UInt(entries.W), 0.U)
   private val elts = Reg(Vec(entries, gen))
 
-  def paddedValid(i: Int) = if (i == -1) true.B else if (i == entries) false.B else valid(i)
-  def paddedUsed(i: Int) = if (i == -1) true.B else if (i == entries) false.B else used(i)
-  def paddedValidAfterInvalidate(i: Int) =
-    if (i == -1) true.B
-    else if (i == entries) false.B
-    else Mux(io.invalidate(i), false.B, paddedValid(i))
+  def pad(mask: Int => Bool) = { i: Int =>
+    if (i == -1) true.B else if (i == entries) false.B else mask(i)
+  }
+  def paddedUsed = pad({ i: Int => used(i) })
+  def validAfterInv(i: Int) = Mux(io.invalidate(i), false.B, valid(i))
 
-  val shift = io.deq.ready || (used =/= 0.U) && !paddedValidAfterInvalidate(0)
+  val shift = io.deq.ready || (used =/= 0.U) && !validAfterInv(0)
   for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.enq.bits else Mux(!used(i + 1), io.enq.bits, elts(i + 1))
     val wen = Mux(
       shift,
-      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
+      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
       // enqueue to the first empty slot above the top
-      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || !paddedValidAfterInvalidate(i)
+      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || !validAfterInv(i)
     )
     when(wen) { elts(i) := wdata }
 
     valid(i) := Mux(
       shift,
-      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || paddedValidAfterInvalidate(i + 1),
+      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
       // TODO: handle enqueueing to invalidated tail?
-      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || paddedValidAfterInvalidate(i)
+      (io.enq.fire && paddedUsed(i - 1) && !used(i)) || validAfterInv(i)
     )
   }
 
@@ -523,7 +522,7 @@ class CoalShiftQueue[T <: Data](
   }
 
   io.enq.ready := !valid(entries - 1)
-  io.deq.valid := paddedValidAfterInvalidate(0)
+  io.deq.valid := validAfterInv(0)
   io.deq.bits := elts.head
 
   assert(!flow, "flow-through is not implemented")
