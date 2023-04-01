@@ -1,7 +1,6 @@
 import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 
@@ -168,18 +167,36 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       // invalidate two entries at head
       c.io.invalidate.poke(0x3.U)
       c.clock.step()
+      // 0x12 should have been dequeued now
       c.io.invalidate.poke(0x0.U)
       c.io.deq.ready.poke(false.B)
-      // 0x12 should be dequeued now
       c.clock.step()
-      // 0x34 should be dequeued now
-      c.clock.step()
+      // 0x34 should have been dequeued now
       c.io.deq.ready.poke(true.B)
       c.io.deq.valid.expect(true.B)
       c.io.deq.bits.expect(0x56.U)
       c.clock.step()
       c.io.deq.ready.poke(true.B)
       c.io.deq.valid.expect(false.B)
+    }
+  }
+
+  it should "overwrite invalidated tail when enqueuing" in {
+    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.invalidate.poke(0.U)
+
+      // prepare
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x12.U)
+      c.clock.step()
+      // invalidate and enqueue at the tail at the same time
+      c.io.invalidate.poke(0x1.U)
+      c.io.deq.ready.poke(false.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x34.U)
     }
   }
 }

@@ -495,7 +495,7 @@ class CoalShiftQueue[T <: Data](
     else if (i == entries) false.B
     else Mux(io.invalidate(i), false.B, paddedValid(i))
 
-  val shift = io.deq.ready || (used =/= 0.U) && !valid(0)
+  val shift = io.deq.ready || (used =/= 0.U) && !paddedValidAfterInvalidate(0)
   for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.enq.bits else Mux(!used(i + 1), io.enq.bits, elts(i + 1))
     val wen = Mux(
