@@ -57,6 +57,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val wordSize = 4
 
   val reqQueueDepth = 4 // FIXME test
+  val respQueueDepth = 2 // FIXME test
+
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   val addressWidth = outer.node.in(1)._1.params.addressBits
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth)
@@ -88,12 +90,15 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         // make queue block up in the middle of the simulation.  Ideally there
         // should be a more logical way to set this, or we should handle
         // response queue blocking.
-        8
+        respQueueDepth
       )
     )
   }
   val respQueueNoncoalPort = 0
   val respQueueCoalPortOffset = 1
+
+  // did coalescing succeed at all?
+  val coalReqValid = Wire(Bool())
 
   // Per-lane request and response queues
   //
@@ -114,7 +119,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     case (((tlIn, edgeIn), (tlOut, edgeOut)), i) =>
       // Request queue
       //
-      val reqQueue = reqQueues(i - 1)
+      val lane = i - 1
+      val reqQueue = reqQueues(lane)
       val req = Wire(reqQueueEntryT)
       req.source := tlIn.a.bits.source
       req.address := tlIn.a.bits.address
@@ -124,8 +130,15 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       reqQueue.io.enq.bits := req
       // TODO: deq.ready should respect downstream ready
       reqQueue.io.deq.ready := true.B
+      reqQueue.io.invalidate := 0.U
 
-      tlOut.a.valid := reqQueue.io.deq.valid
+      printf(s"reqQueue(${lane}).count=%d\n", reqQueue.io.count)
+
+      // Invalidate coalesced requests
+      // FIXME: hardcoded lanes
+      val invalidate = coalReqValid && (lane == 0 || lane == 2).B
+      tlOut.a.valid := reqQueue.io.deq.valid && !invalidate
+
       val reqHead = reqQueue.io.deq.bits
       // FIXME: generate Get or Put according to read/write
       val (reqLegal, reqBits) = edgeOut.Get(
@@ -141,7 +154,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       //
       // This queue will serialize non-coalesced responses along with
       // coalesced responses and serve them back to the core side.
-      val respQueue = respQueues(i - 1)
+      val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
       resp.source := tlOut.d.bits.source
       resp.data := tlOut.d.bits.data
@@ -192,9 +205,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val coalReqAddress = Wire(UInt(tlCoal.params.addressBits.W))
   // TODO: bogus address
   coalReqAddress := (0xabcd.U + coalSourceId) << 4
-  val coalReqValid = Wire(Bool())
-  // FIXME: copy lane 1's valid signal.  This is completely bogus
-  coalReqValid := outer.node.in(1)._1.a.valid
+  // FIXME: coalesce lane 0 and lane 2's queue head whenever they're valid
+  coalReqValid := reqQueues(0).io.deq.valid && reqQueues(2).io.deq.valid
+  when(coalReqValid) {
+    // invalidate original requests due to coalescing
+    reqQueues(0).io.invalidate := 0x1.U
+    reqQueues(2).io.invalidate := 0x1.U
+  }
 
   val (legal, bits) = edgeCoal.Get(
     fromSource = coalSourceId,

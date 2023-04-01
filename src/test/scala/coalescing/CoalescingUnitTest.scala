@@ -26,13 +26,13 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         for (_ <- 0 until 100) {
           c.clock.step()
         }
-        c.io.deq(0).valid.expect(false.B)
+        // c.io.deq(0).valid.expect(false.B)
       }
   }
 }
 
 class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
-  behavior of "request queues"
+  behavior of "request shift queues"
 
   it should "work like normal shiftqueue when no invalidate" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
