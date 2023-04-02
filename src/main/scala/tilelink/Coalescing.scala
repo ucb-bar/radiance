@@ -11,7 +11,6 @@ import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
-
   // Identity node that captures the incoming TL requests and passes them
   // through the other end, dropping coalesced requests.  This node is what
   // will be visible to upstream and downstream nodes.
@@ -136,7 +135,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
       // Invalidate coalesced requests
       // FIXME: hardcoded lanes
-      val invalidate = coalReqValid && (lane == 0 || lane == 2).B
+      // val invalidate = coalReqValid && (lane == 0 || lane == 2).B
+      val invalidate = coalReqValid
       tlOut.a.valid := reqQueue.io.deq.valid && !invalidate
 
       val reqHead = reqQueue.io.deq.bits
@@ -158,6 +158,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       val resp = Wire(respQueueEntryT)
       resp.source := tlOut.d.bits.source
       resp.data := tlOut.d.bits.data
+      // TODO: read/write bit?
 
       // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
       // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
@@ -206,11 +207,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // TODO: bogus address
   coalReqAddress := (0xabcd.U + coalSourceId) << 4
   // FIXME: coalesce lane 0 and lane 2's queue head whenever they're valid
-  coalReqValid := reqQueues(0).io.deq.valid && reqQueues(2).io.deq.valid
+  coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
+    reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
   when(coalReqValid) {
     // invalidate original requests due to coalescing
     reqQueues(0).io.invalidate := 0x1.U
+    reqQueues(1).io.invalidate := 0x1.U
     reqQueues(2).io.invalidate := 0x1.U
+    reqQueues(3).io.invalidate := 0x1.U
   }
 
   val (legal, bits) = edgeCoal.Get(
@@ -246,7 +250,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     }
   }
   newEntry.lanes(0).reqs(0).valid := true.B
+  newEntry.lanes(1).reqs(0).valid := true.B
   newEntry.lanes(2).reqs(0).valid := true.B
+  newEntry.lanes(3).reqs(0).valid := true.B
   dontTouch(newEntry)
 
   // Uncoalescer module sncoalesces responses back to each lane
@@ -267,9 +273,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   uncoalescer.io.coalRespSrcId := tlCoal.d.bits.source
   uncoalescer.io.coalRespData := tlCoal.d.bits.data
 
-  // Queue up uncoalesced responses into each lane's response queue
+  // Queue up synthesized uncoalesced responses into each lane's response queue
   (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, lanes) =>
     lanes.zipWithIndex.foreach { case (resp, i) =>
+      // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
+      // cache.  This should ideally not happen though.
       assert(
         q.io.enq(respQueueCoalPortOffset + i).ready,
         s"respQueue: enq port for 0-th coalesced response is blocked"
@@ -474,11 +482,10 @@ class InflightCoalReqTableEntry(
   val lanes = Vec(numLanes, new PerLane)
 }
 
-// Mostly copied from freechips.rocketchip.util.ShiftQueue, except that every
-// queue entry and its valid signal are exposed as output IO.
+// A shift-register queue implementation that supports invalidating entries
+// and exposing queue contents as output IO. (TODO: support deadline)
+// Initially copied from freechips.rocketchip.util.ShiftQueue.
 // If `pipe` is true, support enqueueing to a full queue when also dequeueing.
-//
-// TODO: support deadline
 class CoalShiftQueue[T <: Data](
     gen: T,
     val entries: Int,
@@ -506,11 +513,12 @@ class CoalShiftQueue[T <: Data](
   private val used = RegInit(UInt(entries.W), 0.U)
   private val elts = Reg(Vec(entries, gen))
 
+  // Indexing is tail-to-head: i=0 equals tail, i=entries-1 equals topmost reg
   def pad(mask: Int => Bool) = { i: Int =>
     if (i == -1) true.B else if (i == entries) false.B else mask(i)
   }
   def paddedUsed = pad({ i: Int => used(i) })
-  def validAfterInv(i: Int) = Mux(io.invalidate(i), false.B, valid(i))
+  def validAfterInv(i: Int) = valid(i) && !io.invalidate(i)
 
   val shift = io.deq.ready || (used =/= 0.U) && !validAfterInv(0)
   for (i <- 0 until entries) {
@@ -526,7 +534,6 @@ class CoalShiftQueue[T <: Data](
     valid(i) := Mux(
       shift,
       (io.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
-      // TODO: handle enqueueing to invalidated tail?
       (io.enq.fire && paddedUsed(i - 1) && !used(i)) || validAfterInv(i)
     )
   }
