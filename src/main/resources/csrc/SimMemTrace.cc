@@ -75,8 +75,8 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
     // read it right now.
     return MemTraceLine{};
   } else if (line.cycle == cycle && line.lane_id == lane_id) {
-    printf("fire! cycle=%ld, valid=%d, %s \n", cycle, line.valid,
-           line.loadstore);
+    printf("fire! cycle=%ld, valid=%d, %s addr=%x \n", cycle, line.valid,
+           line.loadstore, line.address);
 
     // FIXME! Currently lane_id is assumed to be in round-robin order, e.g.
     // 0->1->2->3->0->..., both in the trace file and the order the caller calls

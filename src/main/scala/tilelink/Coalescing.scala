@@ -570,13 +570,14 @@ class CoalShiftQueue[T <: Data](
   io.count := PopCount(io.mask)
 }
 
-class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
+class MemTraceDriver(numLanes: Int = 4, traceFile : String = "vecadd.core1.thread4.trace")(implicit p: Parameters) extends LazyModule {
+
   // Create N client nodes together
   val laneNodes = Seq.tabulate(numLanes) { i =>
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, 0x10)
+        sourceId = IdRange(0, 0x1000)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
@@ -588,7 +589,7 @@ class MemTraceDriver(numLanes: Int = 1)(implicit p: Parameters) extends LazyModu
   val node = TLIdentityNode()
   laneNodes.foreach { l => node := l }
 
-  lazy val module = new MemTraceDriverImp(this, numLanes)
+  lazy val module = new MemTraceDriverImp(this, numLanes, traceFile)
 }
 
 class TraceReq extends Bundle {
@@ -599,11 +600,11 @@ class TraceReq extends Bundle {
   val data = UInt(64.W)
 }
 
-class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
+class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile : String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
   val sim = Module(
-    new SimMemTrace(filename = "vecadd.core1.thread4.trace", numLanes)
+    new SimMemTrace(traceFile, numLanes)
   )
   sim.io.clock := clock
   sim.io.reset := reset.asBool
@@ -629,26 +630,31 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
   val sourceIdCounter = RegInit(0.U(64.W))
   sourceIdCounter := sourceIdCounter + 1.U
 
+  //Issue here is that Vortex mem range is not within Chipyard Mem range
+  //In default setting, all mem-req for program data must be within 0X80000000 -> 0X90000000
+  //
+  def hashToValidPhyAddr(addr : UInt) : UInt = {
+    Cat(8.U(4.W), addr(27, 3), 0.U(3.W) )
+  }
+
   // Connect each lane to its respective TL node.
   (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
     val (tlOut, edge) = node.out(0)
 
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
-      toAddress = req.address,
-      // Memory trace addresses are not necessarily aligned to word boundaries
-      // so leave lgSize to 0
-      // NOTE: this is in bytes not bits
-      lgSize = 0.U,
+      toAddress = hashToValidPhyAddr(req.address),
+      lgSize = 3.U,
       data = req.data
     )
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
-      toAddress = req.address,
-      lgSize = 0.U
+      toAddress = hashToValidPhyAddr(req.address),
+      lgSize = 3.U
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
+
     assert(legal, "illegal TL req gen")
     tlOut.a.valid := req.valid
     tlOut.a.bits := bits
@@ -658,9 +664,13 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
     tlOut.e.valid := false.B
 
     dontTouch(tlOut.a)
+    dontTouch(tlOut.d)
   }
 
   io.finished := sim.io.trace_read.finished
+  when(io.finished){
+    assert(false.B, "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)")
+  }
 
   // Clock Counter, for debugging purpose
   val clkcount = RegInit(0.U(64.W))
@@ -668,7 +678,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int)
   dontTouch(clkcount)
 }
 
-class SimMemTrace(val filename: String, numLanes: Int)
+class SimMemTrace(filename: String, numLanes: Int)
     extends BlackBox(
       Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
     )
