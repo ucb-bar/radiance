@@ -275,6 +275,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
   when(coalReqValid) {
     // invalidate original requests due to coalescing
+    // FIXME: bogus
     reqQueues(0).io.invalidate := 0x1.U
     reqQueues(1).io.invalidate := 0x1.U
     reqQueues(2).io.invalidate := 0x1.U
@@ -310,7 +311,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     l.reqs.zipWithIndex.foreach { case (r, i) =>
       // TODO: this part needs the actual coalescing logic to work
       r.valid := false.B
-      r.source := i.U //FIXME bogus
+      r.source := i.U // FIXME bogus
       r.offset := 1.U
       r.size := 2.U
     }
@@ -787,7 +788,51 @@ class SimMemTrace(filename: String, numLanes: Int)
   addResource("/csrc/SimMemTrace.h")
 }
 
-class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
+class MemTraceLogger(numLanes: Int = 5)(implicit p: Parameters) extends LazyModule {
+  val beatBytes = 4 // FIXME: hardcoded
+  val node = TLManagerNode(Seq.tabulate(numLanes) { _ =>
+    TLSlavePortParameters.v1(
+      Seq(
+        TLSlaveParameters.v1(
+          address = List(AddressSet(0x0000, 0xffffff)), // FIXME: hardcoded
+          supportsGet = TransferSizes(1, beatBytes),
+          supportsPutPartial = TransferSizes(1, beatBytes),
+          supportsPutFull = TransferSizes(1, beatBytes)
+        )
+      ),
+      beatBytes = beatBytes
+    )
+  })
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) {}
+}
+
+// synthesizable unit tests
+
+class CoalescerLogger(implicit p: Parameters) extends LazyModule {
+  // TODO: use parameters for numLanes
+  val numLanes = 4
+  val coal = LazyModule(new CoalescingUnit(numLanes))
+  val driver = LazyModule(new MemTraceDriver(numLanes))
+  val logger = LazyModule(new MemTraceLogger(numLanes + 1)) // +1 for coalesced edge
+
+  logger.node :=* coal.node :=* driver.node
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with UnitTestModule {
+    driver.module.io.start := io.start
+    io.finished := driver.module.io.finished
+  }
+}
+
+class CoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
+  val dut = Module(LazyModule(new CoalescerLogger).module)
+  dut.io.start := io.start
+  io.finished := dut.io.finished
+}
+
+class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
   val coal = LazyModule(new CoalescingUnit(numLanes))
@@ -795,11 +840,9 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
 
   coal.node :=* driver.node
 
-  // Use TLTestRAM as bogus downstream TL manager nodes
-  // TODO: swap this out with a memtrace logger
   val rams = Seq.tabulate(numLanes + 1) { _ =>
     LazyModule(
-      // TODO: properly propagate beatBytes?
+      // FIXME: properly propagate beatBytes?
       new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
     )
   }
@@ -813,8 +856,8 @@ class CoalConnectTrace(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class CoalescingUnitTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
-  val dut = Module(LazyModule(new CoalConnectTrace).module)
+class TLRAMCoalescerTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
+  val dut = Module(LazyModule(new TLRAMCoalescer).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
 }
