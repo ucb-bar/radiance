@@ -238,15 +238,19 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.coalReqValid.poke(true.B)
       c.io.newEntry.source.poke(sourceId)
       c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
+      c.io.newEntry.lanes(0).reqs(0).source.poke(1.U)
       c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
       c.io.newEntry.lanes(0).reqs(0).size.poke(2.U)
       c.io.newEntry.lanes(0).reqs(1).valid.poke(true.B)
+      c.io.newEntry.lanes(0).reqs(1).source.poke(2.U)
       c.io.newEntry.lanes(0).reqs(1).offset.poke(1.U)
       c.io.newEntry.lanes(0).reqs(1).size.poke(2.U)
       c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
+      c.io.newEntry.lanes(2).reqs(0).source.poke(1.U)
       c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
       c.io.newEntry.lanes(2).reqs(0).size.poke(1.U)
       c.io.newEntry.lanes(2).reqs(1).valid.poke(true.B)
+      c.io.newEntry.lanes(2).reqs(1).source.poke(2.U)
       c.io.newEntry.lanes(2).reqs(1).offset.poke(0.U)
       c.io.newEntry.lanes(2).reqs(1).size.poke(2.U)
 
@@ -268,13 +272,13 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.uncoalResps(3)(0).valid.expect(false.B)
 
       c.io.uncoalResps(0)(0).bits.data.expect(0x89abcdefL.U)
-      c.io.uncoalResps(0)(0).bits.source.expect(0.U)
+      c.io.uncoalResps(0)(0).bits.source.expect(1.U)
       c.io.uncoalResps(0)(1).bits.data.expect(0x89abcdefL.U)
-      c.io.uncoalResps(0)(1).bits.source.expect(0.U)
+      c.io.uncoalResps(0)(1).bits.source.expect(2.U)
       c.io.uncoalResps(2)(0).bits.data.expect(0x5ca1ab1eL.U)
-      c.io.uncoalResps(2)(0).bits.source.expect(0.U)
+      c.io.uncoalResps(2)(0).bits.source.expect(1.U)
       c.io.uncoalResps(2)(1).bits.data.expect(0x01234567L.U)
-      c.io.uncoalResps(2)(1).bits.source.expect(0.U)
+      c.io.uncoalResps(2)(1).bits.source.expect(2.U)
     }
   }
 }
