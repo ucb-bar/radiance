@@ -280,13 +280,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
     reqQueues(1).io.invalidate := 0x1.U
     reqQueues(2).io.invalidate := 0x1.U
     reqQueues(3).io.invalidate := 0x1.U
+    printf("coalescing succeeded!\n")
   }
 
+  // TODO: write request
   val (legal, bits) = edgeCoal.Get(
     fromSource = coalSourceId,
     // `toAddress` should be aligned to 2**lgSize
     toAddress = coalReqAddress,
     // 64 bits = 8 bytes = 2**(3) bytes
+    // TODO: parameterize to eg. cache line size
     lgSize = 3.U
   )
   assert(legal, "unhandled illegal TL req gen")
@@ -299,7 +302,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
   // Construct new entry for the inflight table
   // FIXME: don't instantiate inflight table entry type here.  It leaks the table's impl
-  // detail outside to the coalescer
+  // detail to the coalescer
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val newEntry = Wire(
@@ -412,7 +415,10 @@ class UncoalescingUnit(
   def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, byteSize: Int): UInt = {
     val bitSize = byteSize * 8
     val sizeMask = (1.U << bitSize) - 1.U
-    assert(dataWidth % bitSize == 0, "coalesced data width not evenly divisible by size")
+    assert(
+      dataWidth > 0 && dataWidth % bitSize == 0,
+      s"coalesced data width ($dataWidth) not evenly divisible by core req size ($bitSize)"
+    )
     val numChunks = dataWidth / bitSize
     val chunks = Wire(Vec(numChunks, UInt(bitSize.W)))
     val offsets = (0 until numChunks)
@@ -498,13 +504,12 @@ class InflightCoalReqTable(
     .map { i => table(i).valid }
     .reduce { (v0, v1) => v0 && v1 }
   // Inflight table should never be full.  It should have enough number of
-  // entries to keep track of all outstanding core-side requests; otherwise,
-  // it will stall the core issuing logic.
-  assert(!full, "table is blocking coalescer")
+  // entries to keep track of all outstanding core-side requests, i.e.
+  // (2 ** oldSrcIdBits) entries.
+  assert(!full, "inflight table is full and blocking coalescer")
   dontTouch(full)
 
   // Enqueue logic
-  //
   io.enq.ready := !full
   val enqFire = io.enq.ready && io.enq.valid
   when(enqFire) {
@@ -519,7 +524,6 @@ class InflightCoalReqTable(
   }
 
   // Lookup logic
-  //
   io.lookup.valid := table(io.lookupSourceId).valid
   io.lookup.bits := table(io.lookupSourceId).bits
   val lookupFire = io.lookup.ready && io.lookup.valid
@@ -788,36 +792,52 @@ class SimMemTrace(filename: String, numLanes: Int)
   addResource("/csrc/SimMemTrace.h")
 }
 
-class MemTraceLogger(numLanes: Int = 5)(implicit p: Parameters) extends LazyModule {
-  val beatBytes = 4 // FIXME: hardcoded
-  val node = TLManagerNode(Seq.tabulate(numLanes) { _ =>
-    TLSlavePortParameters.v1(
-      Seq(
-        TLSlaveParameters.v1(
-          address = List(AddressSet(0x0000, 0xffffff)), // FIXME: hardcoded
-          supportsGet = TransferSizes(1, beatBytes),
-          supportsPutPartial = TransferSizes(1, beatBytes),
-          supportsPutFull = TransferSizes(1, beatBytes)
-        )
-      ),
-      beatBytes = beatBytes
-    )
-  })
+class MemTraceLogger(numLanes: Int = 4)(implicit p: Parameters) extends LazyModule {
+  val node = TLIdentityNode()
+
+  // val beatBytes = 8 // FIXME: hardcoded
+  // val node = TLManagerNode(Seq.tabulate(numLanes) { _ =>
+  //   TLSlavePortParameters.v1(
+  //     Seq(
+  //       TLSlaveParameters.v1(
+  //         address = List(AddressSet(0x0000, 0xffffff)), // FIXME: hardcoded
+  //         supportsGet = TransferSizes(1, beatBytes),
+  //         supportsPutPartial = TransferSizes(1, beatBytes),
+  //         supportsPutFull = TransferSizes(1, beatBytes)
+  //       )
+  //     ),
+  //     beatBytes = beatBytes
+  //   )
+  // })
 
   lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) {}
+  class Impl extends LazyModuleImp(this) {
+    (node.in zip node.out).foreach {
+      case ((tlIn, _), (tlOut, _)) =>
+        tlOut.a <> tlIn.a
+        tlIn.d <> tlOut.d
+    }
+  }
 }
 
 // synthesizable unit tests
 
-class CoalescerLogger(implicit p: Parameters) extends LazyModule {
+// tracedriver --> coalescer --> tracelogger --> tlram
+class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
   val coal = LazyModule(new CoalescingUnit(numLanes))
   val driver = LazyModule(new MemTraceDriver(numLanes))
-  val logger = LazyModule(new MemTraceLogger(numLanes + 1)) // +1 for coalesced edge
+  val logger = LazyModule(new MemTraceLogger(numLanes + 1))
+  val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
+    LazyModule(
+      // FIXME: properly propagate beatBytes?
+      new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
+    )
+  )
 
   logger.node :=* coal.node :=* driver.node
+  rams.foreach { r => r.node := logger.node }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
@@ -826,27 +846,26 @@ class CoalescerLogger(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class CoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
-  val dut = Module(LazyModule(new CoalescerLogger).module)
+class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
+  val dut = Module(LazyModule(new TLRAMCoalescerLogger).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
 }
 
+// tracedriver --> coalescer --> tlram
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
   val coal = LazyModule(new CoalescingUnit(numLanes))
   val driver = LazyModule(new MemTraceDriver(numLanes))
-
-  coal.node :=* driver.node
-
-  val rams = Seq.tabulate(numLanes + 1) { _ =>
+  val rams = Seq.fill(numLanes + 1) ( // +1 for coalesced edge
     LazyModule(
       // FIXME: properly propagate beatBytes?
       new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
     )
-  }
-  // Connect all (N+1) outputs of coal to separate TestRAM modules
+  )
+
+  coal.node :=* driver.node
   rams.foreach { r => r.node := coal.node }
 
   lazy val module = new Impl
