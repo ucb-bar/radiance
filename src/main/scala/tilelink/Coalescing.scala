@@ -649,7 +649,7 @@ class CoalShiftQueue[T <: Data](
   io.queue.count := PopCount(io.mask)
 }
 
-class MemTraceDriver(numLanes: Int = 4, traceFile: String = "vecadd.core1.thread4.trace")(implicit
+class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.trace")(implicit
     p: Parameters
 ) extends LazyModule {
 
@@ -670,7 +670,7 @@ class MemTraceDriver(numLanes: Int = 4, traceFile: String = "vecadd.core1.thread
   val node = TLIdentityNode()
   laneNodes.foreach { l => node := l }
 
-  lazy val module = new MemTraceDriverImp(this, numLanes, traceFile)
+  lazy val module = new MemTraceDriverImp(this, numLanes, filename)
 }
 
 class TraceReq extends Bundle {
@@ -792,7 +792,7 @@ class SimMemTrace(filename: String, numLanes: Int)
   addResource("/csrc/SimMemTrace.h")
 }
 
-class MemTraceLogger(numLanes: Int = 4)(implicit p: Parameters) extends LazyModule {
+class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.trace")(implicit p: Parameters) extends LazyModule {
   val node = TLIdentityNode()
 
   // val beatBytes = 8 // FIXME: hardcoded
@@ -812,12 +812,45 @@ class MemTraceLogger(numLanes: Int = 4)(implicit p: Parameters) extends LazyModu
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    (node.in zip node.out).foreach {
-      case ((tlIn, _), (tlOut, _)) =>
-        tlOut.a <> tlIn.a
-        tlIn.d <> tlOut.d
+    val sim = Module(new SimMemTraceLogger(filename, numLanes))
+    sim.io.clock := clock
+    sim.io.reset := reset.asBool
+
+    (node.in zip node.out).foreach { case ((tlIn, _), (tlOut, _)) =>
+      tlOut.a <> tlIn.a
+      tlIn.d <> tlOut.d
     }
+
+    // io.finished := sim.io.trace_read.finished
   }
+}
+
+class SimMemTraceLogger(filename: String, numLanes: Int)
+    extends BlackBox(
+      Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
+    )
+    with HasBlackBoxResource {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    // val trace_read = new Bundle {
+    //   val ready = Input(Bool())
+    //   val valid = Output(UInt(numLanes.W))
+    //   // Chisel can't interface with Verilog 2D port, so flatten all lanes into
+    //   // single wide 1D array.
+    //   // TODO: assumes 64-bit address.
+    //   val address = Output(UInt((64 * numLanes).W))
+    //   val is_store = Output(UInt(numLanes.W))
+    //   val store_mask = Output(UInt((8 * numLanes).W))
+    //   val data = Output(UInt((64 * numLanes).W))
+    //   val finished = Output(Bool())
+    // }
+  })
+
+  addResource("/vsrc/SimMemTraceLogger.v")
+  addResource("/csrc/SimMemTraceLogger.cc")
+  addResource("/csrc/SimMemTraceLogger.h")
 }
 
 // synthesizable unit tests
@@ -846,7 +879,8 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
+class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters)
+    extends UnitTest(timeout) {
   val dut = Module(LazyModule(new TLRAMCoalescerLogger).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
@@ -858,7 +892,7 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   val numLanes = 4
   val coal = LazyModule(new CoalescingUnit(numLanes))
   val driver = LazyModule(new MemTraceDriver(numLanes))
-  val rams = Seq.fill(numLanes + 1) ( // +1 for coalesced edge
+  val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // FIXME: properly propagate beatBytes?
       new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
