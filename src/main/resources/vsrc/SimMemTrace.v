@@ -41,7 +41,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   longint __in_address[NUM_LANES-1:0];
 
   bit __in_is_store[NUM_LANES-1:0];
-  int __in_store_mask [NUM_LANES-1:0];
+  logic [`MASK_WIDTH-1:0] __in_store_mask [NUM_LANES-1:0];
   longint __in_data[NUM_LANES-1:0];
 
   bit __in_finished;
