@@ -3,7 +3,7 @@
 #include <svdpi.h>
 #endif
 #include <string>
-#include <string.h> 
+#include <cstring>
 #include <cstdio>
 #include <cassert>
 #include <unistd.h>
@@ -33,10 +33,10 @@ MemTraceLogger::~MemTraceLogger() {
 // Parse trace file in its entirety and store it into internal structure.
 // TODO: might block for a long time when the trace gets big, check if need to
 // be broken down
-void MemTraceReader::parse() {
+void MemTraceLogger::parse() {
   MemTraceLine line;
 
-  printf("MemTraceReader: started parsing\n");
+  printf("MemTraceLogger: started parsing\n");
 
   while (infile >> line.cycle >> line.loadstore >> line.core_id >>
          line.lane_id >> std::hex >> line.address >> line.data >> std::dec >>
@@ -46,13 +46,13 @@ void MemTraceReader::parse() {
   }
   read_pos = trace.cbegin();
 
-  printf("MemTraceReader: finished parsing\n");
+  printf("MemTraceLogger: finished parsing\n");
 }
 
 // Try to read a memory request that might have happened at a given cycle, on a
 // given SIMD lane (= "thread").  In case no request happened at that point,
 // return an empty line with .valid = false.
-MemTraceLine MemTraceReader::read_trace_at(const long cycle,
+MemTraceLine MemTraceLogger::read_trace_at(const long cycle,
                                            const int lane_id) {
   MemTraceLine line;
   line.valid = false;
@@ -120,8 +120,17 @@ extern "C" void memtracelogger_init(const char *filename) {
 }
 
 // TODO: accept core_id as well
-extern "C" void memtracelogger_log(unsigned char *trace_log_ready) {
+extern "C" void memtracelogger_log(unsigned char trace_log_valid,
+                                   unsigned long trace_log_cycle,
+                                   unsigned long trace_log_address,
+                                   unsigned int trace_log_lane_id,
+                                   unsigned char *trace_log_ready) {
   // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
   //        trace_read_lane_id);
   *trace_log_ready = 1;
+
+  if (trace_log_valid) {
+    printf("%s: [%lu] valid: address=0x%lx, tid=%u\n", __func__,
+           trace_log_cycle, trace_log_address, trace_log_lane_id);
+  }
 }
