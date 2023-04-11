@@ -694,15 +694,13 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   // Split output of SimMemTrace, which is flattened across all lanes,
   // back to each lane's.
 
-  // Maybe this part can be improved, since now we are still mannually shifting everything
   val laneReqs = Wire(Vec(numLanes, new TraceReq))
   laneReqs.zipWithIndex.foreach { case (req, i) =>
-    req.valid := (sim.io.trace_read.valid >> i)
-    req.address := (sim.io.trace_read.address >> (64 * i))
-    req.is_store := (sim.io.trace_read.is_store >> i)
-    req.mask := (sim.io.trace_read.store_mask >> (8 * i))
-    req.data := (sim.io.trace_read.data >> (64 * i))
-
+    req.valid := sim.io.trace_read.valid(i)
+    req.address := sim.io.trace_read.address(64 * i + 63, 64 * i)
+    req.is_store := sim.io.trace_read.is_store(i)
+    req.mask := sim.io.trace_read.store_mask(8 * i + 7, 8 * i)
+    req.data := sim.io.trace_read.data(64 * i + 63, 64 * i)
   }
 
   // To prevent collision of sourceId with a current in-flight message,
@@ -718,7 +716,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     Cat(8.U(4.W), addr(27, 3), 0.U(3.W))
   }
 
-  // Connect each lane to its respective TL node.
+  // Generate TL requests according to the trace line.
   (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
     val (tlOut, edge) = node.out(0)
 
@@ -819,8 +817,6 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
     sim.io.reset := reset.asBool
 
     val laneReqs = Wire(Vec(numLanes, new TraceReq))
-    val laneValid = Wire(Vec(numLanes, Bool()))
-    val laneAddress = Wire(Vec(numLanes, UInt(64.W))) // FIXME: hardcoded
 
     // snoop on the TileLink edges to log traffic
     ((node.in zip node.out) zip laneReqs).foreach { case (((tlIn, _), (tlOut, _)), req) =>
@@ -834,15 +830,15 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       req.mask := tlIn.a.bits.mask
     }
 
+    val laneValid = Wire(Vec(numLanes, Bool()))
+    val laneAddress = Wire(Vec(numLanes, UInt(64.W))) // FIXME: hardcoded
     laneReqs.zipWithIndex.foreach { case (req, i) =>
-      laneValid(i) := req.valid.asUInt
+      laneValid(i) := req.valid
       laneAddress(i) := req.address
     }
     // flatten per-lane signals to the Verilog blackbox input
     sim.io.trace_log.valid := laneValid.asUInt
     sim.io.trace_log.address := laneAddress.asUInt
-
-    // io.finished := sim.io.trace_read.finished
   }
 }
 
