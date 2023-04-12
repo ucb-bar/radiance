@@ -1,6 +1,6 @@
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
-`define MASK_WIDTH 8
+`define SIZE_WIDTH 32
 
 import "DPI-C" function void memtrace_init(
   input  string  filename
@@ -18,31 +18,31 @@ import "DPI-C" function void memtrace_query
   output bit     trace_read_valid,
   output longint trace_read_address,
   output bit     trace_read_is_store,
-  output int trace_read_store_mask,
+  output int     trace_read_size,
   output longint trace_read_data,
   output bit     trace_read_finished
 );
 
 module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
-  input              clock,
-  input              reset,
+  input clock,
+  input reset,
 
   // These have to match the IO port of the Chisel wrapper module.
-  input                    trace_read_ready,
-  output [NUM_LANES-1:0] trace_read_valid,
+  input                              trace_read_ready,
+  output [NUM_LANES-1:0]             trace_read_valid,
   output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_address,
 
-  output [NUM_LANES-1:0] trace_read_is_store,
-  output [NUM_LANES*`MASK_WIDTH-1:0] trace_read_store_mask,
+  output [NUM_LANES-1:0]             trace_read_is_store,
+  output [`SIZE_WIDTH*NUM_LANES-1:0] trace_read_size,
   output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_data,
-  output                   trace_read_finished
+  output                             trace_read_finished
 );
-  bit __in_valid[NUM_LANES-1:0];
-  longint __in_address[NUM_LANES-1:0];
+  bit     __in_valid   [NUM_LANES-1:0];
+  longint __in_address [NUM_LANES-1:0];
 
-  bit __in_is_store[NUM_LANES-1:0];
-  logic [`MASK_WIDTH-1:0] __in_store_mask [NUM_LANES-1:0];
-  longint __in_data[NUM_LANES-1:0];
+  bit     __in_is_store [NUM_LANES-1:0];
+  int     __in_size [NUM_LANES-1:0];
+  longint __in_data [NUM_LANES-1:0];
 
   bit __in_finished;
   string __uartlog;
@@ -54,13 +54,13 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   assign next_cycle_counter = cycle_counter + 1'b1;
 
   // registers that stage outputs of the C parser
-  reg [NUM_LANES-1:0] __in_valid_reg;
+  reg [NUM_LANES-1:0]   __in_valid_reg;
   reg [`DATA_WIDTH-1:0] __in_address_reg [NUM_LANES-1:0];
 
-  reg [NUM_LANES-1:0] __in_is_store_reg;
-  reg [`MASK_WIDTH-1:0] __in_store_mask_reg [NUM_LANES-1:0];
+  reg [NUM_LANES-1:0]   __in_is_store_reg;
+  int                   __in_size_reg [NUM_LANES-1:0];
   reg [`DATA_WIDTH-1:0] __in_data_reg [NUM_LANES-1:0];
-  reg __in_finished_reg;
+  reg                   __in_finished_reg;
 
   genvar g;
 
@@ -70,7 +70,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
       assign trace_read_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g]  = __in_address_reg[g];
 
       assign trace_read_is_store[g] = __in_is_store_reg[g];
-      assign trace_read_store_mask[`MASK_WIDTH*(g+1)-1:`MASK_WIDTH*g] = __in_store_mask_reg[g];
+      assign trace_read_size[`SIZE_WIDTH*(g+1)-1:`SIZE_WIDTH*g] = __in_size_reg[g];
       assign trace_read_data[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g] = __in_data_reg[g];
     end
   endgenerate
@@ -83,15 +83,13 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
 
   // Evaluate the signals on the positive edge
   always @(posedge clock) begin
-
-    // Setting reset value
     if (reset) begin
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         __in_valid[tid] = 1'b0;
         __in_address[tid] = `DATA_WIDTH'b0;
         
         __in_is_store[tid] = 1'b0;
-        __in_store_mask[tid] = `MASK_WIDTH'b0;
+        __in_size[tid] = `SIZE_WIDTH'b0;
         __in_data[tid] = `DATA_WIDTH'b0;
       end
 
@@ -105,7 +103,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
         __in_address_reg[tid] <= `DATA_WIDTH'b0;
 
         __in_is_store_reg[tid] = 1'b0;
-        __in_store_mask_reg[tid] = `MASK_WIDTH'b0;
+        __in_size_reg[tid] = `SIZE_WIDTH'b0;
         __in_data_reg[tid] = `DATA_WIDTH'b0;
       end
 
@@ -127,7 +125,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
           __in_address[tid],
  
           __in_is_store[tid],
-          __in_store_mask[tid],
+          __in_size[tid],
           __in_data[tid],
 
           __in_finished
@@ -140,7 +138,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
         __in_address_reg[tid] <= __in_address[tid];
 
         __in_is_store_reg[tid] <= __in_is_store[tid];
-        __in_store_mask_reg[tid] <= __in_store_mask[tid];
+        __in_size_reg[tid] <= __in_size[tid];
         __in_data_reg[tid] <= __in_data[tid];
       end
       __in_finished_reg <= __in_finished;

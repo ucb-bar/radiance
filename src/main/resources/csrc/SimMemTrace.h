@@ -34,11 +34,10 @@ public:
 extern "C" void memtrace_init(const char *filename);
 extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long trace_read_cycle,
-                               int trace_read_lane_id,
+                               int           trace_read_lane_id,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
                                unsigned char *trace_read_is_store,
-                               int *trace_read_store_mask,
+                               int           *trace_read_size,
                                unsigned long *trace_read_data,
-                               unsigned char *trace_read_finished
-                               );
+                               unsigned char *trace_read_finished);
