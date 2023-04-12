@@ -5,6 +5,7 @@
 #include <string>
 #include <string.h> 
 #include <cstdio>
+#include <cmath>
 #include <cassert>
 #include <unistd.h>
 #include "SimMemTrace.h"
@@ -34,10 +35,18 @@ void MemTraceReader::parse() {
 
   printf("MemTraceReader: started parsing\n");
 
+  long size = 0;
   while (infile >> line.cycle >> line.loadstore >> line.core_id >>
          line.lane_id >> std::hex >> line.address >> line.data >> std::dec >>
-         line.data_size) {
+         size) {
     line.valid = true;
+
+    assert(size > 0 && "invalid size in trace");
+    int lgsize = static_cast<int>(log2(size));
+    assert((size & ~(~0lu << lgsize)) == 0 &&
+           "non-power-of-2 size detected in trace");
+    line.log_data_size = lgsize;
+
     trace.push_back(line);
   }
   read_pos = trace.cbegin();
@@ -76,7 +85,7 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
     return MemTraceLine{};
   } else if (line.cycle == cycle && line.lane_id == lane_id) {
     printf("fire! cycle=%ld, valid=%d, %s addr=%lx, size=%d \n", cycle, line.valid,
-           line.loadstore, line.address, line.data_size);
+           line.loadstore, line.address, line.log_data_size);
 
     // FIXME! Currently lane_id is assumed to be in round-robin order, e.g.
     // 0->1->2->3->0->..., both in the trace file and the order the caller calls
@@ -137,7 +146,7 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
   *trace_read_valid = line.valid;
   *trace_read_address = line.address;
   *trace_read_is_store = (strcmp(line.loadstore, "STORE") == 0);
-  *trace_read_size = line.data_size;
+  *trace_read_size = line.log_data_size;
   *trace_read_data = line.data;
   // This means finished and valid will go up at the same cycle.  Need to
   // handle this without skipping the last line.

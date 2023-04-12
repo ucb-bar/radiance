@@ -1,6 +1,6 @@
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
-`define SIZE_WIDTH 32
+`define LOGSIZE_WIDTH 32
 
 import "DPI-C" function void memtrace_init(
   input  string  filename
@@ -27,15 +27,15 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   input clock,
   input reset,
 
-  // These have to match the IO port of the Chisel wrapper module.
-  input                              trace_read_ready,
-  output [NUM_LANES-1:0]             trace_read_valid,
-  output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_address,
+  // These have to match the IO port name of the Chisel wrapper module.
+  input                                 trace_read_ready,
+  output [NUM_LANES-1:0]                trace_read_valid,
+  output [`DATA_WIDTH*NUM_LANES-1:0]    trace_read_address,
 
-  output [NUM_LANES-1:0]             trace_read_is_store,
-  output [`SIZE_WIDTH*NUM_LANES-1:0] trace_read_size,
-  output [`DATA_WIDTH*NUM_LANES-1:0] trace_read_data,
-  output                             trace_read_finished
+  output [NUM_LANES-1:0]                trace_read_is_store,
+  output [`LOGSIZE_WIDTH*NUM_LANES-1:0] trace_read_size,
+  output [`DATA_WIDTH*NUM_LANES-1:0]    trace_read_data,
+  output                                trace_read_finished
 );
   bit     __in_valid   [NUM_LANES-1:0];
   longint __in_address [NUM_LANES-1:0];
@@ -70,7 +70,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
       assign trace_read_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g]  = __in_address_reg[g];
 
       assign trace_read_is_store[g] = __in_is_store_reg[g];
-      assign trace_read_size[`SIZE_WIDTH*(g+1)-1:`SIZE_WIDTH*g] = __in_size_reg[g];
+      assign trace_read_size[`LOGSIZE_WIDTH*(g+1)-1:`LOGSIZE_WIDTH*g] = __in_size_reg[g];
       assign trace_read_data[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g] = __in_data_reg[g];
     end
   endgenerate
@@ -89,7 +89,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
         __in_address[tid] = `DATA_WIDTH'b0;
         
         __in_is_store[tid] = 1'b0;
-        __in_size[tid] = `SIZE_WIDTH'b0;
+        __in_size[tid] = `LOGSIZE_WIDTH'b0;
         __in_data[tid] = `DATA_WIDTH'b0;
       end
 
@@ -103,7 +103,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
         __in_address_reg[tid] <= `DATA_WIDTH'b0;
 
         __in_is_store_reg[tid] = 1'b0;
-        __in_size_reg[tid] = `SIZE_WIDTH'b0;
+        __in_size_reg[tid] = `LOGSIZE_WIDTH'b0;
         __in_data_reg[tid] = `DATA_WIDTH'b0;
       end
 

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cassert>
+#include <memory>
 #include <unistd.h>
 #include "SimMemTraceLogger.h"
 

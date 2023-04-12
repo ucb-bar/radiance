@@ -676,7 +676,7 @@ class TraceReq extends Bundle {
   val valid = Bool()
   val address = UInt(64.W)
   val is_store = Bool()
-  val size = UInt(32.W)
+  val size = UInt(32.W) // this is log2(bytesize) as in TL A bundle
   val data = UInt(64.W)
 }
 
@@ -699,7 +699,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     req.address := sim.io.trace_read.address(64 * i + 63, 64 * i)
     req.is_store := sim.io.trace_read.is_store(i)
     req.size := sim.io.trace_read.size(32 * i + 31, 32 * i)
-    printf("========= req.size=%d\n", req.size)
     req.data := sim.io.trace_read.data(64 * i + 63, 64 * i)
   }
 
@@ -826,12 +825,25 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       tlOut.a <> tlIn.a
       tlIn.d <> tlOut.d
 
+      // requests on TL A channel
       req.valid := tlIn.a.valid
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
-      req.is_store := false.B // FIXME: take is_store from TL
+      req.is_store := false.B
+      when (tlIn.a.bits.opcode === 0.U || tlIn.a.bits.opcode === 1.U) {
+        // 0: PutFullData, 1: PutPartialData
+        req.is_store := true.B
+      }.elsewhen(tlIn.a.bits.opcode === 4.U) {
+        // 4: Get
+        req.is_store := false.B
+      }.elsewhen(true.B) {
+        // that's all I know
+        assert(false.B, "unhandled TL opcode found in MemTraceLogger")
+      }
       req.size := tlIn.a.bits.size
-      printf("========= logger: req.size=%d\n", tlIn.a.bits.size)
+
+      // responses on TL D channel
+      // TODO
     }
 
     val laneValid = Wire(Vec(numLanes, Bool()))
