@@ -1,3 +1,4 @@
+// FIXME hardcoded
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
 `define LOGSIZE_WIDTH 32
@@ -81,7 +82,6 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
       memtrace_init(FILENAME);
   end
 
-  // Evaluate the signals on the positive edge
   always @(posedge clock) begin
     if (reset) begin
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin

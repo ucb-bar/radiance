@@ -124,14 +124,18 @@ extern "C" void memtracelogger_init(const char *filename) {
 extern "C" void memtracelogger_log(unsigned char trace_log_valid,
                                    unsigned long trace_log_cycle,
                                    unsigned long trace_log_address,
-                                   unsigned int trace_log_lane_id,
+                                   int           trace_log_lane_id,
+                                   unsigned char trace_log_is_store,
+                                   int           trace_log_size,
+                                   unsigned long trace_log_data,
                                    unsigned char *trace_log_ready) {
   // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
   //        trace_read_lane_id);
   *trace_log_ready = 1;
 
   if (trace_log_valid) {
-    printf("%s: [%lu] valid: address=0x%lx, tid=%u\n", __func__,
-           trace_log_cycle, trace_log_address, trace_log_lane_id);
+    printf("%s: [%lu] valid: address=%lx, tid=%u, size=%d\n", __func__,
+           trace_log_cycle, trace_log_address, trace_log_lane_id,
+           trace_log_size);
   }
 }

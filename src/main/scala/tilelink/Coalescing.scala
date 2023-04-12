@@ -672,6 +672,8 @@ class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
   lazy val module = new MemTraceDriverImp(this, numLanes, filename)
 }
 
+// TODO: this is replicated in sim.io.trace_read and sim.io.trace_log; make it
+// into a trait
 class TraceReq extends Bundle {
   val valid = Bool()
   val address = UInt(64.W)
@@ -729,7 +731,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(req.address),
-      lgSize = Log2(size),
+      lgSize = Log2(size)
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
@@ -820,6 +822,11 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
 
     val laneReqs = Wire(Vec(numLanes, new TraceReq))
 
+    assert(
+      numLanes == node.in.length,
+      "`numLanes` does not match the number of TL edges connected to the MemTraceLogger"
+    )
+
     // snoop on the TileLink edges to log traffic
     ((node.in zip node.out) zip laneReqs).foreach { case (((tlIn, _), (tlOut, _)), req) =>
       tlOut.a <> tlIn.a
@@ -830,7 +837,7 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
       req.is_store := false.B
-      when (tlIn.a.bits.opcode === 0.U || tlIn.a.bits.opcode === 1.U) {
+      when(tlIn.a.bits.opcode === 0.U || tlIn.a.bits.opcode === 1.U) {
         // 0: PutFullData, 1: PutPartialData
         req.is_store := true.B
       }.elsewhen(tlIn.a.bits.opcode === 4.U) {
@@ -842,19 +849,36 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       }
       req.size := tlIn.a.bits.size
 
-      // responses on TL D channel
-      // TODO
+      when(req.valid) {
+        printf("======== MemTraceLogger: req.size=%d\n", req.size)
+      }
+
+    // responses on TL D channel
+    // TODO
     }
 
+    // clunky workaround of the fact that Chisel doesn't allow partial
+    // assignment to a bitfield range of a wide signal.
     val laneValid = Wire(Vec(numLanes, Bool()))
-    val laneAddress = Wire(Vec(numLanes, UInt(64.W))) // FIXME: hardcoded
+    val laneAddress = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).address)))
+    val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).is_store)))
+    val laneSize = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).size)))
+    val laneData = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).data)))
     laneReqs.zipWithIndex.foreach { case (req, i) =>
       laneValid(i) := req.valid
       laneAddress(i) := req.address
+      laneIsStore(i) := req.is_store
+      laneSize(i) := req.size
+      laneData(i) := req.data
     }
     // flatten per-lane signals to the Verilog blackbox input
     sim.io.trace_log.valid := laneValid.asUInt
     sim.io.trace_log.address := laneAddress.asUInt
+    sim.io.trace_log.is_store := laneIsStore.asUInt
+    sim.io.trace_log.size := laneSize.asUInt
+    sim.io.trace_log.data := laneData.asUInt
+
+    assert(sim.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
   }
 }
 
@@ -867,17 +891,16 @@ class SimMemTraceLogger(filename: String, numLanes: Int)
     val clock = Input(Clock())
     val reset = Input(Bool())
 
-    // Chisel can't interface with Verilog 2D port, so flatten all lanes into
-    // single wide 1D array.
     val trace_log = new Bundle {
       val valid = Input(UInt(numLanes.W))
-      val address = Input(UInt((64 * numLanes).W))
-      // val ready = Output(Bool())
+      // Chisel can't interface with Verilog 2D port, so flatten all lanes into
+      // single wide 1D array.
       // TODO: assumes 64-bit address.
-      // val is_store = Output(UInt(numLanes.W))
-      // val size = Output(UInt((8 * numLanes).W))
-      // val data = Output(UInt((64 * numLanes).W))
-      // val finished = Output(Bool())
+      val address = Input(UInt((64 * numLanes).W))
+      val is_store = Input(UInt(numLanes.W))
+      val size = Input(UInt((32 * numLanes).W))
+      val data = Input(UInt((64 * numLanes).W))
+      val ready = Output(Bool())
     }
   })
 
