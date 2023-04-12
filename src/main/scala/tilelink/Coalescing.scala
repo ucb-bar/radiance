@@ -721,20 +721,28 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
     val (tlOut, edge) = node.out(0)
 
-    val size = 4.U // TODO: get proper size from the trace
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(req.address),
-      lgSize = Log2(size),
+      lgSize = req.size, // trace line already holds log2(size)
       data = req.data
     )
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(req.address),
-      lgSize = Log2(size)
+      lgSize = req.size
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
+
+    when(tlOut.a.valid) {
+      printf(
+        "Get(): addr=%x, size=%x, mask=%x\n",
+        tlOut.a.bits.address,
+        tlOut.a.bits.size,
+        tlOut.a.bits.mask
+      );
+    }
 
     assert(legal, "illegal TL req gen")
     tlOut.a.valid := req.valid
@@ -837,8 +845,8 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
       req.is_store := false.B
-      when(tlIn.a.bits.opcode === 0.U || tlIn.a.bits.opcode === 1.U) {
-        // 0: PutFullData, 1: PutPartialData
+      when(tlIn.a.bits.opcode === 0.U) {
+        // 0: PutFullData, 1: PutPartialData but we don't support it
         req.is_store := true.B
       }.elsewhen(tlIn.a.bits.opcode === 4.U) {
         // 4: Get
@@ -848,10 +856,6 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
         assert(false.B, "unhandled TL opcode found in MemTraceLogger")
       }
       req.size := tlIn.a.bits.size
-
-      when(req.valid) {
-        printf("======== MemTraceLogger: req.size=%d\n", req.size)
-      }
 
     // responses on TL D channel
     // TODO
