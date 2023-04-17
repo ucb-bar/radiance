@@ -3,12 +3,15 @@
 #include <svdpi.h>
 #endif
 #include <string>
-#include <string.h> 
+#include <string.h>
 #include <cstdio>
 #include <cmath>
 #include <cassert>
 #include <unistd.h>
 #include "SimMemTrace.h"
+
+// Global singleton instance
+static std::unique_ptr<MemTraceReader> reader;
 
 MemTraceReader::MemTraceReader(const std::string &filename) {
   char cwd[4096];
@@ -36,10 +39,13 @@ void MemTraceReader::parse() {
   printf("MemTraceReader: started parsing\n");
 
   long size = 0;
-  while (infile >> line.cycle >> line.loadstore >> line.core_id >>
+  std::string loadstore; // FIXME: likely slow
+  while (infile >> line.cycle >> loadstore >> line.core_id >>
          line.lane_id >> std::hex >> line.address >> line.data >> std::dec >>
          size) {
     line.valid = true;
+
+    line.is_store = (loadstore == "STORE");
 
     assert(size > 0 && "invalid size in trace");
     int lgsize = static_cast<int>(log2(size));
@@ -84,8 +90,9 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle,
     // read it right now.
     return MemTraceLine{};
   } else if (line.cycle == cycle && line.lane_id == lane_id) {
-    printf("fire! cycle=%ld, valid=%d, %s addr=%lx, size=%d \n", cycle, line.valid,
-           line.loadstore, line.address, line.log_data_size);
+    printf("fire! cycle=%ld, valid=%d, %s addr=%lx, size=%d \n", cycle,
+           line.valid, (line.is_store ? "STORE" : "LOAD"), line.address,
+           line.log_data_size);
 
     // FIXME! Currently lane_id is assumed to be in round-robin order, e.g.
     // 0->1->2->3->0->..., both in the trace file and the order the caller calls
@@ -145,7 +152,7 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
   auto line = reader->read_trace_at(trace_read_cycle, trace_read_lane_id);
   *trace_read_valid = line.valid;
   *trace_read_address = line.address;
-  *trace_read_is_store = (strcmp(line.loadstore, "STORE") == 0);
+  *trace_read_is_store = line.is_store;
   *trace_read_size = line.log_data_size;
   *trace_read_data = line.data;
   // This means finished and valid will go up at the same cycle.  Need to

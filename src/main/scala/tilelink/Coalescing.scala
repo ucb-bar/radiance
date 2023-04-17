@@ -806,7 +806,7 @@ class SimMemTrace(filename: String, numLanes: Int)
   addResource("/csrc/SimMemTrace.h")
 }
 
-class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.trace")(implicit
+class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.out.trace")(implicit
     p: Parameters
 ) extends LazyModule {
   val node = TLIdentityNode()
@@ -947,7 +947,7 @@ class SimMemTraceLogger(filename: String, numLanes: Int)
 
   addResource("/vsrc/SimMemTraceLogger.v")
   addResource("/csrc/SimMemTraceLogger.cc")
-  addResource("/csrc/SimMemTraceLogger.h")
+  addResource("/csrc/SimMemTrace.h")
 }
 
 class TracePrintf {}
