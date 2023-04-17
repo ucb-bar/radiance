@@ -33,7 +33,9 @@ MemTraceWriter::~MemTraceWriter() {
 void MemTraceWriter::write_trace_at(const MemTraceLine line) {
   printf("tick(): cycle=%ld\n", line.cycle);
 
-  fprintf(outfile, "cycle=%ld\n", line.cycle);
+  fprintf(outfile, "%ld %s %d %d 0x%lx 0x%lx %u\n", line.cycle,
+          (line.is_store ? "STORE" : "LOAD"), line.core_id, line.lane_id,
+          line.address, line.data, (1u << line.log_data_size));
 }
 
 extern "C" void memtracelogger_init(const char *filename) {
