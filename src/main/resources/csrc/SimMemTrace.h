@@ -30,13 +30,9 @@ class MemTraceWriter {
 public:
   MemTraceWriter(const std::string &filename);
   ~MemTraceWriter();
-  // void parse();
-  void write_trace_at(const MemTraceLine line);
-  // bool finished() const { return read_pos == trace.cend(); }
+  void write_line_to_trace(const MemTraceLine line);
 
   FILE *outfile;
-  // std::vector<MemTraceLine> trace;
-  // std::vector<MemTraceLine>::const_iterator read_pos;
 };
 
 extern "C" void memtrace_init(const char *filename);

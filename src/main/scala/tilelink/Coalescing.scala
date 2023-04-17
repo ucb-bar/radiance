@@ -672,9 +672,15 @@ class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
   lazy val module = new MemTraceDriverImp(this, numLanes, filename)
 }
 
-// TODO: this is replicated in sim.io.trace_read and sim.io.trace_log; make it
-// into a trait
-class TraceReq extends Bundle {
+trait HasTraceReq {
+  val valid: UInt
+  val address: UInt
+  val is_store: UInt
+  val size: UInt
+  val data: UInt
+}
+
+class TraceReq extends Bundle with HasTraceReq {
   val valid = Bool()
   val address = UInt(64.W)
   val is_store = Bool()
@@ -787,7 +793,7 @@ class SimMemTrace(filename: String, numLanes: Int)
 
     // These names have to match declarations in the Verilog code, eg.
     // trace_read_address.
-    val trace_read = new Bundle {
+    val trace_read = new Bundle with HasTraceReq {
       val ready = Input(Bool())
       val valid = Output(UInt(numLanes.W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
@@ -932,7 +938,7 @@ class SimMemTraceLogger(filename: String, numLanes: Int)
     val clock = Input(Clock())
     val reset = Input(Bool())
 
-    val trace_log = new Bundle {
+    val trace_log = new Bundle with HasTraceReq {
       val valid = Input(UInt(numLanes.W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.

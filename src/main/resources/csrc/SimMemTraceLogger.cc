@@ -16,7 +16,7 @@ static std::unique_ptr<MemTraceWriter> logger;
 MemTraceWriter::MemTraceWriter(const std::string &filename) {
   char cwd[4096];
   if (getcwd(cwd, sizeof(cwd))) {
-    printf("MemTraceLogger: current working dir: %s\n", cwd);
+    printf("MemTraceWriter: current working dir: %s\n", cwd);
   }
 
   outfile = fopen(filename.c_str(), "w");
@@ -30,9 +30,7 @@ MemTraceWriter::~MemTraceWriter() {
   printf("MemTraceWriter destroyed\n");
 }
 
-void MemTraceWriter::write_trace_at(const MemTraceLine line) {
-  printf("tick(): cycle=%ld\n", line.cycle);
-
+void MemTraceWriter::write_line_to_trace(const MemTraceLine line) {
   fprintf(outfile, "%ld %s %d %d 0x%lx 0x%lx %u\n", line.cycle,
           (line.is_store ? "STORE" : "LOAD"), line.core_id, line.lane_id,
           line.address, line.data, (1u << line.log_data_size));
@@ -91,5 +89,5 @@ extern "C" void memtracelogger_log(unsigned char trace_log_valid,
                     .data = trace_log_data,
                     .log_data_size = trace_log_size};
 
-  logger->write_trace_at(line);
+  logger->write_line_to_trace(line);
 }
