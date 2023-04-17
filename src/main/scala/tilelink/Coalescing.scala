@@ -714,7 +714,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   // In default setting, all mem-req for program data must be within
   // 0X80000000 -> 0X90000000
   def hashToValidPhyAddr(addr: UInt): UInt = {
-    Cat(8.U(4.W), addr(27, 3), 0.U(3.W))
+    Cat(8.U(4.W), addr(27, 0))
   }
 
   // Generate TL requests according to the trace line.
@@ -725,7 +725,8 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(req.address),
       lgSize = req.size, // trace line already holds log2(size)
-      data = req.data
+      // Need to construct data that is correctly aligned to beatBytes
+      data = (req.data << (8.U * (req.address % edge.manager.beatBytes.U)))
     )
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
@@ -737,10 +738,13 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
 
     when(tlOut.a.valid) {
       printf(
-        "Get(): addr=%x, size=%x, mask=%x\n",
+        "MemTraceDriver: TL addr=%x, size=%d, mask=%x, store=%d, tlData=%x, reqData=%x\n",
         tlOut.a.bits.address,
         tlOut.a.bits.size,
-        tlOut.a.bits.mask
+        tlOut.a.bits.mask,
+        req.is_store,
+        tlOut.a.bits.data,
+        req.data
       );
     }
 
@@ -822,6 +826,12 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
   //   )
   // })
 
+  // Copied from freechips.rocketchip.trailingZeros which only supports Scala
+  // integers
+  def trailingZeros(x: UInt): UInt = {
+    Mux(x === 0.U, x.widthOption.get.U, Log2(x & -x))
+  }
+
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val sim = Module(new SimMemTraceLogger(filename, numLanes))
@@ -841,21 +851,48 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       tlIn.d <> tlOut.d
 
       // requests on TL A channel
+      //
       req.valid := tlIn.a.valid
-      req.address := tlIn.a.bits.address
-      req.data := tlIn.a.bits.data
-      req.is_store := false.B
-      when(tlIn.a.bits.opcode === 0.U) {
-        // 0: PutFullData, 1: PutPartialData but we don't support it
-        req.is_store := true.B
-      }.elsewhen(tlIn.a.bits.opcode === 4.U) {
-        // 4: Get
-        req.is_store := false.B
-      }.elsewhen(true.B) {
-        // that's all I know
-        assert(false.B, "unhandled TL opcode found in MemTraceLogger")
-      }
       req.size := tlIn.a.bits.size
+      def tlOpcodeIsStore(opcode: UInt): Bool = {
+        // 0: PutFullData, 1: PutPartialData but we don't support it
+        // 4: Get
+        assert(opcode === 0.U || opcode === 4.U, "unhandled TL opcode found in MemTraceLogger")
+        tlIn.a.bits.opcode === 0.U
+      }
+      req.is_store := tlOpcodeIsStore(tlIn.a.bits.opcode)
+      // TL always carries the exact unaligned address that the client
+      // originally requested, so no postprocessing required
+      req.address := tlIn.a.bits.address
+
+      // TL data
+      //
+      // When tlIn.a.bits.size is smaller than the data bus width, need to
+      // figure out which byte lanes we actually accessed so that
+      // we can write that to the memory trace.
+      // See Section 4.5 Byte Lanes in spec 1.8.1
+
+      // This assert only holds true for PutFullData and not PutPartialData,
+      // where HIGH bits in the mask may not be contiguous.
+      assert(
+        PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
+        "mask HIGH bits do not match the TL size.  This should have been handled by the TL generator logic"
+      )
+      val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
+      val mask = ~((~0.U) << (trailingZerosInMask * 8.U))
+      req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
+
+      when(req.valid) {
+        printf(
+          "MemTraceLogger: TL addr=%x, size=%d, mask=%x, store=%d, tlData=%x, reqData=%x\n",
+          tlIn.a.bits.address,
+          tlIn.a.bits.size,
+          tlIn.a.bits.mask,
+          req.is_store,
+          tlIn.a.bits.data,
+          req.data
+        )
+      }
 
     // responses on TL D channel
     // TODO
