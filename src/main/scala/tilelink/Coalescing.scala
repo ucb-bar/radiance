@@ -737,15 +737,15 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     val bits = Mux(req.is_store, pbits, gbits)
 
     when(tlOut.a.valid) {
-      printf(
-        "MemTraceDriver: TL addr=%x, size=%d, mask=%x, store=%d, tlData=%x, reqData=%x\n",
+      TracePrintf(
+        "MemTraceDriver",
         tlOut.a.bits.address,
         tlOut.a.bits.size,
         tlOut.a.bits.mask,
         req.is_store,
         tlOut.a.bits.data,
         req.data
-      );
+      )
     }
 
     assert(legal, "illegal TL req gen")
@@ -883,8 +883,8 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
       req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
 
       when(req.valid) {
-        printf(
-          "MemTraceLogger: TL addr=%x, size=%d, mask=%x, store=%d, tlData=%x, reqData=%x\n",
+        TracePrintf(
+          "MemTraceLogger",
           tlIn.a.bits.address,
           tlIn.a.bits.size,
           tlIn.a.bits.mask,
@@ -948,6 +948,26 @@ class SimMemTraceLogger(filename: String, numLanes: Int)
   addResource("/vsrc/SimMemTraceLogger.v")
   addResource("/csrc/SimMemTraceLogger.cc")
   addResource("/csrc/SimMemTraceLogger.h")
+}
+
+class TracePrintf {}
+
+object TracePrintf {
+  def apply(
+      printer: String,
+      address: UInt,
+      size: UInt,
+      mask: UInt,
+      is_store: Bool,
+      tlData: UInt,
+      reqData: UInt
+  ) = {
+    printf(s"${printer}: TL addr=%x, size=%d, mask=%x, store=%d", address, size, mask, is_store)
+    when(is_store) {
+      printf(", tlData=%x, reqData=%x", tlData, reqData)
+    }
+    printf("\n")
+  }
 }
 
 // Synthesizable unit tests
