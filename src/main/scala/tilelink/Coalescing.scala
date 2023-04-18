@@ -867,7 +867,7 @@ class MemTraceLogger(
 
     def tlAOpcodeIsStore(opcode: UInt): Bool = {
       assert(
-        opcode === TLMessages.PutFullData || opcode === TLMessages.PutPartialData,
+        opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
         "unhandled TL A opcode found"
       )
       opcode === TLMessages.PutFullData
