@@ -35,7 +35,7 @@ MemTraceWriter::~MemTraceWriter() {
 }
 
 void MemTraceWriter::write_line_to_trace(const MemTraceLine line) {
-  fprintf(outfile, "%ld %s %d %d %d, 0x%lx 0x%lx %u\n", line.cycle,
+  fprintf(outfile, "%ld %s %d %d %d 0x%lx 0x%lx %u\n", line.cycle,
           (line.is_store ? "STORE" : "LOAD"), line.core_id, line.lane_id,
           line.source, line.address, line.data, (1u << line.log_data_size));
 }

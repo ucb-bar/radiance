@@ -889,6 +889,7 @@ class MemTraceLogger(
         req.size := tlIn.a.bits.size
         req.is_store := tlAOpcodeIsStore(tlIn.a.bits.opcode)
         req.source := tlIn.a.bits.source
+        printf("======== req.source=%d\n", req.source)
         // TL always carries the exact unaligned address that the client
         // originally requested, so no postprocessing required
         req.address := tlIn.a.bits.address
@@ -928,6 +929,7 @@ class MemTraceLogger(
         resp.size := tlOut.d.bits.size
         resp.is_store := tlDOpcodeIsStore(tlOut.d.bits.opcode)
         resp.source := tlOut.d.bits.source
+        printf("======== resp.source=%d\n", resp.source)
         // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
         // way to figure out which bytes the master actually use.  Since we
         // don't care too much about addresses in the trace anyway, just store
@@ -941,19 +943,19 @@ class MemTraceLogger(
     // assignment to a bitfield range of a wide signal.
     def flattenTrace(traceLogIO: Bundle with HasTraceLine, perLane: Vec[TraceLine]) = {
       // these will get optimized out
-      val vecValid = Wire(Vec(numLanes, Bool()))
-      val vecSource = Wire(Vec(numLanes, Bool()))
+      val vecValid = Wire(Vec(numLanes, chiselTypeOf(perLane(0).valid)))
+      val vecSource = Wire(Vec(numLanes, chiselTypeOf(perLane(0).source)))
       val vecAddress = Wire(Vec(numLanes, chiselTypeOf(perLane(0).address)))
       val vecIsStore = Wire(Vec(numLanes, chiselTypeOf(perLane(0).is_store)))
       val vecSize = Wire(Vec(numLanes, chiselTypeOf(perLane(0).size)))
       val vecData = Wire(Vec(numLanes, chiselTypeOf(perLane(0).data)))
-      perLane.zipWithIndex.foreach { case (req, i) =>
-        vecValid(i) := req.valid
-        vecSource(i) := req.source
-        vecAddress(i) := req.address
-        vecIsStore(i) := req.is_store
-        vecSize(i) := req.size
-        vecData(i) := req.data
+      perLane.zipWithIndex.foreach { case (l, i) =>
+        vecValid(i) := l.valid
+        vecSource(i) := l.source
+        vecAddress(i) := l.address
+        vecIsStore(i) := l.is_store
+        vecSize(i) := l.size
+        vecData(i) := l.data
       }
       traceLogIO.valid := vecValid.asUInt
       traceLogIO.source := vecSource.asUInt
