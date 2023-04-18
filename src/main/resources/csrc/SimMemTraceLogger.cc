@@ -35,9 +35,9 @@ MemTraceWriter::~MemTraceWriter() {
 }
 
 void MemTraceWriter::write_line_to_trace(const MemTraceLine line) {
-  fprintf(outfile, "%ld %s %d %d 0x%lx 0x%lx %u\n", line.cycle,
+  fprintf(outfile, "%ld %s %d %d %d, 0x%lx 0x%lx %u\n", line.cycle,
           (line.is_store ? "STORE" : "LOAD"), line.core_id, line.lane_id,
-          line.address, line.data, (1u << line.log_data_size));
+          line.source, line.address, line.data, (1u << line.log_data_size));
 }
 
 // Returns the "handle" ID for this particular logger instance.
@@ -70,13 +70,16 @@ extern "C" int memtracelogger_init(int is_response, const char *filename) {
 
 // This is used to log both TileLink A and D channels.
 // TODO: accept core_id as well
-extern "C" void
-memtracelogger_log(int handle,
-                   unsigned char trace_log_valid, unsigned long trace_log_cycle,
-                   unsigned long trace_log_address, int trace_log_lane_id,
-                   unsigned char trace_log_is_store, int trace_log_size,
-                   unsigned long trace_log_data,
-                   unsigned char *trace_log_ready) {
+extern "C" void memtracelogger_log(int handle,
+                                   unsigned char trace_log_valid,
+                                   unsigned long trace_log_cycle,
+                                   int           trace_log_lane_id,
+                                   int           trace_log_source,
+                                   unsigned long trace_log_address,
+                                   unsigned char trace_log_is_store,
+                                   int           trace_log_size,
+                                   unsigned long trace_log_data,
+                                   unsigned char *trace_log_ready) {
   // printf("memtrace_query(cycle=%ld, tid=%d)\n", trace_read_cycle,
   //        trace_read_lane_id);
   *trace_log_ready = 1;
@@ -90,10 +93,11 @@ memtracelogger_log(int handle,
 
   MemTraceLine line{.valid = (trace_log_valid == 1),
                     .cycle = static_cast<long>(trace_log_cycle),
-                    .is_store = (trace_log_is_store == 1),
                     .core_id = 0, // TODO support multicores
                     .lane_id = trace_log_lane_id,
+                    .source = trace_log_source,
                     .address = trace_log_address,
+                    .is_store = (trace_log_is_store == 1),
                     .data = trace_log_data,
                     .log_data_size = trace_log_size};
 

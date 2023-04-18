@@ -5,10 +5,11 @@
 struct MemTraceLine {
   bool valid = false;
   long cycle = 0;
-  bool is_store = 0;
   int core_id = 0;
   int lane_id = 0;
+  int source = 0;
   unsigned long address = 0;
+  bool is_store = 0;
   unsigned long data = 0;
   int log_data_size = 0;
 };
@@ -50,8 +51,9 @@ extern "C" int memtracelogger_init(int is_response, const char *filename);
 extern "C" void memtracelogger_log(int handle,
                                    unsigned char trace_log_valid,
                                    unsigned long trace_log_cycle,
-                                   unsigned long trace_log_address,
                                    int           trace_log_lane_id,
+                                   int           trace_log_source,
+                                   unsigned long trace_log_address,
                                    unsigned char trace_log_is_store,
                                    int           trace_log_size,
                                    unsigned long trace_log_data,

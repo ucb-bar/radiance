@@ -1,6 +1,7 @@
 // FIXME hardcoded
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
+`define SOURCEID_WIDTH 32
 `define LOGSIZE_WIDTH 32
 
 import "DPI-C" function int memtracelogger_init(
@@ -17,8 +18,9 @@ import "DPI-C" function void memtracelogger_log
   input int     handle,
   input bit     trace_log_valid,
   input longint trace_log_cycle,
+  input int     trace_log_lane_id,
+  input int     trace_log_source,
   input longint trace_log_address,
-  input int     trace_log_tid,
   input bit     trace_log_is_store,
   input int     trace_log_size,
   input longint trace_log_data,
@@ -29,16 +31,17 @@ module SimMemTraceLogger #(parameter
                            IS_RESPONSE = 0,
                            FILENAME = "undefined",
                            NUM_LANES = 4) (
-  input              clock,
-  input              reset,
+  input                                 clock,
+  input                                 reset,
 
   // NOTE: LSB is lane 0
-  input [NUM_LANES-1:0]                trace_log_valid,
-  input [`DATA_WIDTH*NUM_LANES-1:0]    trace_log_address,
-  input [NUM_LANES-1:0]                trace_log_is_store,
-  input [`LOGSIZE_WIDTH*NUM_LANES-1:0] trace_log_size,
-  input [`DATA_WIDTH*NUM_LANES-1:0]    trace_log_data,
-  output                               trace_log_ready
+  input [NUM_LANES-1:0]                 trace_log_valid,
+  input [`SOURCEID_WIDTH*NUM_LANES-1:0] trace_log_source,
+  input [`DATA_WIDTH*NUM_LANES-1:0]     trace_log_address,
+  input [NUM_LANES-1:0]                 trace_log_is_store,
+  input [`LOGSIZE_WIDTH*NUM_LANES-1:0]  trace_log_size,
+  input [`DATA_WIDTH*NUM_LANES-1:0]     trace_log_data,
+  output                                trace_log_ready
 );
   int logger_handle;
   bit __in_ready;
@@ -51,6 +54,7 @@ module SimMemTraceLogger #(parameter
 
   // wires going into the DPC
   wire                      __valid [NUM_LANES-1:0];
+  wire [`SOURCEID_WIDTH-1:0] __source [NUM_LANES-1:0];
   wire [`DATA_WIDTH-1:0]    __address [NUM_LANES-1:0];
   wire                      __is_store [NUM_LANES-1:0];
   wire [`LOGSIZE_WIDTH-1:0] __size [NUM_LANES-1:0];
@@ -63,6 +67,7 @@ module SimMemTraceLogger #(parameter
     for (g = 0; g < NUM_LANES; g = g + 1) begin
       // LSB is lane 0
       assign __valid[g] = trace_log_valid[g];
+      assign __source[g] = trace_log_source[`SOURCEID_WIDTH*(g+1)-1:`SOURCEID_WIDTH*g];
       assign __address[g] = trace_log_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g];
       assign __is_store[g] = trace_log_is_store[g];
       assign __size[g] = trace_log_size[`LOGSIZE_WIDTH*(g+1)-1:`LOGSIZE_WIDTH*g];
@@ -87,8 +92,9 @@ module SimMemTraceLogger #(parameter
           logger_handle,
           __valid[tid],
           cycle_counter,
-          __address[tid],
           tid,
+          __source[tid],
+          __address[tid],
           __is_store[tid],
           __size[tid],
           __data[tid],

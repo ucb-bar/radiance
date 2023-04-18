@@ -672,16 +672,19 @@ class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
   lazy val module = new MemTraceDriverImp(this, numLanes, filename)
 }
 
-trait HasTraceReq {
+trait HasTraceLine {
   val valid: UInt
+  val source: UInt
   val address: UInt
   val is_store: UInt
   val size: UInt
   val data: UInt
 }
 
-class TraceReq extends Bundle with HasTraceReq {
+// used for both request and response.  response had address set to 0
+class TraceLine extends Bundle with HasTraceLine {
   val valid = Bool()
+  val source = UInt(32.W)
   val address = UInt(64.W)
   val is_store = Bool()
   val size = UInt(32.W) // this is log2(bytesize) as in TL A bundle
@@ -701,9 +704,11 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   // Split output of SimMemTrace, which is flattened across all lanes,
   // back to each lane's.
 
-  val laneReqs = Wire(Vec(numLanes, new TraceReq))
+  val laneReqs = Wire(Vec(numLanes, new TraceLine))
   laneReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := sim.io.trace_read.valid(i)
+    // TODO: don't take source id from the original trace for now
+    req.source := 0.U
     req.address := sim.io.trace_read.address(64 * i + 63, 64 * i)
     req.is_store := sim.io.trace_read.is_store(i)
     req.size := sim.io.trace_read.size(32 * i + 31, 32 * i)
@@ -793,7 +798,7 @@ class SimMemTrace(filename: String, numLanes: Int)
 
     // These names have to match declarations in the Verilog code, eg.
     // trace_read_address.
-    val trace_read = new Bundle with HasTraceReq {
+    val trace_read = new Bundle { // FIXME: can't use HasTraceLine because this doesn't have source
       val ready = Input(Bool())
       val valid = Output(UInt(numLanes.W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
@@ -851,8 +856,8 @@ class MemTraceLogger(
     simResp.io.clock := clock
     simResp.io.reset := reset.asBool
 
-    val laneReqs = Wire(Vec(numLanes, new TraceReq))
-    val laneResps = Wire(Vec(numLanes, new TraceReq))
+    val laneReqs = Wire(Vec(numLanes, new TraceLine))
+    val laneResps = Wire(Vec(numLanes, new TraceLine))
 
     assert(
       numLanes == node.in.length,
@@ -883,6 +888,7 @@ class MemTraceLogger(
         req.valid := tlIn.a.valid
         req.size := tlIn.a.bits.size
         req.is_store := tlAOpcodeIsStore(tlIn.a.bits.opcode)
+        req.source := tlIn.a.bits.source
         // TL always carries the exact unaligned address that the client
         // originally requested, so no postprocessing required
         req.address := tlIn.a.bits.address
@@ -921,6 +927,7 @@ class MemTraceLogger(
         resp.valid := tlOut.d.valid
         resp.size := tlOut.d.bits.size
         resp.is_store := tlDOpcodeIsStore(tlOut.d.bits.opcode)
+        resp.source := tlOut.d.bits.source
         // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
         // way to figure out which bytes the master actually use.  Since we
         // don't care too much about addresses in the trace anyway, just store
@@ -929,27 +936,31 @@ class MemTraceLogger(
         resp.data := tlOut.d.bits.data
     }
 
+    // Flatten per-lane signals to the Verilog blackbox input.
     // clunky workaround of the fact that Chisel doesn't allow partial
     // assignment to a bitfield range of a wide signal.
-    def flattenTrace(traceLogIO: Bundle with HasTraceReq, perLane: Vec[TraceReq]) = {
-      val laneValid = Wire(Vec(numLanes, Bool()))
-      val laneAddress = Wire(Vec(numLanes, chiselTypeOf(perLane(0).address)))
-      val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(perLane(0).is_store)))
-      val laneSize = Wire(Vec(numLanes, chiselTypeOf(perLane(0).size)))
-      val laneData = Wire(Vec(numLanes, chiselTypeOf(perLane(0).data)))
+    def flattenTrace(traceLogIO: Bundle with HasTraceLine, perLane: Vec[TraceLine]) = {
+      // these will get optimized out
+      val vecValid = Wire(Vec(numLanes, Bool()))
+      val vecSource = Wire(Vec(numLanes, Bool()))
+      val vecAddress = Wire(Vec(numLanes, chiselTypeOf(perLane(0).address)))
+      val vecIsStore = Wire(Vec(numLanes, chiselTypeOf(perLane(0).is_store)))
+      val vecSize = Wire(Vec(numLanes, chiselTypeOf(perLane(0).size)))
+      val vecData = Wire(Vec(numLanes, chiselTypeOf(perLane(0).data)))
       perLane.zipWithIndex.foreach { case (req, i) =>
-        laneValid(i) := req.valid
-        laneAddress(i) := req.address
-        laneIsStore(i) := req.is_store
-        laneSize(i) := req.size
-        laneData(i) := req.data
+        vecValid(i) := req.valid
+        vecSource(i) := req.source
+        vecAddress(i) := req.address
+        vecIsStore(i) := req.is_store
+        vecSize(i) := req.size
+        vecData(i) := req.data
       }
-      // flatten per-lane signals to the Verilog blackbox input
-      traceLogIO.valid := laneValid.asUInt
-      traceLogIO.address := laneAddress.asUInt
-      traceLogIO.is_store := laneIsStore.asUInt
-      traceLogIO.size := laneSize.asUInt
-      traceLogIO.data := laneData.asUInt
+      traceLogIO.valid := vecValid.asUInt
+      traceLogIO.source := vecSource.asUInt
+      traceLogIO.address := vecAddress.asUInt
+      traceLogIO.is_store := vecIsStore.asUInt
+      traceLogIO.size := vecSize.asUInt
+      traceLogIO.data := vecData.asUInt
     }
 
     flattenTrace(simReq.io.trace_log, laneReqs)
@@ -957,25 +968,6 @@ class MemTraceLogger(
 
     assert(simReq.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
     assert(simResp.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
-
-    // val laneValid = Wire(Vec(numLanes, Bool()))
-    // val laneAddress = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).address)))
-    // val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).is_store)))
-    // val laneSize = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).size)))
-    // val laneData = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).data)))
-    // laneReqs.zipWithIndex.foreach { case (req, i) =>
-    //   laneValid(i) := req.valid
-    //   laneAddress(i) := req.address
-    //   laneIsStore(i) := req.is_store
-    //   laneSize(i) := req.size
-    //   laneData(i) := req.data
-    // }
-    // // flatten per-lane signals to the Verilog blackbox input
-    // simReq.io.trace_log.valid := laneValid.asUInt
-    // simReq.io.trace_log.address := laneAddress.asUInt
-    // simReq.io.trace_log.is_store := laneIsStore.asUInt
-    // simReq.io.trace_log.size := laneSize.asUInt
-    // simReq.io.trace_log.data := laneData.asUInt
   }
 }
 
@@ -996,8 +988,9 @@ class SimMemTraceLogger(isResponse: Boolean, filename: String, numLanes: Int)
     val clock = Input(Clock())
     val reset = Input(Bool())
 
-    val trace_log = new Bundle with HasTraceReq {
+    val trace_log = new Bundle with HasTraceLine {
       val valid = Input(UInt(numLanes.W))
+      val source = Input(UInt((32 * numLanes).W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.
       // TODO: assumes 64-bit address.

@@ -15,7 +15,7 @@ import "DPI-C" function void memtrace_query
 (
   input  bit     trace_read_ready,
   input  longint trace_read_cycle,
-  input  int     trace_read_tid,
+  input  int     trace_read_lane_id,
   output bit     trace_read_valid,
   output longint trace_read_address,
   output bit     trace_read_is_store,
@@ -32,7 +32,6 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   input                                 trace_read_ready,
   output [NUM_LANES-1:0]                trace_read_valid,
   output [`DATA_WIDTH*NUM_LANES-1:0]    trace_read_address,
-
   output [NUM_LANES-1:0]                trace_read_is_store,
   output [`LOGSIZE_WIDTH*NUM_LANES-1:0] trace_read_size,
   output [`DATA_WIDTH*NUM_LANES-1:0]    trace_read_data,
