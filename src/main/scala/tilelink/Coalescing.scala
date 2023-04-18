@@ -268,9 +268,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out(0)
   val coalReqAddress = Wire(UInt(tlCoal.params.addressBits.W))
-  // TODO: bogus address
+  // FIXME: bogus address
   coalReqAddress := (0xabcd.U + coalSourceId) << 4
-  // FIXME: coalesce lane 0 and lane 2's queue head whenever they're valid
+  // FIXME: bogus coalescing logic: coalesce whenever all 4 lanes have valid
+  // queue head
   coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
     reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
   when(coalReqValid) {
