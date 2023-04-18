@@ -889,7 +889,6 @@ class MemTraceLogger(
         req.size := tlIn.a.bits.size
         req.is_store := tlAOpcodeIsStore(tlIn.a.bits.opcode)
         req.source := tlIn.a.bits.source
-        printf("======== req.source=%d\n", req.source)
         // TL always carries the exact unaligned address that the client
         // originally requested, so no postprocessing required
         req.address := tlIn.a.bits.address
@@ -929,7 +928,6 @@ class MemTraceLogger(
         resp.size := tlOut.d.bits.size
         resp.is_store := tlDOpcodeIsStore(tlOut.d.bits.opcode)
         resp.source := tlOut.d.bits.source
-        printf("======== resp.source=%d\n", resp.source)
         // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
         // way to figure out which bytes the master actually use.  Since we
         // don't care too much about addresses in the trace anyway, just store
@@ -939,7 +937,8 @@ class MemTraceLogger(
     }
 
     // Flatten per-lane signals to the Verilog blackbox input.
-    // clunky workaround of the fact that Chisel doesn't allow partial
+    //
+    // This is a clunky workaround of the fact that Chisel doesn't allow partial
     // assignment to a bitfield range of a wide signal.
     def flattenTrace(traceLogIO: Bundle with HasTraceLine, perLane: Vec[TraceLine]) = {
       // these will get optimized out
@@ -973,10 +972,10 @@ class MemTraceLogger(
   }
 }
 
-// MemTraceLogger is bidirectional.  The DPI module tells itself if it's logging
-// the request stream or the response stream by `isResponse`.  This distinction
-// is needed because the response trace file will not contain certain columns
-// such as address.
+// MemTraceLogger is bidirectional, and `isResponse` is how the DPI module tells
+// itself whether it's logging the request stream or the response stream.  This
+// is necessary because we have to generate slightly different trace format
+// depending on this, e.g. response trace will not contain an address column.
 class SimMemTraceLogger(isResponse: Boolean, filename: String, numLanes: Int)
     extends BlackBox(
       Map(
