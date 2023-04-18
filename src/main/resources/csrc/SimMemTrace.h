@@ -28,10 +28,11 @@ public:
 
 class MemTraceWriter {
 public:
-  MemTraceWriter(const std::string &filename);
+  MemTraceWriter(const bool is_response, const std::string &filename);
   ~MemTraceWriter();
   void write_line_to_trace(const MemTraceLine line);
 
+  bool is_response;
   FILE *outfile;
 };
 
@@ -45,8 +46,9 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                int           *trace_read_size,
                                unsigned long *trace_read_data,
                                unsigned char *trace_read_finished);
-extern "C" void memtracelogger_init(const char *filename);
-extern "C" void memtracelogger_log(unsigned char trace_log_valid,
+extern "C" int memtracelogger_init(int is_response, const char *filename);
+extern "C" void memtracelogger_log(int handle,
+                                   unsigned char trace_log_valid,
                                    unsigned long trace_log_cycle,
                                    unsigned long trace_log_address,
                                    int           trace_log_lane_id,

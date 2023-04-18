@@ -812,7 +812,11 @@ class SimMemTrace(filename: String, numLanes: Int)
   addResource("/csrc/SimMemTrace.h")
 }
 
-class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.out.trace")(implicit
+class MemTraceLogger(
+    numLanes: Int = 4,
+    reqFilename: String = "vecadd.core1.thread4.logger.req.trace",
+    respFilename: String = "vecadd.core1.thread4.logger.resp.trace"
+)(implicit
     p: Parameters
 ) extends LazyModule {
   val node = TLIdentityNode()
@@ -840,98 +844,152 @@ class MemTraceLogger(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    val sim = Module(new SimMemTraceLogger(filename, numLanes))
-    sim.io.clock := clock
-    sim.io.reset := reset.asBool
+    val simReq = Module(new SimMemTraceLogger(false, reqFilename, numLanes))
+    val simResp = Module(new SimMemTraceLogger(true, respFilename, numLanes))
+    simReq.io.clock := clock
+    simReq.io.reset := reset.asBool
+    simResp.io.clock := clock
+    simResp.io.reset := reset.asBool
 
     val laneReqs = Wire(Vec(numLanes, new TraceReq))
+    val laneResps = Wire(Vec(numLanes, new TraceReq))
 
     assert(
       numLanes == node.in.length,
       "`numLanes` does not match the number of TL edges connected to the MemTraceLogger"
     )
 
+    def tlAOpcodeIsStore(opcode: UInt): Bool = {
+      // 0: PutFullData, 1: PutPartialData but we don't support it
+      // 4: Get
+      assert(opcode === 0.U || opcode === 4.U, "unhandled TL A opcode found")
+      opcode === 0.U
+    }
+    def tlDOpcodeIsStore(opcode: UInt): Bool = {
+      // 0: AccessAck (Put), 1: AccessAckData (Get or Atomic)
+      // See Table 13 of spec 1.8.1
+      assert(opcode === 0.U || opcode === 1.U, "unhandled TL D opcode found")
+      opcode === 0.U
+    }
+
     // snoop on the TileLink edges to log traffic
-    ((node.in zip node.out) zip laneReqs).foreach { case (((tlIn, _), (tlOut, _)), req) =>
-      tlOut.a <> tlIn.a
-      tlIn.d <> tlOut.d
+    ((node.in zip node.out) zip (laneReqs zip laneResps)).foreach {
+      case (((tlIn, _), (tlOut, _)), (req, resp)) =>
+        tlOut.a <> tlIn.a
+        tlIn.d <> tlOut.d
 
-      // requests on TL A channel
-      //
-      req.valid := tlIn.a.valid
-      req.size := tlIn.a.bits.size
-      def tlOpcodeIsStore(opcode: UInt): Bool = {
-        // 0: PutFullData, 1: PutPartialData but we don't support it
-        // 4: Get
-        assert(opcode === 0.U || opcode === 4.U, "unhandled TL opcode found in MemTraceLogger")
-        tlIn.a.bits.opcode === 0.U
-      }
-      req.is_store := tlOpcodeIsStore(tlIn.a.bits.opcode)
-      // TL always carries the exact unaligned address that the client
-      // originally requested, so no postprocessing required
-      req.address := tlIn.a.bits.address
+        // requests on TL A channel
+        //
+        req.valid := tlIn.a.valid
+        req.size := tlIn.a.bits.size
+        req.is_store := tlAOpcodeIsStore(tlIn.a.bits.opcode)
+        // TL always carries the exact unaligned address that the client
+        // originally requested, so no postprocessing required
+        req.address := tlIn.a.bits.address
 
-      // TL data
-      //
-      // When tlIn.a.bits.size is smaller than the data bus width, need to
-      // figure out which byte lanes we actually accessed so that
-      // we can write that to the memory trace.
-      // See Section 4.5 Byte Lanes in spec 1.8.1
+        // TL data
+        //
+        // When tlIn.a.bits.size is smaller than the data bus width, need to
+        // figure out which byte lanes we actually accessed so that
+        // we can write that to the memory trace.
+        // See Section 4.5 Byte Lanes in spec 1.8.1
 
-      // This assert only holds true for PutFullData and not PutPartialData,
-      // where HIGH bits in the mask may not be contiguous.
-      assert(
-        PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
-        "mask HIGH bits do not match the TL size.  This should have been handled by the TL generator logic"
-      )
-      val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
-      val mask = ~((~0.U) << (trailingZerosInMask * 8.U))
-      req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
-
-      when(req.valid) {
-        TracePrintf(
-          "MemTraceLogger",
-          tlIn.a.bits.address,
-          tlIn.a.bits.size,
-          tlIn.a.bits.mask,
-          req.is_store,
-          tlIn.a.bits.data,
-          req.data
+        // This assert only holds true for PutFullData and not PutPartialData,
+        // where HIGH bits in the mask may not be contiguous.
+        assert(
+          PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
+          "mask HIGH bits do not match the TL size.  This should have been handled by the TL generator logic"
         )
-      }
+        val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
+        val mask = ~((~0.U) << (trailingZerosInMask * 8.U))
+        req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
 
-    // responses on TL D channel
-    // TODO
+        when(req.valid) {
+          TracePrintf(
+            "MemTraceLogger",
+            tlIn.a.bits.address,
+            tlIn.a.bits.size,
+            tlIn.a.bits.mask,
+            req.is_store,
+            tlIn.a.bits.data,
+            req.data
+          )
+        }
+
+        // responses on TL D channel
+        //
+        resp.valid := tlOut.d.valid
+        resp.size := tlOut.d.bits.size
+        resp.is_store := tlDOpcodeIsStore(tlOut.d.bits.opcode)
+        // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
+        // way to figure out which bytes the master actually use.  Since we
+        // don't care too much about addresses in the trace anyway, just store
+        // the entire bits.
+        resp.address := 0.U
+        resp.data := tlOut.d.bits.data
     }
 
     // clunky workaround of the fact that Chisel doesn't allow partial
     // assignment to a bitfield range of a wide signal.
-    val laneValid = Wire(Vec(numLanes, Bool()))
-    val laneAddress = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).address)))
-    val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).is_store)))
-    val laneSize = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).size)))
-    val laneData = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).data)))
-    laneReqs.zipWithIndex.foreach { case (req, i) =>
-      laneValid(i) := req.valid
-      laneAddress(i) := req.address
-      laneIsStore(i) := req.is_store
-      laneSize(i) := req.size
-      laneData(i) := req.data
+    def flattenTrace(traceLogIO: Bundle with HasTraceReq, perLane: Vec[TraceReq]) = {
+      val laneValid = Wire(Vec(numLanes, Bool()))
+      val laneAddress = Wire(Vec(numLanes, chiselTypeOf(perLane(0).address)))
+      val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(perLane(0).is_store)))
+      val laneSize = Wire(Vec(numLanes, chiselTypeOf(perLane(0).size)))
+      val laneData = Wire(Vec(numLanes, chiselTypeOf(perLane(0).data)))
+      perLane.zipWithIndex.foreach { case (req, i) =>
+        laneValid(i) := req.valid
+        laneAddress(i) := req.address
+        laneIsStore(i) := req.is_store
+        laneSize(i) := req.size
+        laneData(i) := req.data
+      }
+      // flatten per-lane signals to the Verilog blackbox input
+      traceLogIO.valid := laneValid.asUInt
+      traceLogIO.address := laneAddress.asUInt
+      traceLogIO.is_store := laneIsStore.asUInt
+      traceLogIO.size := laneSize.asUInt
+      traceLogIO.data := laneData.asUInt
     }
-    // flatten per-lane signals to the Verilog blackbox input
-    sim.io.trace_log.valid := laneValid.asUInt
-    sim.io.trace_log.address := laneAddress.asUInt
-    sim.io.trace_log.is_store := laneIsStore.asUInt
-    sim.io.trace_log.size := laneSize.asUInt
-    sim.io.trace_log.data := laneData.asUInt
 
-    assert(sim.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
+    flattenTrace(simReq.io.trace_log, laneReqs)
+    flattenTrace(simResp.io.trace_log, laneResps)
+
+    assert(simReq.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
+    assert(simResp.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
+
+    // val laneValid = Wire(Vec(numLanes, Bool()))
+    // val laneAddress = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).address)))
+    // val laneIsStore = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).is_store)))
+    // val laneSize = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).size)))
+    // val laneData = Wire(Vec(numLanes, chiselTypeOf(laneReqs(0).data)))
+    // laneReqs.zipWithIndex.foreach { case (req, i) =>
+    //   laneValid(i) := req.valid
+    //   laneAddress(i) := req.address
+    //   laneIsStore(i) := req.is_store
+    //   laneSize(i) := req.size
+    //   laneData(i) := req.data
+    // }
+    // // flatten per-lane signals to the Verilog blackbox input
+    // simReq.io.trace_log.valid := laneValid.asUInt
+    // simReq.io.trace_log.address := laneAddress.asUInt
+    // simReq.io.trace_log.is_store := laneIsStore.asUInt
+    // simReq.io.trace_log.size := laneSize.asUInt
+    // simReq.io.trace_log.data := laneData.asUInt
   }
 }
 
-class SimMemTraceLogger(filename: String, numLanes: Int)
+// MemTraceLogger is bidirectional.  The DPI module tells itself if it's logging
+// the request stream or the response stream by `isResponse`.  This distinction
+// is needed because the response trace file will not contain certain columns
+// such as address.
+class SimMemTraceLogger(isResponse: Boolean, filename: String, numLanes: Int)
     extends BlackBox(
-      Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
+      Map(
+        "IS_RESPONSE" -> (if (isResponse) 1 else 0),
+        "FILENAME" -> filename,
+        "NUM_LANES" -> numLanes
+      )
     )
     with HasBlackBoxResource {
   val io = IO(new Bundle {
