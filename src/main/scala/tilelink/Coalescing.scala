@@ -866,16 +866,18 @@ class MemTraceLogger(
     )
 
     def tlAOpcodeIsStore(opcode: UInt): Bool = {
-      // 0: PutFullData, 1: PutPartialData but we don't support it
-      // 4: Get
-      assert(opcode === 0.U || opcode === 4.U, "unhandled TL A opcode found")
-      opcode === 0.U
+      assert(
+        opcode === TLMessages.PutFullData || opcode === TLMessages.PutPartialData,
+        "unhandled TL A opcode found"
+      )
+      opcode === TLMessages.PutFullData
     }
     def tlDOpcodeIsStore(opcode: UInt): Bool = {
-      // 0: AccessAck (Put), 1: AccessAckData (Get or Atomic)
-      // See Table 13 of spec 1.8.1
-      assert(opcode === 0.U || opcode === 1.U, "unhandled TL D opcode found")
-      opcode === 0.U
+      assert(
+        opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
+        "unhandled TL D opcode found"
+      )
+      opcode === TLMessages.AccessAck
     }
 
     // snoop on the TileLink edges to log traffic
