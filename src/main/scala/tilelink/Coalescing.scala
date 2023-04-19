@@ -10,6 +10,22 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
+import org.chipsalliance.tilelink.OpCode
+
+object CoalescerConsts {
+  val MAX_SIZE = 6       // maximum burst size (64 bytes)
+  val DEPTH = 1          // request window per lane
+  val WAIT_TIMEOUT = 8   // max cycles to wait before forced fifo dequeue, per lane
+  val ADDR_WIDTH = 32    // assume <= 32
+  val DATA_BUS_SIZE = 4  // 2^4=16 bytes, 128 bit bus
+  val NUM_LANES = 4
+  // val WATERMARK = 2      // minimum buffer occupancy to start coalescing
+  val WORD_SIZE = 4      // 32-bit system
+  val WORD_WIDTH = 2     // log(WORD_SIZE)
+  val NUM_OLD_IDS = 8    // num of outstanding requests per lane, from processor
+  val NUM_NEW_IDS = 4    // num of outstanding coalesced requests
+}
+
 class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModule {
   // Identity node that captures the incoming TL requests and passes them
   // through the other end, dropping coalesced requests.  This node is what
@@ -18,7 +34,7 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModu
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
   // value would be the sourceId range of a single lane.
-  val numInflightCoalRequests = 4
+  val numInflightCoalRequests = CoalescerConsts.NUM_NEW_IDS
 
   // Master node that actually generates coalesced requests.
   protected val coalParam = Seq(
@@ -37,37 +53,74 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModu
   lazy val module = new CoalescingUnitImp(this, numLanes)
 }
 
-class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int) extends Bundle {
-  val source = UInt(sourceWidth.W)
+class ReqQueueEntry(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, maxSize: Int) extends Bundle {
+  val op = UInt(1.W) // 0=READ 1=WRITE
   val address = UInt(addressWidth.W)
-  val data = UInt(64.W /* FIXME hardcoded */ ) // write data
+  val size = UInt(sizeWidth.W)
+  val source = UInt(sourceWidth.W)
+  val mask = UInt((1 << maxSize).W) // write only
+  val data = UInt((8 * (1 << maxSize)).W) // write only
 }
 
-class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int) extends Bundle {
+class RespQueueEntry(sourceWidth: Int, sizeWidth: Int, maxSize: Int) extends Bundle {
+  val op = UInt(1.W) // 0=READ 1=WRITE
+  val size = UInt(sizeWidth.W)
   val source = UInt(sourceWidth.W)
-  val data = UInt(dataWidthInBits.W) // read data
+  val data = UInt((8 * (1 << maxSize)).W) // read only
+  val error = Bool()
 }
+
+
+class MonoCoalescer(size: Int, window: Seq[CoalShiftQueue]) extends Module {
+  // constructor: size, window
+  // inputs: none
+  // outputs: leader idx, base addr, match OH, match count, coverage hits
+  val io = IO(new Bundle {
+    val leader_idx = Output(UInt(log2Ceil(CoalescerConsts.NUM_LANES).W)),
+    val base_addr = Output(UInt(CoalescerConsts.ADDR_WIDTH.W)),
+    val match_oh = Output(Vec(NUM_LANES, UInt(CoalescerConsts.DEPTH.W))),
+    val coverage_hits = Output(UInt((1 << CoalescerConsts.MAX_SIZE).W))
+  })
+
+  // def can_match(req0: ReqQueueEntry, req1: ReqQueueEntry): Bool
+
+  // combinational logic to drive output from window contents
+}
+
+class MultiCoalescer(sizes: Seq[Int], window: Seq[CoalShiftQueue], reqQueueEntryT: ReqQueueEntry) extends Module {
+  // constructor: sizes, window: Seq[CoalShiftQueue]
+  //              instantiate MonoCoalescers
+  // inputs: none
+  // outputs: out_req: Valid(ReqQueueEntry), invalidate: Valid(Seq[UInt(LOGDEPTH.W)])
+  val io = IO(new Bundle {
+    val out_req = Output(Valid(reqQueueEntryT.cloneType)),
+    val invalidate = Output(Valid(UInt(log2Ceil(LOGDEPTH.W)))),
+  })
+}
+
 
 class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
   // Make sure IdentityNode is connected to an upstream node, not just the
   // coalescer TL master node
   assert(outer.node.in.length >= 2)
 
-  val wordSize = 4
+  val wordSize = WORD_SIZE
 
-  val reqQueueDepth = 4 // FIXME test
-  val respQueueDepth = 2 // FIXME test
+  val reqQueueDepth = DEPTH
+  val respQueueDepth = NUM_NEW_IDS
 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   val addressWidth = outer.node.in(1)._1.params.addressBits
-  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth)
+  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, log2Ceil(MAX_SIZE), addressWidth)
   val reqQueues = Seq.tabulate(numLanes) { _ =>
     Module(new CoalShiftQueue(reqQueueEntryT, reqQueueDepth))
   }
 
   // The maximum number of requests from a single lane that can go into a
-  // coalesced request.  Upper bound is 2**sourceWidth.
-  val numPerLaneReqs = 2
+  // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
+  val numPerLaneReqs = DEPTH
+
+  val coalescer = Module(new MultiCoalescer(Seq(4, 5, 6), reqQueues, reqQueueEntryT))
 
   val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8)
   val respQueues = Seq.tabulate(numLanes) { _ =>
@@ -96,8 +149,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val respQueueNoncoalPort = 0
   val respQueueCoalPortOffset = 1
 
-  // did coalescing succeed at all?
-  val coalReqValid = Wire(Bool())
 
   // Per-lane request and response queues
   //
@@ -105,7 +156,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // queues between input and output edges to buffer requests and responses.
   // See IdentityNode definition in `diplomacy/Nodes.scala`.
   (outer.node.in zip outer.node.out).zipWithIndex.foreach {
-    case (((tlIn, edgeIn), (tlOut, _)), 0) =>
+    case (((tlIn, edgeIn), (tlOut, _)), 0) => // TODO: not necessarily 1 master edge
       assert(
         edgeIn.master.masters(0).name == "CoalescerNode",
         "First edge is not connected to the coalescer master node"
@@ -121,23 +172,26 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       val lane = i - 1
       val reqQueue = reqQueues(lane)
       val req = Wire(reqQueueEntryT)
+
+      // **********
+      // CONNECTING IO
+      // **********
+
+      assert(~tlIn.a.valid || (tlIn.a.bits.opcode === OpCode.Get ||  tlIn.a.bits.opcode === OpCode.PutFullData ||
+        tlIn.a.bits.opcode === OpCode.PutPartialData), "Coalescer input has unsupported TL opcode");
+      req.op := tlIn.a.bits.opcode === OpCode.Get ? 0.U : 1.U
       req.source := tlIn.a.bits.source
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
+      req.size := tlIn.a.bits.size
 
       reqQueue.io.enq.valid := tlIn.a.valid
       reqQueue.io.enq.bits := req
       // TODO: deq.ready should respect downstream ready
       reqQueue.io.deq.ready := true.B
-      reqQueue.io.invalidate := 0.U
-
+      reqQueue.io.invalidate.bits := 0.U // TODO
+      reqQueue.io.invalidate.valid := false.B // TODO
       printf(s"reqQueue(${lane}).count=%d\n", reqQueue.io.count)
-
-      // Invalidate coalesced requests
-      // FIXME: hardcoded lanes
-      // val invalidate = coalReqValid && (lane == 0 || lane == 2).B
-      val invalidate = coalReqValid
-      tlOut.a.valid := reqQueue.io.deq.valid && !invalidate
 
       val reqHead = reqQueue.io.deq.bits
       // FIXME: generate Get or Put according to read/write
@@ -146,9 +200,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         // `toAddress` should be aligned to 2**lgSize
         toAddress = reqHead.address,
         lgSize = 0.U
-      )
+      ) 
       assert(reqLegal, "unhandled illegal TL req gen")
-      tlOut.a.bits := reqBits
+
+      tlOut.a.bits := reqBits // TODO: this is incorrect, this does not take iinto account of queue
+      tlOut.a.valid := reqQueue.io.deq.valid
 
       // Response queue
       //
@@ -492,10 +548,12 @@ class CoalShiftQueue[T <: Data](
     pipe: Boolean = true,
     flow: Boolean = false
 ) extends Module {
-  val io = IO(new QueueIO(gen, entries) {
-    val invalidate = Input(UInt(entries.W))
-    val mask = Output(UInt(entries.W))
-    val elts = Output(Vec(entries, gen))
+    val io = IO(new Bundle {
+      val queue = new QueueIO(gen, entries) {
+      val invalidate = Input(Valid(UInt(entries.W)))
+      val mask = Output(UInt(entries.W))
+      val elts = Output(Vec(entries, gen))
+    }
   })
 
   private val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
