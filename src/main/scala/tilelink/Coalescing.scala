@@ -782,7 +782,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   // Give some slack time after trace EOF to the downstream system so that we
   // make sure to receive all outstanding responses.
   val finishCounter = RegInit(200.U(64.W))
-  when (sim.io.trace_read.finished) {
+  when(sim.io.trace_read.finished) {
     finishCounter := finishCounter - 1.U
   }
   io.finished := (finishCounter === 0.U)
@@ -861,6 +861,22 @@ class MemTraceLogger(
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val numReqs = Output(UInt(64.W))
+      val numResps = Output(UInt(64.W))
+      val reqBytes = Output(UInt(64.W))
+      val respBytes = Output(UInt(64.W))
+    })
+
+    val numReqs = RegInit(0.U(64.W))
+    val numResps = RegInit(0.U(64.W))
+    val reqBytes = RegInit(0.U(64.W))
+    val respBytes = RegInit(0.U(64.W))
+    io.numReqs := numReqs
+    io.numResps := numResps
+    io.reqBytes := reqBytes
+    io.respBytes := respBytes
+
     val simReq =
       if (reqEnable)
         Some(Module(new SimMemTraceLogger(false, s"${filename}.${loggerName}.req", numLanes)))
@@ -943,6 +959,16 @@ class MemTraceLogger(
         // the entire bits.
         resp.address := 0.U
         resp.data := tlOut.d.bits.data
+
+        // stats
+        when(req.valid) {
+          numReqs := numReqs + 1.U
+          reqBytes := reqBytes + (1.U << tlIn.a.bits.size)
+        }
+        when(resp.valid) {
+          numResps := numResps + 1.U
+          respBytes := respBytes + (1.U << tlOut.d.bits.size)
+        }
     }
 
     // Flatten per-lane signals to the Verilog blackbox input.
@@ -1074,6 +1100,20 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   class Impl extends LazyModuleImp(this) with UnitTestModule {
     driver.module.io.start := io.start
     io.finished := driver.module.io.finished
+
+    when(io.finished) {
+      printf(
+        "numReqs=%d, numResps=%d, reqBytes=%d, respBytes=%d\n",
+        coreSideLogger.module.io.numReqs,
+        coreSideLogger.module.io.numResps,
+        coreSideLogger.module.io.reqBytes,
+        coreSideLogger.module.io.respBytes
+      )
+      assert(
+        coreSideLogger.module.io.numReqs === coreSideLogger.module.io.numResps,
+        "FAIL: number of requests and responses to the coalescer do not match"
+      )
+    }
   }
 }
 
