@@ -255,6 +255,7 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val numLanes = 4
   val numPerLaneReqs = 2
   val sourceWidth = 2
+  val sizeWidth = 2
   // 16B coalescing size
   val coalDataWidth = 128
   val numInflightCoalRequests = 4
@@ -265,8 +266,9 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         numLanes,
         numPerLaneReqs,
         sourceWidth,
+        sizeWidth,
         coalDataWidth,
-        numInflightCoalRequests
+        numInflightCoalRequests,
       )
     )
     // vcs helps with simulation time, but sometimes errors with
