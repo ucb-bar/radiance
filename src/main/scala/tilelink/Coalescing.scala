@@ -656,7 +656,7 @@ class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, 0x1000)
+        sourceId = IdRange(0, 0x10)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
@@ -1035,10 +1035,10 @@ object TracePrintf {
 class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
-  // val coal = LazyModule(new CoalescingUnit(numLanes))
+  val coal = LazyModule(new CoalescingUnit(numLanes))
   val driver = LazyModule(new MemTraceDriver(numLanes))
-  val logger = LazyModule(new MemTraceLogger(numLanes))
-  val rams = Seq.fill(numLanes)( // +1 for coalesced edge
+  val logger = LazyModule(new MemTraceLogger(numLanes + 1))
+  val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
       // edges globally, by way of Diplomacy communicating the TL slave
@@ -1047,8 +1047,7 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
     )
   )
 
-  // logger.node :=* coal.node :=* driver.node
-  logger.node :=* driver.node
+  logger.node :=* coal.node :=* driver.node
   rams.foreach { r => r.node := logger.node }
 
   lazy val module = new Impl
