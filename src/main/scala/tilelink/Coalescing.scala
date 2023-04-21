@@ -114,7 +114,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
   val wordSize = WORD_SIZE
 
-  val reqQueueDepth = 4 // FIXME test
+  val reqQueueDepth = 1
   val respQueueDepth = 4 // FIXME test
 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
@@ -125,10 +125,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   }
 
   // The maximum number of requests from a single lane that can go into a
-  // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
-  val numPerLaneReqs = DEPTH
-
-  val coalescer = Module(new MultiCoalescer(Seq(4, 5, 6), reqQueues, reqQueueEntryT))
+  // coalesced request.  Upper bound is request queue depth.
+  val numPerLaneReqs = 1
 
   val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8)
   val respQueues = Seq.tabulate(numLanes) { _ =>
@@ -344,8 +342,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   uncoalescer.io.coalRespSrcId := tlCoal.d.bits.source
   uncoalescer.io.coalRespData := tlCoal.d.bits.data
 
-  // TODO: multibeat TL requests. Currently tlCoal.d.bits.data is fixed to 64b
-  // width
   println(s"=========== coalRespData width: ${tlCoal.d.bits.data.widthOption.get}")
 
   // Queue up synthesized uncoalesced responses into each lane's response queue
@@ -576,6 +572,8 @@ class CoalShiftQueue[T <: Data](
     val invalidate = Input(Valid(UInt(entries.W)))
     val mask = Output(UInt(entries.W))
     val elts = Output(Vec(entries, gen))
+    // 'QueueIO' provides io.count, but we might not want to use it in the
+    // coalescer because it has potentially expensive PopCount
   })
 
   private val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
