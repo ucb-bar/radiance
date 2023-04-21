@@ -169,7 +169,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
         fromSource = reqHead.source,
         toAddress = reqHead.address,
         lgSize = reqHead.size,
-        // data should be aligned to beatBytes
+        // data is already aligned by MemTraceDriver
+        // NOTE: if tlIn has different parameters, this will no longer be the
+        // case
         data = reqHead.data
       )
       val (glegal, gbits) = edgeOut.Get(
@@ -818,9 +820,14 @@ class SimMemTrace(filename: String, numLanes: Int)
 }
 
 class MemTraceLogger(
-    numLanes: Int = 4,
-    reqFilename: String = "vecadd.core1.thread4.logger.req.trace",
-    respFilename: String = "vecadd.core1.thread4.logger.resp.trace"
+    numLanes: Int,
+    // base filename for the generated trace files. full filename will be
+    // suffixed depending on `reqEnable`/`respEnable`/`loggerName`.
+    filename: String = "vecadd.core1.thread4.trace",
+    reqEnable: Boolean = true,
+    respEnable: Boolean = true,
+    // filename suffix that is unique to this logger module.
+    loggerName: String = ".logger"
 )(implicit
     p: Parameters
 ) extends LazyModule {
@@ -849,12 +856,22 @@ class MemTraceLogger(
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    val simReq = Module(new SimMemTraceLogger(false, reqFilename, numLanes))
-    val simResp = Module(new SimMemTraceLogger(true, respFilename, numLanes))
-    simReq.io.clock := clock
-    simReq.io.reset := reset.asBool
-    simResp.io.clock := clock
-    simResp.io.reset := reset.asBool
+    val simReq =
+      if (reqEnable)
+        Some(Module(new SimMemTraceLogger(false, s"${filename}.${loggerName}.req", numLanes)))
+      else None
+    val simResp =
+      if (respEnable)
+        Some(Module(new SimMemTraceLogger(true, s"${filename}.${loggerName}.resp", numLanes)))
+      else None
+    if (simReq.isDefined) {
+      simReq.get.io.clock := clock
+      simReq.get.io.reset := reset.asBool
+    }
+    if (simResp.isDefined) {
+      simResp.get.io.clock := clock
+      simResp.get.io.reset := reset.asBool
+    }
 
     val laneReqs = Wire(Vec(numLanes, new TraceLine))
     val laneResps = Wire(Vec(numLanes, new TraceLine))
@@ -951,11 +968,20 @@ class MemTraceLogger(
       traceLogIO.data := vecData.asUInt
     }
 
-    flattenTrace(simReq.io.trace_log, laneReqs)
-    flattenTrace(simResp.io.trace_log, laneResps)
-
-    assert(simReq.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
-    assert(simResp.io.trace_log.ready === true.B, "MemTraceLogger is expected to be always ready")
+    if (simReq.isDefined) {
+      flattenTrace(simReq.get.io.trace_log, laneReqs)
+      assert(
+        simReq.get.io.trace_log.ready === true.B,
+        "MemTraceLogger is expected to be always ready"
+      )
+    }
+    if (simResp.isDefined) {
+      flattenTrace(simResp.get.io.trace_log, laneResps)
+      assert(
+        simResp.get.io.trace_log.ready === true.B,
+        "MemTraceLogger is expected to be always ready"
+      )
+    }
   }
 }
 
@@ -1021,9 +1047,12 @@ object TracePrintf {
 class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
-  val coal = LazyModule(new CoalescingUnit(numLanes))
   val driver = LazyModule(new MemTraceDriver(numLanes))
-  val logger = LazyModule(new MemTraceLogger(numLanes + 1))
+  val coreSideLogger = LazyModule(
+    new MemTraceLogger(numLanes, loggerName = "coreside")
+  )
+  val coal = LazyModule(new CoalescingUnit(numLanes))
+  val memSideLogger = LazyModule(new MemTraceLogger(numLanes + 1, loggerName = "memside"))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
@@ -1033,8 +1062,8 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
     )
   )
 
-  logger.node :=* coal.node :=* driver.node
-  rams.foreach { r => r.node := logger.node }
+  memSideLogger.node :=* coal.node :=* coreSideLogger.node :=* driver.node
+  rams.foreach { r => r.node := memSideLogger.node }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
