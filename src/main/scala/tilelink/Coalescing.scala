@@ -53,57 +53,22 @@ class CoalescingUnit(numLanes: Int = 1)(implicit p: Parameters) extends LazyModu
   lazy val module = new CoalescingUnitImp(this, numLanes)
 }
 
-class ReqQueueEntry(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, maxSize: Int) extends Bundle {
-  val op = UInt(1.W) // 0=READ 1=WRITE
+// FIXME: this overlaps a lot with HasTraceLine
+class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int, val sizeWidth: Int)
+    extends Bundle {
+  val source = UInt(sourceWidth.W)
+  val isStore = Bool()
   val address = UInt(addressWidth.W)
-  val size = UInt(sizeWidth.W)
+  val size = UInt(sizeWidth.W) // log(sizeInBytes)
+  val data = UInt(64.W /* FIXME hardcoded */ ) // write data
+}
+
+class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int, val sizeWidth: Int)
+    extends Bundle {
   val source = UInt(sourceWidth.W)
-  val mask = UInt((1 << maxSize).W) // write only
-  val data = UInt((8 * (1 << maxSize)).W) // write only
-}
-
-class RespQueueEntry(sourceWidth: Int, sizeWidth: Int, maxSize: Int) extends Bundle {
-  val op = UInt(1.W) // 0=READ 1=WRITE
-  val size = UInt(sizeWidth.W)
-  val source = UInt(sourceWidth.W)
-  val data = UInt((8 * (1 << maxSize)).W) // read only
-  val error = Bool()
-}
-
-
-class MonoCoalescer[QueueT: CoalShiftQueue](coalSize: Int, coalWindow: Seq[QueueT]) extends Module {
-  val io = IO(new Bundle {
-    val leader_idx = Output(UInt(log2Ceil(CoalescerConsts.NUM_LANES).W))
-    val base_addr = Output(UInt(CoalescerConsts.ADDR_WIDTH.W))
-    val match_oh = Output(Vec(CoalescerConsts.NUM_LANES, UInt(CoalescerConsts.DEPTH.W)))
-    val coverage_hits = Output(UInt((1 << CoalescerConsts.MAX_SIZE).W))
-  })
-
-  val size = coalSize
-  val mask = ((1 << CoalescerConsts.ADDR_WIDTH - 1) - (1 << size - 1)).U
-  val window = coalWindow
-
-  def can_match(req0: Valid[ReqQueueEntry], req1: Valid[ReqQueueEntry]): Bool = {
-    (req0.bits.op === req1.bits.op) &&
-    (req0.valid && req1.valid) &&
-    ((req0.bits.address & this.mask) === (req1.bits.address & this.mask))
-  }
-
-  // combinational logic to drive output from window contents
-
-  leaders = coalWindow.map(_.head)
-}
-
-class MultiCoalescer[QueueT: CoalShiftQueue]
-    (sizes: Seq[Int], window: Seq[QueueT], reqQueueEntryT: ReqQueueEntry) extends Module {
-
-  val coalescers = sizes.map(size => Module(new MonoCoalescer(size, window)))
-  // inputs: none
-  // outputs: out_req: Valid(ReqQueueEntry), invalidate: Valid(Seq[UInt(LOGDEPTH.W)])
-  val io = IO(new Bundle {
-    val out_req = Output(Valid(reqQueueEntryT.cloneType))
-    val invalidate = Output(Valid(UInt(log2Ceil(CoalescerConsts.LOGDEPTH.W))))
-  })
+  val isStore = Bool()
+  val size = UInt(sizeWidth.W) // log(sizeInBytes)
+  val data = UInt(dataWidthInBits.W) // read data
 }
 
 
@@ -112,14 +77,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // coalescer TL master node
   assert(outer.node.in.length >= 2)
 
-  val wordSize = WORD_SIZE
+  // 32-bit system. FIXME hardcoded
+  val wordSize = 4
 
   val reqQueueDepth = 1
   val respQueueDepth = 4 // FIXME test
 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   val addressWidth = outer.node.in(1)._1.params.addressBits
-  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, log2Ceil(MAX_SIZE), addressWidth)
+  val sizeWidth = outer.node.in(1)._1.params.sizeBits
+  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, addressWidth, sizeWidth)
   val reqQueues = Seq.tabulate(numLanes) { _ =>
     Module(new CoalShiftQueue(reqQueueEntryT, reqQueueDepth))
   }
@@ -128,7 +95,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // coalesced request.  Upper bound is request queue depth.
   val numPerLaneReqs = 1
 
-  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8)
+  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8, sizeWidth)
   val respQueues = Seq.tabulate(numLanes) { _ =>
     Module(
       new MultiPortQueue(
@@ -179,7 +146,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       val reqQueue = reqQueues(lane)
       val req = Wire(reqQueueEntryT)
       req.source := tlIn.a.bits.source
+      req.isStore := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
       req.address := tlIn.a.bits.address
+      req.size := tlIn.a.bits.size
       req.data := tlIn.a.bits.data
 
       assert(reqQueue.io.enq.ready, "reqQueue is supposed to be always ready")
@@ -196,85 +165,64 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       tlOut.a.valid := reqQueue.io.deq.valid && !invalidate
 
       val reqHead = reqQueue.io.deq.bits
-      // FIXME: generate Get or Put according to read/write
-      val (reqLegal, reqBits) = edgeOut.Get(
+      val (plegal, pbits) = edgeOut.Put(
         fromSource = reqHead.source,
-        // `toAddress` should be aligned to 2**lgSize
         toAddress = reqHead.address,
-        lgSize = 0.U
+        lgSize = reqHead.size,
+        // data should be aligned to beatBytes
+        data = reqHead.data
       )
-      assert(reqLegal, "unhandled illegal TL req gen")
-      tlOut.a.bits := reqBits
+      val (glegal, gbits) = edgeOut.Get(
+        fromSource = reqHead.source,
+        toAddress = reqHead.address,
+        lgSize = reqHead.size
+      )
+      val legal = Mux(reqHead.isStore, plegal, glegal)
+      val bits = Mux(reqHead.isStore, pbits, gbits)
+      assert(legal, "unhandled illegal TL req gen")
+      tlOut.a.bits := bits
 
-      // **********
-      // CONNECTING IO
-      // **********
+      // Response queue
+      //
+      // This queue will serialize non-coalesced responses along with
+      // coalesced responses and serve them back to the core side.
+      val respQueue = respQueues(lane)
+      val resp = Wire(respQueueEntryT)
+      resp.source := tlOut.d.bits.source
+      resp.isStore := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
+      resp.size := tlOut.d.bits.size
+      resp.data := tlOut.d.bits.data
 
-      assert(~tlIn.a.valid || (tlIn.a.bits.opcode === OpCode.Get ||  tlIn.a.bits.opcode === OpCode.PutFullData ||
-        tlIn.a.bits.opcode === OpCode.PutPartialData), "Coalescer input has unsupported TL opcode");
-      req.op := tlIn.a.bits.opcode === OpCode.Get ? 0.U : 1.U
-    req.source := tlIn.a.bits.source
-    req.address := tlIn.a.bits.address
-    req.data := tlIn.a.bits.data
-    req.size := tlIn.a.bits.size
+      // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
+      // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
+      assert(
+        respQueue.io.enq(respQueueNoncoalPort).ready,
+        "respQueue: enq port for noncoalesced response is blocked"
+      )
+      respQueue.io.enq(respQueueNoncoalPort).valid := tlOut.d.valid
+      respQueue.io.enq(respQueueNoncoalPort).bits := resp
+      // TODO: deq.ready should respect upstream ready
+      respQueue.io.deq(respQueueNoncoalPort).ready := true.B
 
-    reqQueue.io.enq.valid := tlIn.a.valid
-    reqQueue.io.enq.bits := req
-    // TODO: deq.ready should respect downstream ready
-    reqQueue.io.deq.ready := true.B
-    reqQueue.io.invalidate.bits := 0.U // TODO
-    reqQueue.io.invalidate.valid := false.B // TODO
-    printf(s"reqQueue(${lane}).count=%d\n", reqQueue.io.count)
+      tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
+      val respHead = respQueue.io.deq(respQueueNoncoalPort).bits
+      // TODO: AccessAckData for Get
+      val respBits = edgeIn.AccessAck(
+        toSource = respHead.source,
+        lgSize = 0.U,
+        data = respHead.data
+      )
+      tlIn.d.bits := respBits
 
-    val reqHead = reqQueue.io.deq.bits
-    // FIXME: generate Get or Put according to read/write
-    val (reqLegal, reqBits) = edgeOut.Get(
-      fromSource = reqHead.source,
-      // `toAddress` should be aligned to 2**lgSize
-      toAddress = reqHead.address,
-      lgSize = 0.U
-    )
-    assert(reqLegal, "unhandled illegal TL req gen")
-
-    tlOut.a.bits := reqBits // TODO: this is incorrect, this does not take iinto account of queue
-    tlOut.a.valid := reqQueue.io.deq.valid
-
-    // Response queue
-    //
-    // This queue will serialize non-coalesced responses along with
-    // coalesced responses and serve them back to the core side.
-    val respQueue = respQueues(lane)
-    val resp = Wire(respQueueEntryT)
-    resp.source := tlOut.d.bits.source
-    resp.data := tlOut.d.bits.data
-    // TODO: read/write bit?
-
-    // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
-    // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
-    assert(
-      respQueue.io.enq(respQueueNoncoalPort).ready,
-      "respQueue: enq port for noncoalesced response is blocked"
-    )
-    respQueue.io.enq(respQueueNoncoalPort).valid := tlOut.d.valid
-    respQueue.io.enq(respQueueNoncoalPort).bits := resp
-    // TODO: deq.ready should respect upstream ready
-    respQueue.io.deq(respQueueNoncoalPort).ready := true.B
-
-    tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
-    val respHead = respQueue.io.deq(respQueueNoncoalPort).bits
-    val respBits = edgeIn.AccessAck(
-      toSource = respHead.source,
-      lgSize = 0.U,
-      data = respHead.data
-    )
-    tlIn.d.bits := respBits
-
-    // Debug only
-    val inflightCounter = RegInit(UInt(32.W), 0.U)
-    when(tlOut.a.valid) {
-      // don't inc/dec on simultaneous req/resp
-      when(!tlOut.d.valid) {
-        inflightCounter := inflightCounter + 1.U
+      // Debug only
+      val inflightCounter = RegInit(UInt(32.W), 0.U)
+      when(tlOut.a.valid) {
+        // don't inc/dec on simultaneous req/resp
+        when(!tlOut.d.valid) {
+          inflightCounter := inflightCounter + 1.U
+        }
+      }.elsewhen(tlOut.d.valid) {
+        inflightCounter := inflightCounter - 1.U
       }
     }.elsewhen(tlOut.d.valid) {
       inflightCounter := inflightCounter - 1.U
@@ -361,6 +309,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       numLanes,
       numPerLaneReqs,
       sourceWidth,
+      sizeWidth,
       coalDataWidth,
       outer.numInflightCoalRequests
     )
@@ -400,12 +349,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 }
 
 class UncoalescingUnit(
-                        val numLanes: Int,
-                        val numPerLaneReqs: Int,
-                        val sourceWidth: Int,
-                        val coalDataWidth: Int,
-                        val numInflightCoalRequests: Int
-                      ) extends Module {
+    val numLanes: Int,
+    val numPerLaneReqs: Int,
+    val sourceWidth: Int,
+    val sizeWidth: Int,
+    val coalDataWidth: Int,
+    val numInflightCoalRequests: Int
+) extends Module {
   val inflightTable = Module(
     new InflightCoalReqTable(numLanes, numPerLaneReqs, sourceWidth, numInflightCoalRequests)
   )
@@ -418,7 +368,10 @@ class UncoalescingUnit(
     val coalRespSrcId = Input(UInt(sourceWidth.W))
     val coalRespData = Input(UInt(coalDataWidth.W))
     val uncoalResps = Output(
-      Vec(numLanes, Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8))))
+      Vec(
+        numLanes,
+        Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8, sizeWidth)))
+      )
     )
   })
 
@@ -783,7 +736,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(req.address),
       lgSize = req.size, // trace line already holds log2(size)
-      // Need to construct data that is correctly aligned to beatBytes
+      // data should be aligned to beatBytes
       data = (req.data << (8.U * (req.address % edge.manager.beatBytes.U)))
     )
     val (glegal, gbits) = edge.Get(
