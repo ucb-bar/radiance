@@ -178,6 +178,33 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       val lane = i - 1
       val reqQueue = reqQueues(lane)
       val req = Wire(reqQueueEntryT)
+      req.source := tlIn.a.bits.source
+      req.address := tlIn.a.bits.address
+      req.data := tlIn.a.bits.data
+
+      assert(reqQueue.io.enq.ready, "reqQueue is supposed to be always ready")
+      reqQueue.io.enq.valid := tlIn.a.valid
+      reqQueue.io.enq.bits := req
+      // TODO: deq.ready should respect downstream ready
+      reqQueue.io.deq.ready := true.B
+      reqQueue.io.invalidate := 0.U
+
+      // Invalidate coalesced requests
+      // FIXME: hardcoded lanes
+      // val invalidate = coalReqValid && (lane == 0 || lane == 2).B
+      val invalidate = coalReqValid
+      tlOut.a.valid := reqQueue.io.deq.valid && !invalidate
+
+      val reqHead = reqQueue.io.deq.bits
+      // FIXME: generate Get or Put according to read/write
+      val (reqLegal, reqBits) = edgeOut.Get(
+        fromSource = reqHead.source,
+        // `toAddress` should be aligned to 2**lgSize
+        toAddress = reqHead.address,
+        lgSize = 0.U
+      )
+      assert(reqLegal, "unhandled illegal TL req gen")
+      tlOut.a.bits := reqBits
 
       // **********
       // CONNECTING IO
@@ -270,8 +297,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   coalReqAddress := (0xabcd.U + coalSourceId) << 4
   // FIXME: bogus coalescing logic: coalesce whenever all 4 lanes have valid
   // queue head
-  coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
-    reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
+  // coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
+  //   reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
+  coalReqValid := false.B
   when(coalReqValid) {
     // invalidate original requests due to coalescing
     // FIXME: bogus
@@ -307,7 +335,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   val newEntry = Wire(
     new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
   )
+
   println(s"=========== table sourceWidth: ${sourceWidth}")
+
   newEntry.source := coalSourceId
   newEntry.lanes.foreach { l =>
     l.reqs.zipWithIndex.foreach { case (r, i) =>
@@ -598,12 +628,13 @@ class CoalShiftQueue[T <: Data](
   def paddedUsed = pad({ i: Int => used(i) })
   def validAfterInv(i: Int) = valid(i) && !io.invalidate.bits(i)
 
-  val shift = io.queue.deq.ready || (used =/= 0.U) && !validAfterInv(0)
+  val shift = (used =/= 0.U) && (io.deq.ready || !validAfterInv(0))
   for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.queue.enq.bits else Mux(!used(i + 1), io.queue.enq.bits, elts(i + 1))
     val wen = Mux(
       shift,
-      (io.queue.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
+      // enqueue to the top entry which will be shifted down and make space
+      (io.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
       // enqueue to the first empty slot above the top
       (io.queue.enq.fire && paddedUsed(i - 1) && !used(i)) || !validAfterInv(i)
     )

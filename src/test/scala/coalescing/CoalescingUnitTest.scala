@@ -87,7 +87,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.invalidate.poke(0.U)
 
       // prepare
-      c.io.deq.ready.poke(false.B)
+      c.io.deq.ready.poke(true.B)
       c.io.enq.ready.expect(true.B)
       c.io.enq.valid.poke(true.B)
       c.io.enq.bits.poke(0x12.U)
@@ -105,6 +105,45 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.enq.valid.poke(false.B)
       c.io.deq.valid.expect(true.B)
       c.io.deq.bits.expect(0x34.U)
+      c.clock.step()
+      // make sure is empty
+      c.io.deq.ready.poke(true.B)
+      c.io.enq.valid.poke(false.B)
+      c.io.deq.valid.expect(false.B)
+    }
+  }
+
+  it should "work when enqueing and dequeueing simultaneously to a full queue" in {
+    test(new CoalShiftQueue(UInt(8.W), 1)) { c =>
+      c.io.invalidate.poke(0.U)
+
+      // prepare
+      c.io.deq.ready.poke(true.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x12.U)
+      c.clock.step()
+      // enqueue and dequeue simultaneously
+      c.io.deq.ready.poke(true.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x34.U)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x12.U)
+      c.clock.step()
+      // enqueue and dequeue simultaneously once more
+      c.io.deq.ready.poke(true.B)
+      c.io.enq.ready.expect(true.B)
+      c.io.enq.valid.poke(true.B)
+      c.io.enq.bits.poke(0x56.U)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x34.U)
+      c.clock.step()
+      // dequeueing back-to-back should work without any holes in the middle
+      c.io.deq.ready.poke(true.B)
+      c.io.enq.valid.poke(false.B)
+      c.io.deq.valid.expect(true.B)
+      c.io.deq.bits.expect(0x56.U)
       c.clock.step()
       // make sure is empty
       c.io.deq.ready.poke(true.B)
