@@ -297,9 +297,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   coalReqAddress := (0xabcd.U + coalSourceId) << 4
   // FIXME: bogus coalescing logic: coalesce whenever all 4 lanes have valid
   // queue head
-  // coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
-  //   reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
-  coalReqValid := false.B
+  coalReqValid := reqQueues(0).io.deq.valid && reqQueues(1).io.deq.valid &&
+    reqQueues(2).io.deq.valid && reqQueues(3).io.deq.valid
+  // coalReqValid := false.B
   when(coalReqValid) {
     // invalidate original requests due to coalescing
     // FIXME: bogus
@@ -679,6 +679,23 @@ class CoalShiftQueue[T <: Data](
   io.queue.count := PopCount(io.mask)
 }
 
+object TLUtils {
+  def AOpcodeIsStore(opcode: UInt): Bool = {
+    assert(
+      opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
+      "unhandled TL A opcode found"
+    )
+    opcode === TLMessages.PutFullData
+  }
+  def DOpcodeIsStore(opcode: UInt): Bool = {
+    assert(
+      opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
+      "unhandled TL D opcode found"
+    )
+    opcode === TLMessages.AccessAck
+  }
+}
+
 class MemTraceDriver(numLanes: Int = 4, filename: String = "vecadd.core1.thread4.trace")(implicit
     p: Parameters
 ) extends LazyModule {
@@ -894,21 +911,6 @@ class MemTraceLogger(
       "`numLanes` does not match the number of TL edges connected to the MemTraceLogger"
     )
 
-    def tlAOpcodeIsStore(opcode: UInt): Bool = {
-      assert(
-        opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
-        "unhandled TL A opcode found"
-      )
-      opcode === TLMessages.PutFullData
-    }
-    def tlDOpcodeIsStore(opcode: UInt): Bool = {
-      assert(
-        opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
-        "unhandled TL D opcode found"
-      )
-      opcode === TLMessages.AccessAck
-    }
-
     // snoop on the TileLink edges to log traffic
     ((node.in zip node.out) zip (laneReqs zip laneResps)).foreach {
       case (((tlIn, _), (tlOut, _)), (req, resp)) =>
@@ -919,7 +921,7 @@ class MemTraceLogger(
         //
         req.valid := tlIn.a.valid
         req.size := tlIn.a.bits.size
-        req.is_store := tlAOpcodeIsStore(tlIn.a.bits.opcode)
+        req.is_store := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
         req.source := tlIn.a.bits.source
         // TL always carries the exact unaligned address that the client
         // originally requested, so no postprocessing required
@@ -958,7 +960,7 @@ class MemTraceLogger(
         //
         resp.valid := tlOut.d.valid
         resp.size := tlOut.d.bits.size
-        resp.is_store := tlDOpcodeIsStore(tlOut.d.bits.opcode)
+        resp.is_store := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
         resp.source := tlOut.d.bits.source
         // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
         // way to figure out which bytes the master actually use.  Since we
