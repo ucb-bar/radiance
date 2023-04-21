@@ -208,12 +208,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
 
       tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
       val respHead = respQueue.io.deq(respQueueNoncoalPort).bits
-      // TODO: AccessAckData for Get
-      val respBits = edgeIn.AccessAck(
+      val apBits = edgeIn.AccessAck(
         toSource = respHead.source,
-        lgSize = 0.U,
+        lgSize = respHead.size
+      )
+      val agBits = edgeIn.AccessAck(
+        toSource = respHead.source,
+        lgSize = respHead.size,
         data = respHead.data
       )
+      val respBits = Mux(respHead.isStore, apBits, agBits)
       tlIn.d.bits := respBits
 
       // Debug only

@@ -88,8 +88,8 @@ extern "C" void memtracelogger_log(int handle,
     return;
   }
 
-  printf("%s: [%lu] valid: address=%lx, tid=%u, size=%d\n", __func__,
-         trace_log_cycle, trace_log_address, trace_log_lane_id, trace_log_size);
+  // printf("%s: [%lu] valid: address=%lx, tid=%u, size=%d\n", __func__,
+  //        trace_log_cycle, trace_log_address, trace_log_lane_id, trace_log_size);
 
   MemTraceLine line{.valid = (trace_log_valid == 1),
                     .cycle = static_cast<long>(trace_log_cycle),
