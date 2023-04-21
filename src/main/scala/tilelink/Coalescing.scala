@@ -779,18 +779,19 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     dontTouch(tlOut.d)
   }
 
-  io.finished := sim.io.trace_read.finished
-  when(io.finished) {
-    assert(
-      false.B,
-      "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
-    )
+  // Give some slack time after trace EOF to the downstream system so that we
+  // make sure to receive all outstanding responses.
+  val finishCounter = RegInit(200.U(64.W))
+  when (sim.io.trace_read.finished) {
+    finishCounter := finishCounter - 1.U
   }
-
-  // Clock Counter, for debugging purpose
-  val clkcount = RegInit(0.U(64.W))
-  clkcount := clkcount + 1.U
-  dontTouch(clkcount)
+  io.finished := (finishCounter === 0.U)
+  // when(io.finished) {
+  //   assert(
+  //     false.B,
+  //     "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
+  //   )
+  // }
 }
 
 class SimMemTrace(filename: String, numLanes: Int)
