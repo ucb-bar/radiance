@@ -291,6 +291,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   )
 
   println(s"=========== table sourceWidth: ${sourceWidth}")
+  println(s"=========== table sizeBits: ${sizeBits}")
 
   newEntry.source := coalSourceId
   newEntry.lanes.foreach { l =>
@@ -693,7 +694,7 @@ class TraceLine extends Bundle with HasTraceLine {
   val source = UInt(32.W)
   val address = UInt(64.W)
   val is_store = Bool()
-  val size = UInt(32.W) // this is log2(bytesize) as in TL A bundle
+  val size = UInt(8.W) // this is log2(bytesize) as in TL A bundle
   val data = UInt(64.W)
 }
 
@@ -959,17 +960,25 @@ class MemTraceLogger(
         // the entire bits.
         resp.address := 0.U
         resp.data := tlOut.d.bits.data
-
-        // stats
-        when(req.valid) {
-          numReqs := numReqs + 1.U
-          reqBytes := reqBytes + (1.U << tlIn.a.bits.size)
-        }
-        when(resp.valid) {
-          numResps := numResps + 1.U
-          respBytes := respBytes + (1.U << tlOut.d.bits.size)
-        }
     }
+
+    // stats
+    val numReqsThisCycle =
+      laneReqs.map { l => Mux(l.valid, 1.U(64.W), 0.U(64.W)) }.reduce { (v0, v1) => v0 + v1 }
+    val numRespsThisCycle =
+      laneResps.map { l => Mux(l.valid, 1.U(64.W), 0.U(64.W)) }.reduce { (v0, v1) => v0 + v1 }
+    val reqBytesThisCycle =
+      laneReqs.map { l => Mux(l.valid, 1.U(64.W) << l.size, 0.U(64.W)) }.reduce { (b0, b1) =>
+        b0 + b1
+      }
+    val respBytesThisCycle =
+      laneResps.map { l => Mux(l.valid, 1.U(64.W) << l.size, 0.U(64.W)) }.reduce { (b0, b1) =>
+        b0 + b1
+      }
+    numReqs := numReqs + numReqsThisCycle
+    numResps := numResps + numRespsThisCycle
+    reqBytes := reqBytes + reqBytesThisCycle
+    respBytes := respBytes + respBytesThisCycle
 
     // Flatten per-lane signals to the Verilog blackbox input.
     //
