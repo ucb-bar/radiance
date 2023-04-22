@@ -71,17 +71,18 @@ class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int, val sizeWid
   val data = UInt(dataWidthInBits.W) // read data
 }
 
+// 32-bit system
+object WordSizeInBytes {
+  def apply(): Int = 4
+}
 
 class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModuleImp(outer) {
   // Make sure IdentityNode is connected to an upstream node, not just the
   // coalescer TL master node
   assert(outer.node.in.length >= 2)
 
-  // 32-bit system. FIXME hardcoded
-  val wordSize = 4
-
   val reqQueueDepth = 1
-  val respQueueDepth = 4 // FIXME test
+  val respQueueDepth = 4 // TODO: hardcoded
 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   val addressWidth = outer.node.in(1)._1.params.addressBits
@@ -95,7 +96,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // coalesced request.  Upper bound is request queue depth.
   val numPerLaneReqs = 1
 
-  val respQueueEntryT = new RespQueueEntry(sourceWidth, wordSize * 8, sizeWidth)
+  val respQueueEntryT = new RespQueueEntry(sourceWidth, WordSizeInBytes() * 8, sizeWidth)
   val respQueues = Seq.tabulate(numLanes) { _ =>
     Module(
       new MultiPortQueue(
@@ -366,8 +367,6 @@ class UncoalescingUnit(
   val inflightTable = Module(
     new InflightCoalReqTable(numLanes, numPerLaneReqs, sourceWidth, numInflightCoalRequests)
   )
-  val wordSize = 4 // FIXME duplicate
-
   val io = IO(new Bundle {
     val coalReqValid = Input(Bool())
     val newEntry = Input(inflightTable.entryT)
@@ -377,7 +376,7 @@ class UncoalescingUnit(
     val uncoalResps = Output(
       Vec(
         numLanes,
-        Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, wordSize * 8, sizeWidth)))
+        Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, WordSizeInBytes() * 8, sizeWidth)))
       )
     )
   })
