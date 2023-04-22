@@ -300,7 +300,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       r.valid := false.B
       r.source := i.U // FIXME bogus
       r.offset := 1.U
-      r.size := 2.U
+      r.size := 2.U // FIXME hardcoded
     }
   }
   newEntry.lanes(0).reqs(0).valid := true.B
@@ -688,7 +688,8 @@ trait HasTraceLine {
   val data: UInt
 }
 
-// used for both request and response.  response had address set to 0
+// Used for both request and response.  Response had address set to 0
+// NOTE: these widths have to agree with what's hardcoded in Verilog.
 class TraceLine extends Bundle with HasTraceLine {
   val valid = Bool()
   val source = UInt(32.W)
@@ -712,14 +713,17 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
   // back to each lane's.
 
   val laneReqs = Wire(Vec(numLanes, new TraceLine))
+  val addrW = laneReqs(0).address.getWidth
+  val sizeW = laneReqs(0).size.getWidth
+  val dataW = laneReqs(0).data.getWidth
   laneReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := sim.io.trace_read.valid(i)
-    // TODO: don't take source id from the original trace for now
+    // TODO: driver trace doesn't contain source id
     req.source := 0.U
-    req.address := sim.io.trace_read.address(64 * i + 63, 64 * i)
+    req.address := sim.io.trace_read.address(addrW * (i + 1) - 1, addrW * i)
     req.is_store := sim.io.trace_read.is_store(i)
-    req.size := sim.io.trace_read.size(32 * i + 31, 32 * i)
-    req.data := sim.io.trace_read.data(64 * i + 63, 64 * i)
+    req.size := sim.io.trace_read.size(sizeW * (i + 1) - 1, sizeW * i)
+    req.data := sim.io.trace_read.data(dataW * (i + 1) - 1, dataW * i)
   }
 
   // To prevent collision of sourceId with a current in-flight message,
@@ -800,6 +804,11 @@ class SimMemTrace(filename: String, numLanes: Int)
     Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
   )
     with HasBlackBoxResource {
+  val traceLineT = new TraceLine
+  val addrW = traceLineT.address.getWidth
+  val sizeW = traceLineT.size.getWidth
+  val dataW = traceLineT.data.getWidth
+
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -812,10 +821,10 @@ class SimMemTrace(filename: String, numLanes: Int)
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.
       // TODO: assumes 64-bit address.
-      val address = Output(UInt((64 * numLanes).W))
+      val address = Output(UInt((addrW * numLanes).W))
       val is_store = Output(UInt(numLanes.W))
-      val size = Output(UInt((32 * numLanes).W))
-      val data = Output(UInt((64 * numLanes).W))
+      val size = Output(UInt((sizeW * numLanes).W))
+      val data = Output(UInt((dataW * numLanes).W))
       val finished = Output(Bool())
     }
   })
@@ -1038,20 +1047,26 @@ class SimMemTraceLogger(isResponse: Boolean, filename: String, numLanes: Int)
       )
     )
     with HasBlackBoxResource {
+  val traceLineT = new TraceLine
+  val sourceW = traceLineT.source.getWidth
+  val addrW = traceLineT.address.getWidth
+  val sizeW = traceLineT.size.getWidth
+  val dataW = traceLineT.data.getWidth
+
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
 
     val trace_log = new Bundle with HasTraceLine {
       val valid = Input(UInt(numLanes.W))
-      val source = Input(UInt((32 * numLanes).W))
+      val source = Input(UInt((sourceW * numLanes).W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.
       // TODO: assumes 64-bit address.
-      val address = Input(UInt((64 * numLanes).W))
+      val address = Input(UInt((addrW * numLanes).W))
       val is_store = Input(UInt(numLanes.W))
-      val size = Input(UInt((32 * numLanes).W))
-      val data = Input(UInt((64 * numLanes).W))
+      val size = Input(UInt((sizeW * numLanes).W))
+      val data = Input(UInt((dataW * numLanes).W))
       val ready = Output(Bool())
     }
   })

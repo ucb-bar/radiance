@@ -1,7 +1,7 @@
 // FIXME hardcoded
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
-`define LOGSIZE_WIDTH 32
+`define LOGSIZE_WIDTH 8
 
 import "DPI-C" function void memtrace_init(
   input  string  filename
@@ -41,7 +41,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   longint __in_address [NUM_LANES-1:0];
 
   bit     __in_is_store [NUM_LANES-1:0];
-  int     __in_size [NUM_LANES-1:0];
+  reg [`LOGSIZE_WIDTH-1:0] __in_size [NUM_LANES-1:0];
   longint __in_data [NUM_LANES-1:0];
 
   bit __in_finished;
@@ -57,10 +57,10 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   reg [NUM_LANES-1:0]   __in_valid_reg;
   reg [`DATA_WIDTH-1:0] __in_address_reg [NUM_LANES-1:0];
 
-  reg [NUM_LANES-1:0]   __in_is_store_reg;
-  int                   __in_size_reg [NUM_LANES-1:0];
-  reg [`DATA_WIDTH-1:0] __in_data_reg [NUM_LANES-1:0];
-  reg                   __in_finished_reg;
+  reg [NUM_LANES-1:0]      __in_is_store_reg;
+  reg [`LOGSIZE_WIDTH-1:0] __in_size_reg [NUM_LANES-1:0];
+  reg [`DATA_WIDTH-1:0]    __in_data_reg [NUM_LANES-1:0];
+  reg                      __in_finished_reg;
 
   genvar g;
 

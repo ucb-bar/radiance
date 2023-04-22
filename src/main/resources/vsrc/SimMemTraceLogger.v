@@ -2,7 +2,7 @@
 `define DATA_WIDTH 64
 `define MAX_NUM_LANES 32
 `define SOURCEID_WIDTH 32
-`define LOGSIZE_WIDTH 32
+`define LOGSIZE_WIDTH 8
 
 import "DPI-C" function int memtracelogger_init(
   input bit    is_response,
