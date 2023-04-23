@@ -549,15 +549,16 @@ class UncoalescingUnit(config: CoalescerConfig, tlCoalD: TLBundleD) extends Modu
       (dataWidth > 0).B && (dataWidth.U % sizeInBits === 0.U),
       s"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
     )
-    assert(logSize === 2.U || logSize === 0.U, "TODO: currently only supporting 4-byte accesses")
+    assert(logSize === 2.U, "currently only supporting 4-byte accesses. TODO")
     val numChunks = dataWidth / 32
     val chunks = Wire(Vec(numChunks, UInt(32.W)))
     val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
-      // Take [(off+1)*size-1:off*size] starting from LSB
-      // FIXME: whether to take the offset from MSB or LSB depends on endianness
+      // FIXME: whether to take the offset from MSB or LSB depends on
+      // endianness.  Right now we're assuming little endian
       c := data(32 * (o + 1) - 1, 32 * o)
-    // c := (data >> (dataWidth - (o + 1) * 32)) & sizeMask
+      // If taking from MSB:
+      // c := (data >> (dataWidth - (o + 1) * 32)) & sizeMask
     }
     chunks(offset) // MUX
   }
@@ -795,19 +796,15 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     val offsetInWord = req.address % config.WORD_SIZE.U
     val subword = req.size < log2Ceil(config.WORD_SIZE).U
 
+    // `mask` is currently unused
     val mask = Wire(UInt(config.WORD_SIZE.W))
-    val wordData = Wire(UInt((config.WORD_SIZE * 8).W))
+    val wordData = Wire(UInt((config.WORD_SIZE * 8 * 2).W))
     val sizeInBytes = Wire(UInt((sizeW + 1).W))
     sizeInBytes := (1.U) << req.size
     mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
     wordData := Mux(subword, req.data << (offsetInWord * 8.U), req.data)
     val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.WORD_SIZE)) - 1).U(addrW.W)
-
-    assert(
-      req.size <= log2Ceil(config.WORD_SIZE).U,
-      s"trace driver currently does not support access sizes larger than word size (${config.WORD_SIZE})"
-    )
-    val wordAlignedSize = 2.U // FIXME: hardcoded
+    val wordAlignedSize = Mux(subword, 2.U, req.size)
 
     // when(req.valid && subword) {
     //   printf(
