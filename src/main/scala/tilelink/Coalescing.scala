@@ -322,7 +322,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   tlCoal.a.bits := coalescer.io.out_req.bits.toTLA(edgeCoal)
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
-  tlCoal.d.ready := true.B
+  // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
   tlCoal.e.valid := false.B
 
 
@@ -472,13 +472,15 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   dontTouch(newEntry)
 
   // Uncoalescer module uncoalesces responses back to each lane
-  val uncoalescer = Module(new UncoalescingUnit(config, tlCoal.d.bits.cloneType))
+  val uncoalescer = Module(new UncoalescingUnit(config))
 
   uncoalescer.io.coalReqValid := coalescer.io.out_req.valid
   uncoalescer.io.newEntry := newEntry
-  // richard: I changed this to use the DecoupledIO interface, which TL is using,
-  // previously we were not handling the ready signal
-  uncoalescer.io.coalResp <> tlCoal.d
+  // Cleanup: custom <>?
+  uncoalescer.io.coalResp.valid := tlCoal.d.valid
+  uncoalescer.io.coalResp.bits.source := tlCoal.d.bits.source
+  uncoalescer.io.coalResp.bits.data := tlCoal.d.bits.data
+  tlCoal.d.ready := uncoalescer.io.coalResp.ready
 
   // Queue up synthesized uncoalesced responses into each lane's response queue
   (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, lanes) =>
@@ -504,7 +506,19 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   dontTouch(tlCoal.d)
 }
 
-class UncoalescingUnit(config: CoalescerConfig, tlCoalD: TLBundleD) extends Module {
+// Protocol-agnostic bundle that represents a coalesced response.
+//
+// Having this makes it easier to:
+//   * do unit tests -- no need to deal with TileLink in the chiseltest code
+//   * adapt coalescer to custom protocols like a custom L1 cache interface.
+//
+// FIXME: overlaps with RespQueueEntry. Trait-ify
+class CoalescedResponseBundle(config: CoalescerConfig) extends Bundle {
+  val source = UInt(log2Ceil(config.NUM_NEW_IDS).W)
+  val data = UInt((8 * (1 << config.MAX_SIZE)).W)
+}
+
+class UncoalescingUnit(config: CoalescerConfig) extends Module {
   // notes to hansung:
   //  val numLanes: Int, <-> config.NUM_LANES
   //  val numPerLaneReqs: Int, <-> config.DEPTH
@@ -515,8 +529,9 @@ class UncoalescingUnit(config: CoalescerConfig, tlCoalD: TLBundleD) extends Modu
   val inflightTable = Module(new InflightCoalReqTable(config))
   val io = IO(new Bundle {
     val coalReqValid = Input(Bool())
+    // FIXME: receive ReqQueueEntry and construct newEntry inside uncoalescer
     val newEntry = Input(inflightTable.entryT.cloneType)
-    val coalResp = Flipped(Decoupled(tlCoalD))
+    val coalResp = Flipped(Decoupled(new CoalescedResponseBundle(config)))
     val uncoalResps = Output(
       Vec(
         config.NUM_LANES,
@@ -1236,7 +1251,7 @@ class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters)
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
-  val filename = "test.trace"
+  val filename = "vecadd.core1.thread4.trace"
   val coal = LazyModule(new CoalescingUnit(defaultConfig))
   val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge

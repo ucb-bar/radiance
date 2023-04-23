@@ -36,216 +36,220 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "work like normal shiftqueue when no invalidate" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.deq.ready.poke(false.B)
+      c.io.queue.deq.ready.poke(false.B)
 
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
       c.clock.step()
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x56.U)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x56.U)
       c.clock.step()
 
-      c.io.enq.valid.poke(false.B)
+      c.io.queue.enq.valid.poke(false.B)
 
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x12.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x12.U)
       c.clock.step()
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34.U)
       c.clock.step()
       // enqueue in the middle
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x78.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x78.U)
       c.clock.step()
-      c.io.enq.valid.poke(false.B)
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x56.U)
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x56.U)
       c.clock.step()
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x78.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x78.U)
       c.clock.step()
 
       // should be emptied
-      c.io.deq.valid.expect(false.B)
+      c.io.queue.deq.valid.expect(false.B)
     }
   }
 
   it should "work when enqueing and dequeueing simultaneously" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.poke(0.U)
+      c.io.invalidate.valid.poke(false.B)
 
       // prepare
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
       // enqueue and dequeue simultaneously
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x12.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x12.U)
       c.clock.step()
       // dequeueing back-to-back should work without any holes in the middle
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.valid.poke(false.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34.U)
       c.clock.step()
       // make sure is empty
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.valid.poke(false.B)
-      c.io.deq.valid.expect(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.valid.expect(false.B)
     }
   }
 
   it should "work when enqueing and dequeueing simultaneously to a full queue" in {
     test(new CoalShiftQueue(UInt(8.W), 1)) { c =>
-      c.io.invalidate.poke(0.U)
+      c.io.invalidate.valid.poke(false.B)
 
       // prepare
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
       // enqueue and dequeue simultaneously
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x12.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x12.U)
       c.clock.step()
       // enqueue and dequeue simultaneously once more
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x56.U)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x56.U)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34.U)
       c.clock.step()
       // dequeueing back-to-back should work without any holes in the middle
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.valid.poke(false.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x56.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x56.U)
       c.clock.step()
       // make sure is empty
-      c.io.deq.ready.poke(true.B)
-      c.io.enq.valid.poke(false.B)
-      c.io.deq.valid.expect(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.valid.expect(false.B)
     }
   }
 
   it should "invalidate head being dequeued" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.poke(0.U)
+      c.io.invalidate.valid.poke(false.B)
 
       // prepare
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
       c.clock.step()
-      c.io.enq.valid.poke(false.B)
+      c.io.queue.enq.valid.poke(false.B)
 
       // invalidate should work for the head just being dequeued at the same
       // cycle.  However, it should not change deq.valid right away to avoid
       // combinational cycles (see definition).
-      c.io.invalidate.poke(0x1.U)
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
+      c.io.invalidate.valid.poke(true.B)
+      c.io.invalidate.bits.poke(0x1.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
       c.clock.step()
       // 0x12 should have been dequeued
-      c.io.invalidate.poke(0.U)
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34.U)
+      c.io.invalidate.valid.poke(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34.U)
     }
   }
 
   it should "dequeue invalidated entries by itself" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.poke(0.U)
+      c.io.invalidate.valid.poke(false.B)
 
       // prepare
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
       c.clock.step()
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x56.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x56.U)
       c.clock.step()
-      c.io.enq.valid.poke(false.B)
+      c.io.queue.enq.valid.poke(false.B)
 
       // invalidate two entries at head
-      c.io.invalidate.poke(0x3.U)
+      c.io.invalidate.valid.poke(true.B)
+      c.io.invalidate.bits.poke(0x3.U)
       c.clock.step()
       // 0x12 should have been dequeued now
-      c.io.invalidate.poke(0x0.U)
-      c.io.deq.ready.poke(false.B)
+      c.io.invalidate.valid.poke(false.B)
+      c.io.queue.deq.ready.poke(false.B)
       c.clock.step()
       // 0x34 should have been dequeued now
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x56.U)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x56.U)
       c.clock.step()
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(false.B)
     }
   }
 
   it should "overwrite invalidated tail when enqueuing" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.poke(0.U)
+      c.io.invalidate.valid.poke(false.B)
+      c.io.invalidate.bits.poke(0.U)
 
       // prepare
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x12.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
       // invalidate and enqueue at the tail at the same time
-      c.io.invalidate.poke(0x1.U)
-      c.io.deq.ready.poke(false.B)
-      c.io.enq.ready.expect(true.B)
-      c.io.enq.valid.poke(true.B)
-      c.io.enq.bits.poke(0x34.U)
+      c.io.invalidate.valid.poke(true.B)
+      c.io.invalidate.bits.poke(0x1.U)
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
       c.clock.step()
-      c.io.invalidate.poke(0x0.U)
-      c.io.enq.valid.poke(false.B)
+      c.io.invalidate.valid.poke(false.B)
+      c.io.queue.enq.valid.poke(false.B)
       // now should be able to dequeue immediately as tail is overwritten
-      c.io.deq.ready.poke(true.B)
-      c.io.deq.valid.expect(true.B)
-      c.io.deq.bits.expect(0x34)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34)
     }
   }
 }
@@ -260,15 +264,11 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val coalDataWidth = 128
   val numInflightCoalRequests = 4
 
+  val hey = new TLBundleParameters(64, 64, 64, 64, 64)
   it should "work" in {
     test(
       new UncoalescingUnit(
-        numLanes,
-        numPerLaneReqs,
-        sourceWidth,
-        sizeWidth,
-        coalDataWidth,
-        numInflightCoalRequests,
+        defaultConfig,
       )
     )
     // vcs helps with simulation time, but sometimes errors with
