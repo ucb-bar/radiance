@@ -705,7 +705,7 @@ object TLUtils {
   }
 }
 
-class MemTraceDriver(config: CoalescerConfig, filename: String = "vecadd.core1.thread4.trace")(implicit
+class MemTraceDriver(config: CoalescerConfig, filename: String)(implicit
     p: Parameters
 ) extends LazyModule {
   // Create N client nodes together
@@ -918,7 +918,7 @@ class MemTraceLogger(
     numLanes: Int,
     // base filename for the generated trace files. full filename will be
     // suffixed depending on `reqEnable`/`respEnable`/`loggerName`.
-    filename: String = "vecadd.core1.thread4.trace",
+    filename: String,
     reqEnable: Boolean = true,
     respEnable: Boolean = true,
     // filename suffix that is unique to this logger module.
@@ -1186,12 +1186,14 @@ object TracePrintf {
 class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
-  val driver = LazyModule(new MemTraceDriver(defaultConfig))
+  // val filename = "test.trace"
+  val filename = "vecadd.core1.thread4.trace"
+  val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
   val coreSideLogger = LazyModule(
-    new MemTraceLogger(numLanes, loggerName = "coreside")
+    new MemTraceLogger(numLanes, filename, loggerName = "coreside")
   )
   val coal = LazyModule(new CoalescingUnit(defaultConfig))
-  val memSideLogger = LazyModule(new MemTraceLogger(numLanes + 1, loggerName = "memside"))
+  val memSideLogger = LazyModule(new MemTraceLogger(numLanes + 1, filename, loggerName = "memside"))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
