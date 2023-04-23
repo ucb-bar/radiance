@@ -31,7 +31,7 @@ MemTraceWriter::MemTraceWriter(const bool is_response,
 
 MemTraceWriter::~MemTraceWriter() {
   fclose(outfile);
-  printf("MemTraceWriter destroyed\n");
+  printf("MemTraceWriter(handle=%zu) destroyed\n", handle);
 }
 
 void MemTraceWriter::write_line_to_trace(const MemTraceLine line) {
@@ -61,6 +61,7 @@ extern "C" int memtracelogger_init(int is_response, const char *filename) {
 
   int handle = loggers.size();
   loggers.emplace_back(std::make_unique<MemTraceWriter>(is_response, filename));
+  loggers.back()->handle = handle;
 
   printf("memtracelogger_init: handle=%d, is_response=%d, filename=[%s]\n",
          handle, is_response, filename);

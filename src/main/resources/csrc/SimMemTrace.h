@@ -33,6 +33,7 @@ public:
   ~MemTraceWriter();
   void write_line_to_trace(const MemTraceLine line);
 
+  size_t handle;
   bool is_response;
   FILE *outfile;
 };
