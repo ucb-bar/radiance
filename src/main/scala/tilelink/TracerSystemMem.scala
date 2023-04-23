@@ -27,7 +27,7 @@ trait CanHaveGPUTracer { this: BaseSubsystem =>
   //p(GPUTracerKey) is the mechnimism to pass Config's parameter down to lazymodule
   p(GPUTracerKey) .map { k =>
     val config = p(GPUTracerKey).get
-    val tracer = LazyModule(new MemTraceDriver(config.numLanes, config.traceFile)(p))
+    val tracer = LazyModule(new MemTraceDriver(defaultConfig, config.traceFile)(p))
     // Must use :=* to ensure the N edges from Tracer doesn't get merged into 1 when connecting to SBus
     sbus.fromPort(Some("gpu-tracer"))() :=* tracer.node
   }
