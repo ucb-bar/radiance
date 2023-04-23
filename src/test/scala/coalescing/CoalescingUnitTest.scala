@@ -254,6 +254,22 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
+object testConfig extends CoalescerConfig(
+  MAX_SIZE = 4,       // maximum coalesced size
+  DEPTH = 2,          // request window per lane
+  WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
+  ADDR_WIDTH = 24,    // assume <= 32
+  DATA_BUS_SIZE = 4,  // 2^4=16 bytes, 128 bit bus
+  NUM_LANES = 4,
+  // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
+  WORD_SIZE = 4,      // 32-bit system
+  WORD_WIDTH = 2,     // log(WORD_SIZE)
+  NUM_OLD_IDS = 16,    // num of outstanding requests per lane, from processor
+  NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
+  COAL_SIZES = Seq(3),
+  SizeEnum = DefaultInFlightTableSizeEnum
+)
+
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
   val numLanes = 4
@@ -265,7 +281,7 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val numInflightCoalRequests = 4
 
   it should "work" in {
-    test(new UncoalescingUnit(defaultConfig))
+    test(new UncoalescingUnit(testConfig))
     // vcs helps with simulation time, but sometimes errors with
     // "mutation occurred during iteration" java error
     // .withAnnotations(Seq(VcsBackendAnnotation))
@@ -276,19 +292,21 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
       c.io.newEntry.lanes(0).reqs(0).source.poke(1.U)
       c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
-      c.io.newEntry.lanes(0).reqs(0).size.poke(2.U)
+      c.io.newEntry.lanes(0).reqs(0).sizeEnum.poke(1.U) // 1.U is FOUR
       c.io.newEntry.lanes(0).reqs(1).valid.poke(true.B)
       c.io.newEntry.lanes(0).reqs(1).source.poke(2.U)
-      c.io.newEntry.lanes(0).reqs(1).offset.poke(1.U)
-      c.io.newEntry.lanes(0).reqs(1).size.poke(2.U)
+      c.io.newEntry.lanes(0).reqs(1).offset.poke(0.U)
+      c.io.newEntry.lanes(0).reqs(1).sizeEnum.poke(1.U)
+      c.io.newEntry.lanes(1).reqs(0).valid.poke(false.B)
       c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
-      c.io.newEntry.lanes(2).reqs(0).source.poke(1.U)
+      c.io.newEntry.lanes(2).reqs(0).source.poke(2.U)
       c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
-      c.io.newEntry.lanes(2).reqs(0).size.poke(1.U)
+      c.io.newEntry.lanes(2).reqs(0).sizeEnum.poke(1.U)
       c.io.newEntry.lanes(2).reqs(1).valid.poke(true.B)
       c.io.newEntry.lanes(2).reqs(1).source.poke(2.U)
-      c.io.newEntry.lanes(2).reqs(1).offset.poke(0.U)
-      c.io.newEntry.lanes(2).reqs(1).size.poke(2.U)
+      c.io.newEntry.lanes(2).reqs(1).offset.poke(3.U)
+      c.io.newEntry.lanes(2).reqs(1).sizeEnum.poke(1.U)
+      c.io.newEntry.lanes(3).reqs(0).valid.poke(false.B)
 
       c.clock.step()
 
@@ -299,6 +317,7 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.coalResp.valid.poke(true.B)
       c.io.coalResp.bits.source.poke(sourceId)
       val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
+      // val lit = BigInt(0x0123456789abcdefL)
       c.io.coalResp.bits.data.poke(lit.U)
 
       // table lookup is combinational at the same cycle
@@ -307,12 +326,13 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.uncoalResps(2)(0).valid.expect(true.B)
       c.io.uncoalResps(3)(0).valid.expect(false.B)
 
-      c.io.uncoalResps(0)(0).bits.data.expect(0x89abcdefL.U)
+      // offset is counting from LSB
+      c.io.uncoalResps(0)(0).bits.data.expect(0x5ca1ab1eL.U)
       c.io.uncoalResps(0)(0).bits.source.expect(1.U)
-      c.io.uncoalResps(0)(1).bits.data.expect(0x89abcdefL.U)
+      c.io.uncoalResps(0)(1).bits.data.expect(0xdeadbeefL.U)
       c.io.uncoalResps(0)(1).bits.source.expect(2.U)
-      c.io.uncoalResps(2)(0).bits.data.expect(0x5ca1ab1eL.U)
-      c.io.uncoalResps(2)(0).bits.source.expect(1.U)
+      c.io.uncoalResps(2)(0).bits.data.expect(0x89abcdefL.U)
+      c.io.uncoalResps(2)(0).bits.source.expect(2.U)
       c.io.uncoalResps(2)(1).bits.data.expect(0x01234567L.U)
       c.io.uncoalResps(2)(1).bits.source.expect(2.U)
     }
