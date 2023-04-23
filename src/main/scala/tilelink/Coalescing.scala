@@ -222,13 +222,13 @@ class CoalShiftQueue[T <: Data](
 }
 
 // Software model: coalescer.py
-class MonoCoalescer[T <: Data](coalSize: Int, coalWindow: Seq[CoalShiftQueue[T]],
+class MonoCoalescer[T <: ReqQueueEntry](coalSize: Int, coalWindow: Seq[CoalShiftQueue[T]],
                                config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val leader_idx = Output(UInt(log2Ceil(config.NUM_LANES).W))
-    val base_addr = Output(UInt(config.ADDR_WIDTH.W))
-    val match_oh = Output(Vec(config.NUM_LANES, UInt(config.DEPTH.W)))
-    val coverage_hits = Output(UInt((1 << config.MAX_SIZE).W))
+    val leaderIdx = Output(UInt(log2Ceil(config.NUM_LANES).W))
+    val baseAddr = Output(UInt(config.ADDR_WIDTH.W))
+    val matchOH = Output(Vec(config.NUM_LANES, UInt(config.DEPTH.W)))
+    val coverageHits = Output(UInt((1 << config.MAX_SIZE).W))
   })
 
   io := DontCare
@@ -237,19 +237,53 @@ class MonoCoalescer[T <: Data](coalSize: Int, coalWindow: Seq[CoalShiftQueue[T]]
   val mask = ((1 << config.ADDR_WIDTH - 1) - (1 << size - 1)).U
   val window = coalWindow
 
-  def can_match(req0: Valid[ReqQueueEntry], req1: Valid[ReqQueueEntry]): Bool = {
-    (req0.bits.op === req1.bits.op) &&
-    (req0.valid && req1.valid) &&
-    ((req0.bits.address & this.mask) === (req1.bits.address & this.mask))
+  def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
+    (req0.op === req1.op) &&
+    (req0v && req1v) &&
+    ((req0.address & this.mask) === (req1.address & this.mask))
   }
 
   // combinational logic to drive output from window contents
+  val leaders = window.map(_.io.elts.head)
+  val leadersValid = window.map(_.io.mask.asBools.head)
 
-  val leaders = coalWindow.map(_.io.elts.head)
+  // TODO: match leader to only lanes >= leader idx
+  val matches = leaders.zip(leadersValid).map { case (leader, leaderValid) =>
+    window.map {followerLane =>
+      followerLane.io.elts.zip(followerLane.io.mask.asBools).map { case (follower, followerValid) =>
+        this.canMatch(follower, followerValid, leader, leaderValid)
+      }
+    }
+  }
+
+  val matchCounts = matches.map(leader => leader.map(PopCount(_)).reduce(_ + _))
+  val canCoalesce = matchCounts.map(_ > 1.U)
+
+  // TODO: maybe use round robin arbiter instead of argmax to pick leader
+  val chosenLeaderIdx = matchCounts.zipWithIndex.map {
+    case (a, b) => (a, b.U)
+  }.reduce { case ((a, i), (b, j)) =>
+    Mux(a > b, (a, i), (b, j))
+  }._2
+
+  // completely unreadable
+  val chosenLeader = VecInit(window.map(_.io.elts))(chosenLeaderIdx)
+  val chosenMatches = VecInit(matches.map(leader => VecInit(leader.map(VecInit(_).asUInt))))(chosenLeaderIdx)
+
+  def getOffsetSlice(addr: UInt) = addr(size - 1, config.WORD_WIDTH)
+  val offsets = window.map(_.io.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
+  val hits = Seq.tabulate(1 << (size - config.WORD_WIDTH)) { target =>
+    offsets.map(_ === target.U).reduce(_ || _)
+  }
+
+  io.leaderIdx := chosenLeaderIdx
+  io.baseAddr := chosenLeader
+  io.matchOH := chosenMatches
+  io.coverageHits := PopCount(hits)
 }
 
 // Software model: coalescer.py
-class MultiCoalescer[T <: Data]
+class MultiCoalescer[T <: ReqQueueEntry]
     (sizes: Seq[Int], window: Seq[CoalShiftQueue[T]], coalReqT: ReqQueueEntry,
      config: CoalescerConfig) extends Module {
 
