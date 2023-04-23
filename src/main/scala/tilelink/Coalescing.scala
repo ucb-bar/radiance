@@ -394,24 +394,24 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   // FIXME: don't instantiate inflight table entry type here.  It leaks the table's impl
   // detail to the coalescer
   val offsetBits = 4 // FIXME hardcoded
-  val sizeBits = 2 // FIXME hardcoded
+  val sizeBits = 4 // FIXME hardcoded.  This is should be not the TL size bits
+  // but the width of the size enum
   val newEntry = Wire(
     new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
   )
-
   println(s"=========== table sourceWidth: ${sourceWidth}")
   println(s"=========== table sizeBits: ${sizeBits}")
-
-  newEntry.source := coalescer.io.out_req.bits.source
-
-  // TODO: richard to write table fill logic
+  newEntry.source := coalSourceId
+  val coalDataWidth = tlCoal.params.dataBits
+  println(s"=========== coalesced data width: ${coalDataWidth}")
+  val origReqs = reqQueues.map(q => q.io.deq.bits)
   newEntry.lanes.foreach { l =>
     l.reqs.zipWithIndex.foreach { case (r, i) =>
       // TODO: this part needs the actual coalescing logic to work
       r.valid := false.B
-      r.source := i.U // FIXME bogus
-      r.offset := 1.U
-      r.size := 2.U // FIXME hardcoded
+      r.source := origReqs(i).source
+      r.offset := (origReqs(i).address % (coalDataWidth / 8).U) >> log2Ceil(WordSizeInBytes())
+      r.size := origReqs(i).size
     }
   }
   newEntry.lanes(0).reqs(0).valid := true.B
@@ -420,8 +420,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   newEntry.lanes(3).reqs(0).valid := true.B
   dontTouch(newEntry)
 
-  // Uncoalescer module sncoalesces responses back to each lane
-  val coalDataWidth = tlCoal.params.dataBits
+  // Uncoalescer module uncoalesces responses back to each lane
   val uncoalescer = Module(
     new UncoalescingUnit(
       numLanes,
@@ -438,8 +437,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
   uncoalescer.io.coalRespValid := tlCoal.d.valid
   uncoalescer.io.coalRespSrcId := tlCoal.d.bits.source
   uncoalescer.io.coalRespData := tlCoal.d.bits.data
-
-  println(s"=========== coalRespData width: ${tlCoal.d.bits.data.widthOption.get}")
 
   // Queue up synthesized uncoalesced responses into each lane's response queue
   (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, lanes) =>
@@ -485,7 +482,10 @@ class UncoalescingUnit(
     val uncoalResps = Output(
       Vec(
         numLanes,
-        Vec(numPerLaneReqs, ValidIO(new RespQueueEntry(sourceWidth, CoalescerConsts.WORD_WIDTH, CoalescerConsts.WORD_SIZE)))
+        Vec(
+          numPerLaneReqs,
+          ValidIO(new RespQueueEntry(sourceWidth, WordSizeInBytes() * 8, sizeWidth))
+        )
       )
     )
   })
@@ -506,20 +506,21 @@ class UncoalescingUnit(
 
   // Un-coalescing logic
   //
-  // FIXME: `size` should be UInt, not Int
-  def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, byteSize: Int): UInt = {
-    val bitSize = byteSize * 8
-    val sizeMask = (1.U << bitSize) - 1.U
+  def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, logSize: UInt): UInt = {
+    val sizeInBits = (1.U << logSize) * 8.U
     assert(
-      dataWidth > 0 && dataWidth % bitSize == 0,
-      s"coalesced data width ($dataWidth) not evenly divisible by core req size ($bitSize)"
+      (dataWidth > 0).B && (dataWidth.U % sizeInBits === 0.U),
+      s"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
     )
-    val numChunks = dataWidth / bitSize
-    val chunks = Wire(Vec(numChunks, UInt(bitSize.W)))
+    assert(logSize === 2.U || logSize === 0.U, "TODO: currently only supporting 4-byte accesses")
+    val numChunks = dataWidth / 32
+    val chunks = Wire(Vec(numChunks, UInt(32.W)))
     val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
-      // Take [(off-1)*size:off*size] starting from MSB
-      c := (data >> (dataWidth - (o + 1) * bitSize)) & sizeMask
+      // Take [(off+1)*size-1:off*size] starting from LSB
+      // FIXME: whether to take the offset from MSB or LSB depends on endianness
+      c := data(32 * (o + 1) - 1, 32 * o)
+    // c := (data >> (dataWidth - (o + 1) * 32)) & sizeMask
     }
     chunks(offset) // MUX
   }
@@ -530,18 +531,16 @@ class UncoalescingUnit(
     perLane.reqs.zipWithIndex.foreach { case (oldReq, i) =>
       val ioOldReq = ioPerLane(i)
 
-      // FIXME: only looking at 0th srcId entry
-
+      // TODO: spatial-only coalescing: only looking at 0th srcId entry
       ioOldReq.valid := false.B
       ioOldReq.bits := DontCare
 
       when(inflightTable.io.lookup.valid) {
         ioOldReq.valid := oldReq.valid
         ioOldReq.bits.source := oldReq.source
-        // FIXME: disregard size enum for now
-        val byteSize = 4
+        ioOldReq.bits.size := oldReq.size
         ioOldReq.bits.data :=
-          getCoalescedDataChunk(io.coalRespData, coalDataWidth, oldReq.offset, byteSize)
+          getCoalescedDataChunk(io.coalRespData, coalDataWidth, oldReq.offset, oldReq.size)
       }
     }
   }
@@ -1180,8 +1179,9 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
         coreSideLogger.module.io.respBytes
       )
       assert(
-        coreSideLogger.module.io.numReqs === coreSideLogger.module.io.numResps,
-        "FAIL: number of requests and responses to the coalescer do not match"
+        (coreSideLogger.module.io.numReqs === coreSideLogger.module.io.numResps) &&
+          (coreSideLogger.module.io.reqBytes === coreSideLogger.module.io.respBytes),
+        "FAIL: requests and responses traffic to the coalescer do not match"
       )
     }
   }
