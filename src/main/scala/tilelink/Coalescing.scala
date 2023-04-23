@@ -11,17 +11,24 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
-object InFlightTableSizeEnum extends ChiselEnum {
+trait InFlightTableSizeEnum extends ChiselEnum {
+  val INVALID: Type
+  val FOUR: Type
+  def logSizeToEnum(x: UInt): Type
+  def enumToLogSize(x: Type): UInt
+}
+
+object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
   val INVALID = Value(0.U)
   val FOUR = Value(1.U)
 
-  def log2Enum(x: UInt): Type = {
+  def logSizeToEnum(x: UInt): Type = {
     MuxCase(INVALID, Seq(
       (x === 2.U) -> FOUR
     ))
   }
 
-  def enum2log(x: Type): UInt = {
+  def enumToLogSize(x: Type): UInt = {
     MuxCase(0.U, Seq(
       (x === FOUR) -> 2.U
     ))
@@ -41,7 +48,7 @@ case class CoalescerConfig(
   NUM_OLD_IDS: Int,    // num of outstanding requests per lane, from processor
   NUM_NEW_IDS: Int,    // num of outstanding coalesced requests
   COAL_SIZES: Seq[Int],
-  SizeEnum: ChiselEnum
+  SizeEnum: InFlightTableSizeEnum
 )
 
 object defaultConfig extends CoalescerConfig(
@@ -58,7 +65,7 @@ object defaultConfig extends CoalescerConfig(
   NUM_OLD_IDS = 16,    // num of outstanding requests per lane, from processor
   NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
   COAL_SIZES = Seq(3),
-  SizeEnum = InFlightTableSizeEnum
+  SizeEnum = DefaultInFlightTableSizeEnum
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
@@ -433,7 +440,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     dontTouch(tlOut.d)
   }
 
-      // Construct new entry for the inflight table
+  // Construct new entry for the inflight table
   // FIXME: don't instantiate inflight table entry type here.  It leaks the table's impl
   // detail to the coalescer
 
@@ -443,13 +450,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // this also reduces top level clutter.
 
   val offsetBits = 4 // FIXME hardcoded
-  val sizeBits = log2Ceil(config.MAX_SIZE) // FIXME This is should be not the TL size bits
   // but the width of the size enum
   val newEntry = Wire(
-    new InflightCoalReqTableEntry(config.NUM_LANES, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
+    new InflightCoalReqTableEntry(config.NUM_LANES, numPerLaneReqs, sourceWidth, offsetBits,
+      config.SizeEnum)
   )
   println(s"=========== table sourceWidth: ${sourceWidth}")
-  println(s"=========== table sizeBits: ${sizeBits}")
+  // println(s"=========== table sizeEnumBits: ${newEntry.sizeEnumBits}")
   newEntry.source := coalescer.io.out_req.bits.source
 
   // TODO: richard to write table fill logic
@@ -462,7 +469,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       r.valid := false.B
       r.source := origReqs(i).source
       r.offset := (origReqs(i).address % (1 << config.MAX_SIZE).U) >> config.WORD_WIDTH
-      r.size := origReqs(i).size
+      r.sizeEnum := config.SizeEnum.logSizeToEnum(origReqs(i).size)
     }
   }
   newEntry.lanes(0).reqs(0).valid := true.B
@@ -559,12 +566,15 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
   // Un-coalescing logic
   //
   def getCoalescedDataChunk(data: UInt, dataWidth: Int, offset: UInt, logSize: UInt): UInt = {
+    assert(logSize === 2.U, "currently only supporting 4-byte accesses. TODO")
+
+    // sizeInBits should be simulation-only construct
     val sizeInBits = (1.U << logSize) << 3.U
     assert(
       (dataWidth > 0).B && (dataWidth.U % sizeInBits === 0.U),
       s"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
     )
-    assert(logSize === 2.U, "currently only supporting 4-byte accesses. TODO")
+
     val numChunks = dataWidth / 32
     val chunks = Wire(Vec(numChunks, UInt(32.W)))
     val offsets = (0 until numChunks)
@@ -591,9 +601,14 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
       when(inflightTable.io.lookup.valid) {
         ioOldReq.valid := oldReq.valid
         ioOldReq.bits.source := oldReq.source
-        ioOldReq.bits.size := oldReq.size
+        // FIXME: this is janky. We can't use config.SizeEnum.enumToLogSize for
+        // some reason because type checker complains that config.SizeEnum.Type
+        // is different from found.sizeEnumType.type
+        // val logSize = config.SizeEnum.enumToLogSize(oldReq.sizeEnum)
+        val logSize = found.sizeEnumType.enumToLogSize(oldReq.sizeEnum)
+        ioOldReq.bits.size := logSize
         ioOldReq.bits.data :=
-          getCoalescedDataChunk(io.coalResp.bits.data, io.coalResp.bits.data.getWidth, oldReq.offset, oldReq.size)
+          getCoalescedDataChunk(io.coalResp.bits.data, io.coalResp.bits.data.getWidth, oldReq.offset, logSize)
       }
     }
   }
@@ -608,7 +623,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val entryT = new InflightCoalReqTableEntry(config.NUM_LANES, config.DEPTH,
-    log2Ceil(config.NUM_OLD_IDS), config.MAX_SIZE, config.SizeEnum.getWidth)
+    log2Ceil(config.NUM_OLD_IDS), config.MAX_SIZE, config.SizeEnum)
 
   val entries = config.NUM_NEW_IDS
   val sourceWidth = log2Ceil(config.NUM_OLD_IDS)
@@ -637,7 +652,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
           r.valid := false.B
           r.source := 0.U
           r.offset := 0.U
-          r.size := 0.U
+          r.sizeEnum := config.SizeEnum.INVALID
         }
       }
     }
@@ -685,14 +700,14 @@ class InflightCoalReqTableEntry(
     val numPerLaneReqs: Int,
     val sourceWidth: Int,
     val offsetBits: Int,
-    val sizeBits: Int
+    val sizeEnumType: InFlightTableSizeEnum
 ) extends Bundle {
   class PerCoreReq extends Bundle {
     val valid = Bool()
     // FIXME: oldId and newId shares the same width
     val source = UInt(sourceWidth.W)
     val offset = UInt(offsetBits.W)
-    val size = UInt(sizeBits.W)
+    val sizeEnum = sizeEnumType()
   }
   class PerLane extends Bundle {
     val reqs = Vec(numPerLaneReqs, new PerCoreReq)

@@ -264,13 +264,8 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val coalDataWidth = 128
   val numInflightCoalRequests = 4
 
-  val hey = new TLBundleParameters(64, 64, 64, 64, 64)
   it should "work" in {
-    test(
-      new UncoalescingUnit(
-        defaultConfig,
-      )
-    )
+    test(new UncoalescingUnit(defaultConfig))
     // vcs helps with simulation time, but sometimes errors with
     // "mutation occurred during iteration" java error
     // .withAnnotations(Seq(VcsBackendAnnotation))
@@ -301,10 +296,10 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
       c.clock.step()
 
-      c.io.coalRespValid.poke(true.B)
-      c.io.coalRespSrcId.poke(sourceId)
+      c.io.coalResp.valid.poke(true.B)
+      c.io.coalResp.bits.source.poke(sourceId)
       val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
-      c.io.coalRespData.poke(lit.U)
+      c.io.coalResp.bits.data.poke(lit.U)
 
       // table lookup is combinational at the same cycle
       c.io.uncoalResps(0)(0).valid.expect(true.B)
