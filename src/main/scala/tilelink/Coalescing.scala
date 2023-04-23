@@ -342,7 +342,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, numLanes: Int) extends LazyModule
       resp.isStore := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
       resp.size := tlOut.d.bits.size
       resp.data := tlOut.d.bits.data
-      resp.error := tlOut.d.bits.denied
+      // NOTE: D channel doesn't have mask
 
       // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
       // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
@@ -987,8 +987,12 @@ class MemTraceLogger(
           "mask HIGH bits do not match the TL size.  This should have been handled by the TL generator logic"
         )
         val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
-        val mask = ~((~0.U) << (trailingZerosInMask * 8.U))
+        val dataW = tlIn.params.dataBits
+        val mask = ~(~(0.U(dataW.W)) << ((1.U << tlIn.a.bits.size) * 8.U))
         req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
+        // when (req.valid) {
+        //   printf("trailingZerosInMask=%d, mask=%x, data=%x\n", trailingZerosInMask, mask, req.data)
+        // }
 
         when(req.valid) {
           TracePrintf(
