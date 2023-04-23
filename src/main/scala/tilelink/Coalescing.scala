@@ -1239,8 +1239,9 @@ class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters)
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = 4
+  val filename = "test.trace"
   val coal = LazyModule(new CoalescingUnit(defaultConfig))
-  val driver = LazyModule(new MemTraceDriver(defaultConfig))
+  val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
