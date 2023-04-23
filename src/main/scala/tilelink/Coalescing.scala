@@ -537,7 +537,6 @@ class InflightCoalReqTableEntry(
     val size = UInt(sizeBits.W)
   }
   class PerLane extends Bundle {
-    // FIXME: if numPerLaneReqs != 2 ** sourceWidth, we need to store srcId as well
     val reqs = Vec(numPerLaneReqs, new PerCoreReq)
   }
   // sourceId of the coalesced response that just came back.  This will be the
@@ -692,7 +691,7 @@ trait HasTraceLine {
 class TraceLine extends Bundle with HasTraceLine {
   val valid = Bool()
   val source = UInt(32.W)
-  val address = UInt(64.W)
+  val address = UInt(64.W) // FIXME: in Verilog this is the same as data width
   val is_store = Bool()
   val size = UInt(8.W) // this is log2(bytesize) as in TL A bundle
   val data = UInt(64.W)
@@ -701,9 +700,7 @@ class TraceLine extends Bundle with HasTraceLine {
 class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
-  val sim = Module(
-    new SimMemTrace(traceFile, numLanes)
-  )
+  val sim = Module(new SimMemTrace(traceFile, numLanes))
   sim.io.clock := clock
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
@@ -738,21 +735,54 @@ class MemTraceDriverImp(outer: MemTraceDriver, numLanes: Int, traceFile: String)
     Cat(8.U(4.W), addr(27, 0))
   }
 
-  // Generate TL requests according to the trace line.
+  // Generate TL requests corresponding to the trace lines
   (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
-    val (tlOut, edge) = node.out(0)
+    // Core only makes accesses of granularity larger than a word, so we want
+    // the trace driver to act so as well.
+    // That means if req.size is smaller than word size, we need to pad data
+    // with zeros to generate a word-size request, and set mask accordingly.
+    val offsetInWord = req.address % WordSizeInBytes().U
+    val subword = req.size < log2Ceil(WordSizeInBytes()).U
 
+    val mask = Wire(UInt(WordSizeInBytes().W))
+    val wordData = Wire(UInt((WordSizeInBytes() * 8).W))
+    val sizeInBytes = Wire(UInt((sizeW + 1).W))
+    sizeInBytes := (1.U) << req.size
+    mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
+    wordData := Mux(subword, req.data << (offsetInWord * 8.U), req.data)
+    val wordAlignedAddress = req.address & ~((1 << log2Ceil(WordSizeInBytes())) - 1).U(addrW.W)
+
+    assert(
+      req.size <= log2Ceil(WordSizeInBytes()).U,
+      s"trace driver currently does not support access sizes larger than word size (${WordSizeInBytes()})"
+    )
+    val wordAlignedSize = 2.U // FIXME: hardcoded
+
+    // when(req.valid && subword) {
+    //   printf(
+    //     "address=%x, size=%d, data=%x, addressMask=%x, wordAlignedAddress=%x, mask=%x, wordData=%x\n",
+    //     req.address,
+    //     req.size,
+    //     req.data,
+    //     ~((1 << log2Ceil(WordSizeInBytes())) - 1).U(addrW.W),
+    //     wordAlignedAddress,
+    //     mask,
+    //     wordData
+    //   )
+    // }
+
+    val (tlOut, edge) = node.out(0)
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
-      toAddress = hashToValidPhyAddr(req.address),
-      lgSize = req.size, // trace line already holds log2(size)
+      toAddress = hashToValidPhyAddr(wordAlignedAddress),
+      lgSize = wordAlignedSize, // trace line already holds log2(size)
       // data should be aligned to beatBytes
-      data = (req.data << (8.U * (req.address % edge.manager.beatBytes.U)))
+      data = (wordData << (8.U * (wordAlignedAddress % edge.manager.beatBytes.U)))
     )
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
-      toAddress = hashToValidPhyAddr(req.address),
-      lgSize = req.size
+      toAddress = hashToValidPhyAddr(wordAlignedAddress),
+      lgSize = wordAlignedSize
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
@@ -814,7 +844,7 @@ class SimMemTrace(filename: String, numLanes: Int)
 
     // These names have to match declarations in the Verilog code, eg.
     // trace_read_address.
-    val trace_read = new Bundle { // FIXME: can't use HasTraceLine because this doesn't have source
+    val trace_read = new Bundle { // can't use HasTraceLine because this doesn't have source
       val ready = Input(Bool())
       val valid = Output(UInt(numLanes.W))
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
