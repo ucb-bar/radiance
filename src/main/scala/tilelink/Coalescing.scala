@@ -452,16 +452,23 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val offsetBits = 4 // FIXME hardcoded
   // but the width of the size enum
   val newEntry = Wire(
-    new InflightCoalReqTableEntry(config.NUM_LANES, numPerLaneReqs, sourceWidth, offsetBits,
-      config.SizeEnum.getWidth)
+    new InflightCoalReqTableEntry(
+      config.NUM_LANES,
+      numPerLaneReqs,
+      sourceWidth,
+      offsetBits,
+      config.SizeEnum.getWidth
+    )
   )
   println(s"=========== table sourceWidth: ${sourceWidth}")
   // println(s"=========== table sizeEnumBits: ${newEntry.sizeEnumBits}")
   newEntry.source := coalescer.io.out_req.bits.source
 
   // TODO: richard to write table fill logic
-  assert(tlCoal.params.dataBits == (1 << config.MAX_SIZE) * 8,
-    s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant")
+  assert(
+    tlCoal.params.dataBits == (1 << config.MAX_SIZE) * 8,
+    s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant"
+  )
   val origReqs = reqQueues.map(q => q.io.queue.deq.bits)
   newEntry.lanes.foreach { l =>
     l.reqs.zipWithIndex.foreach { case (r, i) =>
@@ -542,8 +549,12 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
     val uncoalResps = Output(
       Vec(
         config.NUM_LANES,
-        Vec(config.DEPTH, ValidIO(new RespQueueEntry(
-          log2Ceil(config.NUM_OLD_IDS), config.WORD_WIDTH, config.WORD_SIZE)))
+        Vec(
+          config.DEPTH,
+          ValidIO(
+            new RespQueueEntry(log2Ceil(config.NUM_OLD_IDS), config.WORD_WIDTH, config.WORD_SIZE)
+          )
+        )
       )
     )
   })
@@ -604,7 +615,12 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
         val logSize = config.SizeEnum.enumToLogSize(config.SizeEnum(oldReq.sizeEnum))
         ioOldReq.bits.size := logSize
         ioOldReq.bits.data :=
-          getCoalescedDataChunk(io.coalResp.bits.data, io.coalResp.bits.data.getWidth, oldReq.offset, logSize)
+          getCoalescedDataChunk(
+            io.coalResp.bits.data,
+            io.coalResp.bits.data.getWidth,
+            oldReq.offset,
+            logSize
+          )
       }
     }
   }
@@ -618,8 +634,13 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
 class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
-  val entryT = new InflightCoalReqTableEntry(config.NUM_LANES, config.DEPTH,
-    log2Ceil(config.NUM_OLD_IDS), config.MAX_SIZE, config.SizeEnum.getWidth)
+  val entryT = new InflightCoalReqTableEntry(
+    config.NUM_LANES,
+    config.DEPTH,
+    log2Ceil(config.NUM_OLD_IDS),
+    config.MAX_SIZE,
+    config.SizeEnum.getWidth
+  )
 
   val entries = config.NUM_NEW_IDS
   val sourceWidth = log2Ceil(config.NUM_OLD_IDS)
@@ -903,9 +924,9 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
 }
 
 class SimMemTrace(filename: String, numLanes: Int)
-  extends BlackBox(
-    Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
-  )
+    extends BlackBox(
+      Map("FILENAME" -> filename, "NUM_LANES" -> numLanes)
+    )
     with HasBlackBoxResource {
   val traceLineT = new TraceLine
   val addrW = traceLineT.address.getWidth
