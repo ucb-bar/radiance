@@ -417,8 +417,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.ADDR_WIDTH, config.MAX_SIZE)
   val coalescer = Module(new MultiCoalescer(reqQueues.head, coalReqT, config))
   coalescer.io.window := reqQueues.map(_.io)
-  // FIXME
-  coalescer.io.out_req.ready := true.B
 
   // Per-lane request and response queues
   //
@@ -466,6 +464,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   tlCoal.a.valid := coalescer.io.out_req.valid
   tlCoal.a.bits := coalescer.io.out_req.bits.toTLA(edgeCoal)
+  coalescer.io.out_req.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
