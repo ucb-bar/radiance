@@ -236,21 +236,23 @@ class CoalShiftQueue[T <: Data](
 }
 
 // Software model: coalescer.py
-class MonoCoalescer[T <: ReqQueueEntry](coalSize: Int, coalWindow: Seq[CoalShiftQueue[T]],
-                               config: CoalescerConfig) extends Module {
+class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
+                    config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val leaderIdx = Output(UInt(log2Ceil(config.NUM_LANES).W))
-    val baseAddr = Output(UInt(config.ADDR_WIDTH.W))
-    val matchOH = Output(Vec(config.NUM_LANES, UInt(config.DEPTH.W)))
-    val matchCount = Output(UInt(log2Ceil(config.NUM_LANES * config.DEPTH).W))
-    val coverageHits = Output(UInt((1 << config.MAX_SIZE).W))
+    val window = Input(Vec(config.NUM_LANES, windowT.io.cloneType))
+    val results = Output(new Bundle {
+      val leaderIdx = Output(UInt(log2Ceil(config.NUM_LANES).W))
+      val baseAddr = Output(UInt(config.ADDR_WIDTH.W))
+      val matchOH = Output(Vec(config.NUM_LANES, UInt(config.DEPTH.W)))
+      val matchCount = Output(UInt(log2Ceil(config.NUM_LANES * config.DEPTH).W))
+      val coverageHits = Output(UInt((1 << config.MAX_SIZE).W))
+    })
   })
 
   io := DontCare
 
   val size = coalSize
   val mask = ((1 << config.ADDR_WIDTH - 1) - (1 << size - 1)).U
-  val window = coalWindow
 
   def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
@@ -259,18 +261,13 @@ class MonoCoalescer[T <: ReqQueueEntry](coalSize: Int, coalWindow: Seq[CoalShift
   }
 
   // combinational logic to drive output from window contents
-  val leaders = window.map(_.io.elts.head)
-  println(window.map(_.io.mask))
-  val leadersValidWire = window.map(x => Wire(UInt(x.io.mask.getWidth.W)))
-  leadersValidWire.zipWithIndex.foreach { case (wire, i) =>
-    wire := window(i).io.mask
-  }
-  val leadersValid = leadersValidWire.map(_.asBools.head)
+  val leaders = io.window.map(_.elts.head)
+  val leadersValid = io.window.map(_.mask.asBools.head)
 
   // TODO: match leader to only lanes >= leader idx
   val matches = leaders.zip(leadersValid).map { case (leader, leaderValid) =>
-    window.map {followerLane =>
-      followerLane.io.elts.zip(followerLane.io.mask.asBools).map { case (follower, followerValid) =>
+    io.window.map {followerLane =>
+      followerLane.elts.zip(followerLane.mask.asBools).map { case (follower, followerValid) =>
         this.canMatch(follower, followerValid, leader, leaderValid)
       }
     }
@@ -286,34 +283,36 @@ class MonoCoalescer[T <: ReqQueueEntry](coalSize: Int, coalWindow: Seq[CoalShift
     (Mux(a > b, a, b), Mux(a > b, i, j))
   }._2
 
-  // completely unreadable
-  val chosenLeader = VecInit(window.map(_.io.elts))(chosenLeaderIdx)
+  val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
   val chosenMatches = VecInit(matches.map(leader => VecInit(leader.map(VecInit(_).asUInt))))(chosenLeaderIdx)
   val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
 
+  // coverage calculation
   def getOffsetSlice(addr: UInt) = addr(size - 1, config.WORD_WIDTH)
-  val offsets = window.map(_.io.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
+  val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
   val hits = Seq.tabulate(1 << (size - config.WORD_WIDTH)) { target =>
     offsets.map(_ === target.U).reduce(_ || _)
   }
 
-  io.leaderIdx := chosenLeaderIdx
-  io.baseAddr := chosenLeader
-  io.matchOH := chosenMatches
-  io.matchCount := chosenMatchCount
-  io.coverageHits := PopCount(hits)
+  io.results.leaderIdx := chosenLeaderIdx
+  io.results.baseAddr := chosenLeader.address & mask
+  io.results.matchOH := chosenMatches
+  io.results.matchCount := chosenMatchCount
+  io.results.coverageHits := PopCount(hits)
 }
 
 // Software model: coalescer.py
-class MultiCoalescer[T <: ReqQueueEntry] (window: Seq[CoalShiftQueue[T]], coalReqT: ReqQueueEntry,
-                                          config: CoalescerConfig) extends Module {
+class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueEntry,
+                     config: CoalescerConfig) extends Module {
 
   val io = IO(new Bundle {
-    val out_req = Output(Decoupled(coalReqT.cloneType))
+    val window = Input(Vec(config.NUM_LANES, windowT.io.cloneType))
+    val out_req = DecoupledIO(coalReqT.cloneType)
     val invalidate = Output(Valid(Vec(config.NUM_LANES, UInt(config.DEPTH.W))))
   })
 
-  val coalescers = config.COAL_SIZES.map(size => Module(new MonoCoalescer(size, window, config)))
+  val coalescers = config.COAL_SIZES.map(size => Module(new MonoCoalescer(size, windowT, config)))
+  coalescers.foreach(_.io.window := io.window)
 
   def normalize(x: Seq[UInt]): Seq[UInt] = {
     x.zip(config.COAL_SIZES).map { case (hits, size) =>
@@ -329,13 +328,14 @@ class MultiCoalescer[T <: ReqQueueEntry] (window: Seq[CoalShiftQueue[T]], coalRe
     }._2
   }
 
-  val normalizedMatches = normalize(coalescers.map(_.io.matchCount))
-  val normalizedHits = normalize(coalescers.map(_.io.coverageHits))
+  val normalizedMatches = normalize(coalescers.map(_.io.results.matchCount))
+  val normalizedHits = normalize(coalescers.map(_.io.results.coverageHits))
 
   val chosenIdx = Wire(UInt(log2Ceil(config.COAL_SIZES.size).W))
   val chosenValid = Wire(Bool())
   // minimum 25% coverage
-  when (normalizedHits.map(_ > (1 << (config.MAX_SIZE - 4)).U).reduce(_ || _)) {
+  val minCoverage = 1.max(1 << (config.MAX_SIZE - 4))
+  when (normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
     chosenIdx := argMax(normalizedHits)
     chosenValid := true.B
   }.elsewhen(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
@@ -347,15 +347,15 @@ class MultiCoalescer[T <: ReqQueueEntry] (window: Seq[CoalShiftQueue[T]], coalRe
   }
 
   // create coalesced request
-  val chosenBundle = VecInit(coalescers.map(_.io))(chosenIdx)
+  val chosenBundle = VecInit(coalescers.map(_.io.results))(chosenIdx)
   val chosenSize = VecInit(coalescers.map(_.size.U))(chosenIdx)
 
   // flatten requests and matches
-  val flatReqs = window.flatMap(_.io.elts)
+  val flatReqs = io.window.flatMap(_.elts)
   val flatMatches = chosenBundle.matchOH.flatMap(_.asBools)
 
   // check for word alignment in addresses
-  assert(window.flatMap(_.io.elts.map(req => req.address(config.WORD_WIDTH - 1, 0) === 0.U)).reduce(_ || _),
+  assert(io.window.flatMap(_.elts.map(req => req.address(config.WORD_WIDTH - 1, 0) === 0.U)).reduce(_ || _),
     "one or more addresses used for coalescing is not word-aligned")
 
   // note: this is word-level coalescing. if finer granularity is needed, need to modify code
@@ -364,8 +364,8 @@ class MultiCoalescer[T <: ReqQueueEntry] (window: Seq[CoalShiftQueue[T]], coalRe
   val addrMask = Wire(UInt(config.MAX_SIZE.W))
   addrMask := (1.U << chosenSize).asUInt - 1.U
 
-  val data = Vec(maxWords, UInt((config.WORD_SIZE * 8).W))
-  val mask = Vec(maxWords, UInt(config.WORD_SIZE.W))
+  val data = Wire(Vec(maxWords, UInt((config.WORD_SIZE * 8).W)))
+  val mask = Wire(Vec(maxWords, UInt(config.WORD_SIZE.W)))
 
   for (i <- 0 until maxWords) {
     val sel = flatReqs.zip(flatMatches).map { case (req, m) =>
@@ -391,7 +391,7 @@ class MultiCoalescer[T <: ReqQueueEntry] (window: Seq[CoalShiftQueue[T]], coalRe
   io.out_req.bits.data := data.asUInt
   io.out_req.bits.size := chosenSize
   io.out_req.bits.address := chosenBundle.baseAddr
-  io.out_req.bits.op := VecInit(window.map(_.io.elts.head))(chosenBundle.leaderIdx).op
+  io.out_req.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
   io.out_req.valid := chosenValid && sourceGen.io.id.valid
 
   io.invalidate.bits := chosenBundle.matchOH
@@ -415,7 +415,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   }
 
   val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.ADDR_WIDTH, config.MAX_SIZE)
-  val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
+  val coalescer = Module(new MultiCoalescer(reqQueues.head, coalReqT, config))
+  coalescer.io.window := reqQueues.map(_.io)
+  // FIXME
+  coalescer.io.out_req.ready := true.B
 
   // Per-lane request and response queues
   //
