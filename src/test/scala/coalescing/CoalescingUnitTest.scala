@@ -358,25 +358,26 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     // .withAnnotations(Seq(VcsBackendAnnotation))
     { c =>
       val sourceId = 0.U
+      val four = c.io.newEntry.sizeEnumT.FOUR
       c.io.coalReqValid.poke(true.B)
       c.io.newEntry.source.poke(sourceId)
       c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
       c.io.newEntry.lanes(0).reqs(0).source.poke(1.U)
       c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
-      c.io.newEntry.lanes(0).reqs(0).sizeEnum.poke(1.U) // 1.U is FOUR
+      c.io.newEntry.lanes(0).reqs(0).sizeEnum.poke(four)
       c.io.newEntry.lanes(0).reqs(1).valid.poke(true.B)
       c.io.newEntry.lanes(0).reqs(1).source.poke(2.U)
       c.io.newEntry.lanes(0).reqs(1).offset.poke(0.U)
-      c.io.newEntry.lanes(0).reqs(1).sizeEnum.poke(1.U)
+      c.io.newEntry.lanes(0).reqs(1).sizeEnum.poke(four)
       c.io.newEntry.lanes(1).reqs(0).valid.poke(false.B)
       c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
       c.io.newEntry.lanes(2).reqs(0).source.poke(2.U)
       c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
-      c.io.newEntry.lanes(2).reqs(0).sizeEnum.poke(1.U)
+      c.io.newEntry.lanes(2).reqs(0).sizeEnum.poke(four)
       c.io.newEntry.lanes(2).reqs(1).valid.poke(true.B)
       c.io.newEntry.lanes(2).reqs(1).source.poke(2.U)
       c.io.newEntry.lanes(2).reqs(1).offset.poke(3.U)
-      c.io.newEntry.lanes(2).reqs(1).sizeEnum.poke(1.U)
+      c.io.newEntry.lanes(2).reqs(1).sizeEnum.poke(four)
       c.io.newEntry.lanes(3).reqs(0).valid.poke(false.B)
 
       c.clock.step()
@@ -421,7 +422,7 @@ class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val sizeBits = 2
 
   val inflightCoalReqTableEntry =
-    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, sizeBits)
+    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, testConfig.SizeEnum)
 
   // it should "stop enqueueing when full" in {
   //   test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>
