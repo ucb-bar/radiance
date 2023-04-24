@@ -13,6 +13,7 @@ import freechips.rocketchip.unittest._
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type
+  val FOUR: Type
   def logSizeToEnum(x: UInt): Type
   def enumToLogSize(x: Type): UInt
 }
@@ -182,7 +183,7 @@ class CoalShiftQueue[T <: Data](
     if (i == -1) true.B else if (i == entries) false.B else mask(i)
   }
   def paddedUsed = pad({ i: Int => used(i) })
-  def validAfterInv(i: Int) = valid(i) && !io.invalidate.bits(i)
+  def validAfterInv(i: Int) = valid(i) && (!io.invalidate.valid || !io.invalidate.bits(i))
 
   val shift = (used =/= 0.U) && (io.queue.deq.ready || !validAfterInv(0))
   for (i <- 0 until entries) {

@@ -26,7 +26,7 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         for (_ <- 0 until 100) {
           c.clock.step()
         }
-        // c.io.deq(0).valid.expect(false.B)
+      // c.io.deq(0).valid.expect(false.B)
       }
   }
 }
@@ -257,7 +257,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "dequeue invalidated entries by itself" in {
-    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+    test(new CoalShiftQueue(gen = UInt(8.W), entries = 4)) { c =>
       c.io.invalidate.valid.poke(false.B)
 
       // prepare
@@ -266,12 +266,10 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.enq.valid.poke(true.B)
       c.io.queue.enq.bits.poke(0x12.U)
       c.clock.step()
-      c.io.queue.deq.ready.poke(false.B)
       c.io.queue.enq.ready.expect(true.B)
       c.io.queue.enq.valid.poke(true.B)
       c.io.queue.enq.bits.poke(0x34.U)
       c.clock.step()
-      c.io.queue.deq.ready.poke(false.B)
       c.io.queue.enq.ready.expect(true.B)
       c.io.queue.enq.valid.poke(true.B)
       c.io.queue.enq.bits.poke(0x56.U)
@@ -281,12 +279,13 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       // invalidate two entries at head
       c.io.invalidate.valid.poke(true.B)
       c.io.invalidate.bits.poke(0x3.U)
+      // [ 0x56 | 0x34(inv) | 0x12(inv) ]
       c.clock.step()
-      // 0x12 should have been dequeued now
+      // [ 0x56 | 0x34(inv) ]
       c.io.invalidate.valid.poke(false.B)
       c.io.queue.deq.ready.poke(false.B)
       c.clock.step()
-      // 0x34 should have been dequeued now
+      // [ 0x56 ]
       c.io.queue.deq.ready.poke(true.B)
       c.io.queue.deq.valid.expect(true.B)
       c.io.queue.deq.bits.expect(0x56.U)
@@ -325,21 +324,22 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
-object testConfig extends CoalescerConfig(
-  MAX_SIZE = 6,       // maximum coalesced size
-  DEPTH = 2,          // request window per lane
-  WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
-  ADDR_WIDTH = 24,    // assume <= 32
-  DATA_BUS_SIZE = 4,  // 2^4=16 bytes, 128 bit bus
-  NUM_LANES = 4,
-  // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
-  WORD_SIZE = 4,      // 32-bit system
-  WORD_WIDTH = 2,     // log(WORD_SIZE)
-  NUM_OLD_IDS = 16,    // num of outstanding requests per lane, from processor
-  NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
-  COAL_SIZES = Seq(4, 6),
-  SizeEnum = DefaultInFlightTableSizeEnum
-)
+object testConfig
+    extends CoalescerConfig(
+      MAX_SIZE = 4, // maximum coalesced size
+      DEPTH = 2, // request window per lane
+      WAIT_TIMEOUT = 8, // max cycles to wait before forced fifo dequeue, per lane
+      ADDR_WIDTH = 24, // assume <= 32
+      DATA_BUS_SIZE = 4, // 2^4=16 bytes, 128 bit bus
+      NUM_LANES = 4,
+      // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
+      WORD_SIZE = 4, // 32-bit system
+      WORD_WIDTH = 2, // log(WORD_SIZE)
+      NUM_OLD_IDS = 16, // num of outstanding requests per lane, from processor
+      NUM_NEW_IDS = 4, // num of outstanding coalesced requests
+      COAL_SIZES = Seq(3),
+      SizeEnum = DefaultInFlightTableSizeEnum
+    )
 
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
@@ -422,7 +422,13 @@ class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val sizeBits = 2
 
   val inflightCoalReqTableEntry =
-    new InflightCoalReqTableEntry(numLanes, numPerLaneReqs, sourceWidth, offsetBits, testConfig.SizeEnum)
+    new InflightCoalReqTableEntry(
+      numLanes,
+      numPerLaneReqs,
+      sourceWidth,
+      offsetBits,
+      testConfig.SizeEnum
+    )
 
   // it should "stop enqueueing when full" in {
   //   test(new InflightCoalReqTable(numLanes, sourceWidth, entries)) { c =>
