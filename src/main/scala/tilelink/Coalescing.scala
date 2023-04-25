@@ -603,8 +603,12 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   newEntry.source := coalescer.io.out_req.bits.source
 
   // TODO: richard to write table fill logic
+  // FIXME: this assertion used to say 1 << config.MAX_SIZE
+  // I changed this to say DATA BUS SIZE. We need another assertion
+  // to assert that MAX_SIZE is <= DATA_BUS_SIZE because we do not support
+  // multi-beat writes currently
   assert(
-    tlCoal.params.dataBits == (1 << config.MAX_SIZE) * 8,
+    tlCoal.params.dataBits == (1 << config.DATA_BUS_SIZE) * 8,
     s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant"
   )
   val origReqs = reqQueues.map(q => q.io.queue.deq.bits)
