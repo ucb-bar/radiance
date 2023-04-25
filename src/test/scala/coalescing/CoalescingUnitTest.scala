@@ -42,6 +42,7 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
       visibility = Seq(AddressSet(0x0, 0xffffff))))))) // 24 bit address space (TODO probably use testConfig)
   }
 
+  // FIXME: this mitm is part of a desperate effort, can remove now & reconnect
   val mitm = Seq.tabulate(testConfig.NUM_LANES) {_ => TLIdentityNode()}
 
   val device = new SimpleDevice("dummy", Seq("dummy"))
@@ -69,6 +70,13 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
 class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleImp(outer) {
   val mitmNodesImp = outer.mitm
   val coal = outer.dut
+  // FIXME: these need to be separate variables because of implicit naming in makeIOs
+  // there has to be a better way
+  val coalIO0 = outer.cpuNodes(0).makeIOs()
+  val coalIO1 = outer.cpuNodes(1).makeIOs()
+  val coalIO2 = outer.cpuNodes(2).makeIOs()
+  val coalIO3 = outer.cpuNodes(3).makeIOs()
+  val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
 }
 
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -86,13 +94,14 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     tb.l2Nodes.foreach(_ := coal.node)
 
     test(tb.module) { c =>
+      val nodes = c.coalIOs.map(_.head)
 //      val nodes = c.cpuNodesImp.map(_.out.head._1)
 //      val nodes = c.coal.node.in.map(_._1)
-      val nodes = c.mitmNodesImp.map(_.in.head._1)
+//      val nodes = c.mitmNodesImp.map(_.in.head._1)
 
       def pokeA(nodes: Seq[TLBundle], idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int): Unit = {
         val node = nodes(idx)
-//        node.a.ready.expect(true.B)
+//        node.a.ready.expect(true.B) // TODO: this fails currently
         node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
         node.a.bits.param.poke(0.U)
         node.a.bits.size.poke(size.U)
@@ -101,12 +110,11 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         node.a.bits.mask.poke(mask.U)
         node.a.bits.data.poke(data.U)
         node.a.bits.corrupt.poke(false.B)
-//        node.a.valid.poke(true.B)
+        node.a.valid.poke(true.B)
       }
 
       def unsetA(): Unit = {
         nodes.foreach { node =>
-          node.a.bits.poke(DontCare.asTypeOf(node.a.bits))
           node.a.valid.poke(false.B)
         }
       }
