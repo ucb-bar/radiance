@@ -57,7 +57,9 @@ object defaultConfig extends CoalescerConfig(
   DEPTH = 1,          // request window per lane
   WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
   ADDR_WIDTH = 24,    // assume <= 32
-  DATA_BUS_SIZE = 4,  // 2^4=16 bytes, 128 bit bus
+  DATA_BUS_SIZE = 3,  // 2^3=8 bytes, 64 bit bus
+                      // this has to be at least larger than the word size for
+                      // the coalescer to perform well
   NUM_LANES = 4,
   // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
   WORD_SIZE = 4,      // 32-bit system
@@ -252,7 +254,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   io := DontCare
 
   val size = coalSize
-  val mask = ((1 << config.ADDR_WIDTH - 1) - (1 << size - 1)).U
+  val mask = (((1 << config.ADDR_WIDTH) - 1) - ((1 << size) - 1)).U
 
   def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
@@ -264,8 +266,26 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   val leaders = io.window.map(_.elts.head)
   val leadersValid = io.window.map(_.mask.asBools.head)
 
+  // debug assertions and prints
+  when (leadersValid.reduce(_ || _)) {
+    leaders.zipWithIndex.foreach{ case (head, i) =>
+      printf(s"ReqQueueEntry[${i}].head = v:%d, source:%d, addr:%x\n",
+        leadersValid(i), head.source, head.address)
+    }
+    // when spatial-only coalescing, queue heads should never drift from each
+    // other
+    // FIXME: This relies on the MemTraceDriver's behavior of generating TL
+    // requests with full source info even when the corresponding lane is not
+    // active.
+    val leadersSourceMatch = leaders.map((_, true.B))
+      .reduce[(ReqQueueEntry, Bool)] { case ((h0, m0), (h1, _)) =>
+      (h1, Mux(m0, (h0.source === h1.source), false.B))
+    }._2
+    assert(leadersSourceMatch, "unexpected drift between lane request queues")
+  }
+
   // TODO: match leader to only lanes >= leader idx
-  val matches = leaders.zip(leadersValid).map { case (leader, leaderValid) =>
+  val matches = (leaders zip leadersValid).map { case (leader, leaderValid) =>
     io.window.map {followerLane =>
       followerLane.elts.zip(followerLane.mask.asBools).map { case (follower, followerValid) =>
         this.canMatch(follower, followerValid, leader, leaderValid)
@@ -273,6 +293,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     }
   }
 
+  // TODO: potentially expensive
   val matchCounts = matches.map(leader => leader.map(PopCount(_)).reduce(_ + _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
@@ -610,6 +631,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   assert(
     tlCoal.params.dataBits == (1 << config.DATA_BUS_SIZE) * 8,
     s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant"
+    + s" (${(1 << config.DATA_BUS_SIZE) * 8})"
   )
   val origReqs = reqQueues.map(q => q.io.queue.deq.bits)
   newEntry.lanes.foreach { l =>
