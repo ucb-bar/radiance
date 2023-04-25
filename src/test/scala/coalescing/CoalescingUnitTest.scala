@@ -31,6 +31,77 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
+class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
+  behavior of "multi- and mono-coalescers"
+
+  it should "coalesce fully consecutive accesses at size 4, only once" in {
+    test(new CoalescingUnit(testConfig)) { c =>
+      val dut = c.module
+      val window = dut.reqQueues
+      val (nodes, _) = c.node.in.unzip
+
+      def pokeA(idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int): Unit = {
+        val node = nodes(idx)
+        node.a.ready.expect(true.B)
+        val bundle = Wire(new TLBundleA(node.a.bits.params))
+        bundle.opcode := Mux(op.B, TLMessages.PutFullData, TLMessages.Get)
+        bundle.param := 0.U
+        bundle.size := size.U
+        bundle.source := source.U
+        bundle.address := addr.U
+        bundle.mask := mask.U
+        bundle.data := data.U
+        bundle.corrupt := false.B
+        node.a.bits.poke(bundle)
+        node.a.valid.poke(true.B)
+      }
+
+      def unsetA(): Unit = {
+        nodes.foreach { node =>
+          node.a.bits.poke(DontCare.asTypeOf(node.a.bits))
+          node.a.valid.poke(false.B)
+        }
+      }
+
+      pokeA(idx=0, op=1, size=2, source=0, addr=0x10, mask=0xf, data=0x1111)
+      pokeA(idx=1, op=1, size=2, source=1, addr=0x14, mask=0xf, data=0x2222)
+      pokeA(idx=2, op=1, size=2, source=2, addr=0x18, mask=0xf, data=0x3333)
+      pokeA(idx=3, op=1, size=2, source=3, addr=0x1c, mask=0xf, data=0x4444)
+
+      dut.clock.step()
+
+      unsetA()
+
+      dut.clock.step()
+      dut.clock.step()
+    }
+  }
+
+  it should "coalesce strided accesses at size 6" in {
+
+  }
+
+  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {
+
+  }
+
+  it should "not touch uncoalescable requests" in {
+
+  }
+
+  it should "allow temporal coalescing when depth >=2" in {
+
+  }
+
+  it should "select the most coverage mono-coalescer" in {
+
+  }
+
+  it should "resort to the backup policy when coverage is below average" in {
+
+  }
+}
+
 class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "request shift queues"
 
@@ -255,7 +326,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
 }
 
 object testConfig extends CoalescerConfig(
-  MAX_SIZE = 4,       // maximum coalesced size
+  MAX_SIZE = 6,       // maximum coalesced size
   DEPTH = 2,          // request window per lane
   WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
   ADDR_WIDTH = 24,    // assume <= 32
@@ -266,7 +337,7 @@ object testConfig extends CoalescerConfig(
   WORD_WIDTH = 2,     // log(WORD_SIZE)
   NUM_OLD_IDS = 16,    // num of outstanding requests per lane, from processor
   NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
-  COAL_SIZES = Seq(3),
+  COAL_SIZES = Seq(4, 6),
   SizeEnum = DefaultInFlightTableSizeEnum
 )
 
