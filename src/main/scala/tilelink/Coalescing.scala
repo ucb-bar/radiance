@@ -37,7 +37,7 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 
 case class CoalescerConfig(
   MAX_SIZE: Int,       // maximum burst size (64 bytes)
-  DEPTH: Int,          // request window per lane
+  QUEUE_DEPTH: Int,    // request window per lane
   WAIT_TIMEOUT: Int,   // max cycles to wait before forced fifo dequeue, per lane
   ADDR_WIDTH: Int,     // assume <= 32
   DATA_BUS_SIZE: Int,  // 2^4=16 bytes, 128 bit bus
@@ -54,7 +54,7 @@ case class CoalescerConfig(
 object defaultConfig extends CoalescerConfig(
   // TODO: bigger size
   MAX_SIZE = 3,       // maximum burst size (64 bytes)
-  DEPTH = 1,          // request window per lane
+  QUEUE_DEPTH = 1,    // request window per lane
   WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
   ADDR_WIDTH = 24,    // assume <= 32
   DATA_BUS_SIZE = 3,  // 2^3=8 bytes, 64 bit bus
@@ -245,8 +245,8 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     val results = Output(new Bundle {
       val leaderIdx = Output(UInt(log2Ceil(config.NUM_LANES).W))
       val baseAddr = Output(UInt(config.ADDR_WIDTH.W))
-      val matchOH = Output(Vec(config.NUM_LANES, UInt(config.DEPTH.W)))
-      val matchCount = Output(UInt(log2Ceil(config.NUM_LANES * config.DEPTH).W))
+      val matchOH = Output(Vec(config.NUM_LANES, UInt(config.QUEUE_DEPTH.W)))
+      val matchCount = Output(UInt(log2Ceil(config.NUM_LANES * config.QUEUE_DEPTH).W))
       val coverageHits = Output(UInt((1 << config.MAX_SIZE).W))
     })
   })
@@ -328,8 +328,8 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   val io = IO(new Bundle {
     val window = Input(Vec(config.NUM_LANES, windowT.io.cloneType))
-    val out_req = DecoupledIO(coalReqT.cloneType)
-    val invalidate = Output(Valid(Vec(config.NUM_LANES, UInt(config.DEPTH.W))))
+    val outReq = DecoupledIO(coalReqT.cloneType)
+    val invalidate = Output(Valid(Vec(config.NUM_LANES, UInt(config.QUEUE_DEPTH.W))))
   })
 
   val coalescers = config.COAL_SIZES.map(size => Module(new MonoCoalescer(size, windowT, config)))
@@ -405,18 +405,18 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   }
 
   val sourceGen = Module(new ReqSourceGen(log2Ceil(config.NUM_NEW_IDS)))
-  sourceGen.io.gen := io.out_req.fire // use up a source ID only when request is created
+  sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
 
-  io.out_req.bits.source := sourceGen.io.id.bits
-  io.out_req.bits.mask := mask.asUInt
-  io.out_req.bits.data := data.asUInt
-  io.out_req.bits.size := chosenSize
-  io.out_req.bits.address := chosenBundle.baseAddr
-  io.out_req.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
-  io.out_req.valid := chosenValid && sourceGen.io.id.valid
+  io.outReq.bits.source := sourceGen.io.id.bits
+  io.outReq.bits.mask := mask.asUInt
+  io.outReq.bits.data := data.asUInt
+  io.outReq.bits.size := chosenSize
+  io.outReq.bits.address := chosenBundle.baseAddr
+  io.outReq.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
+  io.outReq.valid := chosenValid && sourceGen.io.id.valid
 
   io.invalidate.bits := chosenBundle.matchOH
-  io.invalidate.valid := io.out_req.fire // invalidate only when fire
+  io.invalidate.valid := io.outReq.fire // invalidate only when fire
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
@@ -432,7 +432,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // note we are using word size. assuming all coalescer inputs are word sized
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.WORD_WIDTH, config.ADDR_WIDTH, config.WORD_SIZE)
   val reqQueues = Seq.tabulate(config.NUM_LANES) { _ =>
-    Module(new CoalShiftQueue(reqQueueEntryT, config.DEPTH))
+    Module(new CoalShiftQueue(reqQueueEntryT, config.QUEUE_DEPTH))
   }
 
   val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.ADDR_WIDTH, config.MAX_SIZE)
@@ -483,9 +483,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out(0)
 
-  tlCoal.a.valid := coalescer.io.out_req.valid
-  tlCoal.a.bits := coalescer.io.out_req.bits.toTLA(edgeCoal)
-  coalescer.io.out_req.ready := tlCoal.a.ready
+  tlCoal.a.valid := coalescer.io.outReq.valid
+  tlCoal.a.bits := coalescer.io.outReq.bits.toTLA(edgeCoal)
+  coalescer.io.outReq.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
@@ -500,7 +500,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   // The maximum number of requests from a single lane that can go into a
   // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
-  val numPerLaneReqs = config.DEPTH
+  val numPerLaneReqs = config.QUEUE_DEPTH
 
   val respQueueEntryT = new RespQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.MAX_SIZE)
   val respQueues = Seq.tabulate(config.NUM_LANES) { _ =>
@@ -621,7 +621,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   )
   println(s"=========== table sourceWidth: ${sourceWidth}")
   // println(s"=========== table sizeEnumBits: ${newEntry.sizeEnumBits}")
-  newEntry.source := coalescer.io.out_req.bits.source
+  newEntry.source := coalescer.io.outReq.bits.source
 
   // TODO: richard to write table fill logic
   // FIXME: this assertion used to say 1 << config.MAX_SIZE
@@ -652,7 +652,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // Uncoalescer module uncoalesces responses back to each lane
   val uncoalescer = Module(new UncoalescingUnit(config))
 
-  uncoalescer.io.coalReqValid := coalescer.io.out_req.valid
+  uncoalescer.io.coalReqValid := coalescer.io.outReq.valid
   uncoalescer.io.newEntry := newEntry
   // Cleanup: custom <>?
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
@@ -676,7 +676,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   }
 
   // Debug
-  dontTouch(coalescer.io.out_req)
+  dontTouch(coalescer.io.outReq)
   val coalRespData = tlCoal.d.bits.data
   dontTouch(coalRespData)
 
@@ -714,7 +714,7 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
       Vec(
         config.NUM_LANES,
         Vec(
-          config.DEPTH,
+          config.QUEUE_DEPTH,
           ValidIO(
             new RespQueueEntry(log2Ceil(config.NUM_OLD_IDS), config.WORD_WIDTH, config.WORD_SIZE)
           )
@@ -800,7 +800,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   val sizeBits = 2 // FIXME hardcoded
   val entryT = new InflightCoalReqTableEntry(
     config.NUM_LANES,
-    config.DEPTH,
+    config.QUEUE_DEPTH,
     log2Ceil(config.NUM_OLD_IDS),
     config.MAX_SIZE,
     config.SizeEnum
