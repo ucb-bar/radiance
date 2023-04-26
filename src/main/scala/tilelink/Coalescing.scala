@@ -56,7 +56,7 @@ case class CoalescerConfig(
 )
 
 object defaultConfig extends CoalescerConfig(
-  numLanes = 32,
+  numLanes = 4,
   // TODO: bigger size
   maxSize = 3,
   queueDepth = 1,
@@ -256,49 +256,75 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   io := DontCare
 
-  val size = coalSize
-  val mask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
-
-  def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
-    (req0.op === req1.op) &&
-    (req0v && req1v) &&
-    ((req0.address & this.mask) === (req1.address & this.mask))
-  }
-
-  // combinational logic to drive output from window contents
+  // Combinational logic to drive output from window contents.
+  // The leader lanes only compare their heads against all entries of the
+  // follower lanes.
   val leaders = io.window.map(_.elts.head)
   val leadersValid = io.window.map(_.mask.asBools.head)
 
-  // debug assertions and prints
-  when (leadersValid.reduce(_ || _)) {
+  // When doing spatial-only coalescing, queues should never drift from each
+  // other, i.e. the queue heads should always contain mem requests from the
+  // same instruction.
+  // FIXME: This relies on the MemTraceDriver's behavior of generating TL
+  // requests with full source info even when the corresponding lane is not
+  // active.
+  def testNoQueueDrift = {
+    leaders.map((_, true.B))
+      .reduce[(ReqQueueEntry, Bool)] { case ((h0, m0), (h1, _)) =>
+      (h1, Mux(m0, (h0.source === h1.source), false.B))
+    }._2
+  }
+  def printQueueHeads = {
     leaders.zipWithIndex.foreach{ case (head, i) =>
       printf(s"ReqQueueEntry[${i}].head = v:%d, source:%d, addr:%x\n",
         leadersValid(i), head.source, head.address)
     }
-    // when spatial-only coalescing, queue heads should never drift from each
-    // other
-    // FIXME: This relies on the MemTraceDriver's behavior of generating TL
-    // requests with full source info even when the corresponding lane is not
-    // active.
-    val leadersSourceMatch = leaders.map((_, true.B))
-      .reduce[(ReqQueueEntry, Bool)] { case ((h0, m0), (h1, _)) =>
-      (h1, Mux(m0, (h0.source === h1.source), false.B))
-    }._2
-    assert(leadersSourceMatch, "unexpected drift between lane request queues")
+  }
+
+  // debug assertions and prints
+  when (leadersValid.reduce(_ || _)) {
+    assert(testNoQueueDrift, "unexpected drift between lane request queues")
+    printQueueHeads
+  }
+
+  val size = coalSize
+  val addrMask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
+  def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
+    (req0.op === req1.op) &&
+    (req0v && req1v) &&
+    ((req0.address & this.addrMask) === (req1.address & this.addrMask))
   }
 
   // TODO: match leader to only lanes >= leader idx
-  val matches = (leaders zip leadersValid).map { case (leader, leaderValid) =>
-    io.window.map {followerLane =>
-      followerLane.elts.zip(followerLane.mask.asBools).map { case (follower, followerValid) =>
-        this.canMatch(follower, followerValid, leader, leaderValid)
+  // Gives a 2-D table of Bools representing match at that entry, per lane.
+  val matchTablePerLane = (leaders zip leadersValid).map { case (leader, leaderValid) =>
+    io.window.map { followerLane =>
+      // compare leader's head against follower's every queue entry
+      (followerLane.elts zip followerLane.mask.asBools).map { case (follower, followerValid) =>
+        canMatch(follower, followerValid, leader, leaderValid)
       }
     }
   }
 
   // TODO: potentially expensive
-  val matchCounts = matches.map(leader => leader.map(PopCount(_)).reduce(_ + _))
+  val matchCounts = matchTablePerLane.map(table => table.map( PopCount(_) )
+    .reduce{ (m0, m1) =>
+      // this is clunky; what's a good way to extend a UInt's bit width?
+      val m0u = Wire(UInt(4.W))
+      val m1u = Wire(UInt(4.W))
+      m0u := m0
+      m1u := m1
+      m0u + m1u
+    })
+  // NOTE: be careful to not have matchCount result to be 1-bit wide
+  assert(matchCounts(0).getWidth > 0)
   val canCoalesce = matchCounts.map(_ > 1.U)
+
+  when (leadersValid.reduce(_ || _)) {
+    matchCounts.zipWithIndex.foreach { case (count, i) =>
+      printf(s"lane[${i}] matchCount = %d\n", count);
+    }
+  }
 
   // TODO: maybe use round robin arbiter instead of argmax to pick leader
   val chosenLeaderIdx = matchCounts.zipWithIndex.map {
@@ -308,7 +334,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   }._2
 
   val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
-  val chosenMatches = VecInit(matches.map(leader => VecInit(leader.map(VecInit(_).asUInt))))(chosenLeaderIdx)
+  val chosenMatches = VecInit(matchTablePerLane.map(leader => VecInit(leader.map(VecInit(_).asUInt))))(chosenLeaderIdx)
   val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
 
   // coverage calculation
@@ -319,7 +345,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   }
 
   io.results.leaderIdx := chosenLeaderIdx
-  io.results.baseAddr := chosenLeader.address & mask
+  io.results.baseAddr := chosenLeader.address & addrMask
   io.results.matchOH := chosenMatches
   io.results.matchCount := chosenMatchCount
   io.results.coverageHits := PopCount(hits)
@@ -422,8 +448,8 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   io.invalidate.valid := io.outReq.fire // invalidate only when fire
 
   // uncomment the following lines to disable coalescing entirely
-  io.outReq.valid := false.B
-  io.invalidate.valid := false.B
+  // io.outReq.valid := false.B
+  // io.invalidate.valid := false.B
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
@@ -1399,10 +1425,12 @@ object TracePrintf {
 
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
-  // TODO: use parameters for numLanes
-  val numLanes = 4
   // val filename = "test.trace"
   val filename = "vecadd.core1.thread4.trace"
+  // val filename = "nvbit.vecadd.n100000.filter_sm0.trace"
+  // TODO: use parameters for numLanes
+  val numLanes = defaultConfig.numLanes
+
   val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
   val coreSideLogger = LazyModule(
     new MemTraceLogger(numLanes, filename, loggerName = "coreside")
