@@ -36,39 +36,40 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 }
 
 case class CoalescerConfig(
-  NUM_LANES: Int,        // number of lanes (or threads) in a warp
-  MAX_SIZE: Int,         // maximum burst size (64 bytes)
-  QUEUE_DEPTH: Int,      // request window per lane
-  WAIT_TIMEOUT: Int,     // max cycles to wait before forced fifo dequeue, per lane
-  ADDR_WIDTH: Int,       // assume <= 32
-  DATA_BUS_SIZE: Int,    // memory-side downstream TileLink data bus size
-                         // this has to be at least larger than the word size for
-                         // the coalescer to perform well
-  // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
-  WORD_SIZE: Int,        // 32-bit system
-  WORD_WIDTH: Int,       // log(WORD_SIZE)
-  NUM_OLD_IDS: Int,      // num of outstanding requests per lane, from processor
-  NUM_NEW_IDS: Int,      // num of outstanding coalesced requests
-  RESP_QUEUE_DEPTH: Int, // depth of the response fifo queues
-  COAL_SIZES: Seq[Int],
+  numLanes: Int,        // number of lanes (or threads) in a warp
+  maxSize: Int,         // maximum burst size (64 bytes)
+  queueDepth: Int,      // request window per lane
+  waitTimeout: Int,     // max cycles to wait before forced fifo dequeue, per lane
+  addressWidth: Int,    // assume <= 32
+  dataBusWidth: Int,    // memory-side downstream TileLink data bus size
+                        // this has to be at least larger than the word size for
+                        // the coalescer to perform well
+  // watermark = 2,     // minimum buffer occupancy to start coalescing
+  wordSizeInBytes: Int, // 32-bit system
+  wordWidth: Int,       // log(WORD_SIZE)
+  numOldSrcIds: Int,    // num of outstanding requests per lane, from processor
+  numNewSrcIds: Int,    // num of outstanding coalesced requests
+  respQueueDepth: Int,  // depth of the response fifo queues
+  coalSizes: Seq[Int],  // list of coalescer sizes to try in the MonoCoalescers
+                        // must be power of 2's
   sizeEnum: InFlightTableSizeEnum
 )
 
 object defaultConfig extends CoalescerConfig(
-  NUM_LANES = 32,
+  numLanes = 32,
   // TODO: bigger size
-  MAX_SIZE = 3,
-  QUEUE_DEPTH = 1,
-  WAIT_TIMEOUT = 8,
-  ADDR_WIDTH = 24,
-  DATA_BUS_SIZE = 3, // 2^3=8 bytes, 64 bit bus
-  // WATERMARK = 2,
-  WORD_SIZE = 4,
-  WORD_WIDTH = 2,
-  NUM_OLD_IDS = 16,
-  NUM_NEW_IDS = 4,
-  RESP_QUEUE_DEPTH = 4,
-  COAL_SIZES = Seq(3),
+  maxSize = 3,
+  queueDepth = 1,
+  waitTimeout = 8,
+  addressWidth = 24,
+  dataBusWidth = 3, // 2^3=8 bytes, 64 bit bus
+  // watermark = 2,
+  wordSizeInBytes = 4,
+  wordWidth = 2,
+  numOldSrcIds = 16,
+  numNewSrcIds = 4,
+  respQueueDepth = 4,
+  coalSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum
 )
 
@@ -80,7 +81,7 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
   // value would be the sourceId range of a single lane.
-  val numInflightCoalRequests = config.NUM_NEW_IDS
+  val numInflightCoalRequests = config.numNewSrcIds
 
   // Master node that actually generates coalesced requests.
   protected val coalParam = Seq(
@@ -243,20 +244,20 @@ class CoalShiftQueue[T <: Data](
 class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
                     config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val window = Input(Vec(config.NUM_LANES, windowT.io.cloneType))
+    val window = Input(Vec(config.numLanes, windowT.io.cloneType))
     val results = Output(new Bundle {
-      val leaderIdx = Output(UInt(log2Ceil(config.NUM_LANES).W))
-      val baseAddr = Output(UInt(config.ADDR_WIDTH.W))
-      val matchOH = Output(Vec(config.NUM_LANES, UInt(config.QUEUE_DEPTH.W)))
-      val matchCount = Output(UInt(log2Ceil(config.NUM_LANES * config.QUEUE_DEPTH).W))
-      val coverageHits = Output(UInt((1 << config.MAX_SIZE).W))
+      val leaderIdx = Output(UInt(log2Ceil(config.numLanes).W))
+      val baseAddr = Output(UInt(config.addressWidth.W))
+      val matchOH = Output(Vec(config.numLanes, UInt(config.queueDepth.W)))
+      val matchCount = Output(UInt(log2Ceil(config.numLanes * config.queueDepth).W))
+      val coverageHits = Output(UInt((1 << config.maxSize).W))
     })
   })
 
   io := DontCare
 
   val size = coalSize
-  val mask = (((1 << config.ADDR_WIDTH) - 1) - ((1 << size) - 1)).U
+  val mask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
 
   def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
@@ -311,9 +312,9 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
 
   // coverage calculation
-  def getOffsetSlice(addr: UInt) = addr(size - 1, config.WORD_WIDTH)
+  def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
   val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
-  val hits = Seq.tabulate(1 << (size - config.WORD_WIDTH)) { target =>
+  val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
     offsets.map(_ === target.U).reduce(_ || _)
   }
 
@@ -329,17 +330,17 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
                      config: CoalescerConfig) extends Module {
 
   val io = IO(new Bundle {
-    val window = Input(Vec(config.NUM_LANES, windowT.io.cloneType))
+    val window = Input(Vec(config.numLanes, windowT.io.cloneType))
     val outReq = DecoupledIO(coalReqT.cloneType)
-    val invalidate = Output(Valid(Vec(config.NUM_LANES, UInt(config.QUEUE_DEPTH.W))))
+    val invalidate = Output(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
   })
 
-  val coalescers = config.COAL_SIZES.map(size => Module(new MonoCoalescer(size, windowT, config)))
+  val coalescers = config.coalSizes.map(size => Module(new MonoCoalescer(size, windowT, config)))
   coalescers.foreach(_.io.window := io.window)
 
   def normalize(x: Seq[UInt]): Seq[UInt] = {
-    x.zip(config.COAL_SIZES).map { case (hits, size) =>
-      (hits << (config.MAX_SIZE - size).U).asUInt
+    x.zip(config.coalSizes).map { case (hits, size) =>
+      (hits << (config.maxSize - size).U).asUInt
     }
   }
 
@@ -354,10 +355,10 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   val normalizedMatches = normalize(coalescers.map(_.io.results.matchCount))
   val normalizedHits = normalize(coalescers.map(_.io.results.coverageHits))
 
-  val chosenIdx = Wire(UInt(log2Ceil(config.COAL_SIZES.size).W))
+  val chosenIdx = Wire(UInt(log2Ceil(config.coalSizes.size).W))
   val chosenValid = Wire(Bool())
   // minimum 25% coverage
-  val minCoverage = 1.max(1 << (config.MAX_SIZE - 4))
+  val minCoverage = 1.max(1 << (config.maxSize - 4))
   when (normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
     chosenIdx := argMax(normalizedHits)
     chosenValid := true.B
@@ -378,21 +379,21 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   val flatMatches = chosenBundle.matchOH.flatMap(_.asBools)
 
   // check for word alignment in addresses
-  assert(io.window.flatMap(_.elts.map(req => req.address(config.WORD_WIDTH - 1, 0) === 0.U)).reduce(_ || _),
+  assert(io.window.flatMap(_.elts.map(req => req.address(config.wordWidth - 1, 0) === 0.U)).reduce(_ || _),
     "one or more addresses used for coalescing is not word-aligned")
 
   // note: this is word-level coalescing. if finer granularity is needed, need to modify code
-  val numWords = (1.U << (chosenSize - config.WORD_WIDTH.U)).asUInt
-  val maxWords = 1 << (config.MAX_SIZE - config.WORD_WIDTH)
-  val addrMask = Wire(UInt(config.MAX_SIZE.W))
+  val numWords = (1.U << (chosenSize - config.wordWidth.U)).asUInt
+  val maxWords = 1 << (config.maxSize - config.wordWidth)
+  val addrMask = Wire(UInt(config.maxSize.W))
   addrMask := (1.U << chosenSize).asUInt - 1.U
 
-  val data = Wire(Vec(maxWords, UInt((config.WORD_SIZE * 8).W)))
-  val mask = Wire(Vec(maxWords, UInt(config.WORD_SIZE.W)))
+  val data = Wire(Vec(maxWords, UInt((config.wordSizeInBytes * 8).W)))
+  val mask = Wire(Vec(maxWords, UInt(config.wordSizeInBytes.W)))
 
   for (i <- 0 until maxWords) {
     val sel = flatReqs.zip(flatMatches).map { case (req, m) =>
-      m && ((req.address(config.MAX_SIZE - 1, 0) & addrMask) === i.U)
+      m && ((req.address(config.maxSize - 1, 0) & addrMask) === i.U)
     }
     // TODO: SW uses priority encoder, not sure about behavior of MuxCase
     data(i) := MuxCase(DontCare, flatReqs.zip(sel).map { case (req, s) =>
@@ -406,7 +407,7 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
     )
   }
 
-  val sourceGen = Module(new ReqSourceGen(log2Ceil(config.NUM_NEW_IDS)))
+  val sourceGen = Module(new ReqSourceGen(log2Ceil(config.numNewSrcIds)))
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
 
   io.outReq.bits.source := sourceGen.io.id.bits
@@ -429,19 +430,19 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // Make sure IdentityNode is connected to an upstream node, not just the
   // coalescer TL master node
   assert(outer.node.in.length >= 2)
-  assert(outer.node.in(1)._1.params.sourceBits == log2Ceil(config.NUM_OLD_IDS),
+  assert(outer.node.in(1)._1.params.sourceBits == log2Ceil(config.numOldSrcIds),
     s"old source id bits TL param (${outer.node.in(1)._1.params.sourceBits}) mismatch with config")
-  assert(outer.node.in(1)._1.params.addressBits == config.ADDR_WIDTH,
+  assert(outer.node.in(1)._1.params.addressBits == config.addressWidth,
     s"address width TL param (${outer.node.in(1)._1.params.addressBits}) mismatch with config")
 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
-  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.WORD_WIDTH, config.ADDR_WIDTH, config.WORD_SIZE)
-  val reqQueues = Seq.tabulate(config.NUM_LANES) { _ =>
-    Module(new CoalShiftQueue(reqQueueEntryT, config.QUEUE_DEPTH))
+  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.wordWidth, config.addressWidth, config.wordSizeInBytes)
+  val reqQueues = Seq.tabulate(config.numLanes) { _ =>
+    Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth))
   }
 
-  val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.ADDR_WIDTH, config.MAX_SIZE)
+  val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.maxSize), config.addressWidth, config.maxSize)
   val coalescer = Module(new MultiCoalescer(reqQueues.head, coalReqT, config))
   coalescer.io.window := reqQueues.map(_.io)
 
@@ -506,10 +507,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   // The maximum number of requests from a single lane that can go into a
   // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
-  val numPerLaneReqs = config.QUEUE_DEPTH
+  val numPerLaneReqs = config.queueDepth
 
-  val respQueueEntryT = new RespQueueEntry(sourceWidth, log2Ceil(config.MAX_SIZE), config.MAX_SIZE)
-  val respQueues = Seq.tabulate(config.NUM_LANES) { _ =>
+  val respQueueEntryT = new RespQueueEntry(sourceWidth, log2Ceil(config.maxSize), config.maxSize)
+  val respQueues = Seq.tabulate(config.numLanes) { _ =>
     Module(
       new MultiPortQueue(
         respQueueEntryT,
@@ -528,7 +529,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
         // make queue block up in the middle of the simulation.  Ideally there
         // should be a more logical way to set this, or we should handle
         // response queue blocking.
-        config.RESP_QUEUE_DEPTH
+        config.respQueueDepth
       )
     )
   }
@@ -618,7 +619,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // but the width of the size enum
   val newEntry = Wire(
     new InflightCoalReqTableEntry(
-      config.NUM_LANES,
+      config.numLanes,
       numPerLaneReqs,
       sourceWidth,
       offsetBits,
@@ -635,9 +636,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // to assert that MAX_SIZE is <= DATA_BUS_SIZE because we do not support
   // multi-beat writes currently
   assert(
-    tlCoal.params.dataBits == (1 << config.DATA_BUS_SIZE) * 8,
+    tlCoal.params.dataBits == (1 << config.dataBusWidth) * 8,
     s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant"
-    + s" (${(1 << config.DATA_BUS_SIZE) * 8})"
+    + s" (${(1 << config.dataBusWidth) * 8})"
   )
   val origReqs = reqQueues.map(q => q.io.queue.deq.bits)
   newEntry.lanes.foreach { l =>
@@ -645,7 +646,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       // TODO: this part needs the actual coalescing logic to work
       r.valid := false.B
       r.source := origReqs(i).source
-      r.offset := (origReqs(i).address % (1 << config.MAX_SIZE).U) >> config.WORD_WIDTH
+      r.offset := (origReqs(i).address % (1 << config.maxSize).U) >> config.wordWidth
       r.sizeEnum := config.sizeEnum.logSizeToEnum(origReqs(i).size)
     }
   }
@@ -698,8 +699,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 //
 // FIXME: overlaps with RespQueueEntry. Trait-ify
 class CoalescedResponseBundle(config: CoalescerConfig) extends Bundle {
-  val source = UInt(log2Ceil(config.NUM_NEW_IDS).W)
-  val data = UInt((8 * (1 << config.MAX_SIZE)).W)
+  val source = UInt(log2Ceil(config.numNewSrcIds).W)
+  val data = UInt((8 * (1 << config.maxSize)).W)
 }
 
 class UncoalescingUnit(config: CoalescerConfig) extends Module {
@@ -718,11 +719,11 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
     val coalResp = Flipped(Decoupled(new CoalescedResponseBundle(config)))
     val uncoalResps = Output(
       Vec(
-        config.NUM_LANES,
+        config.numLanes,
         Vec(
-          config.QUEUE_DEPTH,
+          config.queueDepth,
           ValidIO(
-            new RespQueueEntry(log2Ceil(config.NUM_OLD_IDS), config.WORD_WIDTH, config.WORD_SIZE)
+            new RespQueueEntry(log2Ceil(config.numOldSrcIds), config.wordWidth, config.wordSizeInBytes)
           )
         )
       )
@@ -805,15 +806,15 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   val offsetBits = 4 // FIXME hardcoded
   val sizeBits = 2 // FIXME hardcoded
   val entryT = new InflightCoalReqTableEntry(
-    config.NUM_LANES,
-    config.QUEUE_DEPTH,
-    log2Ceil(config.NUM_OLD_IDS),
-    config.MAX_SIZE,
+    config.numLanes,
+    config.queueDepth,
+    log2Ceil(config.numOldSrcIds),
+    config.maxSize,
     config.sizeEnum
   )
 
-  val entries = config.NUM_NEW_IDS
-  val sourceWidth = log2Ceil(config.NUM_OLD_IDS)
+  val entries = config.numNewSrcIds
+  val sourceWidth = log2Ceil(config.numOldSrcIds)
 
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(entryT))
@@ -927,7 +928,7 @@ class MemTraceDriver(config: CoalescerConfig, filename: String)(implicit
     p: Parameters
 ) extends LazyModule {
   // Create N client nodes together
-  val laneNodes = Seq.tabulate(config.NUM_LANES) { i =>
+  val laneNodes = Seq.tabulate(config.numLanes) { i =>
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
@@ -969,7 +970,7 @@ class TraceLine extends Bundle with HasTraceLine {
 class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFile: String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
-  val sim = Module(new SimMemTrace(traceFile, config.NUM_LANES))
+  val sim = Module(new SimMemTrace(traceFile, config.numLanes))
   sim.io.clock := clock
   sim.io.reset := reset.asBool
   sim.io.trace_read.ready := true.B
@@ -977,7 +978,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
   // Split output of SimMemTrace, which is flattened across all lanes,
   // back to each lane's.
 
-  val laneReqs = Wire(Vec(config.NUM_LANES, new TraceLine))
+  val laneReqs = Wire(Vec(config.numLanes, new TraceLine))
   val addrW = laneReqs(0).address.getWidth
   val sizeW = laneReqs(0).size.getWidth
   val dataW = laneReqs(0).data.getWidth
@@ -1010,17 +1011,17 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     // the trace driver to act so as well.
     // That means if req.size is smaller than word size, we need to pad data
     // with zeros to generate a word-size request, and set mask accordingly.
-    val offsetInWord = req.address % config.WORD_SIZE.U
-    val subword = req.size < log2Ceil(config.WORD_SIZE).U
+    val offsetInWord = req.address % config.wordSizeInBytes.U
+    val subword = req.size < log2Ceil(config.wordSizeInBytes).U
 
     // `mask` is currently unused
-    val mask = Wire(UInt(config.WORD_SIZE.W))
-    val wordData = Wire(UInt((config.WORD_SIZE * 8 * 2).W))
+    val mask = Wire(UInt(config.wordSizeInBytes.W))
+    val wordData = Wire(UInt((config.wordSizeInBytes * 8 * 2).W))
     val sizeInBytes = Wire(UInt((sizeW + 1).W))
     sizeInBytes := (1.U) << req.size
     mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
     wordData := Mux(subword, req.data << (offsetInWord * 8.U), req.data)
-    val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.WORD_SIZE)) - 1).U(addrW.W)
+    val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
     val wordAlignedSize = Mux(subword, 2.U, req.size)
 
     // when(req.valid && subword) {
