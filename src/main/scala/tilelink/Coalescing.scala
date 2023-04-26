@@ -268,12 +268,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // FIXME: This relies on the MemTraceDriver's behavior of generating TL
   // requests with full source info even when the corresponding lane is not
   // active.
-  def testNoQueueDrift = {
-    leaders.map((_, true.B))
-      .reduce[(ReqQueueEntry, Bool)] { case ((h0, m0), (h1, _)) =>
-      (h1, Mux(m0, (h0.source === h1.source), false.B))
-    }._2
-  }
+  def testNoQueueDrift: Bool = leaders.map(_.source === leaders.head.source).reduce(_ || _)
   def printQueueHeads = {
     leaders.zipWithIndex.foreach{ case (head, i) =>
       printf(s"ReqQueueEntry[${i}].head = v:%d, source:%d, addr:%x\n",
@@ -307,19 +302,8 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     }
   }
 
-  // TODO: potentially expensive: popcount & adder & greater-than comparator
-  val matchCounts = matchTablePerLane.map(table => table.map( PopCount(_) )
-    .reduce{ (m0, m1) =>
-      // this is clunky; what's a good way to extend a UInt's bit width?
-      val countWidth = 5 // for 32 lanes, has to be at least 5
-      val m0u = Wire(UInt(countWidth.W))
-      val m1u = Wire(UInt(countWidth.W))
-      m0u := m0
-      m1u := m1
-      m0u + m1u
-    })
-  // NOTE: be careful to not have matchCount result to be 1-bit wide
-  assert(matchCounts(0).getWidth > 0)
+  // TODO: potentially expensive: popcount & adder
+  val matchCounts = matchTablePerLane.map(leader => leader.map(PopCount(_)).reduce(_ +& _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
   // TODO: potentially expensive
@@ -327,7 +311,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   val chosenLeaderIdx = matchCounts.zipWithIndex.map {
     case (c, i) => (c, i.U)
   }.reduce[(UInt, UInt)] { case ((c0, i), (c1, j)) =>
-    (Mux(c0 > c1, c0, c1), Mux(c0 > c1, i, j))
+    (Mux(c0 >= c1, c0, c1), Mux(c0 >= c1, i, j))
   }._2
 
   val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
@@ -353,8 +337,9 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // coverage calculation
   def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
   val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
+  val valids = io.window.map(_.mask).flatMap(_.asBools)
   val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
-    offsets.map(_ === target.U).reduce(_ || _)
+    (offsets zip valids).map { case (offset, valid) => valid && (offset === target.U) }.reduce(_ || _)
   }
 
   io.results.leaderIdx := chosenLeaderIdx
@@ -418,7 +403,8 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   val flatMatches = chosenBundle.matchOH.flatMap(_.asBools)
 
   // check for word alignment in addresses
-  assert(io.window.flatMap(_.elts.map(req => req.address(config.wordWidth - 1, 0) === 0.U)).reduce(_ || _),
+  assert(io.window.flatMap(_.elts.map(req => req.address(config.wordWidth - 1, 0) === 0.U)).zip(
+    io.window.flatMap(_.mask.asBools)).map { case (aligned, valid) => (!valid) || aligned }.reduce(_ || _),
     "one or more addresses used for coalescing is not word-aligned")
 
   // note: this is word-level coalescing. if finer granularity is needed, need to modify code
@@ -459,6 +445,8 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   io.invalidate.bits := chosenBundle.matchOH
   io.invalidate.valid := io.outReq.fire // invalidate only when fire
+
+  dontTouch(io.invalidate) // debug
 
   // uncomment the following lines to disable coalescing entirely
   // io.outReq.valid := false.B

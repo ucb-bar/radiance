@@ -34,19 +34,16 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 }
 
 class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
-  val cpuNodes = Seq.tabulate(testConfig.NUM_LANES) { _ =>
+  val cpuNodes = Seq.tabulate(testConfig.numLanes) { _ =>
     TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
       name = "processor-nodes",
-      sourceId = IdRange(0, testConfig.NUM_OLD_IDS),
+      sourceId = IdRange(0, testConfig.numOldSrcIds),
       requestFifo = true,
       visibility = Seq(AddressSet(0x0, 0xffffff))))))) // 24 bit address space (TODO probably use testConfig)
   }
 
-  // FIXME: this mitm is part of a desperate effort, can remove now & reconnect
-  val mitm = Seq.tabulate(testConfig.NUM_LANES) {_ => TLIdentityNode()}
-
   val device = new SimpleDevice("dummy", Seq("dummy"))
-  val beatBytes = 1 << testConfig.DATA_BUS_SIZE // 256 bit bus
+  val beatBytes = 1 << testConfig.dataBusWidth // 256 bit bus
   val l2Nodes = Seq.tabulate(5) { _ =>
     TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLManagerParameters(
       address = Seq(AddressSet(0x0, 0xffffff)), // should be matching cpuNode
@@ -68,7 +65,6 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
 }
 
 class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleImp(outer) {
-  val mitmNodesImp = outer.mitm
   val coal = outer.dut
   // FIXME: these need to be separate variables because of implicit naming in makeIOs
   // there has to be a better way
@@ -77,6 +73,8 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val coalIO2 = outer.cpuNodes(2).makeIOs()
   val coalIO3 = outer.cpuNodes(3).makeIOs()
   val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
+
+//  val coalMasterNode = coal.coalescerNode.makeIOs()
 }
 
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -89,11 +87,10 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 //    val outer = LazyModule(new CoalescingUnit(testConfig))
 
     val coal = tb.dut
-    tb.cpuNodes.zip(tb.mitm).foreach { case (a, b) => b := a }
-    tb.mitm.foreach(coal.node := _)
+    tb.cpuNodes.foreach(coal.node := _)
     tb.l2Nodes.foreach(_ := coal.node)
 
-    test(tb.module) { c =>
+    test(tb.module).withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { c =>
       val nodes = c.coalIOs.map(_.head)
 //      val nodes = c.cpuNodesImp.map(_.out.head._1)
 //      val nodes = c.coal.node.in.map(_._1)
@@ -101,7 +98,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
       def pokeA(nodes: Seq[TLBundle], idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int): Unit = {
         val node = nodes(idx)
-//        node.a.ready.expect(true.B) // TODO: this fails currently
+//        node.a.ready.expect(true.B) // FIXME: this fails currently
         node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
         node.a.bits.param.poke(0.U)
         node.a.bits.size.poke(size.U)
@@ -119,10 +116,14 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
         }
       }
 
+      // always ready to take coalesced requests
+//      c.coalMasterNode.head.a.ready.poke(true.B)
+//      c.coal.module.coalescer.io.outReq.ready.poke(true.B)
+
       pokeA(nodes, idx=0, op=1, size=2, source=0, addr=0x10, mask=0xf, data=0x1111)
-      pokeA(nodes, idx=1, op=1, size=2, source=1, addr=0x14, mask=0xf, data=0x2222)
-      pokeA(nodes, idx=2, op=1, size=2, source=2, addr=0x18, mask=0xf, data=0x3333)
-      pokeA(nodes, idx=3, op=1, size=2, source=3, addr=0x1c, mask=0xf, data=0x4444)
+      pokeA(nodes, idx=1, op=1, size=2, source=0, addr=0x14, mask=0xf, data=0x2222)
+      pokeA(nodes, idx=2, op=1, size=2, source=0, addr=0x18, mask=0xf, data=0x3333)
+      pokeA(nodes, idx=3, op=1, size=2, source=0, addr=0x1c, mask=0xf, data=0x4444)
 
       c.clock.step()
 
@@ -381,19 +382,20 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
 }
 
 object testConfig extends CoalescerConfig(
-  MAX_SIZE = 5,       // maximum coalesced size
-  DEPTH = 2,          // request window per lane
-  WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
-  ADDR_WIDTH = 24,    // assume <= 32
-  DATA_BUS_SIZE = 5,  // 2^5=32 bytes, 256 bit bus
-  NUM_LANES = 4,
-  // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
-  WORD_SIZE = 4,      // 32-bit system
-  WORD_WIDTH = 2,     // log(WORD_SIZE)
-  NUM_OLD_IDS = 16,   // num of outstanding requests per lane, from processor
-  NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
-  COAL_SIZES = Seq(4, 5),
-  SizeEnum = DefaultInFlightTableSizeEnum
+  maxSize = 5,
+  queueDepth = 2,
+  waitTimeout = 8,
+  addressWidth = 24,
+  dataBusWidth = 5,
+  numLanes = 4,
+  // watermark = 2,
+  wordSizeInBytes = 4,
+  wordWidth = 2,
+  numOldSrcIds = 16,
+  numNewSrcIds = 4,
+  respQueueDepth = 4,
+  coalSizes = Seq(4, 5),
+  sizeEnum = DefaultInFlightTableSizeEnum
 )
 
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -482,7 +484,7 @@ class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       numPerLaneReqs,
       sourceWidth,
       offsetBits,
-      testConfig.SizeEnum
+      testConfig.sizeEnum
     )
 
   // it should "stop enqueueing when full" in {
