@@ -36,38 +36,40 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 }
 
 case class CoalescerConfig(
-  MAX_SIZE: Int,       // maximum burst size (64 bytes)
-  QUEUE_DEPTH: Int,    // request window per lane
-  WAIT_TIMEOUT: Int,   // max cycles to wait before forced fifo dequeue, per lane
-  ADDR_WIDTH: Int,     // assume <= 32
-  DATA_BUS_SIZE: Int,  // 2^4=16 bytes, 128 bit bus
-  NUM_LANES: Int,
+  NUM_LANES: Int,        // number of lanes (or threads) in a warp
+  MAX_SIZE: Int,         // maximum burst size (64 bytes)
+  QUEUE_DEPTH: Int,      // request window per lane
+  WAIT_TIMEOUT: Int,     // max cycles to wait before forced fifo dequeue, per lane
+  ADDR_WIDTH: Int,       // assume <= 32
+  DATA_BUS_SIZE: Int,    // memory-side downstream TileLink data bus size
+                         // this has to be at least larger than the word size for
+                         // the coalescer to perform well
   // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
-  WORD_SIZE: Int,      // 32-bit system
-  WORD_WIDTH: Int,     // log(WORD_SIZE)
-  NUM_OLD_IDS: Int,    // num of outstanding requests per lane, from processor
-  NUM_NEW_IDS: Int,    // num of outstanding coalesced requests
+  WORD_SIZE: Int,        // 32-bit system
+  WORD_WIDTH: Int,       // log(WORD_SIZE)
+  NUM_OLD_IDS: Int,      // num of outstanding requests per lane, from processor
+  NUM_NEW_IDS: Int,      // num of outstanding coalesced requests
+  RESP_QUEUE_DEPTH: Int, // depth of the response fifo queues
   COAL_SIZES: Seq[Int],
-  SizeEnum: InFlightTableSizeEnum
+  sizeEnum: InFlightTableSizeEnum
 )
 
 object defaultConfig extends CoalescerConfig(
+  NUM_LANES = 32,
   // TODO: bigger size
-  MAX_SIZE = 3,       // maximum burst size (64 bytes)
-  QUEUE_DEPTH = 1,    // request window per lane
-  WAIT_TIMEOUT = 8,   // max cycles to wait before forced fifo dequeue, per lane
-  ADDR_WIDTH = 24,    // assume <= 32
-  DATA_BUS_SIZE = 3,  // 2^3=8 bytes, 64 bit bus
-                      // this has to be at least larger than the word size for
-                      // the coalescer to perform well
-  NUM_LANES = 4,
-  // WATERMARK = 2,      // minimum buffer occupancy to start coalescing
-  WORD_SIZE = 4,      // 32-bit system
-  WORD_WIDTH = 2,     // log(WORD_SIZE)
-  NUM_OLD_IDS = 16,    // num of outstanding requests per lane, from processor
-  NUM_NEW_IDS = 4,    // num of outstanding coalesced requests
+  MAX_SIZE = 3,
+  QUEUE_DEPTH = 1,
+  WAIT_TIMEOUT = 8,
+  ADDR_WIDTH = 24,
+  DATA_BUS_SIZE = 3, // 2^3=8 bytes, 64 bit bus
+  // WATERMARK = 2,
+  WORD_SIZE = 4,
+  WORD_WIDTH = 2,
+  NUM_OLD_IDS = 16,
+  NUM_NEW_IDS = 4,
+  RESP_QUEUE_DEPTH = 4,
   COAL_SIZES = Seq(3),
-  SizeEnum = DefaultInFlightTableSizeEnum
+  sizeEnum = DefaultInFlightTableSizeEnum
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
@@ -417,6 +419,10 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   io.invalidate.bits := chosenBundle.matchOH
   io.invalidate.valid := io.outReq.fire // invalidate only when fire
+
+  // uncomment the following lines to disable coalescing entirely
+  io.outReq.valid := false.B
+  io.invalidate.valid := false.B
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
@@ -522,7 +528,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
         // make queue block up in the middle of the simulation.  Ideally there
         // should be a more logical way to set this, or we should handle
         // response queue blocking.
-        config.NUM_NEW_IDS
+        config.RESP_QUEUE_DEPTH
       )
     )
   }
@@ -616,7 +622,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       numPerLaneReqs,
       sourceWidth,
       offsetBits,
-      config.SizeEnum
+      config.sizeEnum
     )
   )
   println(s"=========== table sourceWidth: ${sourceWidth}")
@@ -640,7 +646,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       r.valid := false.B
       r.source := origReqs(i).source
       r.offset := (origReqs(i).address % (1 << config.MAX_SIZE).U) >> config.WORD_WIDTH
-      r.sizeEnum := config.SizeEnum.logSizeToEnum(origReqs(i).size)
+      r.sizeEnum := config.sizeEnum.logSizeToEnum(origReqs(i).size)
     }
   }
   newEntry.lanes(0).reqs(0).valid := true.B
@@ -701,7 +707,7 @@ class UncoalescingUnit(config: CoalescerConfig) extends Module {
   //  val numLanes: Int, <-> config.NUM_LANES
   //  val numPerLaneReqs: Int, <-> config.DEPTH
   //  val sourceWidth: Int, <-> log2ceil(config.NUM_OLD_IDS)
-  //  val sizeWidth: Int, <-> config.SizeEnum.width
+  //  val sizeWidth: Int, <-> config.sizeEnum.width
   //  val coalDataWidth: Int, <-> (1 << config.MAX_SIZE)
   //  val numInflightCoalRequests: Int <-> config.NUM_NEW_IDS
   val inflightTable = Module(new InflightCoalReqTable(config))
@@ -803,7 +809,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
     config.QUEUE_DEPTH,
     log2Ceil(config.NUM_OLD_IDS),
     config.MAX_SIZE,
-    config.SizeEnum
+    config.sizeEnum
   )
 
   val entries = config.NUM_NEW_IDS
@@ -833,7 +839,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
           r.valid := false.B
           r.source := 0.U
           r.offset := 0.U
-          r.sizeEnum := config.SizeEnum.INVALID
+          r.sizeEnum := config.sizeEnum.INVALID
         }
       }
     }
