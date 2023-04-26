@@ -295,9 +295,10 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     ((req0.address & this.addrMask) === (req1.address & this.addrMask))
   }
 
-  // TODO: match leader to only lanes >= leader idx
-  // Gives a 2-D table of Bools representing match at that entry, per lane.
+  // Gives a 2-D table of Bools representing match at every queue entry,
+  // for each lane (so 3-D in total).
   val matchTablePerLane = (leaders zip leadersValid).map { case (leader, leaderValid) =>
+    // TODO: match leader to only lanes >= leader idx
     io.window.map { followerLane =>
       // compare leader's head against follower's every queue entry
       (followerLane.elts zip followerLane.mask.asBools).map { case (follower, followerValid) =>
@@ -306,12 +307,13 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     }
   }
 
-  // TODO: potentially expensive
+  // TODO: potentially expensive: popcount & adder & greater-than comparator
   val matchCounts = matchTablePerLane.map(table => table.map( PopCount(_) )
     .reduce{ (m0, m1) =>
       // this is clunky; what's a good way to extend a UInt's bit width?
-      val m0u = Wire(UInt(4.W))
-      val m1u = Wire(UInt(4.W))
+      val countWidth = 5 // for 32 lanes, has to be at least 5
+      val m0u = Wire(UInt(countWidth.W))
+      val m1u = Wire(UInt(countWidth.W))
       m0u := m0
       m1u := m1
       m0u + m1u
@@ -320,22 +322,33 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   assert(matchCounts(0).getWidth > 0)
   val canCoalesce = matchCounts.map(_ > 1.U)
 
+  // TODO: potentially expensive
+  // TODO: maybe use round robin arbiter instead of argmax to pick leader
+  val chosenLeaderIdx = matchCounts.zipWithIndex.map {
+    case (c, i) => (c, i.U)
+  }.reduce[(UInt, UInt)] { case ((c0, i), (c1, j)) =>
+    (Mux(c0 > c1, c0, c1), Mux(c0 > c1, i, j))
+  }._2
+
+  val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
+  // matchTable for the chosen lane, but converted to a Vec[UInt]
+  val chosenMatches = VecInit(matchTablePerLane.map{ table =>
+    VecInit(table.map(VecInit(_).asUInt))
+  })(chosenLeaderIdx)
+  val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
+
+  // debug prints
   when (leadersValid.reduce(_ || _)) {
     matchCounts.zipWithIndex.foreach { case (count, i) =>
       printf(s"lane[${i}] matchCount = %d\n", count);
     }
+    printf("chosenLeader = lane %d\n", chosenLeaderIdx)
+    printf("chosenLeader matches = [ ")
+    chosenMatches.foreach { m =>
+      printf("%d ", m)
+    }
+    printf("]\n")
   }
-
-  // TODO: maybe use round robin arbiter instead of argmax to pick leader
-  val chosenLeaderIdx = matchCounts.zipWithIndex.map {
-    case (a, b) => (a, b.U)
-  }.reduce[(UInt, UInt)] { case ((a, i), (b, j)) =>
-    (Mux(a > b, a, b), Mux(a > b, i, j))
-  }._2
-
-  val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
-  val chosenMatches = VecInit(matchTablePerLane.map(leader => VecInit(leader.map(VecInit(_).asUInt))))(chosenLeaderIdx)
-  val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
 
   // coverage calculation
   def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
