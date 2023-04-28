@@ -35,26 +35,47 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
 class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
   val cpuNodes = Seq.tabulate(testConfig.numLanes) { _ =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
-      name = "processor-nodes",
-      sourceId = IdRange(0, testConfig.numOldSrcIds),
-//      requestFifo = true,
-      visibility = Seq(AddressSet(0x0, 0xffffff))))))) // 24 bit address space (TODO probably use testConfig)
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          Seq(
+            TLClientParameters(
+              name = "processor-nodes",
+              sourceId = IdRange(0, testConfig.numOldSrcIds),
+              requestFifo = true,
+              visibility = Seq(AddressSet(0x0, 0xffffff))
+            )
+          )
+        )
+      )
+    ) // 24 bit address space (TODO probably use testConfig)
   }
 
   val device = new SimpleDevice("dummy", Seq("dummy"))
   val beatBytes = 1 << testConfig.dataBusWidth // 256 bit bus
   val l2Nodes = Seq.tabulate(5) { _ =>
-    TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLManagerParameters(
-      address = Seq(AddressSet(0x0, 0xffffff)), // should be matching cpuNode
-      resources = device.reg,
-      regionType = RegionType.UNCACHED,
-      executable = true,
-      supportsGet = TransferSizes(1, beatBytes),
-      supportsPutFull = TransferSizes(1, beatBytes),
-      supportsPutPartial = TransferSizes(1, beatBytes),
-      supportsHint = TransferSizes(1, beatBytes),
-      fifoId = Some(0))), beatBytes)))
+    TLManagerNode(
+      Seq(
+        TLSlavePortParameters.v1(
+          Seq(
+            TLManagerParameters(
+              address = Seq(AddressSet(0x0, 0xffffff)), // should be matching cpuNode
+              resources = device.reg,
+              regionType = RegionType.UNCACHED,
+              executable = true,
+              supportsArithmetic = TransferSizes(1, beatBytes),
+              supportsLogical = TransferSizes(1, beatBytes),
+              supportsGet = TransferSizes(1, beatBytes),
+              supportsPutFull = TransferSizes(1, beatBytes),
+              supportsPutPartial = TransferSizes(1, beatBytes),
+              supportsHint = TransferSizes(1, beatBytes),
+              fifoId = Some(0)
+            )
+          ),
+          beatBytes
+        )
+      )
+    )
   }
 
   val dut = LazyModule(new CoalescingUnit(testConfig))
@@ -84,81 +105,85 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "multi- and mono-coalescers"
 
+  implicit val p: Parameters = Parameters.empty
+
+  val tb = LazyModule(new DummyCoalescingUnitTB())
+  // val outer = LazyModule(new CoalescingUnit(testConfig))
+
+  val coal = tb.dut
+  tb.cpuNodes.foreach(coal.node := _)
+  tb.l2Nodes.foreach(_ := coal.node)
+
+  def pokeA(
+      nodes: Seq[TLBundle],
+      idx: Int,
+      op: Int,
+      size: Int,
+      source: Int,
+      addr: Int,
+      mask: Int,
+      data: Int
+  ): Unit = {
+    val node = nodes(idx)
+//        node.a.ready.expect(true.B) // FIXME: this fails currently
+    node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
+    node.a.bits.param.poke(0.U)
+    node.a.bits.size.poke(size.U)
+    node.a.bits.source.poke(source.U)
+    node.a.bits.address.poke(addr.U)
+    node.a.bits.mask.poke(mask.U)
+    node.a.bits.data.poke(data.U)
+    node.a.bits.corrupt.poke(false.B)
+    node.a.valid.poke(true.B)
+  }
+
+  def unsetA(nodes: Seq[TLBundle]): Unit = {
+    nodes.foreach { node =>
+      node.a.valid.poke(false.B)
+    }
+  }
+
   it should "coalesce fully consecutive accesses at size 4, only once" in {
-    implicit val p: Parameters = Parameters.empty
-
-    val tb = LazyModule(new DummyCoalescingUnitTB())
-//    val outer = LazyModule(new CoalescingUnit(testConfig))
-
-    val coal = tb.dut
-
-    test(tb.module).withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { c =>
+    test(tb.module)
+    // .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+    { c =>
+      println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
 //      val nodes = c.cpuNodesImp.map(_.out.head._1)
 //      val nodes = c.coal.node.in.map(_._1)
 //      val nodes = c.mitmNodesImp.map(_.in.head._1)
 
-      def pokeA(nodes: Seq[TLBundle], idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int): Unit = {
-        val node = nodes(idx)
-//        node.a.ready.expect(true.B) // FIXME: this fails currently
-        node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
-        node.a.bits.param.poke(0.U)
-        node.a.bits.size.poke(size.U)
-        node.a.bits.source.poke(source.U)
-        node.a.bits.address.poke(addr.U)
-        node.a.bits.mask.poke(mask.U)
-        node.a.bits.data.poke(data.U)
-        node.a.bits.corrupt.poke(false.B)
-        node.a.valid.poke(true.B)
-      }
-
-      def unsetA(): Unit = {
-        nodes.foreach { node =>
-          node.a.valid.poke(false.B)
-        }
-      }
-
       // always ready to take coalesced requests
 //      c.coalMasterNode.head.a.ready.poke(true.B)
 //      c.coal.module.coalescer.io.outReq.ready.poke(true.B)
 
-      pokeA(nodes, idx=0, op=1, size=2, source=0, addr=0x10, mask=0xf, data=0x1111)
-      pokeA(nodes, idx=1, op=1, size=2, source=0, addr=0x14, mask=0xf, data=0x2222)
-      pokeA(nodes, idx=2, op=1, size=2, source=0, addr=0x18, mask=0xf, data=0x3333)
-      pokeA(nodes, idx=3, op=1, size=2, source=0, addr=0x1c, mask=0xf, data=0x4444)
+      pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
+      pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
+      pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
+      pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
 
       c.clock.step()
 
-      unsetA()
+      unsetA(nodes)
 
       c.clock.step()
       c.clock.step()
     }
   }
 
-  it should "coalesce strided accesses at size 6" in {
+  it should "coalesce identical addresses (stride of 0)" in {}
 
-  }
+  it should "coalesce strided accesses at size 6" in {}
 
-  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {
+  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {}
 
-  }
+  it should "not touch uncoalescable requests" in {}
 
-  it should "not touch uncoalescable requests" in {
+  it should "allow temporal coalescing when depth >=2" in {}
 
-  }
+  it should "select the most coverage mono-coalescer" in {}
 
-  it should "allow temporal coalescing when depth >=2" in {
-
-  }
-
-  it should "select the most coverage mono-coalescer" in {
-
-  }
-
-  it should "resort to the backup policy when coverage is below average" in {
-
-  }
+  it should "resort to the backup policy when coverage is below average" in {}
 }
 
 class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -383,22 +408,23 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
-object testConfig extends CoalescerConfig(
-  maxSize = 5,
-  queueDepth = 2,
-  waitTimeout = 8,
-  addressWidth = 24,
-  dataBusWidth = 5,
-  numLanes = 4,
-  // watermark = 2,
-  wordSizeInBytes = 4,
-  wordWidth = 2,
-  numOldSrcIds = 16,
-  numNewSrcIds = 4,
-  respQueueDepth = 4,
-  coalSizes = Seq(4, 5),
-  sizeEnum = DefaultInFlightTableSizeEnum
-)
+object testConfig
+    extends CoalescerConfig(
+      maxSize = 5,
+      queueDepth = 2,
+      waitTimeout = 8,
+      addressWidth = 24,
+      dataBusWidth = 5,
+      numLanes = 4,
+      // watermark = 2,
+      wordSizeInBytes = 4,
+      wordWidth = 2,
+      numOldSrcIds = 16,
+      numNewSrcIds = 4,
+      respQueueDepth = 4,
+      coalLogSizes = Seq(4, 5),
+      sizeEnum = DefaultInFlightTableSizeEnum
+    )
 
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"

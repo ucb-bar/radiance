@@ -36,22 +36,22 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 }
 
 case class CoalescerConfig(
-  numLanes: Int,        // number of lanes (or threads) in a warp
-  maxSize: Int,         // maximum burst size (64 bytes)
-  queueDepth: Int,      // request window per lane
-  waitTimeout: Int,     // max cycles to wait before forced fifo dequeue, per lane
-  addressWidth: Int,    // assume <= 32
-  dataBusWidth: Int,    // memory-side downstream TileLink data bus size
-                        // this has to be at least larger than the word size for
-                        // the coalescer to perform well
-  // watermark = 2,     // minimum buffer occupancy to start coalescing
-  wordSizeInBytes: Int, // 32-bit system
-  wordWidth: Int,       // log(WORD_SIZE)
-  numOldSrcIds: Int,    // num of outstanding requests per lane, from processor
-  numNewSrcIds: Int,    // num of outstanding coalesced requests
-  respQueueDepth: Int,  // depth of the response fifo queues
-  coalSizes: Seq[Int],  // list of coalescer sizes to try in the MonoCoalescers
-                        // must be power of 2's
+  numLanes: Int,          // number of lanes (or threads) in a warp
+  maxSize: Int,           // maximum burst size (64 bytes)
+  queueDepth: Int,        // request window per lane
+  waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
+  addressWidth: Int,      // assume <= 32
+  dataBusWidth: Int,      // memory-side downstream TileLink data bus size
+                          // this has to be at least larger than the word size for
+                          // the coalescer to perform well
+  // watermark = 2,       // minimum buffer occupancy to start coalescing
+  wordSizeInBytes: Int,   // 32-bit system
+  wordWidth: Int,         // log(WORD_SIZE)
+  numOldSrcIds: Int,      // num of outstanding requests per lane, from processor
+  numNewSrcIds: Int,      // num of outstanding coalesced requests
+  respQueueDepth: Int,    // depth of the response fifo queues
+  coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
+                          // each size is log(byteSize)
   sizeEnum: InFlightTableSizeEnum
 )
 
@@ -69,7 +69,7 @@ object defaultConfig extends CoalescerConfig(
   numOldSrcIds = 16,
   numNewSrcIds = 4,
   respQueueDepth = 4,
-  coalSizes = Seq(3),
+  coalLogSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum
 )
 
@@ -241,7 +241,7 @@ class CoalShiftQueue[T <: Data](
 }
 
 // Software model: coalescer.py
-class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
+class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
                     config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     val window = Input(Vec(config.numLanes, windowT.io.cloneType))
@@ -249,6 +249,8 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       val leaderIdx = Output(UInt(log2Ceil(config.numLanes).W))
       val baseAddr = Output(UInt(config.addressWidth.W))
       val matchOH = Output(Vec(config.numLanes, UInt(config.queueDepth.W)))
+      // number of entries matched with this leader lane's head.
+      // maximum is numLanes * queueDepth
       val matchCount = Output(UInt(log2Ceil(config.numLanes * config.queueDepth).W))
       val coverageHits = Output(UInt((1 << config.maxSize).W))
     })
@@ -282,7 +284,7 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     printQueueHeads
   }
 
-  val size = coalSize
+  val size = coalLogSize
   val addrMask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
   def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
@@ -321,6 +323,18 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   })(chosenLeaderIdx)
   val chosenMatchCount = VecInit(matchCounts)(chosenLeaderIdx)
 
+  // coverage calculation
+  def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
+  // 2-D table flattened to 1-D
+  val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
+  val valids = io.window.map(_.mask).flatMap(_.asBools)
+  val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
+    // count if any of the queue entries accesses the given offset word of the
+    // coalesced chunk; if 1 for all offsets, we've reached 100% utilization
+    // of the coalesced data words
+    (offsets zip valids).map { case (offset, valid) => valid && (offset === target.U) }.reduce(_ || _)
+  }
+
   // debug prints
   when (leadersValid.reduce(_ || _)) {
     matchCounts.zipWithIndex.foreach { case (count, i) =>
@@ -332,14 +346,12 @@ class MonoCoalescer(coalSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       printf("%d ", m)
     }
     printf("]\n")
-  }
 
-  // coverage calculation
-  def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
-  val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
-  val valids = io.window.map(_.mask).flatMap(_.asBools)
-  val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
-    (offsets zip valids).map { case (offset, valid) => valid && (offset === target.U) }.reduce(_ || _)
+    printf("hits = [ ")
+    hits.foreach { m =>
+      printf("%d ", m)
+    }
+    printf("]\n")
   }
 
   io.results.leaderIdx := chosenLeaderIdx
@@ -354,16 +366,19 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
                      config: CoalescerConfig) extends Module {
 
   val io = IO(new Bundle {
+    // coalescing window, connected to the contents of the request queues
     val window = Input(Vec(config.numLanes, windowT.io.cloneType))
+    // newly generated coalesced request
     val outReq = DecoupledIO(coalReqT.cloneType)
+    // invalidate signals going into each request queue's head
     val invalidate = Output(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
   })
 
-  val coalescers = config.coalSizes.map(size => Module(new MonoCoalescer(size, windowT, config)))
+  val coalescers = config.coalLogSizes.map(size => Module(new MonoCoalescer(size, windowT, config)))
   coalescers.foreach(_.io.window := io.window)
 
-  def normalize(x: Seq[UInt]): Seq[UInt] = {
-    x.zip(config.coalSizes).map { case (hits, size) =>
+  def normalize(valPerSize: Seq[UInt]): Seq[UInt] = {
+    (valPerSize zip config.coalLogSizes).map { case (hits, size) =>
       (hits << (config.maxSize - size).U).asUInt
     }
   }
@@ -376,27 +391,34 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
     }._2
   }
 
+  // normalize to maximum coalescing size so that we can do fair comparisons
+  // between coalescing results of different sizes
   val normalizedMatches = normalize(coalescers.map(_.io.results.matchCount))
   val normalizedHits = normalize(coalescers.map(_.io.results.coverageHits))
 
-  val chosenIdx = Wire(UInt(log2Ceil(config.coalSizes.size).W))
+  val chosenSizeIdx = Wire(UInt(log2Ceil(config.coalLogSizes.size).W))
   val chosenValid = Wire(Bool())
   // minimum 25% coverage
-  val minCoverage = 1.max(1 << (config.maxSize - 4))
+  val minCoverage = 1.max(1 << ((config.maxSize - 2) - 2))
+  printf("matchCount[0]=%d\n", coalescers(0).io.results.matchCount)
+  printf("normalizedMatches[0]=%d\n", normalizedMatches(0))
+  printf("coverageHits[0]=%d\n", coalescers(0).io.results.coverageHits)
+  printf("normalizedHits[0]=%d\n", normalizedHits(0))
+  printf("minCoverage=%d\n", minCoverage.U)
   when (normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
-    chosenIdx := argMax(normalizedHits)
+    chosenSizeIdx := argMax(normalizedHits)
     chosenValid := true.B
   }.elsewhen(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
-    chosenIdx := argMax(normalizedMatches)
+    chosenSizeIdx := argMax(normalizedMatches)
     chosenValid := true.B
   }.otherwise {
-    chosenIdx := DontCare
+    chosenSizeIdx := DontCare
     chosenValid := false.B
   }
 
   // create coalesced request
-  val chosenBundle = VecInit(coalescers.map(_.io.results))(chosenIdx)
-  val chosenSize = VecInit(coalescers.map(_.size.U))(chosenIdx)
+  val chosenBundle = VecInit(coalescers.map(_.io.results))(chosenSizeIdx)
+  val chosenSize = VecInit(coalescers.map(_.size.U))(chosenSizeIdx)
 
   // flatten requests and matches
   val flatReqs = io.window.flatMap(_.elts)
@@ -435,13 +457,18 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   val sourceGen = Module(new ReqSourceGen(log2Ceil(config.numNewSrcIds)))
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
 
+  val coalesceValid = chosenValid && sourceGen.io.id.valid
+  when (coalesceValid) {
+    printf("coalescing success!\n")
+  }
+
   io.outReq.bits.source := sourceGen.io.id.bits
   io.outReq.bits.mask := mask.asUInt
   io.outReq.bits.data := data.asUInt
   io.outReq.bits.size := chosenSize
   io.outReq.bits.address := chosenBundle.baseAddr
   io.outReq.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
-  io.outReq.valid := chosenValid && sourceGen.io.id.valid
+  io.outReq.valid := coalesceValid
 
   io.invalidate.bits := chosenBundle.matchOH
   io.invalidate.valid := io.outReq.fire // invalidate only when fire
