@@ -151,10 +151,14 @@ class ReqSourceGen(sourceWidth: Int) extends Module {
 // A shift-register queue implementation that supports invalidating entries
 // and exposing queue contents as output IO. (TODO: support deadline)
 // Initially copied from freechips.rocketchip.util.ShiftQueue.
-// If `pipe` is true, support enqueueing to a full queue when also dequeueing.
+// The queue only shifts down when `allowShift` is given true.  Dequeueing
+// works normally, but if allowShift was false, the queue head will stay
+// invalid after dequeueing.  This option is added in order to synchronize the
+// shifting of the queues between lanes to model the SIMD behavior.
+// If `pipe` is true, support enqueueing to a full queue when head is being
+// dequeued at the next cycle.
 // Software model: window.py
-class CoalShiftQueue[T <: Data](
-                                 gen: T,
+class CoalShiftQueue[T <: Data]( gen: T,
                                  val entries: Int,
                                  pipe: Boolean = true,
                                  flow: Boolean = false
@@ -162,6 +166,7 @@ class CoalShiftQueue[T <: Data](
   val io = IO(new Bundle {
     val queue = new QueueIO(gen, entries)
     val invalidate = Input(Valid(UInt(entries.W)))
+    val allowShift = Input(Bool())
     val mask = Output(UInt(entries.W))
     val elts = Output(Vec(entries, gen))
     // 'QueueIO' provides io.count, but we might not want to use it in the
@@ -190,7 +195,7 @@ class CoalShiftQueue[T <: Data](
   def paddedUsed = pad({ i: Int => used(i) })
   def validAfterInv(i: Int) = valid(i) && (!io.invalidate.valid || !io.invalidate.bits(i))
 
-  val shift = (used =/= 0.U) && (io.queue.deq.ready || !validAfterInv(0))
+  val shift = io.allowShift && (used =/= 0.U) && (io.queue.deq.fire || !validAfterInv(0))
   for (i <- 0 until entries) {
     val wdata = if (i == entries - 1) io.queue.enq.bits else Mux(!used(i + 1), io.queue.enq.bits, elts(i + 1))
     val wen = Mux(
@@ -533,15 +538,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       // data, at the cost of re-aligning at the outgoing end.
       req.mask := tlIn.a.bits.mask
 
-      assert(reqQueue.io.enq.ready, "reqQueue is supposed to be always ready")
-      reqQueue.io.enq.valid := tlIn.a.valid
-      reqQueue.io.enq.bits := req
-      // TODO: deq.ready should respect downstream ready
+      assert(reqQueue.io.queue.enq.ready, "reqQueue is supposed to be always ready")
+      reqQueue.io.queue.enq.valid := tlIn.a.valid
+      reqQueue.io.queue.enq.bits := req
+      // TODO: deq.ready should respect downstream arbiter
       reqQueue.io.queue.deq.ready := true.B
       // invalidate queue entries that contain original core requests that got
       // coalesced into a wider one
       reqQueue.io.invalidate.bits := coalescer.io.invalidate.bits(lane)
       reqQueue.io.invalidate.valid := coalescer.io.invalidate.valid
+      reqQueue.io.allowShift := true.B
 
       // NOTE: this relies on CoalShiftQueue's behavior combinationally
       // deasserting deq.valid in the same cycle that the head invalidate
