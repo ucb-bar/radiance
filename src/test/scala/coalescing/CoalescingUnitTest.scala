@@ -107,12 +107,15 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   implicit val p: Parameters = Parameters.empty
 
-  val tb = LazyModule(new DummyCoalescingUnitTB())
-  // val outer = LazyModule(new CoalescingUnit(testConfig))
+  def makeTb() = {
+    val tb = LazyModule(new DummyCoalescingUnitTB())
+    // val outer = LazyModule(new CoalescingUnit(testConfig))
 
-  val coal = tb.dut
-  tb.cpuNodes.foreach(coal.node := _)
-  tb.l2Nodes.foreach(_ := coal.node)
+    val coal = tb.dut
+    tb.cpuNodes.foreach(coal.node := _)
+    tb.l2Nodes.foreach(_ := coal.node)
+    tb
+  }
 
   def pokeA(
       nodes: Seq[TLBundle],
@@ -144,8 +147,8 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "coalesce fully consecutive accesses at size 4, only once" in {
-    test(tb.module)
-    // .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+    test(makeTb().module)
+    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
       println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
@@ -171,7 +174,28 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "coalesce identical addresses (stride of 0)" in {}
+  it should "coalesce identical addresses (stride of 0)" in {
+    test(makeTb().module)
+    .withAnnotations(Seq(VcsBackendAnnotation))
+    { c =>
+      println(s"coalIO length = ${c.coalIOs(0).length}")
+      val nodes = c.coalIOs.map(_.head)
+
+      pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x1111)
+      pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x2222)
+      pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
+      pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x4444)
+
+      c.clock.step()
+
+      unsetA(nodes)
+
+      c.clock.step()
+      c.clock.step()
+
+      nodes(0).a.ready.expect(true.B)
+    }
+  }
 
   it should "coalesce strided accesses at size 6" in {}
 
