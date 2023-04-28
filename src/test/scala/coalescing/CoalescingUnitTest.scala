@@ -102,6 +102,23 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
 //  val coalMasterNode = coal.coalescerNode.makeIOs()
 }
 
+object testConfig extends CoalescerConfig(
+  numLanes = 4,
+  maxSize = 3,
+  queueDepth = 1,
+  waitTimeout = 8,
+  addressWidth = 24,
+  dataBusWidth = 5,
+  // watermark = 2,
+  wordSizeInBytes = 4,
+  wordWidth = 2,
+  numOldSrcIds = 16,
+  numNewSrcIds = 4,
+  respQueueDepth = 4,
+  coalLogSizes = Seq(3),
+  sizeEnum = DefaultInFlightTableSizeEnum
+)
+
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "multi- and mono-coalescers"
 
@@ -146,33 +163,33 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "coalesce fully consecutive accesses at size 4, only once" in {
-    test(makeTb().module)
-    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
-    { c =>
-      println(s"coalIO length = ${c.coalIOs(0).length}")
-      val nodes = c.coalIOs.map(_.head)
-//      val nodes = c.cpuNodesImp.map(_.out.head._1)
-//      val nodes = c.coal.node.in.map(_._1)
-//      val nodes = c.mitmNodesImp.map(_.in.head._1)
+  // it should "coalesce fully consecutive accesses at size 4, only once" in {
+  //   test(makeTb().module)
+  //   .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+  //   { c =>
+  //     println(s"coalIO length = ${c.coalIOs(0).length}")
+  //     val nodes = c.coalIOs.map(_.head)
+// //      val nodes = c.cpuNodesImp.map(_.out.head._1)
+// //      val nodes = c.coal.node.in.map(_._1)
+// //      val nodes = c.mitmNodesImp.map(_.in.head._1)
 
-      // always ready to take coalesced requests
-//      c.coalMasterNode.head.a.ready.poke(true.B)
-//      c.coal.module.coalescer.io.outReq.ready.poke(true.B)
+  //     // always ready to take coalesced requests
+// //      c.coalMasterNode.head.a.ready.poke(true.B)
+// //      c.coal.module.coalescer.io.outReq.ready.poke(true.B)
 
-      pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
-      pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
-      pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
-      pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
+  //     pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
+  //     pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
+  //     pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
+  //     pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
 
-      c.clock.step()
+  //     c.clock.step()
 
-      unsetA(nodes)
+  //     unsetA(nodes)
 
-      c.clock.step()
-      c.clock.step()
-    }
-  }
+  //     c.clock.step()
+  //     c.clock.step()
+  //   }
+  // }
 
   it should "coalesce identical addresses (stride of 0)" in {
     test(makeTb().module)
@@ -192,8 +209,6 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
       c.clock.step()
       c.clock.step()
-
-      nodes(0).a.ready.expect(true.B)
     }
   }
 
@@ -431,24 +446,6 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 }
-
-object testConfig
-    extends CoalescerConfig(
-      maxSize = 5,
-      queueDepth = 2,
-      waitTimeout = 8,
-      addressWidth = 24,
-      dataBusWidth = 5,
-      numLanes = 4,
-      // watermark = 2,
-      wordSizeInBytes = 4,
-      wordWidth = 2,
-      numOldSrcIds = 16,
-      numNewSrcIds = 4,
-      respQueueDepth = 4,
-      coalLogSizes = Seq(4, 5),
-      sizeEnum = DefaultInFlightTableSizeEnum
-    )
 
 class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"

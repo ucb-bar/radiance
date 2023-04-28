@@ -251,7 +251,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       val matchOH = Output(Vec(config.numLanes, UInt(config.queueDepth.W)))
       // number of entries matched with this leader lane's head.
       // maximum is numLanes * queueDepth
-      val matchCount = Output(UInt(log2Ceil(config.numLanes * config.queueDepth).W))
+      val matchCount = Output(UInt(log2Ceil(config.numLanes * config.queueDepth + 1).W))
       val coverageHits = Output(UInt((1 << config.maxSize).W))
     })
   })
@@ -305,7 +305,9 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   }
 
   // TODO: potentially expensive: popcount & adder
-  val matchCounts = matchTablePerLane.map(leader => leader.map(PopCount(_)).reduce(_ +& _))
+  val matchCounts = matchTablePerLane.map(table =>
+      table.map(PopCount(_)) // sum up each column
+           .reduce(_ +& _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
   // TODO: potentially expensive
@@ -328,10 +330,10 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // 2-D table flattened to 1-D
   val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
   val valids = io.window.map(_.mask).flatMap(_.asBools)
+  // indicates whether each word in the coalesced chunk is accessed by any of the
+  // queue entries. e.g. if [ 1 1 1 1 ], all of the four words in the coalesced
+  // data has been accessed and we've reached 100% utilization.
   val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
-    // count if any of the queue entries accesses the given offset word of the
-    // coalesced chunk; if 1 for all offsets, we've reached 100% utilization
-    // of the coalesced data words
     (offsets zip valids).map { case (offset, valid) => valid && (offset === target.U) }.reduce(_ || _)
   }
 
@@ -346,6 +348,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       printf("%d ", m)
     }
     printf("]\n")
+    printf("chosenMatchCount = %d\n", chosenMatchCount)
 
     printf("hits = [ ")
     hits.foreach { m =>
@@ -408,9 +411,11 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   when (normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
     chosenSizeIdx := argMax(normalizedHits)
     chosenValid := true.B
+    printf("coalescing success by coverage policy\n")
   }.elsewhen(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
     chosenSizeIdx := argMax(normalizedMatches)
     chosenValid := true.B
+    printf("coalescing success by matches policy\n")
   }.otherwise {
     chosenSizeIdx := DontCare
     chosenValid := false.B
@@ -458,9 +463,6 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
 
   val coalesceValid = chosenValid && sourceGen.io.id.valid
-  when (coalesceValid) {
-    printf("coalescing success!\n")
-  }
 
   io.outReq.bits.source := sourceGen.io.id.bits
   io.outReq.bits.mask := mask.asUInt
