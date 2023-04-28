@@ -59,7 +59,6 @@ case class CoalescerConfig(
 
 object defaultConfig extends CoalescerConfig(
   numLanes = 4,
-  // TODO: bigger size
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
@@ -679,19 +678,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // logic to generate the Inflight Entry into the uncoalescer, where it should be.
   // this also reduces top level clutter.
 
-  val offsetBits = 4 // FIXME hardcoded
-  // but the width of the size enum
-  val newEntry = Wire(
-    new InflightCoalReqTableEntry(
-      config.numLanes,
-      numPerLaneReqs,
-      sourceWidth,
-      offsetBits,
-      config.sizeEnum
-    )
-  )
-  println(s"=========== table sourceWidth: ${sourceWidth}")
-  // println(s"=========== table sizeEnumBits: ${newEntry.sizeEnumBits}")
+  val uncoalescer = Module(new Uncoalescer(config))
+
+  val newEntry = Wire(uncoalescer.inflightTable.entryT)
   newEntry.source := coalescer.io.coalReq.bits.source
 
   // TODO: richard to write table fill logic
@@ -717,12 +706,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
           reqEntry.source := req.source
           reqEntry.offset := ((req.address % (1 << config.maxCoalLogSize).U) >> config.wordWidth)
           reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(req.size)
+          // TODO: load/store op
         }
     }
   dontTouch(newEntry)
-
-  // Uncoalescer module uncoalesces responses back to each lane
-  val uncoalescer = Module(new Uncoalescer(config))
 
   uncoalescer.io.coalReqValid := coalescer.io.coalReq.valid
   uncoalescer.io.newEntry := newEntry
@@ -743,9 +730,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       )
       q.io.enq(respQueueUncoalPortOffset + i).valid := resp.valid
       q.io.enq(respQueueUncoalPortOffset + i).bits := resp.bits
-      when (resp.valid) {
-        printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
-      }
+      // debug
+      // when (resp.valid) {
+      //   printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
+      // }
       // dontTouch(q.io.enq(respQueueCoalPortOffset))
     }
   }
@@ -871,8 +859,7 @@ class Uncoalescer(config: CoalescerConfig) extends Module {
 // split the coalesced response back to individual per-lane responses with the
 // right metadata.
 class InflightCoalReqTable(config: CoalescerConfig) extends Module {
-  val offsetBits = 4 // FIXME hardcoded
-  val sizeBits = 2 // FIXME hardcoded
+  val offsetBits = config.maxCoalLogSize - config.wordWidth // assumes word offset
   val entryT = new InflightCoalReqTableEntry(
     config.numLanes,
     config.queueDepth,
@@ -883,6 +870,9 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
 
   val entries = config.numNewSrcIds
   val sourceWidth = log2Ceil(config.numOldSrcIds)
+
+  println(s"=========== table sourceWidth: ${sourceWidth}")
+  println(s"=========== table sizeEnumBits: ${entryT.sizeEnumT.getWidth}")
 
   val io = IO(new Bundle {
     val enq = Flipped(Decoupled(entryT))
