@@ -272,11 +272,9 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
         leadersValid(i), head.source, head.address)
     }
   }
-
-  // debug assertions and prints
   when (leadersValid.reduce(_ || _)) {
     assert(testNoQueueDrift, "unexpected drift between lane request queues")
-    printQueueHeads
+    // printQueueHeads
   }
 
   val size = coalLogSize
@@ -289,15 +287,19 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   // Gives a 2-D table of Bools representing match at every queue entry,
   // for each lane (so 3-D in total).
-  val matchTablePerLane = (leaders zip leadersValid).map { case (leader, leaderValid) =>
-    // TODO: match leader to only lanes >= leader idx
-    io.window.map { followerLane =>
-      // compare leader's head against follower's every queue entry
-      (followerLane.elts zip followerLane.mask.asBools).map { case (follower, followerValid) =>
-        canMatch(follower, followerValid, leader, leaderValid)
+  val matchTablePerLane = (leaders zip leadersValid).zipWithIndex
+    .map { case ((leader, leaderValid), leaderIndex) =>
+      io.window.zipWithIndex.map { case (followerQueue, followerIndex) =>
+        // compare leader's head against follower's every queue entry
+        (followerQueue.elts zip followerQueue.mask.asBools)
+          .map { case (follower, followerValid) =>
+            // match leader to only followers at lanes >= leader idx
+            // this halves the number of comparators
+            if (followerIndex < leaderIndex) false.B
+            else canMatch(follower, followerValid, leader, leaderValid)
+          }
       }
     }
-  }
 
   // TODO: potentially expensive: popcount & adder
   val matchCounts = matchTablePerLane.map(table =>
@@ -334,9 +336,9 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   // debug prints
   when (leadersValid.reduce(_ || _)) {
-    // matchCounts.zipWithIndex.foreach { case (count, i) =>
-    //   printf(s"lane[${i}] matchCount = %d\n", count);
-    // }
+    matchCounts.zipWithIndex.foreach { case (count, i) =>
+      printf(s"lane[${i}] matchCount = %d\n", count);
+    }
     printf("chosenLeader = lane %d\n", chosenLeaderIdx)
     printf("chosenLeader matches = [ ")
     chosenMatches.foreach { m =>
