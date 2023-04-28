@@ -218,7 +218,6 @@ class CoalShiftQueue[T <: Data](
   }
 
   io.queue.enq.ready := !valid(entries - 1)
-  // TODO: making this validAfterInv(0) might be useful for the arbiter
   io.queue.deq.valid := validAfterInv(0)
   io.queue.deq.bits := elts.head
 
@@ -336,9 +335,9 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   // debug prints
   when (leadersValid.reduce(_ || _)) {
-    matchCounts.zipWithIndex.foreach { case (count, i) =>
-      printf(s"lane[${i}] matchCount = %d\n", count);
-    }
+    // matchCounts.zipWithIndex.foreach { case (count, i) =>
+    //   printf(s"lane[${i}] matchCount = %d\n", count);
+    // }
     printf("chosenLeader = lane %d\n", chosenLeaderIdx)
     printf("chosenLeader matches = [ ")
     chosenMatches.foreach { m =>
@@ -543,6 +542,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       reqQueue.io.invalidate.bits := coalescer.io.invalidate.bits(lane)
       reqQueue.io.invalidate.valid := coalescer.io.invalidate.valid
 
+      // NOTE: this relies on CoalShiftQueue's behavior combinationally
+      // deasserting deq.valid in the same cycle that the head invalidate
+      // signal goes up.
       tlOut.a.valid := reqQueue.io.queue.deq.valid
       tlOut.a.bits := reqQueue.io.queue.deq.bits.toTLA(edgeOut)
   }
@@ -701,31 +703,21 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     + s" (${(1 << config.dataBusWidth) * 8})"
   )
   val reqQueueHeads = reqQueues.map(q => q.io.queue.deq.bits)
-  // newEntry.lanes.foreach { l =>
-  //   l.reqs.zipWithIndex.foreach { case (r, i) =>
-  //     // TODO: this part needs the actual coalescing logic to work
-  //     r.valid := false.B
-  //     r.source := origReqs(i).source
-  //     r.offset := (origReqs(i).address % (1 << config.maxCoalLogSize).U) >> config.wordWidth
-  //     r.sizeEnum := config.sizeEnum.logSizeToEnum(origReqs(i).size)
-  //   }
-  // }
-  // newEntry.lanes(0).reqs(0).valid := true.B
-  // newEntry.lanes(1).reqs(0).valid := true.B
-  // newEntry.lanes(2).reqs(0).valid := true.B
-  // newEntry.lanes(3).reqs(0).valid := true.B
+  // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
+  // coalescer to every (numLanes * queueDepth) entry in the inflight table.
   (newEntry.lanes zip coalescer.io.invalidate.bits).zipWithIndex
     .foreach { case ((laneEntry, laneInv), lane) =>
-      (laneEntry.reqs zip laneInv.asBools).foreach { case (reqEntry, inv) =>
-        reqEntry.valid := (coalescer.io.invalidate.valid && inv)
-        when ((coalescer.io.invalidate.valid && inv)) {
-          printf(s"entry for reqQueue(${lane}) got invalidated\n")
+      (laneEntry.reqs zip laneInv.asBools).zipWithIndex
+        .foreach { case ((reqEntry, inv), i) =>
+          val req = reqQueues(lane).io.elts(i)
+          when ((coalescer.io.invalidate.valid && inv)) {
+            printf(s"coalescer: reqQueue(${lane})(${i}) got invalidated (source=%d)\n", req.source)
+          }
+          reqEntry.valid := (coalescer.io.invalidate.valid && inv)
+          reqEntry.source := req.source
+          reqEntry.offset := ((req.address % (1 << config.maxCoalLogSize).U) >> config.wordWidth)
+          reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(req.size)
         }
-        // FIXME: copying over queue heads out of laziness
-        reqEntry.source := reqQueueHeads(lane).source
-        reqEntry.offset := (reqQueueHeads(lane).address % (1 << config.maxCoalLogSize).U) >> config.wordWidth
-        reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(reqQueueHeads(lane).size)
-      }
     }
   dontTouch(newEntry)
 
