@@ -577,6 +577,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
         // requests that didn't get coalesced, and M is the maximum number of
         // single-lane requests that can go into a coalesced request.
         // (`numPerLaneReqs`).
+        // TODO: potentially expensive, because this generates more FFs.
+        // Rather than enqueueing all responses in a single cycle, consider
+        // enqueueing one by one (at the cost of possibly stalling downstream).
         1 + numPerLaneReqs,
         // deq_lanes = 1 because we're serializing all responses to 1 port that
         // goes back to the core.
@@ -593,7 +596,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     )
   }
   val respQueueNoncoalPort = 0
-  val respQueueCoalPortOffset = 1
+  val respQueueUncoalPortOffset = 1
 
   (outer.node.in zip outer.node.out).zipWithIndex.foreach {
     case (((tlIn, edgeIn), (tlOut, _)), 0) => // TODO: not necessarily 1 master edge
@@ -714,9 +717,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   (newEntry.lanes zip coalescer.io.invalidate.bits).zipWithIndex
     .foreach { case ((laneEntry, laneInv), lane) =>
       (laneEntry.reqs zip laneInv.asBools).foreach { case (reqEntry, inv) =>
-        // TODO: this part needs the actual coalescing logic to work
-        reqEntry.valid := inv
-        when (inv) {
+        reqEntry.valid := (coalescer.io.invalidate.valid && inv)
+        when ((coalescer.io.invalidate.valid && inv)) {
           printf(s"entry for reqQueue(${lane}) got invalidated\n")
         }
         // FIXME: copying over queue heads out of laziness
@@ -728,7 +730,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   dontTouch(newEntry)
 
   // Uncoalescer module uncoalesces responses back to each lane
-  val uncoalescer = Module(new UncoalescingUnit(config))
+  val uncoalescer = Module(new Uncoalescer(config))
 
   uncoalescer.io.coalReqValid := coalescer.io.coalReq.valid
   uncoalescer.io.newEntry := newEntry
@@ -744,11 +746,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
       // cache.  This should ideally not happen though.
       assert(
-        q.io.enq(respQueueCoalPortOffset + i).ready,
-        s"respQueue: enq port for coalesced response is blocked for lane ${lane}"
+        q.io.enq(respQueueUncoalPortOffset + i).ready,
+        s"respQueue: enq port for ${i}-th uncoalesced response is blocked for lane ${lane}"
       )
-      q.io.enq(respQueueCoalPortOffset + i).valid := resp.valid
-      q.io.enq(respQueueCoalPortOffset + i).bits := resp.bits
+      q.io.enq(respQueueUncoalPortOffset + i).valid := resp.valid
+      q.io.enq(respQueueUncoalPortOffset + i).bits := resp.bits
+      when (resp.valid) {
+        printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
+      }
       // dontTouch(q.io.enq(respQueueCoalPortOffset))
     }
   }
@@ -774,7 +779,7 @@ class CoalescedResponseBundle(config: CoalescerConfig) extends Bundle {
   val data = UInt((8 * (1 << config.maxCoalLogSize)).W)
 }
 
-class UncoalescingUnit(config: CoalescerConfig) extends Module {
+class Uncoalescer(config: CoalescerConfig) extends Module {
   // notes to hansung:
   //  val numLanes: Int, <-> config.NUM_LANES
   //  val numPerLaneReqs: Int, <-> config.DEPTH

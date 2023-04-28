@@ -446,7 +446,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
-class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
+class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
   val numLanes = 4
   val numPerLaneReqs = 2
@@ -457,7 +457,7 @@ class UncoalescingUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   val numInflightCoalRequests = 4
 
   it should "work" in {
-    test(new UncoalescingUnit(testConfig))
+    test(new Uncoalescer(testConfig))
     // vcs helps with simulation time, but sometimes errors with
     // "mutation occurred during iteration" java error
     // .withAnnotations(Seq(VcsBackendAnnotation))
