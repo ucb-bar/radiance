@@ -211,6 +211,11 @@ class CoalShiftQueue[T <: Data]( gen: T,
       (io.queue.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
       (io.queue.enq.fire && paddedUsed(i - 1) && !used(i)) || validAfterInv(i)
     )
+    // additionally, head entry should get invalidated when dequeue fired
+    // but queue didn't shift (e.g. because allowShift was false)
+    when (io.queue.deq.fire && !shift) {
+      valid(0) := false.B
+    }
   }
 
   when(io.queue.enq.fire) {

@@ -308,6 +308,43 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  it should "not shift entries when allowShift is false" in {
+    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
+      c.io.invalidate.valid.poke(false.B)
+      c.io.queue.deq.ready.poke(false.B)
+
+      c.io.allowShift.poke(false.B)
+
+      // prepare
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x12.U)
+      c.clock.step()
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x34.U)
+      c.clock.step()
+      c.io.queue.enq.valid.poke(false.B)
+
+      // dequeueing should work normally when allowShift is false...
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x12.U)
+      c.clock.step()
+      // but should stop there and not dequeue the next entry
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(false.B)
+      c.clock.step()
+      // when allowShift is back one, dequeueing should start working from next
+      // cycle
+      c.io.allowShift.poke(true.B)
+      c.clock.step()
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x34.U)
+    }
+  }
+
   it should "work when enqueing and dequeueing simultaneously to a depth=1 queue" in {
     test(new CoalShiftQueue(UInt(8.W), 1)) { c =>
       c.io.invalidate.valid.poke(false.B)
@@ -364,9 +401,9 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.allowShift.poke(false.B)
       c.io.invalidate.valid.poke(true.B)
       c.io.invalidate.bits.poke(0x1.U)
-      // TODO: we might be able to enqueue to a depth=1 queue whose entry
-      // just got invalidated, so that enq.ready is true.B here, but it is a
-      // niche case
+      // TODO: we might be able to enqueue to a full depth=1 queue whose only
+      // entry just got invalidated, so that enq.ready is true here, but
+      // it is a niche case
       c.io.queue.enq.ready.expect(false.B)
       c.clock.step()
       // now try enqueueing now that we have space
@@ -385,7 +422,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "invalidate head being dequeued" in {
+  it should "invalidate head that is also being dequeued" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
       c.io.invalidate.valid.poke(false.B)
       c.io.allowShift.poke(true.B)
