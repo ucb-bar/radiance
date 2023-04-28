@@ -104,7 +104,6 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
 
 object testConfig extends CoalescerConfig(
   numLanes = 4,
-  maxSize = 3,
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
