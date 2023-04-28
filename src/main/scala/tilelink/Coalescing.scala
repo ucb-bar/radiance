@@ -214,10 +214,10 @@ class CoalShiftQueue[T <: Data]( gen: T,
   }
 
   when(io.queue.enq.fire) {
-    when(!io.queue.deq.fire) {
+    when(!shift) {
       used := (used << 1.U) | 1.U
     }
-  }.elsewhen(io.queue.deq.fire) {
+  }.elsewhen(shift) {
     used := used >> 1.U
   }
 
@@ -227,6 +227,7 @@ class CoalShiftQueue[T <: Data]( gen: T,
 
   assert(!flow, "flow-through is not implemented")
   if (flow) {
+    // FIXME old code
     when(io.queue.enq.valid) { io.queue.deq.valid := true.B }
     when(!valid(0)) { io.queue.deq.bits := io.queue.enq.bits }
   }

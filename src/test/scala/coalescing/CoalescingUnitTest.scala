@@ -381,9 +381,10 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "dequeue invalidated entries by itself" in {
+  it should "dequeue invalidated head on its own when allowShift" in {
     test(new CoalShiftQueue(gen = UInt(8.W), entries = 4)) { c =>
       c.io.invalidate.valid.poke(false.B)
+
       c.io.allowShift.poke(true.B)
 
       // prepare
@@ -405,19 +406,33 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       // invalidate two entries at head
       c.io.invalidate.valid.poke(true.B)
       c.io.invalidate.bits.poke(0x3.U)
+      c.io.queue.deq.ready.poke(false.B)
       // [ 0x56 | 0x34(inv) | 0x12(inv) ]
       c.clock.step()
-      // [ 0x56 | 0x34(inv) ]
+      //             [ 0x56 | 0x34(inv) ]
       c.io.invalidate.valid.poke(false.B)
       c.io.queue.deq.ready.poke(false.B)
       c.clock.step()
-      // [ 0x56 ]
+      //                         [ 0x56 ]
       c.io.queue.deq.ready.poke(true.B)
       c.io.queue.deq.valid.expect(true.B)
       c.io.queue.deq.bits.expect(0x56.U)
       c.clock.step()
       c.io.queue.deq.ready.poke(true.B)
       c.io.queue.deq.valid.expect(false.B)
+      c.clock.step()
+
+      // do one more enqueue-then-dequeue to see if used bit was properly cleared
+      c.io.queue.deq.ready.poke(false.B)
+      c.io.queue.enq.ready.expect(true.B)
+      c.io.queue.enq.valid.poke(true.B)
+      c.io.queue.enq.bits.poke(0x78.U)
+      c.clock.step()
+      // should dequeue right away
+      c.io.queue.enq.valid.poke(false.B)
+      c.io.queue.deq.ready.poke(true.B)
+      c.io.queue.deq.valid.expect(true.B)
+      c.io.queue.deq.bits.expect(0x78.U)
     }
   }
 
