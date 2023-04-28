@@ -219,7 +219,7 @@ class CoalShiftQueue[T <: Data](
 
   io.queue.enq.ready := !valid(entries - 1)
   // TODO: making this validAfterInv(0) might be useful for the arbiter
-  io.queue.deq.valid := valid(0)
+  io.queue.deq.valid := validAfterInv(0)
   io.queue.deq.bits := elts.head
 
   assert(!flow, "flow-through is not implemented")
