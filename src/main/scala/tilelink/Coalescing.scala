@@ -218,11 +218,7 @@ class CoalShiftQueue[T <: Data](
   }
 
   io.queue.enq.ready := !valid(entries - 1)
-  // We don't want to invalidate deq.valid response right away even when
-  // io.invalidate(head) is true.
-  // Coalescing unit consumes queue head's validity, and produces its new
-  // validity.  Deasserting deq.valid right away will result in a combinational
-  // cycle.
+  // TODO: making this validAfterInv(0) might be useful for the arbiter
   io.queue.deq.valid := valid(0)
   io.queue.deq.bits := elts.head
 
@@ -368,12 +364,11 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 // Software model: coalescer.py
 class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueEntry,
                      config: CoalescerConfig) extends Module {
-
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
     val window = Input(Vec(config.numLanes, windowT.io.cloneType))
-    // newly generated coalesced request
-    val outReq = DecoupledIO(coalReqT.cloneType)
+    // generated coalesced request
+    val coalReq = DecoupledIO(coalReqT.cloneType)
     // invalidate signals going into each request queue's head
     val invalidate = Output(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
   })
@@ -465,20 +460,20 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   }
 
   val sourceGen = Module(new ReqSourceGen(log2Ceil(config.numNewSrcIds)))
-  sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
+  sourceGen.io.gen := io.coalReq.fire // use up a source ID only when request is created
 
   val coalesceValid = chosenValid && sourceGen.io.id.valid
 
-  io.outReq.bits.source := sourceGen.io.id.bits
-  io.outReq.bits.mask := mask.asUInt
-  io.outReq.bits.data := data.asUInt
-  io.outReq.bits.size := chosenSize
-  io.outReq.bits.address := chosenBundle.baseAddr
-  io.outReq.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
-  io.outReq.valid := coalesceValid
+  io.coalReq.bits.source := sourceGen.io.id.bits
+  io.coalReq.bits.mask := mask.asUInt
+  io.coalReq.bits.data := data.asUInt
+  io.coalReq.bits.size := chosenSize
+  io.coalReq.bits.address := chosenBundle.baseAddr
+  io.coalReq.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
+  io.coalReq.valid := coalesceValid
 
   io.invalidate.bits := chosenBundle.matchOH
-  io.invalidate.valid := io.outReq.fire // invalidate only when fire
+  io.invalidate.valid := io.coalReq.fire // invalidate only when fire
 
   dontTouch(io.invalidate) // debug
 
@@ -542,8 +537,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       reqQueue.io.enq.valid := tlIn.a.valid
       reqQueue.io.enq.bits := req
       // TODO: deq.ready should respect downstream ready
-      reqQueue.io.deq.ready := true.B
-      reqQueue.io.invalidate := 0.U
+      reqQueue.io.queue.deq.ready := true.B
+      // invalidate queue entries that contain original core requests that got
+      // coalesced into a wider one
+      reqQueue.io.invalidate.bits := coalescer.io.invalidate.bits(lane)
+      reqQueue.io.invalidate.valid := coalescer.io.invalidate.valid
 
       tlOut.a.valid := reqQueue.io.queue.deq.valid
       tlOut.a.bits := reqQueue.io.queue.deq.bits.toTLA(edgeOut)
@@ -551,9 +549,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out(0)
 
-  tlCoal.a.valid := coalescer.io.outReq.valid
-  tlCoal.a.bits := coalescer.io.outReq.bits.toTLA(edgeCoal)
-  coalescer.io.outReq.ready := tlCoal.a.ready
+  tlCoal.a.valid := coalescer.io.coalReq.valid
+  tlCoal.a.bits := coalescer.io.coalReq.bits.toTLA(edgeCoal)
+  coalescer.io.coalReq.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
@@ -689,36 +687,50 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   )
   println(s"=========== table sourceWidth: ${sourceWidth}")
   // println(s"=========== table sizeEnumBits: ${newEntry.sizeEnumBits}")
-  newEntry.source := coalescer.io.outReq.bits.source
+  newEntry.source := coalescer.io.coalReq.bits.source
 
   // TODO: richard to write table fill logic
   assert (config.maxCoalLogSize <= config.dataBusWidth,
     "multi-beat coalesced reads/writes are currently not supported")
   assert (
     tlCoal.params.dataBits == (1 << config.dataBusWidth) * 8,
-    s"tlCoal param dataBits (${tlCoal.params.dataBits}) mismatch coalescer constant"
+    s"tlCoal param `dataBits` (${tlCoal.params.dataBits}) mismatches coalescer constant"
     + s" (${(1 << config.dataBusWidth) * 8})"
   )
-  val origReqs = reqQueues.map(q => q.io.queue.deq.bits)
-  newEntry.lanes.foreach { l =>
-    l.reqs.zipWithIndex.foreach { case (r, i) =>
-      // TODO: this part needs the actual coalescing logic to work
-      r.valid := false.B
-      r.source := origReqs(i).source
-      r.offset := (origReqs(i).address % (1 << config.maxCoalLogSize).U) >> config.wordWidth
-      r.sizeEnum := config.sizeEnum.logSizeToEnum(origReqs(i).size)
+  val reqQueueHeads = reqQueues.map(q => q.io.queue.deq.bits)
+  // newEntry.lanes.foreach { l =>
+  //   l.reqs.zipWithIndex.foreach { case (r, i) =>
+  //     // TODO: this part needs the actual coalescing logic to work
+  //     r.valid := false.B
+  //     r.source := origReqs(i).source
+  //     r.offset := (origReqs(i).address % (1 << config.maxCoalLogSize).U) >> config.wordWidth
+  //     r.sizeEnum := config.sizeEnum.logSizeToEnum(origReqs(i).size)
+  //   }
+  // }
+  // newEntry.lanes(0).reqs(0).valid := true.B
+  // newEntry.lanes(1).reqs(0).valid := true.B
+  // newEntry.lanes(2).reqs(0).valid := true.B
+  // newEntry.lanes(3).reqs(0).valid := true.B
+  (newEntry.lanes zip coalescer.io.invalidate.bits).zipWithIndex
+    .foreach { case ((laneEntry, laneInv), lane) =>
+      (laneEntry.reqs zip laneInv.asBools).foreach { case (reqEntry, inv) =>
+        // TODO: this part needs the actual coalescing logic to work
+        reqEntry.valid := inv
+        when (inv) {
+          printf(s"entry for reqQueue(${lane}) got invalidated\n")
+        }
+        // FIXME: copying over queue heads out of laziness
+        reqEntry.source := reqQueueHeads(lane).source
+        reqEntry.offset := (reqQueueHeads(lane).address % (1 << config.maxCoalLogSize).U) >> config.wordWidth
+        reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(reqQueueHeads(lane).size)
+      }
     }
-  }
-  newEntry.lanes(0).reqs(0).valid := true.B
-  newEntry.lanes(1).reqs(0).valid := true.B
-  newEntry.lanes(2).reqs(0).valid := true.B
-  newEntry.lanes(3).reqs(0).valid := true.B
   dontTouch(newEntry)
 
   // Uncoalescer module uncoalesces responses back to each lane
   val uncoalescer = Module(new UncoalescingUnit(config))
 
-  uncoalescer.io.coalReqValid := coalescer.io.outReq.valid
+  uncoalescer.io.coalReqValid := coalescer.io.coalReq.valid
   uncoalescer.io.newEntry := newEntry
   // Cleanup: custom <>?
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
@@ -727,13 +739,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   tlCoal.d.ready := uncoalescer.io.coalResp.ready
 
   // Queue up synthesized uncoalesced responses into each lane's response queue
-  (respQueues zip uncoalescer.io.uncoalResps).foreach { case (q, lanes) =>
-    lanes.zipWithIndex.foreach { case (resp, i) =>
+  (respQueues zip uncoalescer.io.uncoalResps).zipWithIndex.foreach { case ((q, perLaneResps), lane) =>
+    perLaneResps.zipWithIndex.foreach { case (resp, i) =>
       // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
       // cache.  This should ideally not happen though.
       assert(
         q.io.enq(respQueueCoalPortOffset + i).ready,
-        s"respQueue: enq port for 0-th coalesced response is blocked"
+        s"respQueue: enq port for coalesced response is blocked for lane ${lane}"
       )
       q.io.enq(respQueueCoalPortOffset + i).valid := resp.valid
       q.io.enq(respQueueCoalPortOffset + i).bits := resp.bits
@@ -742,7 +754,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   }
 
   // Debug
-  dontTouch(coalescer.io.outReq)
+  dontTouch(coalescer.io.coalReq)
   val coalRespData = tlCoal.d.bits.data
   dontTouch(coalRespData)
 
