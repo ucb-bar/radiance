@@ -1505,11 +1505,11 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 
     // generate dummy traffic to coalescer to prevent it from optimized out
     // during synthesis
-    val address = finishCounter // bogus
+    val address = Wire(chiselTypeOf(finishCounter))
     val (tl, edge) = node.out(0)
     val (legal, bits) = edge.Get(
       fromSource = sourceIdCounter,
-      toAddress = address, // bogus address
+      toAddress = address,
       lgSize = 2.U
     )
     assert(legal, "illegal TL req gen")
@@ -1519,6 +1519,13 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
     tl.c.valid := false.B
     tl.d.ready := true.B
     tl.e.valid := false.B
+
+    address := finishCounter // bogus
+    // we have to also touch tl.d in order for the uncoalescer to not get
+    // optimized out
+    when (tl.d.valid) {
+      address := finishCounter + tl.d.bits.data + tl.d.bits.size
+    }
   }
 }
 
@@ -1573,7 +1580,8 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
-      new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
+      new TLRAM(address = AddressSet(0x0000, 0xffffff),
+        beatBytes = (1 << defaultConfig.dataBusWidth))
     )
   )
 
@@ -1621,7 +1629,8 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
-      new TLRAM(address = AddressSet(0x0000, 0xffffff), beatBytes = 8)
+      new TLRAM(address = AddressSet(0x0000, 0xffffff),
+        beatBytes = (1 << defaultConfig.dataBusWidth))
     )
   )
 
