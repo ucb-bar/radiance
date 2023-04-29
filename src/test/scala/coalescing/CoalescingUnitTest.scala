@@ -38,7 +38,7 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
     TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLClientParameters(
       name = "processor-nodes",
       sourceId = IdRange(0, testConfig.numOldSrcIds),
-      requestFifo = true,
+//      requestFifo = true,
       visibility = Seq(AddressSet(0x0, 0xffffff))))))) // 24 bit address space (TODO probably use testConfig)
   }
 
@@ -50,8 +50,6 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
       resources = device.reg,
       regionType = RegionType.UNCACHED,
       executable = true,
-      supportsArithmetic = TransferSizes(1, beatBytes),
-      supportsLogical = TransferSizes(1, beatBytes),
       supportsGet = TransferSizes(1, beatBytes),
       supportsPutFull = TransferSizes(1, beatBytes),
       supportsPutPartial = TransferSizes(1, beatBytes),
@@ -60,6 +58,12 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
   }
 
   val dut = LazyModule(new CoalescingUnit(testConfig))
+
+  val widthWidgets = Seq.tabulate(4) { _ => TLWidthWidget(4)}
+  (cpuNodes zip widthWidgets).foreach { case (cpuNode, widthWidget) => widthWidget := cpuNode}
+
+  widthWidgets.foreach(dut.node := _)
+  l2Nodes.foreach(_ := dut.node)
 
   lazy val module = new DummyCoalescingUnitTBImp(this)
 }
@@ -87,8 +91,6 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 //    val outer = LazyModule(new CoalescingUnit(testConfig))
 
     val coal = tb.dut
-    tb.cpuNodes.foreach(coal.node := _)
-    tb.l2Nodes.foreach(_ := coal.node)
 
     test(tb.module).withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { c =>
       val nodes = c.coalIOs.map(_.head)
