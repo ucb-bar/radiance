@@ -1469,6 +1469,91 @@ object TracePrintf {
 
 // Synthesizable unit tests
 
+class DummyDriver(config: CoalescerConfig)(implicit p: Parameters)
+  extends LazyModule {
+  val laneNodes = Seq.tabulate(config.numLanes) { i =>
+    val clientParam = Seq(
+      TLMasterParameters.v1(
+        name = "dummy-core-node-" + i.toString,
+        sourceId = IdRange(0, defaultConfig.numOldSrcIds)
+        // visibility = Seq(AddressSet(0x0000, 0xffffff))
+      )
+    )
+    TLClientNode(Seq(TLMasterPortParameters.v1(clientParam)))
+  }
+
+  // Combine N outgoing client node into 1 idenity node for diplomatic
+  // connection.
+  val node = TLIdentityNode()
+  laneNodes.foreach { l => node := l }
+
+  lazy val module = new DummyDriverImp(this, config)
+}
+
+class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
+    extends LazyModuleImp(outer)
+    with UnitTestModule {
+  val sourceIdCounter = RegInit(0.U(log2Ceil(config.numOldSrcIds).W))
+  sourceIdCounter := sourceIdCounter + 1.U
+
+  val finishCounter = RegInit(10000.U(64.W))
+  finishCounter := finishCounter - 1.U
+  io.finished := (finishCounter === 0.U)
+
+  outer.laneNodes.foreach { node =>
+    assert(node.out.length == 1)
+
+    // generate dummy traffic to coalescer to prevent it from optimized out
+    // during synthesis
+    val address = finishCounter // bogus
+    val (tl, edge) = node.out(0)
+    val (legal, bits) = edge.Get(
+      fromSource = sourceIdCounter,
+      toAddress = address, // bogus address
+      lgSize = 2.U
+    )
+    assert(legal, "illegal TL req gen")
+    tl.a.valid := true.B
+    tl.a.bits := bits
+    tl.b.ready := true.B
+    tl.c.valid := false.B
+    tl.d.ready := true.B
+    tl.e.valid := false.B
+  }
+}
+
+// A dummy harness around the coalescer for use in VLSI flow.
+// Should not instantiate any memtrace modules.
+class DummyCoalescer(implicit p: Parameters) extends LazyModule {
+  val driver = LazyModule(new DummyDriver(defaultConfig))
+  val rams = Seq.fill(defaultConfig.numLanes + 1)( // +1 for coalesced edge
+    LazyModule(
+      // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
+      // edges globally, by way of Diplomacy communicating the TL slave
+      // parameters to the upstream nodes.
+      new TLRAM(address = AddressSet(0x0000, 0xffffff),
+        beatBytes = (1 << defaultConfig.dataBusWidth))
+    )
+  )
+
+  val coal = LazyModule(new CoalescingUnit(defaultConfig))
+
+  coal.node :=* driver.node
+  rams.foreach(_.node := coal.node)
+
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this) with UnitTestModule {
+    io.finished := driver.module.io.finished
+  }
+}
+
+class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
+    extends UnitTest(timeout) {
+  val dut = Module(LazyModule(new DummyCoalescer).module)
+  dut.io.start := io.start
+  io.finished := dut.io.finished
+}
+
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
   // val filename = "test.trace"
