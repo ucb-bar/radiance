@@ -721,7 +721,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   uncoalescer.io.coalResp.bits.data := tlCoal.d.bits.data
   tlCoal.d.ready := uncoalescer.io.coalResp.ready
 
-  // Queue up synthesized uncoalesced responses into each lane's response queue
+  // Connect uncoalescer results back into each lane's response queue
   (respQueues zip uncoalescer.io.uncoalResps).zipWithIndex.foreach { case ((q, perLaneResps), lane) =>
     perLaneResps.zipWithIndex.foreach { case (resp, i) =>
       // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
@@ -907,12 +907,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   }
 
   val full = Wire(Bool())
-  full := (0 until entries)
-    .map { i => table(i).valid }
-    .reduce { (v0, v1) => v0 && v1 }
-  // Inflight table should never be full.  It should have enough number of
-  // entries to keep track of all outstanding core-side requests, i.e.
-  // (2 ** oldSrcIdBits) entries.
+  full := (0 until entries).map( table(_).valid ).reduce( _ && _ )
   assert(!full, "inflight table is full and blocking coalescer")
   dontTouch(full)
 
@@ -1491,14 +1486,16 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
   outer.laneNodes.foreach { node =>
     assert(node.out.length == 1)
 
-    // generate dummy traffic to coalescer to prevent it from optimized out
-    // during synthesis
-    val address = Wire(chiselTypeOf(finishCounter))
+    // generate dummy traffic to coalescer to prevent it from optimized being
+    // out during synthesis
+    val address = Wire(UInt(config.addressWidth.W))
+    address := Cat(finishCounter, 0.U(config.wordWidth.W))
     val (tl, edge) = node.out(0)
-    val (legal, bits) = edge.Get(
+    val (legal, bits) = edge.Put(
       fromSource = sourceIdCounter,
       toAddress = address,
-      lgSize = 2.U
+      lgSize = 2.U,
+      data = finishCounter
     )
     assert(legal, "illegal TL req gen")
     tl.a.valid := true.B
@@ -1507,14 +1504,16 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
     tl.c.valid := false.B
     tl.d.ready := true.B
     tl.e.valid := false.B
-
-    address := finishCounter // bogus
-    // we have to also touch tl.d in order for the uncoalescer to not get
-    // optimized out
-    when (tl.d.valid) {
-      address := finishCounter + tl.d.bits.data + tl.d.bits.size
-    }
   }
+
+  val dataSum = outer.laneNodes.map { node =>
+    val tl = node.out(0)._1
+    val data = Mux(tl.d.valid, tl.d.bits.data, 0.U)
+    data
+  }.reduce (_ +& _)
+  // this doesn't make much sense, but it prevents the entire uncoalescer from
+  // being optimized away
+  finishCounter := finishCounter + dataSum
 }
 
 // A dummy harness around the coalescer for use in VLSI flow.
