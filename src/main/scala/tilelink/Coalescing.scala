@@ -150,8 +150,10 @@ class ReqSourceGen(sourceWidth: Int) extends Module {
 
 class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val enq = Vec(config.numLanes, DeqIO(gen.cloneType))
-    val deq = Vec(config.numLanes, EnqIO(gen.cloneType))
+    val queue = new Bundle {
+      val enq = Vec(config.numLanes, DeqIO(gen.cloneType))
+      val deq = Vec(config.numLanes, EnqIO(gen.cloneType))
+    }
     val invalidate = Input(Valid(Vec(config.numLanes, UInt(entries.W))))
     val coalescable = Input(Vec(config.numLanes, Bool()))
     val mask = Output(Vec(config.numLanes, UInt(entries.W)))
@@ -173,18 +175,18 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
   }))
 
   val shiftHint = !io.coalescable.reduce(_ || _)
-  val syncedEnqValid = io.enq.map(_.valid).reduce(_ || _)
-  val syncedDeqValid = io.deq.map(_.valid).reduce(_ || _)
+  val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
+  val syncedDeqValid = io.queue.deq.map(_.valid).reduce(_ || _)
 
   for (i <- 0 until config.numLanes) {
-    val enq = io.enq(i)
-    val deq = io.deq(i)
+    val enq = io.queue.enq(i)
+    val deq = io.queue.deq(i)
     val ctrl = controlSignals(i)
 
     ctrl.full := writePtr(i) === entries.U
     ctrl.empty := writePtr(i) === 0.U
     // shift when no outstanding dequeue, no more coalescable chunks, and not empty
-    ctrl.shift := syncedDeqValid && shiftHint && !ctrl.empty
+    ctrl.shift := !syncedDeqValid && shiftHint && !ctrl.empty
 
     // dequeue is valid when:
     // head entry is valid, has not been processed by downstream, and is not coalescable
@@ -538,8 +540,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       // data, at the cost of re-aligning at the outgoing end.
       req.mask := tlIn.a.bits.mask
 
-      val enq = reqQueues.io.enq(lane)
-      val deq = reqQueues.io.deq(lane)
+      val enq = reqQueues.io.queue.enq(lane)
+      val deq = reqQueues.io.queue.deq(lane)
       enq.valid := tlIn.a.valid
       enq.bits := req
       deq.ready := true.B // TODO: deq.ready should respect downstream arbiter
@@ -693,7 +695,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     s"tlCoal param `dataBits` (${tlCoal.params.dataBits}) mismatches coalescer constant"
     + s" (${(1 << config.dataBusWidth) * 8})"
   )
-  val reqQueueHeads = reqQueues.io.deq.map(_.bits)
+  val reqQueueHeads = reqQueues.io.queue.deq.map(_.bits)
   // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
   // coalescer to every (numLanes * queueDepth) entry in the inflight table.
   (newEntry.lanes zip coalescer.io.invalidate.bits).zipWithIndex

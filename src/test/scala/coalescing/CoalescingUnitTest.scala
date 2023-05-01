@@ -224,58 +224,119 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   it should "resort to the backup policy when coverage is below average" in {}
 }
 
-/*class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
+class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "request shift queues"
 
   it should "work like normal shiftqueue when no invalidate" in {
-    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.queue.deq.ready.poke(false.B)
-      c.io.allowShift.poke(true.B)
 
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x12.U)
+//    new CoalShiftQueue(0.U,4, testConfig)
+    def attemptEnqueue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
+      ((c.io.queue.enq zip bits) zip valids).foreach { case ((enq, ent), valid) =>
+        enq.ready.expect(true.B)
+        enq.valid.poke(valid)
+        enq.bits.poke(ent)
+      }
       c.clock.step()
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x34.U)
-      c.clock.step()
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x56.U)
-      c.clock.step()
+    }
 
-      c.io.queue.enq.valid.poke(false.B)
+    def expectDequeue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
+      ((c.io.queue.deq zip bits) zip valids).foreach { case ((deq, ent), valid) =>
+        deq.valid.expect(valid)
+        deq.bits.expect(ent)
+      }
+    }
 
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x12.U)
-      c.clock.step()
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x34.U)
-      c.clock.step()
-      // enqueue in the middle
-      c.io.queue.deq.ready.poke(false.B)
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x78.U)
-      c.clock.step()
-      c.io.queue.enq.valid.poke(false.B)
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x56.U)
-      c.clock.step()
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x78.U)
+    def pokeVec[T <: Data](vec: Seq[T], value: Seq[T]): Unit = {
+      (vec zip value).foreach { case (a, b) => a.poke(b) }
+    }
+
+    test(new CoalShiftQueue(UInt(8.W),4, testConfig)) { c =>
+      c.io.coalescable.foreach(_.poke(true.B))
+      c.io.queue.deq.foreach(_.ready.poke(false.B))
+
+      attemptEnqueue(c, Seq.fill(4)(1.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(2.U), Seq(true.B, false.B, false.B, false.B)) // should remain synchronous
+      attemptEnqueue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
+
+      c.io.queue.enq.foreach(_.valid.poke(false.B))
+      c.io.queue.enq.foreach(_.ready.expect(true.B))
+      // check if head is the first enqueued item
+      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
       c.clock.step()
 
-      // should be emptied
-      c.io.queue.deq.valid.expect(false.B)
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
+      // should not dequeue because all are coalescable
+      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
+      c.clock.step()
+
+      pokeVec(c.io.coalescable, Seq(false.B, false.B, false.B, true.B))
+      // first 3 items should be valid now
+      expectDequeue(c, Seq.fill(4)(1.U), Seq(true.B, true.B, true.B, false.B))
+      // only dequeue first item - 4th item should not be dequeued since not valid
+      pokeVec(c.io.queue.deq.map(_.ready), Seq(true.B, false.B, false.B, true.B))
+      c.clock.step()
+
+      // first item should turn invalid
+      c.io.coalescable.foreach(_.poke(false.B))
+      expectDequeue(c, Seq.fill(4)(1.U), Seq(false.B, true.B, true.B, true.B))
+      // now dequeue everything else in the first line
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
+      c.clock.step()
+
+      // all dequeued, none valid this cycle
+      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
+      c.clock.step()
+
+      // shifted last cycle
+      c.io.coalescable.foreach(_.poke(false.B))
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
+      expectDequeue(c, Seq.fill(4)(2.U), Seq(true.B, false.B, false.B, false.B))
+      c.clock.step()
+
+      expectDequeue(c, Seq.fill(4)(2.U), Seq(false.B, false.B, false.B, false.B))
+      c.clock.step()
+
+      pokeVec(c.io.coalescable, Seq(true.B, false.B, true.B, true.B))
+      expectDequeue(c, Seq.fill(4)(3.U), Seq(false.B, true.B, false.B, false.B))
+      c.clock.step()
+
+      c.io.coalescable.foreach(_.poke(false.B))
+      expectDequeue(c, Seq.fill(4)(3.U), Seq(true.B, false.B, true.B, true.B))
+      c.clock.step()
+
+      // empty
+      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(false.B))
+
+      // now enqueue back to full & test back pressure
+      c.io.queue.deq.foreach(_.ready.poke(false.B))
+      attemptEnqueue(c, Seq.fill(4)(1.U), Seq.fill(4)(true.B))
+      pokeVec(c.io.coalescable, Seq(true.B, true.B, true.B, true.B))
+      attemptEnqueue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
+
+      // check full
+      c.io.queue.enq.foreach(_.ready.expect(false.B))
+      c.clock.step()
+
+      // now indicate the next cycle will dequeue everything
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
+      c.io.coalescable.foreach(_.poke(false.B))
+      c.clock.step()
+
+      // should still be full, but allow enqueue
+      c.io.coalescable.foreach(_.poke(true.B))
+      c.io.queue.enq.foreach(_.ready.expect(false.B)) // check full
+      c.io.coalescable.foreach(_.poke(false.B))
+      attemptEnqueue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
+
+      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
+      c.clock.step()
+
+//      attemptEnqueue(c, Seq.fill(4)(6.U), Seq.fill(4)(true.B))
     }
   }
-
+/*
   it should "work when enqueing and dequeueing simultaneously" in {
     test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
       c.io.invalidate.valid.poke(false.B)
@@ -305,43 +366,6 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.deq.ready.poke(true.B)
       c.io.queue.enq.valid.poke(false.B)
       c.io.queue.deq.valid.expect(false.B)
-    }
-  }
-
-  it should "not shift entries when allowShift is false" in {
-    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.valid.poke(false.B)
-      c.io.queue.deq.ready.poke(false.B)
-
-      c.io.allowShift.poke(false.B)
-
-      // prepare
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x12.U)
-      c.clock.step()
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x34.U)
-      c.clock.step()
-      c.io.queue.enq.valid.poke(false.B)
-
-      // dequeueing should work normally when allowShift is false...
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x12.U)
-      c.clock.step()
-      // but should stop there and not dequeue the next entry
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(false.B)
-      c.clock.step()
-      // when allowShift is back one, dequeueing should start working from next
-      // cycle
-      c.io.allowShift.poke(true.B)
-      c.clock.step()
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x34.U)
     }
   }
 
@@ -537,8 +561,8 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.deq.valid.expect(true.B)
       c.io.queue.deq.bits.expect(0x34)
     }
-  }
-}*/
+  }*/
+}
 
 object uncoalescerTestConfig extends CoalescerConfig(
   numLanes = 4,
