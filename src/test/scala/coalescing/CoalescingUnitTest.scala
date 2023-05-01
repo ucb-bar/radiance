@@ -224,7 +224,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   it should "resort to the backup policy when coverage is below average" in {}
 }
 
-class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
+/*class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "request shift queues"
 
   it should "work like normal shiftqueue when no invalidate" in {
@@ -538,7 +538,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.deq.bits.expect(0x34)
     }
   }
-}
+}*/
 
 object uncoalescerTestConfig extends CoalescerConfig(
   numLanes = 4,

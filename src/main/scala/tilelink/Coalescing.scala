@@ -148,109 +148,101 @@ class ReqSourceGen(sourceWidth: Int) extends Module {
   io.id.bits := head
 }
 
-// A shift-register queue implementation that supports invalidating entries
-// and exposing queue contents as output IO. (TODO: support deadline)
-// Initially copied from freechips.rocketchip.util.ShiftQueue.
-// The queue only shifts down when `allowShift` is given true.  Dequeueing
-// works normally, but if allowShift was false, the queue head will stay
-// invalid after dequeueing.  This option is added in order to synchronize the
-// shifting of the queues between lanes to model the SIMD behavior.
-// If `pipe` is true, support enqueueing to a full queue when head is being
-// dequeued at the next cycle.
-// Software model: window.py
-class CoalShiftQueue[T <: Data]( gen: T,
-                                 val entries: Int,
-                                 pipe: Boolean = true,
-                                 flow: Boolean = false
-                               ) extends Module {
+class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val queue = new QueueIO(gen, entries)
-    val invalidate = Input(Valid(UInt(entries.W)))
-    val allowShift = Input(Bool())
-    val mask = Output(UInt(entries.W))
-    val elts = Output(Vec(entries, gen))
-    // 'QueueIO' provides io.count, but we might not want to use it in the
-    // coalescer because it has potentially expensive PopCount
+    val enq = Vec(config.numLanes, DeqIO(gen.cloneType))
+    val deq = Vec(config.numLanes, EnqIO(gen.cloneType))
+    val invalidate = Input(Valid(Vec(config.numLanes, UInt(entries.W))))
+    val coalescable = Input(Vec(config.numLanes, Bool()))
+    val mask = Output(Vec(config.numLanes, UInt(entries.W)))
+    val elts = Output(Vec(config.numLanes, Vec(entries, gen)))
   })
 
-  val valid = RegInit(VecInit(Seq.fill(entries) { false.B }))
-  // "Used" flag is 1 for every entry between the current queue head and tail,
-  // even if that entry has been invalidated:
-  //
-  //  used: 000011111
-  // valid: 000011011
-  //            │ │ └─ head
-  //            │ └────invalidated
-  //            └──────tail
-  //
-  // Need this because we can't tell where to enqueue simply by looking at the
-  // valid bits.
-  private val used = RegInit(UInt(entries.W), 0.U)
-  private val elts = Reg(Vec(entries, gen))
+//  val eltPrototype = Wire(Valid(gen))
+//  eltPrototype.bits := DontCare
+//  eltPrototype.valid := false.B
 
-  // Indexing is tail-to-head: i=0 equals tail, i=entries-1 equals topmost reg
-  def pad(mask: Int => Bool) = { i: Int =>
-    if (i == -1) true.B else if (i == entries) false.B else mask(i)
-  }
-  def paddedUsed = pad({ i: Int => used(i) })
-  def validAfterInv(i: Int) = valid(i) && (!io.invalidate.valid || !io.invalidate.bits(i))
+  val elts = Reg(Vec(config.numLanes, Vec(entries, Valid(gen))))
+  val writePtr = RegInit(VecInit(Seq.fill(config.numLanes)(0.asUInt(log2Ceil(entries + 1).W))))
+  val deqDone = RegInit(VecInit(Seq.fill(config.numLanes)(false.B)))
 
-  val shift = io.allowShift && (used =/= 0.U) && (io.queue.deq.fire || !validAfterInv(0))
-  for (i <- 0 until entries) {
-    val wdata = if (i == entries - 1) io.queue.enq.bits else Mux(!used(i + 1), io.queue.enq.bits, elts(i + 1))
-    val wen = Mux(
-      shift,
-      (io.queue.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
-      // enqueue to the first empty slot above the top
-      (io.queue.enq.fire && paddedUsed(i - 1) && !used(i)) || !validAfterInv(i)
-    )
-    when(wen) { elts(i) := wdata }
+  val controlSignals = Wire(Vec(config.numLanes, new Bundle {
+    val shift = Bool()
+    val full = Bool()
+    val empty = Bool()
+  }))
 
-    valid(i) := Mux(
-      shift,
-      (io.queue.enq.fire && !paddedUsed(i + 1) && used(i)) || pad(validAfterInv)(i + 1),
-      (io.queue.enq.fire && paddedUsed(i - 1) && !used(i)) || validAfterInv(i)
-    )
-    // additionally, head entry should get invalidated when dequeue fired
-    // but queue didn't shift (e.g. because allowShift was false)
-    when (io.queue.deq.fire && !shift) {
-      valid(0) := false.B
+  val shiftHint = !io.coalescable.reduce(_ || _)
+  val syncedEnqValid = io.enq.map(_.valid).reduce(_ || _)
+  val syncedDeqValid = io.deq.map(_.valid).reduce(_ || _)
+
+  for (i <- 0 until config.numLanes) {
+    val enq = io.enq(i)
+    val deq = io.deq(i)
+    val ctrl = controlSignals(i)
+
+    ctrl.full := writePtr(i) === entries.U
+    ctrl.empty := writePtr(i) === 0.U
+    // shift when no outstanding dequeue, no more coalescable chunks, and not empty
+    ctrl.shift := syncedDeqValid && shiftHint && !ctrl.empty
+
+    // dequeue is valid when:
+    // head entry is valid, has not been processed by downstream, and is not coalescable
+    deq.bits := elts.map(_.head.bits)(i)
+    deq.valid := elts.map(_.head.valid)(i) && !deqDone(i) && !io.coalescable(i)
+
+    // can take new entries if not empty, or if full but shifting
+    enq.ready := (!ctrl.full) || ctrl.shift
+
+    when (ctrl.shift) {
+      // shift, invalidate tail, invalidate coalesced requests
+      elts(i).zipWithIndex.foreach { case (elt, j) =>
+        if (j == entries - 1) { // tail
+          elt.valid := false.B
+        } else {
+          elt.bits := elts(i)(j + 1).bits
+          elt.valid := elts(i)(j + 1).valid && !(io.invalidate.valid && io.invalidate.bits(i)(j + 1))
+        }
+      }
+      // reset dequeue mask when new entries are shifted in
+      deqDone(i) := false.B
+      // enqueue
+      when (enq.ready && syncedEnqValid) { // to allow drift, swap for enq.fire
+        elts(i)(writePtr(i) - 1.U).bits := enq.bits
+        elts(i)(writePtr(i) - 1.U).valid := enq.valid
+      }.otherwise {
+        writePtr(i) := writePtr(i) - 1.U
+      }
+    }.otherwise {
+      // invalidate coalesced requests
+      when (io.invalidate.valid) {
+        (elts(i) zip io.invalidate.bits(i).asBools).map { case (elt, inv) =>
+          elt.valid := elt.valid && !inv
+        }
+      }
+      // enqueue
+      when (enq.ready && syncedEnqValid) {
+        elts(i)(writePtr(i)).bits := enq.bits
+        elts(i)(writePtr(i)).valid := enq.valid
+        writePtr(i) := writePtr(i) + 1.U
+      }
+      deqDone(i) := deqDone(i) || deq.fire
     }
   }
 
-  when(io.queue.enq.fire) {
-    when(!shift) {
-      used := (used << 1.U) | 1.U
-    }
-  }.elsewhen(shift) {
-    used := used >> 1.U
-  }
+  val queueInSync = controlSignals.map(_ === controlSignals.head).reduce(_ && _) &&
+    writePtr.map(_ === writePtr.head).reduce(_ && _)
+  assert(queueInSync, "shift queue lanes are not in sync")
 
-  io.queue.enq.ready := !valid(entries - 1)
-  io.queue.deq.valid := validAfterInv(0)
-  io.queue.deq.bits := elts.head
-
-  assert(!flow, "flow-through is not implemented")
-  if (flow) {
-    // FIXME old code
-    when(io.queue.enq.valid) { io.queue.deq.valid := true.B }
-    when(!valid(0)) { io.queue.deq.bits := io.queue.enq.bits }
-  }
-
-  if (pipe) {
-    when(io.queue.deq.ready) { io.queue.enq.ready := true.B }
-  }
-
-  io.mask := valid.asUInt
-  io.elts := elts
-  io.queue.count := PopCount(io.mask)
+  io.mask := elts.map(x => VecInit(x.map(_.valid)).asUInt)
+  io.elts := elts.map(x => VecInit(x.map(_.bits)))
 }
 
 // Software model: coalescer.py
 class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
                     config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
-    val window = Input(Vec(config.numLanes, windowT.io.cloneType))
+    val window = Input(windowT.io.cloneType)
     val results = Output(new Bundle {
       val leaderIdx = Output(UInt(log2Ceil(config.numLanes).W))
       val baseAddr = Output(UInt(config.addressWidth.W))
@@ -259,6 +251,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       // maximum is numLanes * queueDepth
       val matchCount = Output(UInt(log2Ceil(config.numLanes * config.queueDepth + 1).W))
       val coverageHits = Output(UInt((1 << config.maxCoalLogSize).W))
+      val canCoalesce = Output(Vec(config.numLanes, Bool()))
     })
   })
 
@@ -267,8 +260,8 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // Combinational logic to drive output from window contents.
   // The leader lanes only compare their heads against all entries of the
   // follower lanes.
-  val leaders = io.window.map(_.elts.head)
-  val leadersValid = io.window.map(_.mask.asBools.head)
+  val leaders = io.window.elts.map(_.head)
+  val leadersValid = io.window.mask.map(_.asBools.head)
 
   // When doing spatial-only coalescing, queues should never drift from each
   // other, i.e. the queue heads should always contain mem requests from the
@@ -298,27 +291,27 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   // Gives a 2-D table of Bools representing match at every queue entry,
   // for each lane (so 3-D in total).
-  val matchTablePerLane = (leaders zip leadersValid).zipWithIndex
-    .map { case ((leader, leaderValid), leaderIndex) =>
-      io.window.zipWithIndex.map { case (followerQueue, followerIndex) =>
-        // compare leader's head against follower's every queue entry
-        (followerQueue.elts zip followerQueue.mask.asBools)
-          .map { case (follower, followerValid) =>
-            // match leader to only followers at lanes >= leader idx
-            // this halves the number of comparators
-            if (followerIndex < leaderIndex) false.B
-            else canMatch(follower, followerValid, leader, leaderValid)
-          }
+  // dimensions: (leader lane, follower lane, follower entry)
+  val matchTablePerLane = (leaders zip leadersValid).map { case (leader, leaderValid) =>
+    (io.window.elts zip io.window.mask).map { case (followers, followerValids) =>
+      // compare leader's head against follower's every queue entry
+      (followers zip followerValids.asBools).map { case (follower, followerValid) =>
+        canMatch(follower, followerValid, leader, leaderValid)
+        // disabling halving optimization because it does not give the correct
+        // per-lane coalescable indication to the shift queue
+          // // match leader to only followers at lanes >= leader idx
+          // // this halves the number of comparators
+          // if (followerIndex < leaderIndex) false.B
+          // else canMatch(follower, followerValid, leader, leaderValid)
       }
     }
+  }
 
-  // TODO: potentially expensive: popcount & adder
   val matchCounts = matchTablePerLane.map(table =>
       table.map(PopCount(_)) // sum up each column
            .reduce(_ +& _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
-  // TODO: potentially expensive
   // TODO: maybe use round robin arbiter instead of argmax to pick leader
   val chosenLeaderIdx = matchCounts.zipWithIndex.map {
     case (c, i) => (c, i.U)
@@ -336,8 +329,8 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // coverage calculation
   def getOffsetSlice(addr: UInt) = addr(size - 1, config.wordWidth)
   // 2-D table flattened to 1-D
-  val offsets = io.window.map(_.elts).flatMap(_.map(req => getOffsetSlice(req.address)))
-  val valids = io.window.map(_.mask).flatMap(_.asBools)
+  val offsets = io.window.elts.flatMap(_.map(req => getOffsetSlice(req.address)))
+  val valids = io.window.mask.flatMap(_.asBools)
   // indicates whether each word in the coalesced chunk is accessed by any of the
   // queue entries. e.g. if [ 1 1 1 1 ], all of the four words in the coalesced
   // data has been accessed and we've reached 100% utilization.
@@ -352,16 +345,12 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
     }
     printf("chosenLeader = lane %d\n", chosenLeaderIdx)
     printf("chosenLeader matches = [ ")
-    chosenMatches.foreach { m =>
-      printf("%d ", m)
-    }
+    chosenMatches.foreach { m => printf("%d ", m) }
     printf("]\n")
     printf("chosenMatchCount = %d\n", chosenMatchCount)
 
     printf("hits = [ ")
-    hits.foreach { m =>
-      printf("%d ", m)
-    }
+    hits.foreach { m => printf("%d ", m) }
     printf("]\n")
   }
 
@@ -370,6 +359,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   io.results.matchOH := chosenMatches
   io.results.matchCount := chosenMatchCount
   io.results.coverageHits := PopCount(hits)
+  io.results.canCoalesce := canCoalesce
 }
 
 // Software model: coalescer.py
@@ -377,11 +367,13 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
                      config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
-    val window = Input(Vec(config.numLanes, windowT.io.cloneType))
+    val window = Input(windowT.io.cloneType)
     // generated coalesced request
     val coalReq = DecoupledIO(coalReqT.cloneType)
     // invalidate signals going into each request queue's head
     val invalidate = Output(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
+    // whether a lane is coalescable
+    val coalescable = Output(Vec(config.numLanes, Bool()))
   })
 
   val coalescers = config.coalLogSizes.map(size => Module(new MonoCoalescer(size, windowT, config)))
@@ -397,7 +389,7 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
     x.zipWithIndex.map {
       case (a, b) => (a, b.U)
     }.reduce[(UInt, UInt)] { case ((a, i), (b, j)) =>
-      (Mux(a > b, a, b), Mux(a > b, i, j)) // TODO: tie-breaker
+      (Mux(a >= b, a, b), Mux(a >= b, i, j)) // TODO: tie-breaker
     }._2
   }
 
@@ -437,12 +429,12 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   val chosenSize = VecInit(coalescers.map(_.size.U))(chosenSizeIdx)
 
   // flatten requests and matches
-  val flatReqs = io.window.flatMap(_.elts)
+  val flatReqs = io.window.elts.flatten
   val flatMatches = chosenBundle.matchOH.flatMap(_.asBools)
 
   // check for word alignment in addresses
-  assert(io.window.flatMap(_.elts.map(req => req.address(config.wordWidth - 1, 0) === 0.U)).zip(
-    io.window.flatMap(_.mask.asBools)).map { case (aligned, valid) => (!valid) || aligned }.reduce(_ || _),
+  assert(io.window.elts.flatMap(_.map(req => req.address(config.wordWidth - 1, 0) === 0.U)).zip(
+    io.window.mask.flatMap(_.asBools)).map { case (aligned, valid) => (!valid) || aligned }.reduce(_ || _),
     "one or more addresses used for coalescing is not word-aligned")
 
   // note: this is word-level coalescing. if finer granularity is needed, need to modify code
@@ -466,7 +458,7 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
       MuxCase(0.U, flatReqs.zip(sel).map { case (req, s) =>
         s -> req.mask
       }),
-      0.U // TODO: Do we care about masks at positions > size specified? if not, use DontCare
+      0.U
     )
   }
 
@@ -480,11 +472,13 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   io.coalReq.bits.data := data.asUInt
   io.coalReq.bits.size := chosenSize
   io.coalReq.bits.address := chosenBundle.baseAddr
-  io.coalReq.bits.op := VecInit(io.window.map(_.elts.head))(chosenBundle.leaderIdx).op
+  io.coalReq.bits.op := io.window.elts(chosenBundle.leaderIdx).head.op
   io.coalReq.valid := coalesceValid
 
   io.invalidate.bits := chosenBundle.matchOH
   io.invalidate.valid := io.coalReq.fire // invalidate only when fire
+
+  io.coalescable := coalescers.map(_.io.results.canCoalesce.asUInt).reduce(_ | _).asBools
 
   dontTouch(io.invalidate) // debug
 
@@ -505,13 +499,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val sourceWidth = outer.node.in(1)._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.wordWidth, config.addressWidth, config.wordSizeInBytes)
-  val reqQueues = Seq.tabulate(config.numLanes) { _ =>
-    Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth))
-  }
+  val reqQueues = Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config))
 
-  val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.maxCoalLogSize), config.addressWidth, config.maxCoalLogSize)
-  val coalescer = Module(new MultiCoalescer(reqQueues.head, coalReqT, config))
-  coalescer.io.window := reqQueues.map(_.io)
+  val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.maxCoalLogSize),
+    config.addressWidth, config.maxCoalLogSize)
+  val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
+  coalescer.io.window := reqQueues.io
+  reqQueues.io.coalescable := coalescer.io.coalescable
+  reqQueues.io.invalidate := coalescer.io.invalidate
 
   // Per-lane request and response queues
   //
@@ -531,7 +526,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     case (((tlIn, _), (tlOut, edgeOut)), i) =>
       // Request queue
       val lane = i - 1
-      val reqQueue = reqQueues(lane)
       val req = Wire(reqQueueEntryT)
       req.source := tlIn.a.bits.source
       req.isStore := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
@@ -544,22 +538,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       // data, at the cost of re-aligning at the outgoing end.
       req.mask := tlIn.a.bits.mask
 
-      assert(reqQueue.io.queue.enq.ready, "reqQueue is supposed to be always ready")
-      reqQueue.io.queue.enq.valid := tlIn.a.valid
-      reqQueue.io.queue.enq.bits := req
-      // TODO: deq.ready should respect downstream arbiter
-      reqQueue.io.queue.deq.ready := true.B
-      // invalidate queue entries that contain original core requests that got
-      // coalesced into a wider one
-      reqQueue.io.invalidate.bits := coalescer.io.invalidate.bits(lane)
-      reqQueue.io.invalidate.valid := coalescer.io.invalidate.valid
-      reqQueue.io.allowShift := true.B
-
+      val enq = reqQueues.io.enq(lane)
+      val deq = reqQueues.io.deq(lane)
+      enq.valid := tlIn.a.valid
+      enq.bits := req
+      deq.ready := true.B // TODO: deq.ready should respect downstream arbiter
       // NOTE: this relies on CoalShiftQueue's behavior combinationally
       // deasserting deq.valid in the same cycle that the head invalidate
       // signal goes up.
-      tlOut.a.valid := reqQueue.io.queue.deq.valid
-      tlOut.a.bits := reqQueue.io.queue.deq.bits.toTLA(edgeOut)
+      tlOut.a.valid := deq.valid
+      tlOut.a.bits := deq.bits.toTLA(edgeOut)
   }
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out(0)
@@ -705,16 +693,16 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     s"tlCoal param `dataBits` (${tlCoal.params.dataBits}) mismatches coalescer constant"
     + s" (${(1 << config.dataBusWidth) * 8})"
   )
-  val reqQueueHeads = reqQueues.map(q => q.io.queue.deq.bits)
+  val reqQueueHeads = reqQueues.io.deq.map(_.bits)
   // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
   // coalescer to every (numLanes * queueDepth) entry in the inflight table.
   (newEntry.lanes zip coalescer.io.invalidate.bits).zipWithIndex
     .foreach { case ((laneEntry, laneInv), lane) =>
       (laneEntry.reqs zip laneInv.asBools).zipWithIndex
         .foreach { case ((reqEntry, inv), i) =>
-          val req = reqQueues(lane).io.elts(i)
+          val req = reqQueues.io.elts(lane)(i)
           when ((coalescer.io.invalidate.valid && inv)) {
-            printf(s"coalescer: reqQueue(${lane})(${i}) got invalidated (source=%d)\n", req.source)
+            printf(s"coalescer: reqQueue($lane)($i) got invalidated (source=%d)\n", req.source)
           }
           reqEntry.valid := (coalescer.io.invalidate.valid && inv)
           reqEntry.source := req.source
