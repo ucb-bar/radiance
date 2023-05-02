@@ -115,7 +115,8 @@ object testConfig extends CoalescerConfig(
   numNewSrcIds = 4,
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
-  sizeEnum = DefaultInFlightTableSizeEnum
+  sizeEnum = DefaultInFlightTableSizeEnum,
+  arbiterOutputs = 4
 )
 
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -227,28 +228,27 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "request shift queues"
 
+  def attemptEnqueue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
+    ((c.io.queue.enq zip bits) zip valids).foreach { case ((enq, ent), valid) =>
+      enq.ready.expect(true.B)
+      enq.valid.poke(valid)
+      enq.bits.poke(ent)
+    }
+    c.clock.step()
+  }
+
+  def expectDequeue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
+    ((c.io.queue.deq zip bits) zip valids).foreach { case ((deq, ent), valid) =>
+      deq.valid.expect(valid)
+      deq.bits.expect(ent)
+    }
+  }
+
+  def pokeVec[T <: Data](vec: Seq[T], value: Seq[T]): Unit = {
+    (vec zip value).foreach { case (a, b) => a.poke(b) }
+  }
+
   it should "work like normal shiftqueue when no invalidate" in {
-
-//    new CoalShiftQueue(0.U,4, testConfig)
-    def attemptEnqueue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
-      ((c.io.queue.enq zip bits) zip valids).foreach { case ((enq, ent), valid) =>
-        enq.ready.expect(true.B)
-        enq.valid.poke(valid)
-        enq.bits.poke(ent)
-      }
-      c.clock.step()
-    }
-
-    def expectDequeue(c: CoalShiftQueue[UInt], bits: Seq[UInt], valids: Seq[Bool]): Unit = {
-      ((c.io.queue.deq zip bits) zip valids).foreach { case ((deq, ent), valid) =>
-        deq.valid.expect(valid)
-        deq.bits.expect(ent)
-      }
-    }
-
-    def pokeVec[T <: Data](vec: Seq[T], value: Seq[T]): Unit = {
-      (vec zip value).foreach { case (a, b) => a.poke(b) }
-    }
 
     test(new CoalShiftQueue(UInt(8.W),4, testConfig)) { c =>
       c.io.coalescable.foreach(_.poke(true.B))
@@ -333,42 +333,49 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
       c.clock.step()
 
-//      attemptEnqueue(c, Seq.fill(4)(6.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(6.U), Seq.fill(4)(true.B))
+    }
+  }
+
+  it should "work when enqueing and dequeueing simultaneously" in {
+    test(new CoalShiftQueue(UInt(8.W), 4, testConfig)) { c =>
+      c.io.invalidate.valid.poke(false.B)
+
+      c.io.coalescable.foreach(_.poke(true.B))
+      c.io.queue.deq.foreach(_.ready.poke(false.B))
+
+      attemptEnqueue(c, Seq.fill(4)(1.U), Seq.fill(4)(true.B))
+
+      // mark for dequeue
+      c.io.coalescable.foreach(_.poke(false.B))
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
+      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
+
+      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
+      attemptEnqueue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
+
+      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
+
+      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(false.B))
+      attemptEnqueue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
+
+      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(false.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(4.U), Seq.fill(4)(false.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(5.U), Seq.fill(4)(false.B))
+      c.clock.step()
     }
   }
 /*
-  it should "work when enqueing and dequeueing simultaneously" in {
-    test(new CoalShiftQueue(UInt(8.W), 4)) { c =>
-      c.io.invalidate.valid.poke(false.B)
-      c.io.allowShift.poke(true.B)
-
-      // prepare
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x12.U)
-      c.clock.step()
-      // enqueue and dequeue simultaneously
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.enq.ready.expect(true.B)
-      c.io.queue.enq.valid.poke(true.B)
-      c.io.queue.enq.bits.poke(0x34.U)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x12.U)
-      c.clock.step()
-      // dequeueing back-to-back should work without any holes in the middle
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.enq.valid.poke(false.B)
-      c.io.queue.deq.valid.expect(true.B)
-      c.io.queue.deq.bits.expect(0x34.U)
-      c.clock.step()
-      // make sure is empty
-      c.io.queue.deq.ready.poke(true.B)
-      c.io.queue.enq.valid.poke(false.B)
-      c.io.queue.deq.valid.expect(false.B)
-    }
-  }
-
   it should "work when enqueing and dequeueing simultaneously to a depth=1 queue" in {
     test(new CoalShiftQueue(UInt(8.W), 1)) { c =>
       c.io.invalidate.valid.poke(false.B)
@@ -577,7 +584,8 @@ object uncoalescerTestConfig extends CoalescerConfig(
   numNewSrcIds = 4,
   respQueueDepth = 4,
   coalLogSizes = Seq(4),
-  sizeEnum = DefaultInFlightTableSizeEnum
+  sizeEnum = DefaultInFlightTableSizeEnum,
+  arbiterOutputs = 4
 )
 
 class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {

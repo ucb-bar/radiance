@@ -52,6 +52,7 @@ case class CoalescerConfig(
   coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
   sizeEnum: InFlightTableSizeEnum,
+  arbiterOutputs: Int
 ) {
   // maximum coalesced size
   def maxCoalLogSize: Int = coalLogSizes.max
@@ -70,13 +71,25 @@ object defaultConfig extends CoalescerConfig(
   numNewSrcIds = 4,
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
-  sizeEnum = DefaultInFlightTableSizeEnum
+  sizeEnum = DefaultInFlightTableSizeEnum,
+  arbiterOutputs = 4
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
-  // Identity node that captures the incoming TL requests and passes them
-  // through the other end, dropping coalesced requests.  This node is what
-  // will be visible to upstream and downstream nodes.
+  // Nexus node that captures the incoming TL requests, rewrites coalescable requests,
+  // and arbitrates between non-coalesced and coalesced requests to a fix number of outputs
+  // before sending it out to memory. This node is what's visible to upstream and downstream nodes.
+
+  // WIP:
+//  val node = TLNexusNode(
+//    clientFn  = c => c.head,
+//    managerFn = m => m.head  // assuming arbiter generated ids are distinct between edges
+//  )
+//  node.in.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.wordSizeInBytes,
+//    s"input edges into coalescer node does not have beatBytes = ${config.wordSizeInBytes}"))
+//  node.out.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.maxCoalLogSize,
+//    s"output edges into coalescer node does not have beatBytes = ${config.maxCoalLogSize}"))
+
   val node = TLIdentityNode()
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
@@ -450,7 +463,9 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   for (i <- 0 until maxWords) {
     val sel = flatReqs.zip(flatMatches).map { case (req, m) =>
-      m && ((req.address(config.maxCoalLogSize - 1, 0) & addrMask) === i.U)
+      // note: ANDing against addrMask is to conform to active byte lanes requirements
+      // if aligning to LSB suffices, we should add the bitwise AND back
+      m && ((req.address(config.maxCoalLogSize - 1, 0)/* & addrMask*/) === i.U)
     }
     // TODO: SW uses priority encoder, not sure about behavior of MuxCase
     data(i) := MuxCase(DontCare, flatReqs.zip(sel).map { case (req, s) =>
