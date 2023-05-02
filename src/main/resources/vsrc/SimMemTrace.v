@@ -28,6 +28,8 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
   input clock,
   input reset,
 
+  // Chisel module needs to tell Verilog blackbox which cycle to read
+  input  [64-1:0]                       trace_read_cycle,
   // These have to match the IO port name of the Chisel wrapper module.
   input                                 trace_read_ready,
   output [NUM_LANES-1:0]                trace_read_valid,
@@ -117,7 +119,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
           // Since parsed results are latched to the output on the next
           // cycle due to staging registers, we need to pass in the next cycle
           // to sync up.
-          next_cycle_counter,
+          trace_read_cycle,  // the left replace next_cycle_counter,
           tid,
 
           __in_valid[tid],

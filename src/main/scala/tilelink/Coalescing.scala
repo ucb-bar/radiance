@@ -1047,10 +1047,18 @@ class TraceLine extends Bundle with HasTraceLine {
 class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFile: String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
+
+  val globalClkCounter = RegInit(0.U(64.W))
+  val traceReadCycle   = RegInit(0.U(64.W))
+  globalClkCounter    := globalClkCounter + 1.U
+  traceReadCycle      := traceReadCycle + 1.U
+
   val sim = Module(new SimMemTrace(traceFile, config.numLanes))
   sim.io.clock := clock
   sim.io.reset := reset.asBool
-  sim.io.trace_read.ready := true.B
+  // <FIX ME>, change ready to be base on down stream
+  sim.io.trace_read.ready := true.B  
+  sim.io.trace_read.cycle := traceReadCycle
 
   // Split output of SimMemTrace, which is flattened across all lanes,
   // back to each lane's.
@@ -1193,6 +1201,7 @@ class SimMemTrace(filename: String, numLanes: Int)
       // Chisel can't interface with Verilog 2D port, so flatten all lanes into
       // single wide 1D array.
       // TODO: assumes 64-bit address.
+      val cycle = Input(UInt(64.W))
       val address = Output(UInt((addrW * numLanes).W))
       val is_store = Output(UInt(numLanes.W))
       val size = Output(UInt((sizeW * numLanes).W))
