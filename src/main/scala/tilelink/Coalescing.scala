@@ -120,7 +120,7 @@ class ReqQueueEntry(val sourceWidth: Int, val addressWidth: Int, val sizeWidth: 
   val mask = UInt((1 << maxSize).W) // write only
   val data = UInt((8 * (1 << maxSize)).W) // write only
 
-  def toTLA (edgeOut: TLEdgeOut): TLBundleA = {
+  def toTLA(edgeOut: TLEdgeOut): TLBundleA = {
     val (plegal, pbits) = edgeOut.Put(
       fromSource = this.source,
       toAddress = this.address,
@@ -144,6 +144,27 @@ class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int, val sizeWid
   val source = UInt(sourceWidth.W)
   val data = UInt((8 * (1 << maxSize)).W) // read only
   val error = Bool()
+
+  def toTLD(edgeIn: TLEdgeIn): TLBundleD = {
+    val apBits = edgeIn.AccessAck(
+      toSource = this.source,
+      lgSize = this.size
+    )
+    val agBits = edgeIn.AccessAck(
+      toSource = this.source,
+      lgSize = this.size,
+      data = this.data
+    )
+    Mux(this.op.asBool, apBits, agBits)
+  }
+
+  def fromTLD(bundle: TLBundleD): Unit = {
+    this.source := bundle.source
+    this.op := TLUtils.DOpcodeIsStore(bundle.opcode)
+    this.size := bundle.size
+    this.data := bundle.data
+    this.error := bundle.denied
+  }
 }
 
 class ReqSourceGen(sourceWidth: Int) extends Module {
@@ -636,11 +657,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       val lane = i - 1
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
-      resp.source := tlOut.d.bits.source
-      resp.isStore := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
-      resp.size := tlOut.d.bits.size
-      resp.data := tlOut.d.bits.data
-      // NOTE: D channel doesn't have mask
+      resp.fromTLD(tlOut.d.bits)
 
       // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
       // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
@@ -654,18 +671,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       respQueue.io.deq(respQueueNoncoalPort).ready := true.B
 
       tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
-      val respHead = respQueue.io.deq(respQueueNoncoalPort).bits
-      val apBits = edgeIn.AccessAck(
-        toSource = respHead.source,
-        lgSize = respHead.size
-      )
-      val agBits = edgeIn.AccessAck(
-        toSource = respHead.source,
-        lgSize = respHead.size,
-        data = respHead.data
-      )
-      val respBits = Mux(respHead.op.asBool, apBits, agBits)
-      tlIn.d.bits := respBits
+      tlIn.d.bits := respQueue.io.deq(respQueueNoncoalPort).bits.toTLD(edgeIn)
 
       // Debug only
       val inflightCounter = RegInit(UInt(32.W), 0.U)
