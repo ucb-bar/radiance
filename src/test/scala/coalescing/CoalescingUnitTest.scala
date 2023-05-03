@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.diplomacy._
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.experimental.BoringUtils
 
 class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "MultiPortQueue"
@@ -99,6 +100,68 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val coalIO3 = outer.cpuNodes(3).makeIOs()
   val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
 
+  private val reqQueues = coal.module.reqQueues
+  private val coalescer = coal.module.coalescer
+
+  // workaround for peeking internal signals as outlined in
+  // https://github.com/ucb-bar/chiseltest/issues/17
+
+  private val peekIn = Seq(
+    reqQueues.io.queue.enq.map(_.ready),
+    reqQueues.io.queue.deq.map(_.bits),
+    reqQueues.io.queue.deq.map(_.valid),
+    coalescer.io.coalReq.ready,
+    coalescer.io.coalReq.bits,
+    coalescer.io.coalReq.valid,
+  )
+
+  val reqQueueEnqReady = peekIn(0).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
+  val reqQueueDeqBits = peekIn(1).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(Output(x.cloneType)))
+  val reqQueueDeqValid = peekIn(2).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
+  val coalReqReady = IO(Output(peekIn(3).asInstanceOf[Bool].cloneType))
+  val coalReqBits = IO(Output(peekIn(4).asInstanceOf[ReqQueueEntry].cloneType))
+  val coalReqValid = IO(Output(peekIn(5).asInstanceOf[Bool].cloneType))
+
+  private val peekOut = Seq(
+    reqQueueEnqReady, reqQueueDeqBits, reqQueueDeqValid,
+    coalReqReady, coalReqBits, coalReqValid,
+  )
+
+  (peekIn zip peekOut).foreach {
+    case (inner: IndexedSeq[Data], outer: Seq[Data]) =>
+      (inner zip outer).foreach { case (i, o) =>
+        BoringUtils.bore(i, Seq(o))
+      }
+    case (inner: Data, outer: Data) =>
+      BoringUtils.bore(inner, Seq(outer))
+    case _ =>
+      assert(false, "boring between different data types")
+  }
+
+  private val pokeIn = Seq(
+    reqQueues.io.queue.deq.map(_.ready),
+//    coalescer.io.coalReq.ready
+  )
+
+  val reqQueueDeqReady = pokeIn(0).asInstanceOf[Seq[Bool]].map(x => IO(Input(x.cloneType)))
+
+  private val pokeOut = Seq(
+    reqQueueDeqReady
+  )
+
+  // TODO: doesn't work yet
+  /*
+  (pokeIn zip pokeOut).foreach {
+    case (inner: IndexedSeq[Data], outer: Seq[Data]) =>
+      (inner zip outer).foreach { case (i, o) =>
+        BoringUtils.bore(i, Seq(o))
+      }
+    case (inner: Data, outer: Data) =>
+      BoringUtils.bore(inner, Seq(outer))
+    case _ =>
+      assert(false, "boring between different data types")
+  }*/
+
 //  val coalMasterNode = coal.coalescerNode.makeIOs()
 }
 
@@ -145,7 +208,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       data: Int
   ): Unit = {
     val node = nodes(idx)
-//        node.a.ready.expect(true.B) // FIXME: this fails currently
+//    node.a.ready.expect(true.B) // FIXME: this fails currently
     node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
     node.a.bits.param.poke(0.U)
     node.a.bits.size.poke(size.U)
@@ -163,33 +226,31 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  // it should "coalesce fully consecutive accesses at size 4, only once" in {
-  //   test(makeTb().module)
-  //   .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
-  //   { c =>
-  //     println(s"coalIO length = ${c.coalIOs(0).length}")
-  //     val nodes = c.coalIOs.map(_.head)
-// //      val nodes = c.cpuNodesImp.map(_.out.head._1)
-// //      val nodes = c.coal.node.in.map(_._1)
-// //      val nodes = c.mitmNodesImp.map(_.in.head._1)
+   it should "coalesce fully consecutive accesses at size 4, only once" in {
+     test(LazyModule(new DummyCoalescingUnitTB()).module)
+     .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+     { c =>
+       println(s"coalIO length = ${c.coalIOs(0).length}")
+       val nodes = c.coalIOs.map(_.head)
 
-  //     // always ready to take coalesced requests
-// //      c.coalMasterNode.head.a.ready.poke(true.B)
-// //      c.coal.module.coalescer.io.outReq.ready.poke(true.B)
+       c.reqQueueEnqReady.foreach(_.expect(true.B))
 
-  //     pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
-  //     pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
-  //     pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
-  //     pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
+       // always ready to take non-coalesced requests
+       c.reqQueueDeqReady.foreach(_.poke(true.B))
 
-  //     c.clock.step()
+       pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
+       pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
+       pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
+       pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
 
-  //     unsetA(nodes)
+       c.clock.step()
 
-  //     c.clock.step()
-  //     c.clock.step()
-  //   }
-  // }
+       unsetA(nodes)
+
+       c.clock.step()
+       c.clock.step()
+     }
+   }
 
   it should "coalesce identical addresses (stride of 0)" in {
     test(makeTb().module)
@@ -212,17 +273,17 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "coalesce strided accesses at size 6" in {}
-
-  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {}
-
-  it should "not touch uncoalescable requests" in {}
-
-  it should "allow temporal coalescing when depth >=2" in {}
-
-  it should "select the most coverage mono-coalescer" in {}
-
-  it should "resort to the backup policy when coverage is below average" in {}
+//  it should "coalesce strided accesses at size 6" in {}
+//
+//  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {}
+//
+//  it should "not touch uncoalescable requests" in {}
+//
+//  it should "allow temporal coalescing when depth >=2" in {}
+//
+//  it should "select the most coverage mono-coalescer" in {}
+//
+//  it should "resort to the backup policy when coverage is below average" in {}
 }
 
 class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {

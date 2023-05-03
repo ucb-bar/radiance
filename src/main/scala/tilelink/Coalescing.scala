@@ -708,7 +708,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val newEntry = Wire(uncoalescer.inflightTable.entryT)
   newEntry.source := coalescer.io.coalReq.bits.source
 
-  // TODO: richard to write table fill logic
   assert (config.maxCoalLogSize <= config.dataBusWidth,
     "multi-beat coalesced reads/writes are currently not supported")
   assert (
@@ -832,7 +831,7 @@ class Uncoalescer(config: CoalescerConfig) extends Module {
     assert(logSize === 2.U, "currently only supporting 4-byte accesses. TODO")
 
     // sizeInBits should be simulation-only construct
-    val sizeInBits = (1.U << logSize) << 3.U
+    val sizeInBits = ((1.U << logSize) << 3.U).asUInt
     assert(
       (dataWidth > 0).B && (dataWidth.U % sizeInBits === 0.U),
       s"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
@@ -1121,7 +1120,7 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
       toAddress = hashToValidPhyAddr(wordAlignedAddress),
       lgSize = wordAlignedSize, // trace line already holds log2(size)
       // data should be aligned to beatBytes
-      data = (wordData << (8.U * (wordAlignedAddress % edge.manager.beatBytes.U)))
+      data = (wordData << (8.U * (wordAlignedAddress % edge.manager.beatBytes.U))).asUInt
     )
     val (glegal, gbits) = edge.Get(
       fromSource = sourceIdCounter,
