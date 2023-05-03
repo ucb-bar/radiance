@@ -51,39 +51,37 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
 
   // Cycle counter that is used to query C parser whether we have a request
   // coming in at the current cycle.
-  reg [`DATA_WIDTH-1:0] cycle_counter;
-  wire [`DATA_WIDTH-1:0] next_cycle_counter;
-  assign next_cycle_counter = cycle_counter + 1'b1;
+
 
   // registers that stage outputs of the C parser
-  reg [NUM_LANES-1:0]   __in_valid_reg;
-  reg [`DATA_WIDTH-1:0] __in_address_reg [NUM_LANES-1:0];
+  reg [NUM_LANES-1:0]   __in_valid_wire;
+  reg [`DATA_WIDTH-1:0] __in_address_wire [NUM_LANES-1:0];
 
-  reg [NUM_LANES-1:0]      __in_is_store_reg;
-  reg [`LOGSIZE_WIDTH-1:0] __in_size_reg [NUM_LANES-1:0];
-  reg [`DATA_WIDTH-1:0]    __in_data_reg [NUM_LANES-1:0];
-  reg                      __in_finished_reg;
+  reg [NUM_LANES-1:0]      __in_is_store_wire;
+  reg [`LOGSIZE_WIDTH-1:0] __in_size_wire [NUM_LANES-1:0];
+  reg [`DATA_WIDTH-1:0]    __in_data_wire [NUM_LANES-1:0];
+  reg                      __in_finished_wire;
 
   genvar g;
 
   generate
     for (g = 0; g < NUM_LANES; g = g + 1) begin
-      assign trace_read_valid[g] = __in_valid_reg[g];
-      assign trace_read_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g]  = __in_address_reg[g];
+      assign trace_read_valid[g] = __in_valid_wire[g];
+      assign trace_read_address[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g]  = __in_address_wire[g];
 
-      assign trace_read_is_store[g] = __in_is_store_reg[g];
-      assign trace_read_size[`LOGSIZE_WIDTH*(g+1)-1:`LOGSIZE_WIDTH*g] = __in_size_reg[g];
-      assign trace_read_data[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g] = __in_data_reg[g];
+      assign trace_read_is_store[g] = __in_is_store_wire[g];
+      assign trace_read_size[`LOGSIZE_WIDTH*(g+1)-1:`LOGSIZE_WIDTH*g] = __in_size_wire[g];
+      assign trace_read_data[`DATA_WIDTH*(g+1)-1:`DATA_WIDTH*g] = __in_data_wire[g];
     end
   endgenerate
-  assign trace_read_finished = __in_finished_reg;
+  assign trace_read_finished = __in_finished_wire;
 
   initial begin
       /* $value$plusargs("uartlog=%s", __uartlog); */
       memtrace_init(FILENAME);
   end
 
-  always @(posedge clock) begin
+  always @(*) begin
     if (reset) begin
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
         __in_valid[tid] = 1'b0;
@@ -96,21 +94,20 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
 
       __in_finished = 1'b0;
 
-      cycle_counter <= `DATA_WIDTH'b0;
+      //cycle_counter <= `DATA_WIDTH'b0;
 
       // setting default value for register to avoid latches
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
-        __in_valid_reg[tid] <= 1'b0;
-        __in_address_reg[tid] <= `DATA_WIDTH'b0;
+        __in_valid_wire[tid] = 1'b0;
+        __in_address_wire[tid] = `DATA_WIDTH'b0;
 
-        __in_is_store_reg[tid] = 1'b0;
-        __in_size_reg[tid] = `LOGSIZE_WIDTH'b0;
-        __in_data_reg[tid] = `DATA_WIDTH'b0;
+        __in_is_store_wire[tid] = 1'b0;
+        __in_size_wire[tid] = `LOGSIZE_WIDTH'b0;
+        __in_data_wire[tid] = `DATA_WIDTH'b0;
       end
 
-      __in_finished_reg <= 1'b0;
+      __in_finished_wire = 1'b0;
     end else begin
-      cycle_counter <= next_cycle_counter;
 
       // Getting values from C function into pseudeo register
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
@@ -135,14 +132,14 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
 
       // Connect values from pseudo register into verilog register 
       for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
-        __in_valid_reg[tid]   <= __in_valid[tid];
-        __in_address_reg[tid] <= __in_address[tid];
+        __in_valid_wire[tid]   = __in_valid[tid];
+        __in_address_wire[tid] = __in_address[tid];
 
-        __in_is_store_reg[tid] <= __in_is_store[tid];
-        __in_size_reg[tid] <= __in_size[tid];
-        __in_data_reg[tid] <= __in_data[tid];
+        __in_is_store_wire[tid] = __in_is_store[tid];
+        __in_size_wire[tid] = __in_size[tid];
+        __in_data_wire[tid] = __in_data[tid];
       end
-      __in_finished_reg <= __in_finished;
+      __in_finished_wire = __in_finished;
     end
   end
 endmodule

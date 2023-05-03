@@ -19,7 +19,7 @@ public:
   MemTraceReader(const std::string &filename);
   ~MemTraceReader();
   void parse();
-  MemTraceLine read_trace_at(const long cycle, const int lane_id);
+  MemTraceLine read_trace_at(const long cycle, const int lane_id, unsigned char trace_read_ready);
   bool finished() const { return read_pos == trace.cend(); }
 
   std::ifstream infile;
