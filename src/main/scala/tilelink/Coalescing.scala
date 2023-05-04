@@ -1005,7 +1005,7 @@ class MemTraceDriver(config: CoalescerConfig, filename: String)(implicit
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "MemTraceDriver" + i.toString,
-        sourceId = IdRange(0, 0x100)
+        sourceId = IdRange(0, config.numOldSrcIds)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
