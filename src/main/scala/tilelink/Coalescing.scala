@@ -36,6 +36,7 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 }
 
 case class CoalescerConfig(
+  enable: Boolean,        // globally enable or disable coalescing
   numLanes: Int,          // number of lanes (or threads) in a warp
   queueDepth: Int,        // request window per lane
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
@@ -60,6 +61,7 @@ case class CoalescerConfig(
 
 
 object defaultConfig extends CoalescerConfig(
+  enable = true,
   numLanes = 4,
   queueDepth = 1,
   waitTimeout = 8,
@@ -526,9 +528,11 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   dontTouch(io.invalidate) // debug
 
-  // uncomment the following lines to disable coalescing entirely
-  // io.outReq.valid := false.B
-  // io.invalidate.valid := false.B
+  def disable = {
+    io.coalReq.valid := false.B
+    io.invalidate.valid := false.B
+  }
+  if (!config.enable) disable
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
