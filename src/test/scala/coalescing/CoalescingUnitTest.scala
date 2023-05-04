@@ -7,6 +7,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.diplomacy._
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.{DecoupledIO, Valid}
 import chisel3.util.experimental.BoringUtils
 
 class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -81,11 +82,8 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
 
   val dut = LazyModule(new CoalescingUnit(testConfig))
 
-  val widthWidgets = Seq.tabulate(4) { _ => TLWidthWidget(4)}
-  (cpuNodes zip widthWidgets).foreach { case (cpuNode, widthWidget) => widthWidget := cpuNode}
-
-  widthWidgets.foreach(dut.node := _)
-  l2Nodes.foreach(_ := dut.node)
+  cpuNodes.foreach(dut.cpuNode := _)
+  l2Nodes.foreach(_ := dut.aggregateNode)
 
   lazy val module = new DummyCoalescingUnitTBImp(this)
 }
@@ -100,6 +98,8 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val coalIO3 = outer.cpuNodes(3).makeIOs()
   val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
 
+//  val coalMasterNode = coal.coalescerNode.makeIOs()
+
   private val reqQueues = coal.module.reqQueues
   private val coalescer = coal.module.coalescer
 
@@ -108,23 +108,30 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
 
   private val peekIn = Seq(
     reqQueues.io.queue.enq.map(_.ready),
+    reqQueues.io.queue.enq.map(_.bits),
+    reqQueues.io.queue.enq.map(_.valid),
     reqQueues.io.queue.deq.map(_.bits),
     reqQueues.io.queue.deq.map(_.valid),
     coalescer.io.coalReq.ready,
     coalescer.io.coalReq.bits,
     coalescer.io.coalReq.valid,
+    coalescer.io.invalidate,
   )
 
-  val reqQueueEnqReady = peekIn(0).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
-  val reqQueueDeqBits = peekIn(1).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(Output(x.cloneType)))
-  val reqQueueDeqValid = peekIn(2).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
-  val coalReqReady = IO(Output(peekIn(3).asInstanceOf[Bool].cloneType))
-  val coalReqBits = IO(Output(peekIn(4).asInstanceOf[ReqQueueEntry].cloneType))
-  val coalReqValid = IO(Output(peekIn(5).asInstanceOf[Bool].cloneType))
+  val reqQueueEnqReady =  peekIn(0).asInstanceOf[Seq[Bool]].map(x => IO(x.cloneType))
+  val reqQueueEnqBits =   peekIn(1).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(x.cloneType))
+  val reqQueueEnqValid =  peekIn(2).asInstanceOf[Seq[Bool]].map(x => IO(x.cloneType))
+  val reqQueueDeqBits =   peekIn(3).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(Output(x.cloneType)))
+  val reqQueueDeqValid =  peekIn(4).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
+  val coalReqReady =      IO(Output(peekIn(5).asInstanceOf[Bool].cloneType))
+  val coalReqBits =       IO(Output(peekIn(6).asInstanceOf[ReqQueueEntry].cloneType))
+  val coalReqValid =      IO(Output(peekIn(7).asInstanceOf[Bool].cloneType))
+  val coalInvalidate =    IO(Output(peekIn(8).asInstanceOf[Valid[Vec[UInt]]].cloneType))
 
   private val peekOut = Seq(
-    reqQueueEnqReady, reqQueueDeqBits, reqQueueDeqValid,
-    coalReqReady, coalReqBits, coalReqValid,
+    reqQueueEnqReady, reqQueueEnqBits, reqQueueEnqValid,
+    reqQueueDeqBits, reqQueueDeqValid,
+    coalReqReady, coalReqBits, coalReqValid, coalInvalidate,
   )
 
   (peekIn zip peekOut).foreach {
@@ -143,14 +150,13 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
 //    coalescer.io.coalReq.ready
   )
 
-  val reqQueueDeqReady = pokeIn(0).asInstanceOf[Seq[Bool]].map(x => IO(Input(x.cloneType)))
+  val reqQueueDeqReady = pokeIn(0).asInstanceOf[Seq[Bool]].map(x => IO(x.cloneType))
 
   private val pokeOut = Seq(
     reqQueueDeqReady
   )
 
   // TODO: doesn't work yet
-  /*
   (pokeIn zip pokeOut).foreach {
     case (inner: IndexedSeq[Data], outer: Seq[Data]) =>
       (inner zip outer).foreach { case (i, o) =>
@@ -160,9 +166,7 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
       BoringUtils.bore(inner, Seq(outer))
     case _ =>
       assert(false, "boring between different data types")
-  }*/
-
-//  val coalMasterNode = coal.coalescerNode.makeIOs()
+  }
 }
 
 object testConfig extends CoalescerConfig(
@@ -177,7 +181,7 @@ object testConfig extends CoalescerConfig(
   numOldSrcIds = 16,
   numNewSrcIds = 4,
   respQueueDepth = 4,
-  coalLogSizes = Seq(3),
+  coalLogSizes = Seq(4, 5),
   sizeEnum = DefaultInFlightTableSizeEnum,
   arbiterOutputs = 4
 )
@@ -199,13 +203,8 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   def pokeA(
       nodes: Seq[TLBundle],
-      idx: Int,
-      op: Int,
-      size: Int,
-      source: Int,
-      addr: Int,
-      mask: Int,
-      data: Int
+      idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int,
+      valid: Boolean = true,
   ): Unit = {
     val node = nodes(idx)
 //    node.a.ready.expect(true.B) // FIXME: this fails currently
@@ -217,7 +216,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     node.a.bits.mask.poke(mask.U)
     node.a.bits.data.poke(data.U)
     node.a.bits.corrupt.poke(false.B)
-    node.a.valid.poke(true.B)
+    node.a.valid.poke(valid.B)
   }
 
   def unsetA(nodes: Seq[TLBundle]): Unit = {
@@ -226,31 +225,56 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-   it should "coalesce fully consecutive accesses at size 4, only once" in {
-     test(LazyModule(new DummyCoalescingUnitTB()).module)
-     .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
-     { c =>
-       println(s"coalIO length = ${c.coalIOs(0).length}")
-       val nodes = c.coalIOs.map(_.head)
+  def expectVec[T <: Data](vec: Seq[T], value: Seq[T]): Unit = {
+    (vec zip value).foreach { case (a, b) => a.expect(b) }
+  }
 
-       c.reqQueueEnqReady.foreach(_.expect(true.B))
+  it should "coalesce fully consecutive accesses at size 4, only once" in {
+    test(LazyModule(new DummyCoalescingUnitTB()).module)
+    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+    { c =>
+      println(s"coalIO length = ${c.coalIOs(0).length}")
+      val nodes = c.coalIOs.map(_.head)
+      // TODO: this doesn't work
+//      c.coalMasterNode.head.a.ready.poke(true.B)
 
-       // always ready to take non-coalesced requests
-       c.reqQueueDeqReady.foreach(_.poke(true.B))
+      c.reqQueueEnqReady.foreach(_.expect(true.B))
+      pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
+      pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
+      pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
+      pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
+      expectVec(c.reqQueueEnqBits.map(_.data), Seq(0x1111.U, 0x2222.U, 0x3333.U, 0x4444.U))
+      c.clock.step()
 
-       pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
-       pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x14, mask = 0xf, data = 0x2222)
-       pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
-       pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0x1c, mask = 0xf, data = 0x4444)
+      unsetA(nodes)
+      c.reqQueueDeqValid.foreach(_.expect(false.B))
 
-       c.clock.step()
+      c.coalReqValid.expect(true.B)
+      c.coalReqBits.address.expect(0x10.U)
+      c.coalReqBits.data.expect(BigInt("4444000033330000222200001111", 16) << 128)
+      c.coalReqBits.mask.expect(0xffff0000L)
+      c.coalReqBits.size.expect(4.U)
+      c.coalReqBits.op.expect(1.U)
 
-       unsetA(nodes)
+//      c.coalReqReady.expect(true.B)
+      c.reqQueueEnqReady.foreach(_.expect(true.B))
+      pokeA(nodes, idx = 0, op = 1, size = 2, source = 1, addr = 0xf20, mask = 0xf, data = 0x5555)
+      pokeA(nodes, idx = 1, op = 1, size = 2, source = 1, addr = 0xf24, mask = 0xf, data = 0x6666, valid = false)
+      pokeA(nodes, idx = 2, op = 1, size = 2, source = 1, addr = 0xf28, mask = 0xf, data = 0x7777)
+      pokeA(nodes, idx = 3, op = 1, size = 2, source = 1, addr = 0xf2c, mask = 0xf, data = 0x8888, valid = false)
+      c.clock.step()
 
-       c.clock.step()
-       c.clock.step()
-     }
-   }
+      c.coalReqValid.expect(true.B)
+      c.coalReqBits.address.expect(0xf20.U)
+      c.coalReqBits.data.expect(BigInt("77770000000000005555", 16)) // technically these can be dontcare's
+      c.coalReqBits.mask.expect(0x0000ffff)
+      c.coalReqBits.size.expect(4.U)
+      c.coalReqBits.op.expect(1.U)
+
+      c.clock.step()
+      c.clock.step()
+    }
+  }
 
   it should "coalesce identical addresses (stride of 0)" in {
     test(makeTb().module)

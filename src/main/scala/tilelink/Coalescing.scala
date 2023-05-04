@@ -90,7 +90,8 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
 //  node.out.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.maxCoalLogSize,
 //    s"output edges into coalescer node does not have beatBytes = ${config.maxCoalLogSize}"))
 
-  val node = TLIdentityNode()
+  val aggregateNode = TLIdentityNode()
+  val cpuNode = TLIdentityNode()
 
   // Number of maximum in-flight coalesced requests.  The upper bound of this
   // value would be the sourceId range of a single lane.
@@ -107,8 +108,9 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
     Seq(TLMasterPortParameters.v1(coalParam))
   )
 
-  // Connect master node as the first inward edge of the IdentityNode
-  node :=* coalescerNode
+  // merge coalescerNode and cpuNode
+  aggregateNode :=* coalescerNode
+  aggregateNode :=* TLWidthWidget(config.wordSizeInBytes) :=* cpuNode
 
   lazy val module = new CoalescingUnitImp(this, config)
 }
@@ -208,7 +210,10 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
     val empty = Bool()
   }))
 
-  val shiftHint = !io.coalescable.reduce(_ || _)
+  // shift hint is when the heads have no more coalescable left this or next cycle
+  val shiftHint = !(io.coalescable zip io.invalidate.bits.map(_(0))).map { case (c, i) =>
+    c && !(io.invalidate.valid && i)
+  }.reduce(_ || _)
   val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
   val syncedDeqValid = io.queue.deq.map(_.valid).reduce(_ || _)
 
@@ -486,18 +491,15 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
     val sel = flatReqs.zip(flatMatches).map { case (req, m) =>
       // note: ANDing against addrMask is to conform to active byte lanes requirements
       // if aligning to LSB suffices, we should add the bitwise AND back
-      m && ((req.address(config.maxCoalLogSize - 1, 0)/* & addrMask*/) === i.U)
+      m && ((req.address(config.maxCoalLogSize - 1, config.wordWidth)/* & addrMask*/) === i.U)
     }
     // TODO: SW uses priority encoder, not sure about behavior of MuxCase
     data(i) := MuxCase(DontCare, flatReqs.zip(sel).map { case (req, s) =>
       s -> req.data
     })
-    mask(i) := Mux(i.U < numWords,
-      MuxCase(0.U, flatReqs.zip(sel).map { case (req, s) =>
-        s -> req.mask
-      }),
-      0.U
-    )
+    mask(i) := MuxCase(0.U, flatReqs.zip(sel).map { case (req, s) =>
+      s -> req.mask
+    })
   }
 
   val sourceGen = Module(new ReqSourceGen(log2Ceil(config.numNewSrcIds)))
@@ -526,15 +528,14 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
-  // Make sure IdentityNode is connected to an upstream node, not just the
-  // coalescer TL master node
-  assert(outer.node.in.length >= 2)
-  assert(outer.node.in(1)._1.params.sourceBits == log2Ceil(config.numOldSrcIds),
-    s"old source id bits TL param (${outer.node.in(1)._1.params.sourceBits}) mismatch with config")
-  assert(outer.node.in(1)._1.params.addressBits == config.addressWidth,
-    s"address width TL param (${outer.node.in(1)._1.params.addressBits}) mismatch with config")
+  assert(outer.cpuNode.in.length == config.numLanes,
+    s"number of incoming edges (${outer.cpuNode.in.length}) is not the same as number of lanes")
+  assert(outer.cpuNode.in.head._1.params.sourceBits == log2Ceil(config.numOldSrcIds),
+    s"old source id bits TL param (${outer.cpuNode.in.head._1.params.sourceBits}) mismatch with config")
+  assert(outer.cpuNode.in.head._1.params.addressBits == config.addressWidth,
+    s"address width TL param (${outer.cpuNode.in.head._1.params.addressBits}) mismatch with config")
 
-  val sourceWidth = outer.node.in(1)._1.params.sourceBits
+  val sourceWidth = outer.cpuNode.in.head._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.wordWidth, config.addressWidth, config.wordSizeInBytes)
   val reqQueues = Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config))
@@ -551,19 +552,9 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // Override IdentityNode implementation so that we can instantiate
   // queues between input and output edges to buffer requests and responses.
   // See IdentityNode definition in `diplomacy/Nodes.scala`.
-  (outer.node.in zip outer.node.out).zipWithIndex.foreach {
-    case (((tlIn, edgeIn), (tlOut, _)), 0) => // TODO: not necessarily 1 master edge
-      assert(
-        edgeIn.master.masters(0).name == "CoalescerNode",
-        "First edge is not connected to the coalescer master node"
-      )
-      // Edge from the coalescer TL master node should simply bypass the identity node,
-      // except for connecting the outgoing edge to the inflight table, which is done
-      // down below.
-      tlOut.a <> tlIn.a
-    case (((tlIn, _), (tlOut, edgeOut)), i) =>
+  (outer.cpuNode.in zip outer.cpuNode.out).zipWithIndex.foreach {
+    case (((tlIn, _), (tlOut, edgeOut)), lane) =>
       // Request queue
-      val lane = i - 1
       val req = Wire(reqQueueEntryT)
       req.source := tlIn.a.bits.source
       req.isStore := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
@@ -588,7 +579,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       tlOut.a.bits := deq.bits.toTLA(edgeOut)
   }
 
-  val (tlCoal, edgeCoal) = outer.coalescerNode.out(0)
+  val (tlCoal, edgeCoal) = outer.coalescerNode.out.head
 
   tlCoal.a.valid := coalescer.io.coalReq.valid
   tlCoal.a.bits := coalescer.io.coalReq.bits.toTLA(edgeCoal)
@@ -639,22 +630,12 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val respQueueNoncoalPort = 0
   val respQueueUncoalPortOffset = 1
 
-  (outer.node.in zip outer.node.out).zipWithIndex.foreach {
-    case (((tlIn, edgeIn), (tlOut, _)), 0) => // TODO: not necessarily 1 master edge
-      assert(
-        edgeIn.master.masters(0).name == "CoalescerNode",
-        "First edge is not connected to the coalescer master node"
-      )
-      // Edge from the coalescer TL master node should simply bypass the identity node,
-      // except for connecting the outgoing edge to the inflight table, which is done
-      // down below.
-      tlIn.d <> tlOut.d
-    case (((tlIn, edgeIn), (tlOut, _)), i) =>
+  (outer.cpuNode.in zip outer.cpuNode.out).zipWithIndex.foreach {
+    case (((tlIn, edgeIn), (tlOut, _)), lane) =>
       // Response queue
       //
       // This queue will serialize non-coalesced responses along with
       // coalesced responses and serve them back to the core side.
-      val lane = i - 1
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
       resp.fromTLD(tlOut.d.bits)
@@ -1563,8 +1544,8 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
 
   val coal = LazyModule(new CoalescingUnit(defaultConfig))
 
-  coal.node :=* driver.node
-  rams.foreach(_.node := coal.node)
+  coal.cpuNode :=* driver.node
+  rams.foreach(_.node := coal.aggregateNode)
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
@@ -1603,7 +1584,8 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
     )
   )
 
-  memSideLogger.node :=* coal.node :=* coreSideLogger.node :=* driver.node
+  memSideLogger.node :=* coal.aggregateNode
+  coal.cpuNode :=* coreSideLogger.node :=* driver.node
   rams.foreach { r => r.node := memSideLogger.node }
 
   lazy val module = new Impl
@@ -1652,8 +1634,8 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
     )
   )
 
-  coal.node :=* driver.node
-  rams.foreach { r => r.node := coal.node }
+  coal.cpuNode :=* driver.node
+  rams.foreach { r => r.node := coal.aggregateNode }
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
