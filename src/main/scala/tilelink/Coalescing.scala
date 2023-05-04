@@ -532,12 +532,15 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends LazyModuleImp(outer) {
-  assert(outer.cpuNode.in.length == config.numLanes,
-    s"number of incoming edges (${outer.cpuNode.in.length}) is not the same as number of lanes")
-  assert(outer.cpuNode.in.head._1.params.sourceBits == log2Ceil(config.numOldSrcIds),
-    s"old source id bits TL param (${outer.cpuNode.in.head._1.params.sourceBits}) mismatch with config")
-  assert(outer.cpuNode.in.head._1.params.addressBits == config.addressWidth,
-    s"address width TL param (${outer.cpuNode.in.head._1.params.addressBits}) mismatch with config")
+  require(outer.cpuNode.in.length == config.numLanes,
+    s"number of incoming edges (${outer.cpuNode.in.length}) is not the same as " +
+    s"config.numLanes (${config.numLanes})")
+  require(outer.cpuNode.in.head._1.params.sourceBits == log2Ceil(config.numOldSrcIds),
+    s"TL param sourceBits (${outer.cpuNode.in.head._1.params.sourceBits}) " +
+    s"mismatch with log2(config.numOldSrcIds) (${log2Ceil(config.numOldSrcIds)})")
+  require(outer.cpuNode.in.head._1.params.addressBits == config.addressWidth,
+    s"TL param addressBits (${outer.cpuNode.in.head._1.params.addressBits}) " +
+    s"mismatch with config.addressWidth (${config.addressWidth})")
 
   val sourceWidth = outer.cpuNode.in.head._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
