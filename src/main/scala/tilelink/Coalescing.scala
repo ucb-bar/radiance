@@ -354,7 +354,9 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
            .reduce(_ +& _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
-  // TODO: maybe use round robin arbiter instead of argmax to pick leader
+  // Elect the leader out of all potential leaders that have matchCounts > 1.
+  // TODO: potentially expensive: magnitude comparator
+  // Maybe choose leftmost leader (priority encoder) instead of argmax
   val chosenLeaderIdx = matchCounts.zipWithIndex.map {
     case (c, i) => (c, i.U)
   }.reduce[(UInt, UInt)] { case ((c0, i), (c1, j)) =>
@@ -373,9 +375,10 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   // 2-D table flattened to 1-D
   val offsets = io.window.elts.flatMap(_.map(req => getOffsetSlice(req.address)))
   val valids = io.window.mask.flatMap(_.asBools)
-  // indicates whether each word in the coalesced chunk is accessed by any of the
-  // queue entries. e.g. if [ 1 1 1 1 ], all of the four words in the coalesced
-  // data has been accessed and we've reached 100% utilization.
+  // indicates for each word in the coalesced chunk whether it is accessed by
+  // any of the requests in the queue. e.g. if [ 1 1 1 1 ], all of the four
+  // words in the coalesced data coming back will be accessed by some request
+  // and we've reached 100% bandwidth utilization.
   val hits = Seq.tabulate(1 << (size - config.wordWidth)) { target =>
     (offsets zip valids).map { case (offset, valid) => valid && (offset === target.U) }.reduce(_ || _)
   }
@@ -573,9 +576,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       enq.valid := tlIn.a.valid
       enq.bits := req
       deq.ready := true.B // TODO: deq.ready should respect downstream arbiter
-      // NOTE: this relies on CoalShiftQueue's behavior combinationally
-      // deasserting deq.valid in the same cycle that the head invalidate
-      // signal goes up.
       tlOut.a.valid := deq.valid
       tlOut.a.bits := deq.bits.toTLA(edgeOut)
   }
@@ -888,6 +888,7 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   val sourceWidth = log2Ceil(config.numOldSrcIds)
 
   println(s"=========== table sourceWidth: ${sourceWidth}")
+  println(s"=========== table offsetBits: ${offsetBits}")
   println(s"=========== table sizeEnumBits: ${entryT.sizeEnumT.getWidth}")
 
   val io = IO(new Bundle {
@@ -1525,19 +1526,19 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
   finishCounter := finishCounter - 1.U
   io.finished := (finishCounter === 0.U)
 
-  outer.laneNodes.foreach { node =>
+  outer.laneNodes.zipWithIndex.foreach { case (node, lane) =>
     assert(node.out.length == 1)
 
-    // generate dummy traffic to coalescer to prevent it from optimized being
+    // generate dummy traffic to coalescer to prevent it from being optimized
     // out during synthesis
     val address = Wire(UInt(config.addressWidth.W))
-    address := Cat(finishCounter, 0.U(config.wordWidth.W))
+    address := Cat((finishCounter + (lane.U % 3.U)), 0.U(config.wordWidth.W))
     val (tl, edge) = node.out(0)
     val (legal, bits) = edge.Put(
       fromSource = sourceIdCounter,
       toAddress = address,
       lgSize = 2.U,
-      data = finishCounter
+      data = finishCounter + (lane.U % 3.U)
     )
     assert(legal, "illegal TL req gen")
     tl.a.valid := true.B
