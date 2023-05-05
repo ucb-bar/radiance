@@ -547,6 +547,7 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
   def disable = {
     io.coalReq.valid := false.B
     io.invalidate.valid := false.B
+    io.coalescable.foreach { _ := false.B }
   }
   if (!config.enable) disable
 }
