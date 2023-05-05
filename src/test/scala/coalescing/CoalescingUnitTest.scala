@@ -6,7 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.diplomacy._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.util.{DecoupledIO, Valid}
 import chisel3.util.experimental.BoringUtils
 
