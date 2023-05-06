@@ -245,8 +245,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
     // dequeue is valid when:
     // head entry is valid, has not been processed by downstream, and is not coalescable
     deq.bits := elts.map(_.head.bits)(i)
-    deq.valid := elts.map(_.head.valid)(i) && !deqDone(i) &&
-                 (!io.invalidate.valid || !io.coalescable(i))
+    deq.valid := elts.map(_.head.valid)(i) && !deqDone(i) && !io.coalescable(i)
 
     // can take new entries if not empty, or if full but shifting
     enq.ready := (!ctrl.full) || ctrl.shift
@@ -564,7 +563,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.wordWidth, config.addressWidth, config.wordSizeInBytes)
   val reqQueues = Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config))
 
-  val coalReqT = new ReqQueueEntry(sourceWidth, log2Ceil(config.maxCoalLogSize),
+  val coalReqT = new ReqQueueEntry(log2Ceil(config.numNewSrcIds), log2Ceil(config.maxCoalLogSize),
     config.addressWidth, config.maxCoalLogSize)
   val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
   coalescer.io.window := reqQueues.io
