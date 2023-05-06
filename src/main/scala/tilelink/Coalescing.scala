@@ -53,7 +53,9 @@ case class CoalescerConfig(
   coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
   sizeEnum: InFlightTableSizeEnum,
-  arbiterOutputs: Int
+  numCoalReq: Int,         // the total number of coalesced request
+  arbiterOutputs: Int,     //total number RW ports from the
+  bankStrideInBytes: Int  //cache line strides across the different banks
 ) {
   // maximum coalesced size
   def maxCoalLogSize: Int = coalLogSizes.max
@@ -75,7 +77,9 @@ object defaultConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  arbiterOutputs = 4
+  numCoalReq = 1, 
+  arbiterOutputs = 4,
+  bankStrideInBytes = 64  //Current L2 is strided by 512 bits
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
@@ -1719,4 +1723,102 @@ class TLRAMCoalescerTest(timeout: Int = 500000)(implicit p: Parameters) extends 
   val dut = Module(LazyModule(new TLRAMCoalescer).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
+}
+
+
+////////////
+////////////
+////////////
+////////////  Code for CoalArbiter
+////////////
+////////////
+
+// Lazy Module is needed to instantiate outgoing node
+class CoalArbiter(config: CoalescerConfig) (implicit p: Parameters) extends LazyModule {
+    // Let SIMT's word size be 32, and read/write granularity be 256 
+
+    val fullSourceIdRange = config.numOldSrcIds * config.numLanes + config.numNewSrcIds * config.numCoalReq
+
+    // K client nodes of edge size 32 for non-coalesced reqs
+    val nonCoalNarrowNodes = Seq.tabulate(config.arbiterOutputs){ i =>
+        val nonCoalNarrowParam = Seq(
+          TLMasterParameters.v1(
+          name = "NonCoalNarrowNode" + i.toString,
+          sourceId = IdRange(0, fullSourceIdRange)
+          )
+        )
+        TLClientNode(Seq(TLMasterPortParameters.v1(nonCoalNarrowParam)))
+    }
+
+    // One identity Node for the Noncoalesced Reqest after Width Adaptation
+    // You can put widget between idenity node and client node (diplomacy)
+    val nonCoalNode = TLIdentityNode()
+    nonCoalNarrowNodes.foreach(narrowNode => 
+      nonCoalNode := TLWidthWidget(config.wordSizeInBytes) := narrowNode
+    )
+
+    // K client nodes of edge size 256 for the coalesced reqs
+    val coalReqNodes = Seq.tabulate(config.arbiterOutputs){ i =>
+        val coalParam = Seq(
+          TLMasterParameters.v1(
+          name = "CoalReqNode" + i.toString,
+          sourceId = IdRange(0, fullSourceIdRange)
+          )
+        )
+        TLClientNode(Seq(TLMasterPortParameters.v1(coalParam)))
+    }
+    // 1 idenity node for the Coalesced Reqs
+    val coalNode = TLIdentityNode()
+    coalReqNodes.foreach(coalReqNode =>
+      coalNode := coalReqNode
+    )
+
+
+    // 1 Final Output Identity Node 
+    val outputNode = TLIdentityNode()
+
+
+    //Explictly define I/O bundule tyoe
+    val nonCoalEntryT = new ReqQueueEntry(
+                                log2Ceil(config.numOldSrcIds),
+                                config.wordWidth,
+                                config.addressWidth,
+                                log2Ceil(config.wordSizeInBytes)
+                              )
+    val coalEntryT    = new ReqQueueEntry(
+                                log2Ceil(config.numOldSrcIds),
+                                log2Ceil(config.maxCoalLogSize),
+                                config.addressWidth,
+                                config.maxCoalLogSize //already log 2
+                              )
+    val respNonCoalEntryT = new RespQueueEntry(
+                                log2Ceil(config.numOldSrcIds),
+                                config.wordWidth,
+                                log2Ceil(config.wordSizeInBytes)
+                              ) 
+
+    val respCoalBundleT   = new CoalescedResponseBundle(config)
+       
+    lazy val module = new CoalArbiterImpl(this, config, nonCoalEntryT, coalEntryT, respNonCoalEntryT, respCoalBundleT)
+
+}
+
+class CoalArbiterImpl(outer: CoalArbiter, 
+                      config: CoalescerConfig,
+                      nonCoalEntryT: ReqQueueEntry, 
+                      coalEntryT: ReqQueueEntry,
+                      respNonCoalEntryT: RespQueueEntry, 
+                      respCoalBundleT: CoalescedResponseBundle
+      ) extends LazyModuleImp(outer){
+
+
+    val io =IO(new Bundle {
+      val nonCoalVec      = Vec(config.numLanes, Flipped(Decoupled(nonCoalEntryT.cloneType)))
+      val coalVec         = Vec(config.numCoalReq, Flipped(Decoupled(coalEntryT.cloneType)))
+      val respNonCoalVec  = Vec(config.numLanes, Decoupled(respNonCoalEntryT.cloneType))
+      val respCoalBundle  = Decoupled(respCoalBundleT.cloneType)
+      }
+    )
+
+
 }
