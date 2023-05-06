@@ -102,7 +102,8 @@ extern "C" void memtracelogger_log(int handle,
                     .data = trace_log_data,
                     .log_data_size = trace_log_size};
 
-  assert(0 <= handle && handle < loggers.size() && "wrong trace logger handle");
+  assert(0 <= handle && static_cast<size_t>(handle) < loggers.size() &&
+         "wrong trace logger handle");
   auto logger = loggers[handle].get();
   logger->write_line_to_trace(line);
 }
