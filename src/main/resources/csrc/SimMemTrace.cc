@@ -23,6 +23,7 @@ MemTraceReader::MemTraceReader(const std::string &filename)
   infile.open(filename);
   if (infile.fail()) {
     fprintf(stderr, "failed to open file %s\n", filename.c_str());
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -60,8 +61,6 @@ void MemTraceReader::parse(const bool has_source) {
     }
 
     if (!(infile >> line.cycle >> loadstore >> line.core_id >> line.lane_id)) {
-      printf("char=[%c]\n", infile.peek());
-      // assert(!infile.eof());
       error(fileline, "failed parsing cycle..lane_id");
     }
     if (has_source && !(infile >> source)) {
@@ -100,8 +99,6 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
                                            unsigned char trace_read_ready) {
   MemTraceLine line;
   line.valid = false;
-
-  // printf("tick(): cycle=%ld\n", cycle);
 
   if (finished()) {
     return line;
