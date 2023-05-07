@@ -111,8 +111,8 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
   // It should always be guaranteed that we consumed all of the past lines, and
   // the next line is in the future.
   if (line.cycle < cycle) {
-    printf("cycle=%ld, some lines are left in past Fatal", cycle);
-    assert(false && "some trace lines are left unread in the past");
+    long fileline = read_pos - std::cbegin(trace_buf) + 1;
+    error(fileline, "some trace lines are left unread in the past");
     return MemTraceLine{};
   }
 
