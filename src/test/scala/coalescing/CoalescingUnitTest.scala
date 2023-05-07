@@ -98,6 +98,8 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val coalIO3 = outer.cpuNodes(3).makeIOs()
   val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
 
+  val l2IO0 = outer.l2Nodes(0).makeIOs()
+
 //  val coalMasterNode = coal.coalescerNode.makeIOs()
 
   private val reqQueues = coal.module.reqQueues
@@ -184,7 +186,9 @@ object testConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(4, 5),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  arbiterOutputs = 4
+  arbiterOutputs = 4,
+  numCoalReq = 1,
+  bankStrideInBytes = 64
 )
 
 class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -204,7 +208,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   def pokeA(
       nodes: Seq[TLBundle],
-      idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Int,
+      idx: Int, op: Int, size: Int, source: Int, addr: Int, mask: Int, data: Long,
       valid: Boolean = true,
   ): Unit = {
     val node = nodes(idx)
@@ -232,11 +236,13 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "coalesce fully consecutive accesses at size 4, only once" in {
     test(LazyModule(new DummyCoalescingUnitTB()).module)
-    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
+    .withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation))
+//    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
       println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
       // TODO: this doesn't work
+      c.l2IO0.head.a.ready.poke(true.B)
 //      c.coalMasterNode.head.a.ready.poke(true.B)
 
       c.reqQueueEnqReady.foreach(_.expect(true.B))
@@ -257,7 +263,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.coalReqBits.size.expect(4.U)
       c.coalReqBits.op.expect(1.U)
 
-//      c.coalReqReady.expect(true.B)
+      c.coalReqReady.expect(true.B)
       c.reqQueueEnqReady.foreach(_.expect(true.B))
       pokeA(nodes, idx = 0, op = 1, size = 2, source = 1, addr = 0xf20, mask = 0xf, data = 0x5555)
       pokeA(nodes, idx = 1, op = 1, size = 2, source = 1, addr = 0xf24, mask = 0xf, data = 0x6666, valid = false)
@@ -268,12 +274,27 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.coalReqValid.expect(true.B)
       c.coalReqBits.address.expect(0xf20.U)
       c.coalReqBits.data.expect(BigInt("77770000000000005555", 16)) // technically these can be dontcare's
-      c.coalReqBits.mask.expect(0x0000ffff)
+      c.coalReqBits.mask.expect(0x00000f0f)
       c.coalReqBits.size.expect(4.U)
       c.coalReqBits.op.expect(1.U)
 
+      c.coalReqReady.expect(true.B)
+      c.reqQueueEnqReady.foreach(_.expect(true.B))
+      pokeA(nodes, idx = 0, op = 0, size = 2, source = 2, addr = 0xd04, mask = 0xa, data = 0xdeadbeefL)
+      pokeA(nodes, idx = 1, op = 0, size = 2, source = 2, addr = 0xd0c, mask = 0xb, data = 0x8badf00dL)
+      pokeA(nodes, idx = 2, op = 0, size = 2, source = 2, addr = 0xd14, mask = 0xc, data = 0xcafeb0baL)
+      pokeA(nodes, idx = 3, op = 0, size = 2, source = 2, addr = 0xd1c, mask = 0xd, data = 0xdabbad00L)
       c.clock.step()
+
+      c.coalReqValid.expect(true.B)
+      c.coalReqBits.address.expect(0xd00.U)
+      c.coalReqBits.size.expect(5.U)
+      c.coalReqBits.data.expect(BigInt("dabbad0000000000cafeb0ba000000008badf00d00000000deadbeef00000000", 16))
+      c.coalReqBits.mask.expect(0xd0c0b0a0L)
+      c.coalReqBits.op.expect(0.U)
+
       c.clock.step()
+//      c.clock.step()
     }
   }
 
@@ -672,7 +693,9 @@ object uncoalescerTestConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(4),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  arbiterOutputs = 4
+  numCoalReq = 1,
+  arbiterOutputs = 4,
+  bankStrideInBytes = 64,
 )
 
 class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
