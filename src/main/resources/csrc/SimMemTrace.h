@@ -18,12 +18,18 @@ class MemTraceReader {
 public:
   MemTraceReader(const std::string &filename);
   ~MemTraceReader();
-  void parse();
+  void parse(const bool has_source);
   MemTraceLine read_trace_at(const long cycle, const int lane_id, unsigned char trace_read_ready);
-  bool finished() const { return read_pos == trace.cend(); }
+  bool finished() const { return read_pos == trace_buf.cend(); }
+  MemTraceLine peek() const { return *read_pos; }
+  void next() { read_pos++; }
+  void error(long fileline, const std::string &msg);
 
+  const std::string filename;
+
+private:
   std::ifstream infile;
-  std::vector<MemTraceLine> trace;
+  std::vector<MemTraceLine> trace_buf;
   std::vector<MemTraceLine>::const_iterator read_pos;
 };
 
