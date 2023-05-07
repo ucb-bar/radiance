@@ -191,8 +191,8 @@ object testConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(4, 5),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  numArbiterOutputPorts = 4,
   numCoalReqs = 1,
+  numArbiterOutputPorts = 4,
   bankStrideInBytes = 64
 )
 
@@ -303,7 +303,6 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "coalesce identical addresses (stride of 0)" in {
     test(LazyModule(new DummyCoalescingUnitTB()).module)
-//    .withAnnotations(Seq(VcsBackendAnnotation))
     .withAnnotations(Seq(VerilatorBackendAnnotation))
     { c =>
       println(s"coalIO length = ${c.coalIOs(0).length}")
