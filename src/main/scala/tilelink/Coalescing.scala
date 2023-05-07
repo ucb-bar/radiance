@@ -53,9 +53,10 @@ case class CoalescerConfig(
   coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
   sizeEnum: InFlightTableSizeEnum,
-  numCoalReq: Int,         // the total number of coalesced request
-  arbiterOutputs: Int,     //total number RW ports from the
-  bankStrideInBytes: Int  //cache line strides across the different banks
+  numCoalReqs: Int,       // total number of coalesced requests we can generate in one cycle
+  numArbiterOutputPorts: Int, // total of output ports the arbiter will arbitrate into.
+                              // this has to match downstream cache's configuration
+  bankStrideInBytes: Int  // cache line strides across the different banks
 ) {
   // maximum coalesced size
   def maxCoalLogSize: Int = coalLogSizes.max
@@ -77,9 +78,9 @@ object defaultConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  numCoalReq = 1, 
-  arbiterOutputs = 4,
-  bankStrideInBytes = 64 // Current L2 is strided by 512 bits
+  numCoalReqs = 1,
+  numArbiterOutputPorts = 4,
+  bankStrideInBytes = 64  //Current L2 is strided by 512 bits
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
@@ -1738,10 +1739,10 @@ class TLRAMCoalescerTest(timeout: Int = 500000)(implicit p: Parameters) extends 
 class CoalArbiter(config: CoalescerConfig) (implicit p: Parameters) extends LazyModule {
     // Let SIMT's word size be 32, and read/write granularity be 256 
 
-    val fullSourceIdRange = config.numOldSrcIds * config.numLanes + config.numNewSrcIds * config.numCoalReq
+    val fullSourceIdRange = config.numOldSrcIds * config.numLanes + config.numNewSrcIds * config.numCoalReqs
 
     // K client nodes of edge size 32 for non-coalesced reqs
-    val nonCoalNarrowNodes = Seq.tabulate(config.arbiterOutputs){ i =>
+    val nonCoalNarrowNodes = Seq.tabulate(config.numArbiterOutputPorts){ i =>
         val nonCoalNarrowParam = Seq(
           TLMasterParameters.v1(
           name = "NonCoalNarrowNode" + i.toString,
@@ -1759,7 +1760,7 @@ class CoalArbiter(config: CoalescerConfig) (implicit p: Parameters) extends Lazy
     )
 
     // K client nodes of edge size 256 for the coalesced reqs
-    val coalReqNodes = Seq.tabulate(config.arbiterOutputs){ i =>
+    val coalReqNodes = Seq.tabulate(config.numArbiterOutputPorts){ i =>
         val coalParam = Seq(
           TLMasterParameters.v1(
           name = "CoalReqNode" + i.toString,
@@ -1814,11 +1815,11 @@ class CoalArbiterImpl(outer: CoalArbiter,
       ) extends LazyModuleImp(outer){
 
 
-    val io = IO(new Bundle {
-      val nonCoalVec      = Vec(config.numLanes, Flipped(Decoupled(nonCoalEntryT.cloneType)))
-      val coalVec         = Vec(config.numCoalReq, Flipped(Decoupled(coalEntryT.cloneType)))
-      val respNonCoalVec  = Vec(config.numLanes, Decoupled(respNonCoalEntryT.cloneType))
-      val respCoalBundle  = Decoupled(respCoalBundleT.cloneType)
+    val io =IO(new Bundle {
+      val nonCoalReqs   = Vec(config.numLanes, Flipped(Decoupled(nonCoalEntryT)))
+      val coalReqs      = Vec(config.numCoalReqs, Flipped(Decoupled(coalEntryT)))
+      val nonCoalResps  = Vec(config.numLanes, Decoupled(respNonCoalEntryT))
+      val coalResp      = Decoupled(respCoalBundleT)
       }
     )
 
