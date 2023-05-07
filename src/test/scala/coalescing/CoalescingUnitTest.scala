@@ -99,6 +99,11 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val coalIOs = Seq(coalIO0, coalIO1, coalIO2, coalIO3)
 
   val l2IO0 = outer.l2Nodes(0).makeIOs()
+  val l2IO1 = outer.l2Nodes(1).makeIOs()
+  val l2IO2 = outer.l2Nodes(2).makeIOs()
+  val l2IO3 = outer.l2Nodes(3).makeIOs()
+  val l2IO4 = outer.l2Nodes(4).makeIOs()
+  val l2IOs = Seq(l2IO0, l2IO1, l2IO2, l2IO3, l2IO4)
 
 //  val coalMasterNode = coal.coalescerNode.makeIOs()
 
@@ -186,8 +191,8 @@ object testConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(4, 5),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  arbiterOutputs = 4,
-  numCoalReq = 1,
+  numArbiterOutputPorts = 4,
+  numCoalReqs = 1,
   bankStrideInBytes = 64
 )
 
@@ -239,11 +244,9 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     .withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation))
 //    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
-      println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
-      // TODO: this doesn't work
-      c.l2IO0.head.a.ready.poke(true.B)
-//      c.coalMasterNode.head.a.ready.poke(true.B)
+
+      c.l2IOs.foreach(_.head.a.ready.poke(true.B))
 
       c.reqQueueEnqReady.foreach(_.expect(true.B))
       pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x10, mask = 0xf, data = 0x1111)
@@ -305,6 +308,9 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
 
+      c.l2IOs.foreach(_.head.a.ready.poke(true.B))
+      c.coalReqReady.expect(true.B)
+      c.reqQueueEnqReady.foreach(_.expect(true.B))
       pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x1111)
       pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x2222)
       pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0x18, mask = 0xf, data = 0x3333)
@@ -313,14 +319,17 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
 
       unsetA(nodes)
+      c.coalReqValid.expect(true.B)
+      c.coalReqBits.address.expect(0xf20.U)
+      c.coalReqBits.data.expect(BigInt("44440000000000000000", 16) << 128)
+      c.coalReqBits.mask.expect(0x0f000000)
+      c.coalReqBits.size.expect(4.U)
+      c.coalReqBits.op.expect(1.U)
 
-      c.clock.step()
       c.clock.step()
     }
   }
 
-//  it should "coalesce strided accesses at size 6" in {}
-//
 //  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {}
 //
 //  it should "not touch uncoalescable requests" in {}
@@ -390,17 +399,10 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.deq.foreach(_.ready.poke(true.B))
       c.clock.step()
 
-      // all dequeued, none valid this cycle
-      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
-      c.clock.step()
-
-      // shifted last cycle
+      // all dequeued && shifted last cycle
       c.io.coalescable.foreach(_.poke(false.B))
       c.io.queue.deq.foreach(_.ready.poke(true.B))
       expectDequeue(c, Seq.fill(4)(2.U), Seq(true.B, false.B, false.B, false.B))
-      c.clock.step()
-
-      expectDequeue(c, Seq.fill(4)(2.U), Seq(false.B, false.B, false.B, false.B))
       c.clock.step()
 
       pokeVec(c.io.coalescable, Seq(true.B, false.B, true.B, true.B))
@@ -412,7 +414,7 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
 
       // empty
-      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(false.B))
+      expectDequeue(c, Seq.fill(4)(0.U), Seq.fill(4)(false.B))
 
       // now enqueue back to full & test back pressure
       c.io.queue.deq.foreach(_.ready.poke(false.B))
@@ -426,10 +428,8 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.queue.enq.foreach(_.ready.expect(false.B))
       c.clock.step()
 
-      // now indicate the next cycle will dequeue everything
+      // now indicate this cycle will dequeue everything
       c.io.queue.deq.foreach(_.ready.poke(true.B))
-      c.io.coalescable.foreach(_.poke(false.B))
-      c.clock.step()
 
       // should still be full, but allow enqueue
       c.io.coalescable.foreach(_.poke(true.B))
@@ -459,26 +459,31 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
       expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(true.B))
       attemptEnqueue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
 
-      expectDequeue(c, Seq.fill(4)(1.U), Seq.fill(4)(false.B))
+      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
       attemptEnqueue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
 
-      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(true.B))
+      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
       attemptEnqueue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
 
-      expectDequeue(c, Seq.fill(4)(2.U), Seq.fill(4)(false.B))
+      expectDequeue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
       attemptEnqueue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
 
-      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(true.B))
-      c.clock.step()
-      expectDequeue(c, Seq.fill(4)(3.U), Seq.fill(4)(false.B))
-      c.clock.step()
-      expectDequeue(c, Seq.fill(4)(4.U), Seq.fill(4)(true.B))
-      c.clock.step()
-      expectDequeue(c, Seq.fill(4)(4.U), Seq.fill(4)(false.B))
-      c.clock.step()
+      // disable dequeue
+      c.io.queue.deq.foreach(_.ready.poke(false.B))
+      expectDequeue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(6.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(7.U), Seq.fill(4)(true.B))
+      attemptEnqueue(c, Seq.fill(4)(8.U), Seq.fill(4)(true.B))
+
+      c.io.queue.enq.foreach(_.ready.expect(false.B))
+      c.io.queue.deq.foreach(_.ready.poke(true.B))
       expectDequeue(c, Seq.fill(4)(5.U), Seq.fill(4)(true.B))
       c.clock.step()
-      expectDequeue(c, Seq.fill(4)(5.U), Seq.fill(4)(false.B))
+      expectDequeue(c, Seq.fill(4)(6.U), Seq.fill(4)(true.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(7.U), Seq.fill(4)(true.B))
+      c.clock.step()
+      expectDequeue(c, Seq.fill(4)(8.U), Seq.fill(4)(true.B))
       c.clock.step()
     }
   }
@@ -693,8 +698,8 @@ object uncoalescerTestConfig extends CoalescerConfig(
   respQueueDepth = 4,
   coalLogSizes = Seq(4),
   sizeEnum = DefaultInFlightTableSizeEnum,
-  numCoalReq = 1,
-  arbiterOutputs = 4,
+  numCoalReqs = 1,
+  numArbiterOutputPorts = 4,
   bankStrideInBytes = 64,
 )
 
