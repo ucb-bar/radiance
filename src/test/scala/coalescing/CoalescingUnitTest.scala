@@ -7,6 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.WithoutTLMonitors
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.{DecoupledIO, Valid}
 import chisel3.util.experimental.BoringUtils
@@ -241,7 +242,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "coalesce fully consecutive accesses at size 4, only once" in {
-    test(LazyModule(new DummyCoalescingUnitTB()).module)
+    test(LazyModule(new DummyCoalescingUnitTB()(new WithoutTLMonitors())).module)
     .withAnnotations(Seq(VerilatorBackendAnnotation, VerilatorFlags(Seq("--coverage-line")), WriteFstAnnotation))
 //    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
@@ -303,7 +304,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "coalesce identical addresses (stride of 0)" in {
-    test(LazyModule(new DummyCoalescingUnitTB()).module)
+    test(LazyModule(new DummyCoalescingUnitTB()(new WithoutTLMonitors())).module)
     .withAnnotations(Seq(VerilatorBackendAnnotation))
     { c =>
       println(s"coalIO length = ${c.coalIOs(0).length}")
