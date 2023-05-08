@@ -76,21 +76,26 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
       end
       __in_finished = 1'b0;
     end else begin
-      for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
-        memtrace_query(
-          trace_read_ready,
-          trace_read_cycle,
-          tid,
+      // We have to write to __in_ regs only when trace_read_ready, or
+      // otherwise we might overwrite lines that were previously valid
+      // but the downstream missed by being not ready.
+      if (trace_read_ready) begin
+        for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
+          memtrace_query(
+            trace_read_ready,
+            trace_read_cycle,
+            tid,
 
-          __in_valid[tid],
-          __in_address[tid],
- 
-          __in_is_store[tid],
-          __in_size[tid],
-          __in_data[tid],
+            __in_valid[tid],
+            __in_address[tid],
 
-          __in_finished
-        );
+            __in_is_store[tid],
+            __in_size[tid],
+            __in_data[tid],
+
+            __in_finished
+          );
+        end
       end
     end
   end
