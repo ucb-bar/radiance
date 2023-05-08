@@ -1349,7 +1349,9 @@ class MemTraceLogger(
 
         // requests on TL A channel
         //
-        req.valid := tlIn.a.valid
+        // Only log trace when fired, e.g. both upstream and downstream is ready
+        // and transaction happened.
+        req.valid := tlIn.a.fire
         req.size := tlIn.a.bits.size
         req.is_store := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
         req.source := tlIn.a.bits.source
@@ -1393,7 +1395,9 @@ class MemTraceLogger(
 
         // responses on TL D channel
         //
-        resp.valid := tlOut.d.valid
+        // Only log trace when fired, e.g. both upstream and downstream is ready
+        // and transaction happened.
+        resp.valid := tlOut.d.fire
         resp.size := tlOut.d.bits.size
         resp.is_store := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
         resp.source := tlOut.d.bits.source
@@ -1427,7 +1431,7 @@ class MemTraceLogger(
     //
     // This is a clunky workaround of the fact that Chisel doesn't allow partial
     // assignment to a bitfield range of a wide signal.
-    def flattenTrace(traceLogIO: Bundle with HasTraceLine, perLane: Vec[TraceLine]) = {
+    def flattenTrace(simIO: Bundle with HasTraceLine, perLane: Vec[TraceLine]) = {
       // these will get optimized out
       val vecValid = Wire(Vec(numLanes, chiselTypeOf(perLane(0).valid)))
       val vecSource = Wire(Vec(numLanes, chiselTypeOf(perLane(0).source)))
@@ -1443,12 +1447,12 @@ class MemTraceLogger(
         vecSize(i) := l.size
         vecData(i) := l.data
       }
-      traceLogIO.valid := vecValid.asUInt
-      traceLogIO.source := vecSource.asUInt
-      traceLogIO.address := vecAddress.asUInt
-      traceLogIO.is_store := vecIsStore.asUInt
-      traceLogIO.size := vecSize.asUInt
-      traceLogIO.data := vecData.asUInt
+      simIO.valid := vecValid.asUInt
+      simIO.source := vecSource.asUInt
+      simIO.address := vecAddress.asUInt
+      simIO.is_store := vecIsStore.asUInt
+      simIO.size := vecSize.asUInt
+      simIO.data := vecData.asUInt
     }
 
     if (simReq.isDefined) {
