@@ -22,7 +22,8 @@ MemTraceReader::MemTraceReader(const std::string &filename)
 
   infile.open(filename);
   if (infile.fail()) {
-    fprintf(stderr, "failed to open file %s\n", filename.c_str());
+    fprintf(stderr, "MemTraceReader: error: failed to open file %s\n",
+            filename.c_str());
     exit(EXIT_FAILURE);
   }
 }
@@ -109,7 +110,11 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
   // the next line is in the future.
   if (line.cycle < cycle) {
     long fileline = read_pos - std::cbegin(trace_buf) + 1;
-    error(fileline, "some trace lines are left unread in the past");
+    error(fileline, "some trace lines are left unread in the past. "
+                    "Tried cycle=" +
+                        std::to_string(cycle) +
+                        ", found line.cycle=" + std::to_string(line.cycle) +
+                        ". Is NUM_LANES set correctly?");
     return MemTraceLine{};
   }
 
@@ -131,14 +136,17 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
       // monotonically increment read_pos.  lane_id need not be contiguous, e.g.
       // 0->1->3 is fine.
       ++read_pos;
-      return line;
     } else {
       // For debugging purposes, instead of early-returning on
       // !trace_read_ready, print something to notify we are blocking a valid
       // trace line.
       printf("All Lanes Blocked on this cycle! cycle=%ld \n", cycle);
-      return MemTraceLine{};
     }
+    // We want to return valid line regardless of `trace_read_ready` or not,
+    // because we want to let the driver know that it missed a valid line at the
+    // given cycle, so that it holds its cycle counter and safely reads back the
+    // line in the future.
+    return line;
   }
 
   assert(!"unreachable");
