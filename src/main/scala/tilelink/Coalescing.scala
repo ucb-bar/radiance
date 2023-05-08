@@ -1823,5 +1823,151 @@ class CoalArbiterImpl(outer: CoalArbiter,
       }
     )
 
+    //Helper Class & Method Section
+    
+    //Provide an decoupled interface between bundle of 2 different type
+    class ConverterTunnel[T <: Data, U <: Data](
+                          genA: T,
+                          genB: U,
+                          conversionFn: T => U
+        ) extends Module {
+      val io = IO(new Bundle {
+          val in = Flipped(Decoupled(genA.cloneType))
+          val out = Decoupled(genB.cloneType)
+      })
+      io.in.ready := io.out.ready
+      io.out.valid := io.in.valid
+      io.out.bits := conversionFn(io.in.bits)
+    }
 
-}
+
+    def canHitBank(addr: UInt, bankNum: UInt) : Bool = {
+      val byteOffset = 3
+      val bankBase = log2Ceil(config.bankStrideInBytes)
+      val bankOffset = log2Ceil(config.numArbiterOutputPorts)
+      (addr(bankBase+bankOffset-byteOffset, bankBase - byteOffset) === bankNum)
+    }
+
+    //This Operation Could be Expensive
+    def toGlobalSourceId(isCoalReq : Bool, laneIndex : UInt, sourceID : UInt) : UInt = {
+      val res = Mux(isCoalReq,
+          config.numNewSrcIds.U * laneIndex + sourceID,
+          config.numOldSrcIds.U * laneIndex + sourceID + config.numNewSrcIds.U * config.numCoalReqs.U
+      )
+      res
+    }
+
+    //
+    val fullSourceIdRange = config.numOldSrcIds * config.numLanes + config.numNewSrcIds * config.numCoalReqs
+    
+
+    val nonCoalGiDEntryT = new ReqQueueEntry(
+                        log2Ceil(fullSourceIdRange),
+                        config.wordWidth,
+                        config.addressWidth,
+                        log2Ceil(config.wordSizeInBytes)
+                      )
+    // Before a nonCoalesced request enter RR arbiter
+    // It needs to turn its source into global source id
+    // Unfortunately this involves extending the width of sourceid field, and a new bundle must be created
+    // This is a higher order function
+    def nonCoal2gidReqFn(laneIndex : UInt) 
+        : ReqQueueEntry => ReqQueueEntry = {
+            def func(lid_req : ReqQueueEntry) : ReqQueueEntry = {
+                val gid_req     =  nonCoalGiDEntryT.cloneType
+                gid_req         <> lid_req
+                gid_req.source :=  toGlobalSourceId(false.B, laneIndex, lid_req.source)
+                gid_req
+              }
+            func
+        }
+    
+    def nonCoal2TLAFn(edgeOut: TLEdgeOut) : ReqQueueEntry => TLBundleA = {
+      def func(gid_req : ReqQueueEntry) : TLBundleA = {
+        gid_req.toTLA(edgeOut)
+      }
+      func
+    }
+
+    /////////////////////////////////////////////////////
+    //HDL Implementation Section
+    /////////////////////////////////////////////////////
+    
+    //Stage 1: Create Queue for nonCoalReqs and CoalReqs 
+    val nonCoalReqsQueues = Seq.tabulate(config.numLanes){_=>
+      Module(new Queue(nonCoalEntryT.cloneType, 1, true, false))
+    }
+    val coalReqsQueues = Seq.tabulate(config.numCoalReqs){_=>
+      Module(new Queue(coalEntryT.cloneType, 1, true, false))
+    }
+    //Stage 1a: connect two Queue groups to the input
+    (io.nonCoalReqs zip nonCoalReqsQueues).foreach{
+      case (req, q) => q.io.enq <> req
+    }
+    (io.coalReqs zip coalReqsQueues).foreach{
+      case (req, q) => q.io.enq <> req
+    }
+    //Stage 1b: connect output of Queues to the RR arbiters (each arbiter is for a unique bank)
+    val nonCoalRRArbiters = Seq.tabulate(config.numArbiterOutputPorts){_=>
+      Module(new RRArbiter(nonCoalGiDEntryT.cloneType, config.numLanes))
+    }
+    nonCoalReqsQueues.zipWithIndex.foreach{ case(q, q_idx) =>
+        nonCoalRRArbiters.zipWithIndex.foreach{ case(arb, arb_idx) =>
+          val nonCoal2gidFunc       = nonCoal2gidReqFn(q_idx.U)
+          val nonCoalRRArbTunnel    = Module(new ConverterTunnel(
+                                          coalEntryT.cloneType,
+                                          nonCoalGiDEntryT.cloneType,
+                                          nonCoal2gidFunc)
+                                          )
+          nonCoalRRArbTunnel.io.in <> q.io.deq
+          arb.io.in(q_idx) <> nonCoalRRArbTunnel.io.out
+          //OverWrite Valid base on if we can actually hit this bank
+          arb.io.in(q_idx).valid := canHitBank(nonCoalRRArbTunnel.io.out.bits.address, arb_idx.U)
+        }
+      }
+
+    //Stage 2, Connect the output of Arbiters to respective nonCoal node
+
+    //Stage 2a, the K Arbiters for Coalesced
+    (outer.nonCoalNarrowNodes zip nonCoalRRArbiters).foreach{
+      case (node, arb) => 
+        val (tlOut, edgeOut)  = node.out(0)
+        val coal2TLAFunc      = nonCoal2TLAFn(edgeOut)
+        val nonCoalTLATunnel  = Module(new ConverterTunnel(
+                                      arb.io.out.bits.cloneType,
+                                      tlOut.a.bits.cloneType,
+                                      coal2TLAFunc
+                                      )
+                                    )
+        nonCoalTLATunnel.io.in <> arb.io.out
+        tlOut.a <> nonCoalTLATunnel.io.out
+    }
+    
+    //Stage 3, Connect the K edges Identity Node to PO arbiter
+    //         noncoalesced to port 1, coalesced to por1
+
+    val priorityArbs = Seq.tabulate(config.numArbiterOutputPorts){_=>
+        Module(new Arbiter(outer.outputNode.out(0)._1.a.bits.cloneType, 2))
+    }
+    ((outer.nonCoalNode.out zip outer.coalNode.out) zip priorityArbs).foreach{
+      case (((nonCoalOut, _),(coalOut, _)), arb) =>
+        arb.io.in(1) <> nonCoalOut.a
+        arb.io.in(0) <> coalOut.a
+    }
+
+
+    //Stage 4, Connect PO arbiter to each edge of output Node
+    //And make idenitity node passs through the inputs
+    ((outer.outputNode.in zip outer.outputNode.out) zip priorityArbs).foreach{
+      case (((tlIn, _), (tlOut, _)), arb) =>
+        tlOut <> tlIn
+        tlIn.a <> arb.io.out
+    }
+
+  }
+
+
+
+
+
+
