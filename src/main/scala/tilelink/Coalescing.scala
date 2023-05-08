@@ -1120,22 +1120,20 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     req.data := sim.io.trace_read.data(dataW * (i + 1) - 1, dataW * i)
   }
 
-  def missedLine = {
-    val existsValidLine = WireInit(false.B)
-    existsValidLine := laneReqs.map(_.valid).reduce(_||_)
-    val missedLine = WireInit(false.B)
-    missedLine := !downstreamReady && existsValidLine
+  // def missedLine = {
+  //   val existsValidLine = WireInit(false.B)
+  //   existsValidLine := laneReqs.map(_.valid).reduce(_||_)
+  //   val missedLine = WireInit(false.B)
+  //   missedLine := !downstreamReady && existsValidLine
 
-    // Debug
-    dontTouch(downstreamReady)
-    dontTouch(existsValidLine)
-    dontTouch(missedLine)
+  //   // Debug
+  //   dontTouch(downstreamReady)
+  //   dontTouch(existsValidLine)
+  //   dontTouch(missedLine)
 
-    missedLine
-  }
-  // Do not increment trace read cycle if we didn't fire a valid line because
-  // downstream was blocking.  This prevents missing any line in the trace.
-  when (!missedLine){
+  //   missedLine
+  // }
+  when (downstreamReady){
     traceReadCycle := traceReadCycle + 1.U
   }
 
