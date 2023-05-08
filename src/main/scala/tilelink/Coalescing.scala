@@ -1093,23 +1093,17 @@ class TraceLine extends Bundle with HasTraceLine {
 class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFile: String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
+  // Current cycle mark to read from trace
+  val traceReadCycle = RegInit(1.U(64.W))
 
-  val globalClkCounter    = RegInit(1.U(64.W))
-  val traceReadCycle      = RegInit(1.U(64.W))
-  val downstreamSQready   = WireInit(true.B)
+  // If any of the downstream lane is not ready, hold on from advancing
+  val downstreamReady = outer.laneNodes.map(_.out(0)._1.a.ready).reduce(_ && _)
 
-  //make the downstream only ready 1/4 of the time
-  //This is to test Tracer System's ability to hold on requests
-  //FIXME
-  downstreamSQready       := (globalClkCounter(1,0) =/= 0.U)
-  //Connect Signals to Verilog BlackBox
   val sim = Module(new SimMemTrace(traceFile, config.numLanes))
   sim.io.clock := clock
   sim.io.reset := reset.asBool
-  sim.io.trace_read.ready := downstreamSQready
-  //FIXME - 1.U hardcoded, currently there is a delay between chisel and verilog
+  sim.io.trace_read.ready := downstreamReady
   sim.io.trace_read.cycle := traceReadCycle
-
 
   // Read output from Verilog BlackBox
   // Split output of SimMemTrace, which is flattened across all lanes,back to each lane's.
@@ -1119,26 +1113,30 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
   val dataW = laneReqs(0).data.getWidth
   laneReqs.zipWithIndex.foreach { case (req, i) =>
     req.valid := sim.io.trace_read.valid(i)
-    // TODO: driver trace doesn't contain source id
-    req.source := 0.U
+    req.source := 0.U // driver trace doesn't contain source id
     req.address := sim.io.trace_read.address(addrW * (i + 1) - 1, addrW * i)
     req.is_store := sim.io.trace_read.is_store(i)
     req.size := sim.io.trace_read.size(sizeW * (i + 1) - 1, sizeW * i)
     req.data := sim.io.trace_read.data(dataW * (i + 1) - 1, dataW * i)
   }
 
-  globalClkCounter       := globalClkCounter + 1.U
-  val existValidReq       = WireInit(false.B)
-  existValidReq          := laneReqs.map(_.valid).reduce(_||_)
-  val validReqBlocked     = WireInit(false.B)
-  validReqBlocked        := !downstreamSQready && existValidReq
-  //Debug
-  dontTouch(downstreamSQready)
-  dontTouch(existValidReq)
-  dontTouch(validReqBlocked)
-  // Do Not Update TraceReadCycle if downstream is blocking
-  when(!validReqBlocked){
-    traceReadCycle       := traceReadCycle + 1.U
+  def missedLine = {
+    val existsValidLine = WireInit(false.B)
+    existsValidLine := laneReqs.map(_.valid).reduce(_||_)
+    val missedLine = WireInit(false.B)
+    missedLine := !downstreamReady && existsValidLine
+
+    // Debug
+    dontTouch(downstreamReady)
+    dontTouch(existsValidLine)
+    dontTouch(missedLine)
+
+    missedLine
+  }
+  // Do not increment trace read cycle if we didn't fire a valid line because
+  // downstream was blocking.  This prevents missing any line in the trace.
+  when (!missedLine){
+    traceReadCycle := traceReadCycle + 1.U
   }
 
   // To prevent collision of sourceId with a current in-flight message,
@@ -1172,19 +1170,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     wordData := Mux(subword, req.data << (offsetInWord * 8.U), req.data)
     val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
     val wordAlignedSize = Mux(subword, 2.U, req.size)
-
-    // when(req.valid && subword) {
-    //   printf(
-    //     "address=%x, size=%d, data=%x, addressMask=%x, wordAlignedAddress=%x, mask=%x, wordData=%x\n",
-    //     req.address,
-    //     req.size,
-    //     req.data,
-    //     ~((1 << log2Ceil(config.WORD_SIZE)) - 1).U(addrW.W),
-    //     wordAlignedAddress,
-    //     mask,
-    //     wordData
-    //   )
-    // }
 
     val (tlOut, edge) = node.out(0)
     val (plegal, pbits) = edge.Put(
