@@ -2,6 +2,7 @@ package freechips.rocketchip.tilelink.coalescing
 
 import chisel3._
 import chiseltest._
+import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.MultiPortQueue
@@ -241,7 +242,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "coalesce fully consecutive accesses at size 4, only once" in {
     test(LazyModule(new DummyCoalescingUnitTB()).module)
-    .withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation))
+    .withAnnotations(Seq(VerilatorBackendAnnotation, VerilatorFlags(Seq("--coverage-line")), WriteFstAnnotation))
 //    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
       val nodes = c.coalIOs.map(_.head)
