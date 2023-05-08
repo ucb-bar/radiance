@@ -370,14 +370,21 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
            .reduce(_ +& _))
   val canCoalesce = matchCounts.map(_ > 1.U)
 
-  // Elect the leader out of all potential leaders that have matchCounts > 1.
+  // Elect the leader that has the most match counts.
   // TODO: potentially expensive: magnitude comparator
-  // Maybe choose leftmost leader (priority encoder) instead of argmax
-  val chosenLeaderIdx = matchCounts.zipWithIndex.map {
-    case (c, i) => (c, i.U)
-  }.reduce[(UInt, UInt)] { case ((c0, i), (c1, j)) =>
-    (Mux(c0 >= c1, c0, c1), Mux(c0 >= c1, i, j))
-  }._2
+  def chooseLeaderArgMax(matchCounts: Seq[UInt]): UInt = {
+    matchCounts.zipWithIndex.map {
+      case (c, i) => (c, i.U)
+    }.reduce[(UInt, UInt)] { case ((c0, i), (c1, j)) =>
+        (Mux(c0 >= c1, c0, c1), Mux(c0 >= c1, i, j))
+    }._2
+  }
+  // Elect leader by choosing the smallest-index lane that has a valid
+  // match, i.e. using priority encoder.
+  def chooseLeaderPriorityEncoder(matchCounts: Seq[UInt]): UInt = {
+    PriorityEncoder(matchCounts.map(_ > 1.U))
+  }
+  val chosenLeaderIdx = chooseLeaderPriorityEncoder(matchCounts)
 
   val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
   // matchTable for the chosen lane, but converted to a Vec[UInt]
@@ -1545,7 +1552,7 @@ class DummyDriver(config: CoalescerConfig)(implicit p: Parameters)
     val clientParam = Seq(
       TLMasterParameters.v1(
         name = "dummy-core-node-" + i.toString,
-        sourceId = IdRange(0, defaultConfig.numOldSrcIds)
+        sourceId = IdRange(0, config.numOldSrcIds)
         // visibility = Seq(AddressSet(0x0000, 0xffffff))
       )
     )
