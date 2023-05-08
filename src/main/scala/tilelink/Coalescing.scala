@@ -231,11 +231,13 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
   }))
 
   // shift hint is when the heads have no more coalescable left this or next cycle
-  val shiftHint = !(io.coalescable zip io.invalidate.bits.map(_(0))).map { case (c, i) =>
-    c && !(io.invalidate.valid && i)
+  val shiftHint = !(io.coalescable zip io.invalidate.bits.map(_(0))).map { case (c, inv) =>
+    c && !(io.invalidate.valid && inv)
   }.reduce(_ || _)
   val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
-  val syncedDeqValid = io.queue.deq.map(x => x.valid && !x.ready).reduce(_ || _) // valid and not fire
+  // syncedDeqValidNextCycle being true means the arbiter has completed
+  // processing all of the ready-to-go requests.
+  val syncedDeqValidNextCycle = io.queue.deq.map(x => x.valid && !x.ready).reduce(_ || _) // valid and not fire
 
   for (i <- 0 until config.numLanes) {
     val enq = io.queue.enq(i)
@@ -245,7 +247,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
     ctrl.full := writePtr(i) === entries.U
     ctrl.empty := writePtr(i) === 0.U
     // shift when no outstanding dequeue, no more coalescable chunks, and not empty
-    ctrl.shift := !syncedDeqValid && shiftHint && !ctrl.empty
+    ctrl.shift := !syncedDeqValidNextCycle && shiftHint && !ctrl.empty
 
     // dequeue is valid when:
     // head entry is valid, has not been processed by downstream, and is not coalescable
@@ -1644,10 +1646,7 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 }
 
 // tracedriver --> coalescer --> tracelogger --> tlram
-class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
-  // val filename = "test.trace"
-  val filename = "vecadd.core1.thread4.trace"
-  // val filename = "nvbit.vecadd.n100000.filter_sm0.trace"
+class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters) extends LazyModule {
   // TODO: use parameters for numLanes
   val numLanes = defaultConfig.numLanes
 
@@ -1689,13 +1688,14 @@ class TLRAMCoalescerLogger(implicit p: Parameters) extends LazyModule {
           (coreSideLogger.module.io.reqBytes === coreSideLogger.module.io.respBytes),
         "FAIL: requests and responses traffic to the coalescer do not match"
       )
+      printf("SUCCESS: coalescer response traffic matched requests!\n")
     }
   }
 }
 
-class TLRAMCoalescerLoggerTest(timeout: Int = 500000)(implicit p: Parameters)
+class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit p: Parameters)
     extends UnitTest(timeout) {
-  val dut = Module(LazyModule(new TLRAMCoalescerLogger).module)
+  val dut = Module(LazyModule(new TLRAMCoalescerLogger(filename)).module)
   dut.io.start := io.start
   io.finished := dut.io.finished
 }
