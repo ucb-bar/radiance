@@ -600,7 +600,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
       val deq = reqQueues.io.queue.deq(lane)
       enq.valid := tlIn.a.valid
       enq.bits := req
-      deq.ready := true.B // TODO: deq.ready should respect downstream arbiter
+      // TODO: deq.ready should respect downstream arbiter
+      deq.ready := true.B
+      // Stall upstream core or memtrace driver when shiftqueue is not ready
+      tlIn.a.ready := enq.ready
       tlOut.a.valid := deq.valid
       tlOut.a.bits := deq.bits.toTLA(edgeOut)
 
