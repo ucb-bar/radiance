@@ -217,7 +217,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       valid: Boolean = true,
   ): Unit = {
     val node = nodes(idx)
-//    node.a.ready.expect(true.B) // FIXME: this fails currently
+    node.a.ready.expect(true.B)
     node.a.bits.opcode.poke(if (op == 1) TLMessages.PutFullData else TLMessages.Get)
     node.a.bits.param.poke(0.U)
     node.a.bits.size.poke(size.U)
@@ -302,8 +302,9 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "coalesce identical addresses (stride of 0)" in {
-    test(makeTb().module)
-    .withAnnotations(Seq(VcsBackendAnnotation))
+    test(LazyModule(new DummyCoalescingUnitTB()).module)
+//    .withAnnotations(Seq(VcsBackendAnnotation))
+    .withAnnotations(Seq(VerilatorBackendAnnotation))
     { c =>
       println(s"coalIO length = ${c.coalIOs(0).length}")
       val nodes = c.coalIOs.map(_.head)
@@ -320,8 +321,8 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
       unsetA(nodes)
       c.coalReqValid.expect(true.B)
-      c.coalReqBits.address.expect(0xf20.U)
-      c.coalReqBits.data.expect(BigInt("44440000000000000000", 16) << 128)
+      c.coalReqBits.address.expect(0x10.U)
+      c.coalReqBits.data.expect(BigInt("11110000000000000000", 16) << 128) // could be any of the 4 reqs
       c.coalReqBits.mask.expect(0x0f000000)
       c.coalReqBits.size.expect(4.U)
       c.coalReqBits.op.expect(1.U)
@@ -330,8 +331,41 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-//  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {}
-//
+  it should "coalesce the coalescable chunk and leave 2 uncoalescable requests" in {
+    test(LazyModule(new DummyCoalescingUnitTB()).module)
+//      .withAnnotations(Seq(VcsBackendAnnotation)) { c =>
+      .withAnnotations(Seq(VerilatorBackendAnnotation)) { c =>
+        println(s"coalIO length = ${c.coalIOs(0).length}")
+        val nodes = c.coalIOs.map(_.head)
+
+        c.l2IOs.foreach(_.head.a.ready.poke(true.B))
+        c.coalReqReady.expect(true.B)
+        c.reqQueueEnqReady.foreach(_.expect(true.B))
+        pokeA(nodes, idx = 0, op = 1, size = 2, source = 0, addr = 0x04, mask = 0xf, data = 0x1111)
+        pokeA(nodes, idx = 1, op = 1, size = 2, source = 0, addr = 0x08, mask = 0xf, data = 0x2222)
+        pokeA(nodes, idx = 2, op = 1, size = 2, source = 0, addr = 0xf00, mask = 0xf, data = 0x3333)
+        pokeA(nodes, idx = 3, op = 1, size = 2, source = 0, addr = 0xd00, mask = 0xf, data = 0x4444)
+
+        c.clock.step()
+
+        unsetA(nodes)
+        c.coalReqValid.expect(true.B)
+        c.coalReqBits.address.expect(0x00.U)
+        c.coalReqBits.data.expect(BigInt("22220000111100000000", 16))
+        c.coalReqBits.mask.expect(0x00000ff0)
+        c.coalReqBits.size.expect(4.U)
+        c.coalReqBits.op.expect(1.U)
+
+        expectVec(c.reqQueueDeqValid, Seq(false.B, false.B, true.B, true.B))
+        expectVec(c.reqQueueDeqBits.map(_.data), Seq(0x1111.U, 0x2222.U, 0x3333.U, 0x4444.U))
+        expectVec(c.reqQueueDeqReady, Seq.fill(4)(true.B))
+
+        c.clock.step()
+        expectVec(c.reqQueueDeqValid, Seq.fill(4)(false.B))
+        c.coalReqValid.expect(false.B)
+      }
+  }
+
 //  it should "not touch uncoalescable requests" in {}
 //
 //  it should "allow temporal coalescing when depth >=2" in {}
