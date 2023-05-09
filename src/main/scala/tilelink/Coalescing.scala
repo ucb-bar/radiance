@@ -14,7 +14,7 @@ import freechips.rocketchip.unittest._
 // TODO: find better place for these
 case class SIMTCoreParams(nLanes: Int = 4, tracefilename: String = "undefined")
 
-case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None)
+case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None /*default*/)
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type
@@ -1618,18 +1618,22 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // A dummy harness around the coalescer for use in VLSI flow.
 // Should not instantiate any memtrace modules.
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
-  val driver = LazyModule(new DummyDriver(defaultConfig))
-  val rams = Seq.fill(defaultConfig.numLanes + 1)( // +1 for coalesced edge
+  val numLanes = p(SIMTCoreKey).get.nLanes
+  println(s"============ numLanes: ${numLanes}")
+  val config = defaultConfig.copy(numLanes = numLanes)
+
+  val driver = LazyModule(new DummyDriver(config))
+  val rams = Seq.fill(config.numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << defaultConfig.dataBusWidth))
+        beatBytes = (1 << config.dataBusWidth))
     )
   )
 
-  val coal = LazyModule(new CoalescingUnit(defaultConfig))
+  val coal = LazyModule(new CoalescingUnit(config))
 
   coal.cpuNode :=* driver.node
   rams.foreach(_.node := coal.aggregateNode)
@@ -1650,7 +1654,6 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters) extends LazyModule {
   val numLanes = p(SIMTCoreKey).get.nLanes
-  println(s"============ numLanes: ${numLanes}")
   val config = defaultConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new MemTraceDriver(config, filename))
