@@ -12,9 +12,11 @@ import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
 // TODO: find better place for these
-case class SIMTCoreParams(nLanes: Int = 4, tracefilename: String = "undefined")
+case class SIMTCoreParams(nLanes: Int = 4)
+case class MemtraceCoreParams(tracefilename: String = "undefined")
 
 case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None /*default*/)
+case object MemtraceCoreKey extends Field[Option[MemtraceCoreParams]](None /*default*/)
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type

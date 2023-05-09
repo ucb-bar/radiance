@@ -6,20 +6,24 @@ import org.chipsalliance.cde.config.{Parameters, Config}
 
 // The trait is attached to DigitalTop of Chipyard system, informing it indeed
 // has the ability to attach GPU tracer node onto the system bus
-trait CanHaveGPUTracer { this: BaseSubsystem =>
+trait CanHaveMemtraceCore { this: BaseSubsystem =>
   implicit val p: Parameters
 
-  p(SIMTCoreKey).map { _ =>
-    val config = p(SIMTCoreKey).get
-    val tracer = LazyModule(new MemTraceDriver(defaultConfig, config.tracefilename)(p))
+  p(MemtraceCoreKey).map { param =>
+    val tracer = LazyModule(new MemTraceDriver(defaultConfig, param.tracefilename)(p))
     // Must use :=* to ensure the N edges from Tracer doesn't get merged into 1
     // when connecting to SBus
+    println(s"============ MemTraceDriver instantiated [filename=${param.tracefilename}]")
     sbus.fromPort(Some("gpu-tracer"))() :=* tracer.node
   }
 }
 
 //This is used by Chip Level Config, the config which creates the SoC
-class WithGPUTracer(numLanes: Int, tracefilename: String)
-    extends Config((_, _, _) => { case SIMTCoreKey =>
-      Some(SIMTCoreParams(numLanes, tracefilename))
+class WithMemtraceCore(tracefilename: String)
+    extends Config((site, _, _) => { case MemtraceCoreKey =>
+      require(
+        site(SIMTCoreKey).isDefined,
+        "Memtrace core requires a SIMT configuration. Use WithNLanes to enable SIMT."
+      )
+      Some(MemtraceCoreParams(tracefilename))
     })
