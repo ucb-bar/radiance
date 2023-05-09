@@ -5,11 +5,16 @@ package freechips.rocketchip.tilelink
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.ChiselEnum
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.diplomacy._
 // import freechips.rocketchip.devices.tilelink.TLTestRAM
 import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
+
+// TODO: find better place for these
+case class SIMTCoreParams(nLanes: Int = 4, tracefilename: String = "undefined")
+
+case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None)
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type
@@ -1644,14 +1649,15 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters) extends LazyModule {
-  // TODO: use parameters for numLanes
-  val numLanes = defaultConfig.numLanes
+  val numLanes = p(SIMTCoreKey).get.nLanes
+  println(s"============ numLanes: ${numLanes}")
+  val config = defaultConfig.copy(numLanes = numLanes)
 
-  val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
+  val driver = LazyModule(new MemTraceDriver(config, filename))
   val coreSideLogger = LazyModule(
     new MemTraceLogger(numLanes, filename, loggerName = "coreside")
   )
-  val coal = LazyModule(new CoalescingUnit(defaultConfig))
+  val coal = LazyModule(new CoalescingUnit(config))
   val memSideLogger = LazyModule(new MemTraceLogger(numLanes + 1, filename, loggerName = "memside"))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
@@ -1659,7 +1665,7 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters) extends Laz
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << defaultConfig.dataBusWidth))
+        beatBytes = (1 << config.dataBusWidth))
     )
   )
 
