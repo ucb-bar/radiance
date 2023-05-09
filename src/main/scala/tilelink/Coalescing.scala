@@ -240,9 +240,10 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
     c && !(io.invalidate.valid && inv)
   }.reduce(_ || _)
   val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
-  // syncedDeqValidNextCycle being true means the arbiter has completed
-  // processing all of the ready-to-go requests.
-  val syncedDeqValidNextCycle = io.queue.deq.map(x => x.valid && !x.ready).reduce(_ || _) // valid and not fire
+  // valid && !fire means we enable enqueueing to a full queue, provided the
+  // arbiter is taking away all remaining valid queue heads in the next cycle so
+  // that we make space for the entire next warp.
+  val syncedDeqValidNextCycle = io.queue.deq.map(x => x.valid && !x.ready).reduce(_ || _)
 
   for (i <- 0 until config.numLanes) {
     val enq = io.queue.enq(i)
@@ -360,8 +361,8 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
       // compare leader's head against follower's every queue entry
       (followers zip followerValids.asBools).map { case (follower, followerValid) =>
         canMatch(follower, followerValid, leader, leaderValid)
-        // disabling halving optimization because it does not give the correct
-        // per-lane coalescable indication to the shift queue
+        // FIXME: disabling halving optimization because it does not give the
+        // correct per-lane coalescable indication to the shift queue
           // // match leader to only followers at lanes >= leader idx
           // // this halves the number of comparators
           // if (followerIndex < leaderIndex) false.B
@@ -391,7 +392,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   }
   val chosenLeaderIdx = chooseLeaderPriorityEncoder(matchCounts)
 
-  val chosenLeader = VecInit(leaders)(chosenLeaderIdx)
+  val chosenLeader = VecInit(leaders)(chosenLeaderIdx) // mux
   // matchTable for the chosen lane, but converted to a Vec[UInt]
   val chosenMatches = VecInit(matchTablePerLane.map{ table =>
     VecInit(table.map(VecInit(_).asUInt))
@@ -435,6 +436,11 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
   io.results.canCoalesce := canCoalesce
 }
 
+// Combinational logic that generates a coalesced request given a request
+// window, and a selection of possible coalesced sizes.  May utilize multiple
+// MonoCoalescers and apply size-choosing policy to determine the final
+// coalesced request out of all possible combinations.
+//
 // Software model: coalescer.py
 class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueEntry,
                      config: CoalescerConfig) extends Module {
@@ -913,8 +919,8 @@ class Uncoalescer(config: CoalescerConfig) extends Module {
   // Un-coalesce responses back to individual lanes
   val found = inflightTable.io.lookup.bits
   (found.lanes zip io.uncoalResps).foreach { case (perLane, ioPerLane) =>
-    perLane.reqs.zipWithIndex.foreach { case (oldReq, i) =>
-      val ioOldReq = ioPerLane(i)
+    perLane.reqs.zipWithIndex.foreach { case (oldReq, depth) =>
+      val ioOldReq = ioPerLane(depth)
 
       // TODO: spatial-only coalescing: only looking at 0th srcId entry
       ioOldReq.valid := false.B
