@@ -185,19 +185,33 @@ class RespQueueEntry(val sourceWidth: Int, val dataWidthInBits: Int, val sizeWid
   }
 }
 
-class ReqSourceGen(sourceWidth: Int) extends Module {
+// If `ignoreInUse`, just keep giving out new IDs without checking if it is in
+// use.
+class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true) extends Module {
   val io = IO(new Bundle {
     val gen = Input(Bool())
+    val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
   })
 
   val head = RegInit(UInt(sourceWidth.W), 0.U)
-
   head := Mux(io.gen, head + 1.U, head)
 
-  // FIXME: keep track of ones in use & set invalid when out
-  io.id.valid := true.B
+  val numSourceId = 1 << sourceWidth
+  // true: in use, false: available
+  val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
+  when(reset.asBool) {
+    (0 until numSourceId).foreach { i => occupancyTable(i).valid := false.B }
+  }
+
+  io.id.valid := (if (ignoreInUse) true.B else !occupancyTable(head).valid)
   io.id.bits := head
+  when (io.gen && io.id.valid /* fire */) {
+    occupancyTable(io.id.bits).valid := true.B // mark in use
+  }
+  when (io.reclaim.valid) {
+    occupancyTable(io.reclaim.bits).valid := false.B // mark freed
+  }
 }
 
 class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) extends Module {
@@ -543,7 +557,7 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
     })
   }
 
-  val sourceGen = Module(new ReqSourceGen(log2Ceil(config.numNewSrcIds)))
+  val sourceGen = Module(new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds)))
   sourceGen.io.gen := io.coalReq.fire // use up a source ID only when request is created
 
   val coalesceValid = chosenValid && sourceGen.io.id.valid
@@ -1167,12 +1181,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, filename
     reqQ.io.enq.bits := req // FIXME duplicate valid
   }
 
-  // To prevent collision of sourceId with a current in-flight message,
-  // just use a counter that increments indefinitely as the sourceId of new
-  // messages.
-  val sourceIdCounter = RegInit(0.U(64.W))
-  sourceIdCounter := sourceIdCounter + 1.U
-
   // Issue here is that Vortex mem range is not within Chipyard Mem range
   // In default setting, all mem-req for program data must be within
   // 0X80000000 -> 0X90000000
@@ -1205,22 +1213,27 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, filename
     val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
     val wordAlignedSize = Mux(subword, 2.U, req.size)
 
+    val sourceGen = Module(new RoundRobinSourceGenerator(log2Ceil(config.numOldSrcIds),
+      ignoreInUse = false))
+    sourceGen.io.gen := reqQ.io.deq.fire
+    // assert(sourceGen.io.id.valid)
+
     val (plegal, pbits) = edge.Put(
-      fromSource = sourceIdCounter,
+      fromSource = sourceGen.io.id.bits,
       toAddress = hashToValidPhyAddr(wordAlignedAddress),
       lgSize = wordAlignedSize, // trace line already holds log2(size)
       // data should be aligned to beatBytes
       data = (wordData << (8.U * (wordAlignedAddress % edge.manager.beatBytes.U))).asUInt
     )
     val (glegal, gbits) = edge.Get(
-      fromSource = sourceIdCounter,
+      fromSource = sourceGen.io.id.bits,
       toAddress = hashToValidPhyAddr(wordAlignedAddress),
       lgSize = wordAlignedSize
     )
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
 
-    tlOut.a.valid := reqQ.io.deq.valid
+    tlOut.a.valid := (reqQ.io.deq.valid && sourceGen.io.id.valid)
     when (tlOut.a.valid) {
       assert(legal, "illegal TL req gen")
     }
@@ -1229,6 +1242,10 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, filename
     tlOut.c.valid := false.B
     tlOut.d.ready := true.B
     tlOut.e.valid := false.B
+
+    // Reclaim source id on response
+    sourceGen.io.reclaim.valid := tlOut.d.valid
+    sourceGen.io.reclaim.bits := tlOut.d.bits.source
 
     // debug
     when(tlOut.a.valid) {
