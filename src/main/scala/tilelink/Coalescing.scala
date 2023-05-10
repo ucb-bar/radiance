@@ -80,7 +80,8 @@ object defaultConfig extends CoalescerConfig(
   // watermark = 2,
   wordSizeInBytes = 4,
   wordWidth = 2,
-  numOldSrcIds = 16,
+  // when attaching to SoC, 16 source IDs are not enough due to longer latency
+  numOldSrcIds = 64,
   numNewSrcIds = 4,
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
@@ -1113,19 +1114,26 @@ class TraceLine extends Bundle with HasTraceLine {
   val data = UInt(64.W)
 }
 
-class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFile: String)
+class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, filename: String)
     extends LazyModuleImp(outer)
     with UnitTestModule {
   // Current cycle mark to read from trace
   val traceReadCycle = RegInit(1.U(64.W))
 
-  // If any of the downstream lane is not ready, hold on from advancing
-  val downstreamReady = outer.laneNodes.map(_.out(0)._1.a.ready).reduce(_ && _)
+  // A decoupling queue to handle backpressure from downstream.  We let the
+  // downstream take requests from the queue individually for each lane,
+  // but do synchronized enqueue whenever all lane queue is ready to prevent
+  // drifts between the lane.
+  val reqQueues = Seq.fill(config.numLanes)(Module(new Queue(new TraceLine, 2)))
+  // Are we safe to read the next warp?
+  val reqQueueAllReady = reqQueues.map(_.io.enq.ready).reduce(_ && _)
 
-  val sim = Module(new SimMemTrace(traceFile, config.numLanes))
+  val sim = Module(new SimMemTrace(filename, config.numLanes))
   sim.io.clock := clock
   sim.io.reset := reset.asBool
-  sim.io.trace_read.ready := downstreamReady
+  // 'sim.io.trace_ready.ready' is a ready signal going into the DPI sim,
+  // indicating this Chisel module is ready to read the next line.
+  sim.io.trace_read.ready := reqQueueAllReady
   sim.io.trace_read.cycle := traceReadCycle
 
   // Read output from Verilog BlackBox
@@ -1143,21 +1151,17 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     req.data := sim.io.trace_read.data(dataW * (i + 1) - 1, dataW * i)
   }
 
-  // def missedLine = {
-  //   val existsValidLine = WireInit(false.B)
-  //   existsValidLine := laneReqs.map(_.valid).reduce(_||_)
-  //   val missedLine = WireInit(false.B)
-  //   missedLine := !downstreamReady && existsValidLine
-
-  //   // Debug
-  //   dontTouch(downstreamReady)
-  //   dontTouch(existsValidLine)
-  //   dontTouch(missedLine)
-
-  //   missedLine
-  // }
-  when (downstreamReady){
+  // Not all fire because trace cycle has to advance even when there is no valid
+  // line in the trace.
+  when (reqQueueAllReady){
     traceReadCycle := traceReadCycle + 1.U
+  }
+
+  // Enqueue traces to the request queue
+  (reqQueues zip laneReqs).foreach { case (reqQ, req) =>
+    // Synchronized enqueue
+    reqQ.io.enq.valid := reqQueueAllReady && req.valid
+    reqQ.io.enq.bits := req // FIXME duplicate valid
   }
 
   // To prevent collision of sourceId with a current in-flight message,
@@ -1173,8 +1177,14 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     Cat(8.U(4.W), addr(27, 0))
   }
 
-  // Generate TL requests corresponding to the trace lines
-  (outer.laneNodes zip laneReqs).foreach { case (node, req) =>
+  // Take requests off of the queue and generate TL requests
+  (outer.laneNodes zip reqQueues).foreach { case (node, reqQ) =>
+    val (tlOut, edge) = node.out(0)
+
+    val req = reqQ.io.deq.bits
+    // backpressure from downstream propagates into the queue
+    reqQ.io.deq.ready := tlOut.a.ready
+
     // Core only makes accesses of granularity larger than a word, so we want
     // the trace driver to act so as well.
     // That means if req.size is smaller than word size, we need to pad data
@@ -1192,7 +1202,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     val wordAlignedAddress = req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
     val wordAlignedSize = Mux(subword, 2.U, req.size)
 
-    val (tlOut, edge) = node.out(0)
     val (plegal, pbits) = edge.Put(
       fromSource = sourceIdCounter,
       toAddress = hashToValidPhyAddr(wordAlignedAddress),
@@ -1208,9 +1217,21 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
 
+    tlOut.a.valid := reqQ.io.deq.valid
+    when (tlOut.a.valid) {
+      assert(legal, "illegal TL req gen")
+    }
+    tlOut.a.bits := bits
+    tlOut.b.ready := true.B
+    tlOut.c.valid := false.B
+    tlOut.d.ready := true.B
+    tlOut.e.valid := false.B
+
+    // debug
     when(tlOut.a.valid) {
       TLPrintf(
         "MemTraceDriver",
+        tlOut.a.bits.source,
         tlOut.a.bits.address,
         tlOut.a.bits.size,
         tlOut.a.bits.mask,
@@ -1219,17 +1240,6 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
         req.data
       )
     }
-
-    assert(legal, "illegal TL req gen")
-    tlOut.a.valid := req.valid
-    tlOut.a.bits := bits
-    tlOut.b.ready := true.B
-    tlOut.c.valid := false.B
-    tlOut.d.ready := true.B
-    tlOut.e.valid := false.B
-
-    println(s"======= MemTraceDriver: TL data width: ${tlOut.params.dataBits}")
-
     dontTouch(tlOut.a)
     dontTouch(tlOut.d)
   }
@@ -1241,12 +1251,13 @@ class MemTraceDriverImp(outer: MemTraceDriver, config: CoalescerConfig, traceFil
     finishCounter := finishCounter - 1.U
   }
   io.finished := (finishCounter === 0.U)
-  // when(io.finished) {
-  //   assert(
-  //     false.B,
-  //     "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
-  //   )
-  // }
+
+  when(io.finished) {
+    assert(
+      false.B,
+      "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
+    )
+  }
 }
 
 
@@ -1385,6 +1396,7 @@ class MemTraceLogger(
         when(req.valid) {
           TLPrintf(
             s"MemTraceLogger (${loggerName}:downstream)",
+            tlIn.a.bits.source,
             tlIn.a.bits.address,
             tlIn.a.bits.size,
             tlIn.a.bits.mask,
@@ -1542,6 +1554,7 @@ class TLPrintf {}
 object TLPrintf {
   def apply(
       printer: String,
+      source: UInt,
       address: UInt,
       size: UInt,
       mask: UInt,
@@ -1549,7 +1562,8 @@ object TLPrintf {
       tlData: UInt,
       reqData: UInt
   ) = {
-    printf(s"${printer}: TL addr=%x, size=%d, mask=%x, store=%d", address, size, mask, is_store)
+    printf(s"${printer}: TL source=%d, addr=%x, size=%d, mask=%x, store=%d",
+      source, address, size, mask, is_store)
     when(is_store) {
       printf(", tlData=%x, reqData=%x", tlData, reqData)
     }
