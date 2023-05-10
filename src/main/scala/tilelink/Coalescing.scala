@@ -81,7 +81,7 @@ object defaultConfig extends CoalescerConfig(
   wordSizeInBytes = 4,
   wordWidth = 2,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
-  numOldSrcIds = 64,
+  numOldSrcIds = 16,
   numNewSrcIds = 4,
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
@@ -559,6 +559,8 @@ class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueE
 
   val sourceGen = Module(new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds)))
   sourceGen.io.gen := io.coalReq.fire // use up a source ID only when request is created
+  sourceGen.io.reclaim.valid := false.B // not used
+  sourceGen.io.reclaim.bits := DontCare // not used
 
   val coalesceValid = chosenValid && sourceGen.io.id.valid
 
