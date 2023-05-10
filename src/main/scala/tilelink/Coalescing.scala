@@ -1438,11 +1438,13 @@ class MemTraceLogger(
 
         // This assert only holds true for PutFullData and not PutPartialData,
         // where HIGH bits in the mask may not be contiguous.
-        assert(
-          PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
-          "mask HIGH popcount do not match the TL size. " +
-          "Partial masks are not allowed for PutFull"
-        )
+        when (tlIn.a.valid) {
+          assert(
+            PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
+            "mask HIGH popcount do not match the TL size. " +
+            "Partial masks are not allowed for PutFull"
+          )
+        }
         val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
         val dataW = tlIn.params.dataBits
         val mask = ~(~(0.U(dataW.W)) << ((1.U << tlIn.a.bits.size) * 8.U))
