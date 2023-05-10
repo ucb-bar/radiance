@@ -4,7 +4,8 @@
 `define LOGSIZE_WIDTH 8
 
 import "DPI-C" function void memtrace_init(
-  input  string  filename
+  input  string  filename,
+  input  bit     has_source
 );
 
 // Make sure to sync the parameters for:
@@ -24,7 +25,9 @@ import "DPI-C" function void memtrace_query
   output bit     trace_read_finished
 );
 
-module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
+module SimMemTrace #(parameter FILENAME = "undefined",
+                               NUM_LANES = 4,
+                               HAS_SOURCE = 0) (
   input clock,
   input reset,
 
@@ -61,7 +64,7 @@ module SimMemTrace #(parameter FILENAME = "undefined", NUM_LANES = 4) (
 
   initial begin
       /* $value$plusargs("uartlog=%s", __uartlog); */
-      memtrace_init(FILENAME);
+      memtrace_init(FILENAME, HAS_SOURCE);
   end
 
   always @(posedge clock) begin

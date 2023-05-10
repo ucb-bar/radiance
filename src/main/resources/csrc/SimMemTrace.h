@@ -44,7 +44,7 @@ public:
   FILE *outfile;
 };
 
-extern "C" void memtrace_init(const char *filename);
+extern "C" void memtrace_init(const char *filename, bool has_source);
 extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned long trace_read_cycle,
                                int           trace_read_lane_id,

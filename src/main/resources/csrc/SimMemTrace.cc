@@ -152,7 +152,7 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
   assert(!"unreachable");
 }
 
-extern "C" void memtrace_init(const char *filename) {
+extern "C" void memtrace_init(const char *filename, bool has_source) {
 #ifndef NO_VPI
   s_vpi_vlog_info info;
   if (!vpi_get_vlog_info(&info)) {
@@ -175,7 +175,7 @@ extern "C" void memtrace_init(const char *filename) {
   reader = std::make_unique<MemTraceReader>(filename);
   // parse file upfront
   // driver trace file is assumed to not have source id
-  reader->parse(false);
+  reader->parse(has_source);
 }
 
 // TODO: accept core_id as well
