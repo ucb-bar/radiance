@@ -10,7 +10,10 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
   implicit val p: Parameters
 
   p(MemtraceCoreKey).map { param =>
-    val tracer = LazyModule(new MemTraceDriver(defaultConfig, param.tracefilename)(p))
+    // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
+    val simtParam = p(SIMTCoreKey).get
+    val config = defaultConfig.copy(numLanes = simtParam.nLanes)
+    val tracer = LazyModule(new MemTraceDriver(config, param.tracefilename)(p))
     // Must use :=* to ensure the N edges from Tracer doesn't get merged into 1
     // when connecting to SBus
     println(s"============ MemTraceDriver instantiated [filename=${param.tracefilename}]")
