@@ -165,12 +165,12 @@ class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: In
     bits
   }
 }
-class NonCoalescedRequest(config: CoalescerConfig)
+case class NonCoalescedRequest(config: CoalescerConfig)
 extends Request(sourceWidth = log2Ceil(config.numOldSrcIds),
   sizeWidth = config.wordSizeWidth,
   addressWidth = config.addressWidth,
   dataWidth = config.wordSizeInBytes * 8)
-class CoalescedRequest(config: CoalescerConfig)
+case class CoalescedRequest(config: CoalescerConfig)
 extends Request(sourceWidth = log2Ceil(config.numNewSrcIds),
   sizeWidth = log2Ceil(config.maxCoalLogSize),
   addressWidth = config.addressWidth,
@@ -204,11 +204,11 @@ class Response(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends Bundle 
     this.error := bundle.denied
   }
 }
-class NonCoalescedResponse(config: CoalescerConfig)
+case class NonCoalescedResponse(config: CoalescerConfig)
 extends Response(sourceWidth = log2Ceil(config.numOldSrcIds),
   sizeWidth = config.wordSizeWidth,
   dataWidth = config.wordSizeInBytes * 8)
-class CoalescedResponse(config: CoalescerConfig)
+case class CoalescedResponse(config: CoalescerConfig)
 extends Response(sourceWidth = log2Ceil(config.numNewSrcIds),
   sizeWidth = log2Ceil(config.maxCoalLogSize),
   dataWidth = (8 * (1 << config.maxCoalLogSize)))
