@@ -4,7 +4,6 @@ package freechips.rocketchip.tilelink
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.ChiselEnum
 import org.chipsalliance.cde.config.{Parameters, Field}
 import freechips.rocketchip.diplomacy._
 // import freechips.rocketchip.devices.tilelink.TLTestRAM
@@ -381,9 +380,9 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
 
 // Software model: coalescer.py
 class MonoCoalescer(
+    config: CoalescerConfig,
     coalLogSize: Int,
-    windowT: CoalShiftQueue[NonCoalescedRequest],
-    config: CoalescerConfig
+    windowT: CoalShiftQueue[NonCoalescedRequest]
 ) extends Module {
   val io = IO(new Bundle {
     val window = Input(windowT.io.cloneType)
@@ -532,9 +531,9 @@ class MonoCoalescer(
 //
 // Software model: coalescer.py
 class MultiCoalescer(
+    config: CoalescerConfig,
     windowT: CoalShiftQueue[NonCoalescedRequest],
     coalReqT: Request,
-    config: CoalescerConfig
 ) extends Module {
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
@@ -549,7 +548,7 @@ class MultiCoalescer(
   })
 
   val coalescers = config.coalLogSizes.map(size =>
-    Module(new MonoCoalescer(size, windowT, config))
+    Module(new MonoCoalescer(config, size, windowT))
   )
   coalescers.foreach(_.io.window := io.window)
 
@@ -704,14 +703,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   )
 
   val oldSourceWidth = outer.cpuNode.in.head._1.params.sourceBits
-  // note we are using word size. assuming all coalescer inputs are word sized
   val reqQueueEntryT = new NonCoalescedRequest(config)
   val reqQueues = Module(
     new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config)
   )
 
   val coalReqT = new CoalescedRequest(config)
-  val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
+  val coalescer = Module(new MultiCoalescer(config, reqQueues, coalReqT))
   coalescer.io.window := reqQueues.io
   reqQueues.io.coalescable := coalescer.io.coalescable
   reqQueues.io.invalidate := coalescer.io.invalidate
@@ -966,7 +964,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 }
 
 class Uncoalescer(config: CoalescerConfig) extends Module {
-  // notes to hansung:
+  // Mapping to reference model param names
   //  val numLanes: Int, <-> config.NUM_LANES
   //  val numPerLaneReqs: Int, <-> config.DEPTH
   //  val sourceWidth: Int, <-> log2ceil(config.NUM_OLD_IDS)
