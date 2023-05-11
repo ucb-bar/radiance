@@ -135,7 +135,10 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
   lazy val module = new CoalescingUnitImp(this, config)
 }
 
-class ReqQueueEntry(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: Int) extends Bundle {
+// Protocol-agnostic bundles that represent a request and a response to the
+// coalescer.
+
+class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: Int) extends Bundle {
   require(dataWidth % 8 == 0, s"dataWidth (${dataWidth} bits) is not multiple of 8")
   val op = UInt(1.W) // 0=READ 1=WRITE
   val address = UInt(addressWidth.W)
@@ -163,7 +166,7 @@ class ReqQueueEntry(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWid
   }
 }
 
-class RespQueueEntry(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends Bundle {
+class Response(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends Bundle {
   val op = UInt(1.W) // 0=READ 1=WRITE
   val size = UInt(sizeWidth.W)
   val source = UInt(sourceWidth.W)
@@ -191,6 +194,15 @@ class RespQueueEntry(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends B
     this.error := bundle.denied
   }
 }
+
+class NonCoalescedResponse(config: CoalescerConfig)
+extends Response(sourceWidth = log2Ceil(config.numOldSrcIds),
+  sizeWidth = config.wordSizeWidth,
+  dataWidth = config.wordSizeInBytes * 8)
+class CoalescedResponse(config: CoalescerConfig)
+extends Response(sourceWidth = log2Ceil(config.numNewSrcIds),
+  sizeWidth = log2Ceil(config.maxCoalLogSize),
+  dataWidth = (8 * (1 << config.maxCoalLogSize)))
 
 // If `ignoreInUse`, just keep giving out new IDs without checking if it is in
 // use.
@@ -340,7 +352,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
 }
 
 // Software model: coalescer.py
-class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
+class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[Request],
                     config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     val window = Input(windowT.io.cloneType)
@@ -376,7 +388,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 
   val size = coalLogSize
   val addrMask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
-  def canMatch(req0: ReqQueueEntry, req0v: Bool, req1: ReqQueueEntry, req1v: Bool): Bool = {
+  def canMatch(req0: Request, req0v: Bool, req1: Request, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
     (req0v && req1v) &&
     ((req0.address & this.addrMask) === (req1.address & this.addrMask))
@@ -471,7 +483,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[ReqQueueEntry],
 // coalesced request out of all possible combinations.
 //
 // Software model: coalescer.py
-class MultiCoalescer(windowT: CoalShiftQueue[ReqQueueEntry], coalReqT: ReqQueueEntry,
+class MultiCoalescer(windowT: CoalShiftQueue[Request], coalReqT: Request,
                      config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
@@ -612,11 +624,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
 
   val sourceWidth = outer.cpuNode.in.head._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
-  val reqQueueEntryT = new ReqQueueEntry(sourceWidth, config.wordSizeWidth,
+  val reqQueueEntryT = new Request(sourceWidth, config.wordSizeWidth,
     config.addressWidth, (config.wordSizeInBytes * 8))
   val reqQueues = Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config))
 
-  val coalReqT = new ReqQueueEntry(log2Ceil(config.numNewSrcIds), log2Ceil(config.maxCoalLogSize),
+  val coalReqT = new Request(log2Ceil(config.numNewSrcIds), log2Ceil(config.maxCoalLogSize),
     config.addressWidth, (1 << config.maxCoalLogSize) * 8)
   val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
   coalescer.io.window := reqQueues.io
@@ -701,7 +713,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
   val numPerLaneReqs = config.queueDepth
 
-  val respQueueEntryT = new RespQueueEntry(sourceWidth, log2Ceil(config.maxCoalLogSize),
+  // FIXME: no need to contain maxCoalLogSize data
+  val respQueueEntryT = new Response(sourceWidth, log2Ceil(config.maxCoalLogSize),
     (1 << config.maxCoalLogSize) * 8)
   val respQueues = Seq.tabulate(config.numLanes) { _ =>
     Module(
@@ -832,8 +845,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   uncoalescer.io.newEntry := newEntry
   // Cleanup: custom <>?
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
-  uncoalescer.io.coalResp.bits.source := tlCoal.d.bits.source
-  uncoalescer.io.coalResp.bits.data := tlCoal.d.bits.data
+  uncoalescer.io.coalResp.bits.fromTLD(tlCoal.d.bits)
   tlCoal.d.ready := uncoalescer.io.coalResp.ready
 
   // Connect uncoalescer results back into each lane's response queue
@@ -864,24 +876,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   dontTouch(tlCoal.d)
 }
 
-// Protocol-agnostic bundle that represents a coalesced response.
-//
-// Having this makes it easier to:
-//   * do unit tests -- no need to deal with TileLink in the chiseltest code
-//   * adapt coalescer to custom protocols like a custom L1 cache interface.
-//
-// FIXME: overlaps with RespQueueEntry. Trait-ify
-class CoalescedResponseBundle(config: CoalescerConfig) extends Bundle {
-  val source = UInt(log2Ceil(config.numNewSrcIds).W)
-  val data = UInt((8 * (1 << config.maxCoalLogSize)).W)
-
-  def fromTLD(bundle:TLBundleD): Unit = {
-    this.source := bundle.source
-    this.data   := bundle.data
-  }
-
-}
-
 class Uncoalescer(config: CoalescerConfig) extends Module {
   // notes to hansung:
   //  val numLanes: Int, <-> config.NUM_LANES
@@ -895,15 +889,14 @@ class Uncoalescer(config: CoalescerConfig) extends Module {
     val coalReqValid = Input(Bool())
     // FIXME: receive ReqQueueEntry and construct newEntry inside uncoalescer
     val newEntry = Input(inflightTable.entryT.cloneType)
-    val coalResp = Flipped(Decoupled(new CoalescedResponseBundle(config)))
+    val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
     val uncoalResps = Output(
       Vec(
         config.numLanes,
         Vec(
           config.queueDepth,
           ValidIO(
-            new RespQueueEntry(log2Ceil(config.numOldSrcIds), config.wordSizeWidth,
-              config.wordSizeInBytes * 8)
+            new NonCoalescedResponse(config)
           )
         )
       )
@@ -1864,25 +1857,20 @@ class CoalescerXbar(config: CoalescerConfig) (implicit p: Parameters) extends La
     val node = TLIdentityNode()
     node :=* outputXbar.node
 
-    val nonCoalEntryT = new ReqQueueEntry(
+    val nonCoalEntryT = new Request(
                                 log2Ceil(config.numOldSrcIds),
                                 config.wordSizeWidth,
                                 config.addressWidth,
                                 config.wordSizeInBytes * 8
                               )
-    val coalEntryT    = new ReqQueueEntry(
+    val coalEntryT    = new Request(
                                 log2Ceil(config.numOldSrcIds),
                                 log2Ceil(config.maxCoalLogSize),
                                 config.addressWidth,
                                 (1 << config.maxCoalLogSize) * 8
                               )
-    val respNonCoalEntryT = new RespQueueEntry(
-                                log2Ceil(config.numOldSrcIds),
-                                config.wordSizeWidth,
-                                config.wordSizeInBytes * 8
-                              )
-
-    val respCoalBundleT   = new CoalescedResponseBundle(config)
+    val respNonCoalEntryT = new NonCoalescedResponse(config)
+    val respCoalBundleT   = new CoalescedResponse(config)
     
 
     lazy val module = new CoalescerXbarImpl(
@@ -1894,10 +1882,10 @@ class CoalescerXbar(config: CoalescerConfig) (implicit p: Parameters) extends La
 
 class CoalescerXbarImpl(outer: CoalescerXbar, 
                       config: CoalescerConfig,
-                      nonCoalEntryT: ReqQueueEntry, 
-                      coalEntryT: ReqQueueEntry,
-                      respNonCoalEntryT: RespQueueEntry, 
-                      respCoalBundleT: CoalescedResponseBundle
+                      nonCoalEntryT: Request, 
+                      coalEntryT: Request,
+                      respNonCoalEntryT: Response, 
+                      respCoalBundleT: CoalescedResponse
       ) extends LazyModuleImp(outer){
 
 
