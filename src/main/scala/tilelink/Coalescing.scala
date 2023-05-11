@@ -1765,64 +1765,64 @@ class TLRAMCoalescerTest(timeout: Int = 500000)(implicit p: Parameters) extends 
 ////////////
 ////////////
 ////////////
-////////////  Code for CoalArbiter
+////////////  Code for CoalescerXbar
 ////////////
 ////////////
 
 // Lazy Module is needed to instantiate outgoing node
-class CoalArbiter(config: CoalescerConfig) (implicit p: Parameters) extends LazyModule {
+class CoalescerXbar(config: CoalescerConfig) (implicit p: Parameters) extends LazyModule {
     // Let SIMT's word size be 32, and read/write granularity be 256 
 
-    val fullSourceIdRange = config.numOldSrcIds * config.numLanes + config.numNewSrcIds * config.numCoalReqs
 
-    // K client nodes of edge size 32 for non-coalesced reqs
-    val nonCoalNarrowNodes = Seq.tabulate(config.numArbiterOutputPorts){ i =>
+    // 32 client nodes of edge size 32 for non-coalesced reqs
+    // And attaching them wigets
+    val nonCoalNarrowNodes = Seq.tabulate(config.numLanes){i =>
         val nonCoalNarrowParam = Seq(
           TLMasterParameters.v1(
           name = "NonCoalNarrowNode" + i.toString,
-          sourceId = IdRange(0, fullSourceIdRange)
+          sourceId = IdRange(0, config.numOldSrcIds)
           )
         )
         TLClientNode(Seq(TLMasterPortParameters.v1(nonCoalNarrowParam)))
     }
+    val nonCoalWidgets = Seq.tabulate(config.numLanes){ _=>
+        TLWidthWidget(config.wordSizeInBytes)
+    }
 
-    // One identity Node for the Noncoalesced Reqest after Width Adaptation
-    // You can put widget between idenity node and client node (diplomacy)
-    val nonCoalNode = TLIdentityNode()
-    nonCoalNarrowNodes.foreach(narrowNode => 
-      nonCoalNode := TLWidthWidget(config.wordSizeInBytes) := narrowNode
-    )
+    (nonCoalWidgets zip nonCoalNarrowNodes).foreach{
+      case(wgt,node)=> wgt := node
+    }
+
+    //Creating a round robin cross tilelink xbar for the un-coalesced
+    //and connect them to the widgets
+    val nonCoalXbar = LazyModule(new TLXbar(TLArbiter.roundRobin))
+    nonCoalWidgets.foreach{nonCoalXbar.node:=_}
+
+
 
     // K client nodes of edge size 256 for the coalesced reqs
-    val coalReqNodes = Seq.tabulate(config.numArbiterOutputPorts){ i =>
+    val coalReqNodes = Seq.tabulate(config.numCoalReqs){ i =>
         val coalParam = Seq(
           TLMasterParameters.v1(
           name = "CoalReqNode" + i.toString,
-          sourceId = IdRange(0, fullSourceIdRange)
+          sourceId = IdRange(0, config.numNewSrcIds)
           )
         )
         TLClientNode(Seq(TLMasterPortParameters.v1(coalParam)))
     }
-    // 1 idenity node for the Coalesced Reqs
-    val coalNode = TLIdentityNode()
-    coalReqNodes.foreach(coalReqNode =>
-      coalNode := coalReqNode
-    )
+    // Create a RR Xbar for the coalesced request
+    val coalXbar = LazyModule(new TLXbar(TLArbiter.roundRobin))
+    coalReqNodes.foreach{coalXbar.node:=_}
 
-    //Assertion Section 
-    def isPowerOfTwo(n: Int): Boolean = {
-        (n > 0) && ((n & (n - 1)) == 0)
-    }
-    assert(isPowerOfTwo(config.numOldSrcIds), "Number of old source id must be power of 2")
-    assert(isPowerOfTwo(config.numNewSrcIds), "Number of new source id must be power of 2")
-    //Below is for efficient conversion from Global to Local bits
-    //Also, we should have more source id for coalesced request for better perf
-    assert(config.numNewSrcIds >= config.numOldSrcIds, "new source id must be equal or greater than old source id")
-    // 1 Final Output Identity Node 
-    val outputNode = TLIdentityNode()
+    //Create a Priority XBar between Coalesced and Uncoalesced Request
+    val outputXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
+    outputXbar.node :=* coalXbar.node
+    outputXbar.node :=* nonCoalXbar.node
 
+    //express output crossbar as an idenity node for simpler downstream connection
+    val node = TLIdentityNode()
+    node :=* outputXbar.node
 
-    
     val nonCoalEntryT = new ReqQueueEntry(
                                 log2Ceil(config.numOldSrcIds),
                                 config.wordWidth,
@@ -1844,14 +1844,14 @@ class CoalArbiter(config: CoalescerConfig) (implicit p: Parameters) extends Lazy
     val respCoalBundleT   = new CoalescedResponseBundle(config)
     
 
-    lazy val module = new CoalArbiterImpl(
+    lazy val module = new CoalescerXbarImpl(
       this, config, nonCoalEntryT, coalEntryT, respNonCoalEntryT, respCoalBundleT)
 
 
 
 }
 
-class CoalArbiterImpl(outer: CoalArbiter, 
+class CoalescerXbarImpl(outer: CoalescerXbar, 
                       config: CoalescerConfig,
                       nonCoalEntryT: ReqQueueEntry, 
                       coalEntryT: ReqQueueEntry,
@@ -1867,4 +1867,71 @@ class CoalArbiterImpl(outer: CoalArbiter,
       val coalResp      = Decoupled(respCoalBundleT)
       }
     )
-}
+
+    //Create Queues to receive data from upstream
+    //Stage 1: Create Queue for nonCoalReqs and CoalReqs 
+    val nonCoalReqsQueues = Seq.tabulate(config.numLanes){_=>
+      Module(new Queue(nonCoalEntryT.cloneType, 1, true, false))
+    }
+    val coalReqsQueues = Seq.tabulate(config.numCoalReqs){_=>
+      Module(new Queue(coalEntryT.cloneType, 1, true, false))
+    }
+    //Stage 1a: connect two Queue groups to the input
+    (io.nonCoalReqs++io.coalReqs zip nonCoalReqsQueues++coalReqsQueues).foreach{
+      case (req, q) => q.io.enq <> req
+    }
+
+    //Stage 2: connect output of the queue to the respective Node
+    (nonCoalReqsQueues++coalReqsQueues zip outer.nonCoalNarrowNodes++outer.coalReqNodes).foreach{
+      case(q, node) => 
+        val (tlOut, edgeOut)  = node.out(0)
+        q.io.deq.ready := tlOut.a.ready
+        tlOut.a.valid  := q.io.deq.valid
+        tlOut.a.bits   := q.io.deq.bits.toTLA(edgeOut)
+    }
+    //The XBar will take care of the rest
+
+
+    //
+    // Inward data handling
+    //
+
+    // For the uncoalesced data response
+    (outer.nonCoalNarrowNodes zip io.nonCoalResps).foreach{
+      case(node,resp) => 
+        val (tlOut, edgeOut)  = node.out(0)
+        val nonCoalResp = Wire(respNonCoalEntryT)
+        nonCoalResp.fromTLD(tlOut.d.bits)
+        tlOut.d.ready  := resp.ready
+        resp.valid     := tlOut.d.valid
+        resp.bits      := nonCoalResp
+    }
+
+    //For the coalesced data response
+    //Have an RR arbiter that holds the response data
+    val coalRespRRArbiter = Module(new RRArbiter(
+                                  outer.node.in(0)._1.d.bits.cloneType, 
+                                  config.numCoalReqs)
+                                  )
+    outer.coalReqNodes.zipWithIndex.foreach{
+      case(node, idx) =>
+        val (tlOut, edgeOut)  = node.out(0)
+        coalRespRRArbiter.io.in(idx) <> tlOut.d
+    }
+    //Connect output of arbiter to coalesced reponse output
+    io.coalResp.valid := coalRespRRArbiter.io.out.valid
+    coalRespRRArbiter.io.out.ready := io.coalResp.ready
+    val coalRespBundle = Wire(respCoalBundleT)
+    coalRespBundle.fromTLD(coalRespRRArbiter.io.out.bits)
+    io.coalResp.bits  := coalRespBundle
+
+
+  }
+
+
+
+
+
+
+
+
