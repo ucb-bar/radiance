@@ -181,12 +181,12 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   )
 
   val reqQueueEnqReady =  peekIn(0).asInstanceOf[Seq[Bool]].map(x => IO(x.cloneType))
-  val reqQueueEnqBits =   peekIn(1).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(x.cloneType))
+  val reqQueueEnqBits =   peekIn(1).asInstanceOf[Seq[Request]].map(x => IO(x.cloneType))
   val reqQueueEnqValid =  peekIn(2).asInstanceOf[Seq[Bool]].map(x => IO(x.cloneType))
-  val reqQueueDeqBits =   peekIn(3).asInstanceOf[Seq[ReqQueueEntry]].map(x => IO(Output(x.cloneType)))
+  val reqQueueDeqBits =   peekIn(3).asInstanceOf[Seq[Request]].map(x => IO(Output(x.cloneType)))
   val reqQueueDeqValid =  peekIn(4).asInstanceOf[Seq[Bool]].map(x => IO(Output(x.cloneType)))
   val coalReqReady =      IO(Output(peekIn(5).asInstanceOf[Bool].cloneType))
-  val coalReqBits =       IO(Output(peekIn(6).asInstanceOf[ReqQueueEntry].cloneType))
+  val coalReqBits =       IO(Output(peekIn(6).asInstanceOf[Request].cloneType))
   val coalReqValid =      IO(Output(peekIn(7).asInstanceOf[Bool].cloneType))
   val coalInvalidate =    IO(Output(peekIn(8).asInstanceOf[Valid[Vec[UInt]]].cloneType))
 

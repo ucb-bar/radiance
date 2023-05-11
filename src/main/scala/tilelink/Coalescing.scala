@@ -165,6 +165,16 @@ class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: In
     bits
   }
 }
+class NonCoalescedRequest(config: CoalescerConfig)
+extends Request(sourceWidth = log2Ceil(config.numOldSrcIds),
+  sizeWidth = config.wordSizeWidth,
+  addressWidth = config.addressWidth,
+  dataWidth = config.wordSizeInBytes * 8)
+class CoalescedRequest(config: CoalescerConfig)
+extends Request(sourceWidth = log2Ceil(config.numNewSrcIds),
+  sizeWidth = log2Ceil(config.maxCoalLogSize),
+  addressWidth = config.addressWidth,
+  dataWidth = (8 * (1 << config.maxCoalLogSize)))
 
 class Response(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends Bundle {
   val op = UInt(1.W) // 0=READ 1=WRITE
@@ -194,7 +204,6 @@ class Response(sourceWidth: Int, sizeWidth: Int, dataWidth: Int) extends Bundle 
     this.error := bundle.denied
   }
 }
-
 class NonCoalescedResponse(config: CoalescerConfig)
 extends Response(sourceWidth = log2Ceil(config.numOldSrcIds),
   sizeWidth = config.wordSizeWidth,
@@ -352,7 +361,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig) e
 }
 
 // Software model: coalescer.py
-class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[Request],
+class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[NonCoalescedRequest],
                     config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     val window = Input(windowT.io.cloneType)
@@ -483,7 +492,7 @@ class MonoCoalescer(coalLogSize: Int, windowT: CoalShiftQueue[Request],
 // coalesced request out of all possible combinations.
 //
 // Software model: coalescer.py
-class MultiCoalescer(windowT: CoalShiftQueue[Request], coalReqT: Request,
+class MultiCoalescer(windowT: CoalShiftQueue[NonCoalescedRequest], coalReqT: Request,
                      config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
@@ -622,14 +631,12 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
     s"TL param addressBits (${outer.cpuNode.in.head._1.params.addressBits}) " +
     s"mismatch with config.addressWidth (${config.addressWidth})")
 
-  val sourceWidth = outer.cpuNode.in.head._1.params.sourceBits
+  val oldSourceWidth = outer.cpuNode.in.head._1.params.sourceBits
   // note we are using word size. assuming all coalescer inputs are word sized
-  val reqQueueEntryT = new Request(sourceWidth, config.wordSizeWidth,
-    config.addressWidth, (config.wordSizeInBytes * 8))
+  val reqQueueEntryT = new NonCoalescedRequest(config)
   val reqQueues = Module(new CoalShiftQueue(reqQueueEntryT, config.queueDepth, config))
 
-  val coalReqT = new Request(log2Ceil(config.numNewSrcIds), log2Ceil(config.maxCoalLogSize),
-    config.addressWidth, (1 << config.maxCoalLogSize) * 8)
+  val coalReqT = new CoalescedRequest(config)
   val coalescer = Module(new MultiCoalescer(reqQueues, coalReqT, config))
   coalescer.io.window := reqQueues.io
   reqQueues.io.coalescable := coalescer.io.coalescable
@@ -714,7 +721,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig) extends 
   val numPerLaneReqs = config.queueDepth
 
   // FIXME: no need to contain maxCoalLogSize data
-  val respQueueEntryT = new Response(sourceWidth, log2Ceil(config.maxCoalLogSize),
+  val respQueueEntryT = new Response(oldSourceWidth, log2Ceil(config.maxCoalLogSize),
     (1 << config.maxCoalLogSize) * 8)
   val respQueues = Seq.tabulate(config.numLanes) { _ =>
     Module(
@@ -1857,21 +1864,10 @@ class CoalescerXbar(config: CoalescerConfig) (implicit p: Parameters) extends La
     val node = TLIdentityNode()
     node :=* outputXbar.node
 
-    val nonCoalEntryT = new Request(
-                                log2Ceil(config.numOldSrcIds),
-                                config.wordSizeWidth,
-                                config.addressWidth,
-                                config.wordSizeInBytes * 8
-                              )
-    val coalEntryT    = new Request(
-                                log2Ceil(config.numOldSrcIds),
-                                log2Ceil(config.maxCoalLogSize),
-                                config.addressWidth,
-                                (1 << config.maxCoalLogSize) * 8
-                              )
+    val nonCoalEntryT = new NonCoalescedRequest(config)
+    val coalEntryT    = new CoalescedRequest(config)
     val respNonCoalEntryT = new NonCoalescedResponse(config)
     val respCoalBundleT   = new CoalescedResponse(config)
-    
 
     lazy val module = new CoalescerXbarImpl(
       this, config, nonCoalEntryT, coalEntryT, respNonCoalEntryT, respCoalBundleT)
