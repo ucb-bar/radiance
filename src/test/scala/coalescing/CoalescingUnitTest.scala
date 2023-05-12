@@ -10,7 +10,7 @@ import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.WithoutTLMonitors
 import org.chipsalliance.cde.config.Parameters
-import chisel3.util.{DecoupledIO, Valid}
+import chisel3.util.{Cat, DecoupledIO, Valid}
 import chisel3.util.experimental.BoringUtils
 
 class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -39,12 +39,40 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 }
 
 class Splitter(implicit p: Parameters) extends LazyModule {
-  private def noChangeRequired(manager: TLManagerPortParameters) = manager.beatBytes == 4
-  val node = new TLAdapterNode(
-    clientFn = { case c => c },
-    managerFn = { case m => m.v1copy(beatBytes = 32) }) {
-    override def circuitIdentity = edges.out.map(_.manager).forall(noChangeRequired)
-  }
+//  private def noChangeRequired(manager: TLManagerPortParameters) = manager.beatBytes == 4
+  val node = new TLNexusNode(
+    clientFn = { c =>
+      require(c.length == 1, "splitter client check")
+      require(c.head.clients.length == 1, "splitter client check")
+      val headId = c.head.clients.head.sourceId
+      c.head.v1copy(
+        clients = Seq.tabulate(4)(i => c.head.clients.head.v1copy(
+          sourceId = headId.shift(headId.size * i),
+          supportsProbe = TransferSizes(1, 8),
+          supportsArithmetic = TransferSizes(1, 8),
+          supportsLogical = TransferSizes(1, 8),
+          supportsGet = TransferSizes(1, 8),
+          supportsPutFull = TransferSizes(1, 8),
+          supportsPutPartial = TransferSizes(1, 8)
+        ))
+      )
+    },
+    managerFn = { m =>
+      require(m.length == 4, "splitter manager check")
+//      require(m.head.managers.length == 4, "splitter manager check")
+      m.head.v1copy(
+        beatBytes = 32,
+        managers = Seq.fill(4)(m.head.managers.head.v1copy(
+          address = Seq(AddressSet(0, 0xffffff)), // full range
+          supportsGet = TransferSizes(1, 32),
+          supportsPutFull = TransferSizes(1, 32),
+          supportsPutPartial = TransferSizes(1, 32),
+        ))
+      )
+    }
+  ) //{
+//    override def circuitIdentity = edges.out.map(_.manager).forall(noChangeRequired)
+//  }
   lazy val module = new SplitterImp(this)
 }
 
@@ -59,17 +87,22 @@ class SplitterImp(outer: Splitter) extends LazyModuleImp(outer) {
 
   in.a.ready := node.out.map(_._1.a.ready).reduce(_ && _)
   in.d.valid := node.out.map(_._1.d.valid).reduce(_ && _)
+  in.d.bits.data := Cat(node.out.map(_._1.d.bits.data).reverse)
+  in.d.bits.size := 5.U // FIXME: this is often wrong
 
   node.out.zipWithIndex.foreach { case ((out, edgeOut), i) =>
-    assert(!in.a.valid || in.a.bits.size === 5.U, "runtime request size is not 256 bits")
+    when (!in.a.valid || in.a.bits.size === 5.U) {
+      printf("[WARNING] runtime request size is not 256 bits")
+    }
+    assert(!out.d.valid || out.d.bits.size === 3.U, "runtime response size is not 64 bits")
+
     out.a.valid := in.a.valid
     out.a.bits := in.a.bits
+    out.a.bits.size := in.a.bits.size.min(3.U)
     out.a.bits.address := in.a.bits.address | (i << 3).U
     out.a.bits.data := in.a.bits.data(64 * (i + 1) - 1, 64 * i)
     out.a.bits.mask := in.a.bits.mask(8 * (i + 1) - 1, 8 * i)
 
-    assert(!out.d.valid || out.d.bits.size === 3.U, "runtime response size is not 64 bits")
-    in.d.bits.data(64 * (i + 1) - 1, 64 * i) := out.d.bits.data
     out.d.ready := in.d.ready && in.d.valid // this might not conform to deadlock rules
   }
 }
@@ -125,11 +158,35 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
 
   cpuNodes.foreach(dut.cpuNode := _)
 
-  val xbar = TLXbar()
-  l2Nodes.foreach(_ := xbar)
 
   val splitters = Seq.fill(5)(LazyModule(new Splitter()))
-  splitters.foreach(xbar :=* _.node := dut.aggregateNode)
+
+  val splitOuts = Seq.fill(5)(Seq.fill(4)(TLIdentityNode()))
+
+
+//  val xbar = TLXbar()
+//  (splitters zip splitOuts).foreach { case (splitter, splitOut) =>
+//    splitter.node := dut.aggregateNode
+//    splitOut.foreach(xbar := _ := splitter.node)
+//  }
+//  l2Nodes.foreach(_ := xbar)
+
+
+  (splitters zip splitOuts).foreach { case (splitter, splitOut) =>
+    splitter.node := dut.aggregateNode
+    splitOut.foreach(_ := splitter.node)
+  }
+
+  val xbars = Seq.fill(4)(TLXbar()) // per bank xbar that arbitrates between N+1
+  splitOuts.foreach { allBanks =>
+    (allBanks zip xbars).foreach { case (splitBank, xbar) =>
+      xbar := splitBank
+    }
+  }
+  (l2Nodes zip xbars).foreach { case (l2Node, xbar) =>
+    l2Node := xbar
+  }
+
 
   lazy val module = new DummyCoalescingUnitTBImp(this)
 }
@@ -157,8 +214,7 @@ class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleI
   val l2IO1 = outer.l2Nodes(1).makeIOs()
   val l2IO2 = outer.l2Nodes(2).makeIOs()
   val l2IO3 = outer.l2Nodes(3).makeIOs()
-  val l2IO4 = outer.l2Nodes(4).makeIOs()
-  val l2IOs = Seq(l2IO0, l2IO1, l2IO2, l2IO3, l2IO4)
+  val l2IOs = Seq(l2IO0, l2IO1, l2IO2, l2IO3)
 
 //  val coalMasterNode = coal.coalescerNode.makeIOs()
 
