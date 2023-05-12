@@ -906,14 +906,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   val uncoalescer = Module(
-    new Uncoalescer(config, reqQueues, coalReqT, coalescer.invalidateT)
+    new Uncoalescer(config, nonCoalReqT, coalReqT)
   )
   // connect coalesced request that is newly generated and being recorded in
   // the uncoalescer
   uncoalescer.io.coalReq <> coalescer.io.coalReq
   uncoalescer.io.invalidate := coalescer.io.invalidate
   val reqQueueHeads = reqQueues.io.queue.deq.map(_.bits)
-  uncoalescer.io.window := reqQueues.io
+  uncoalescer.io.windowElts := reqQueues.io.elts
   // connect coalesced response going into the uncoalescer, ready to be
   // uncoalesced
   // Cleanup: custom <>?
@@ -953,20 +953,22 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
 class Uncoalescer(
     config: CoalescerConfig,
-    queueT: CoalShiftQueue[NonCoalescedRequest],
-    coalReqT: Request,
-    coalInvalidateT: Valid[Vec[UInt]],
+    nonCoalReqT: NonCoalescedRequest,
+    coalReqT: CoalescedRequest,
 ) extends Module {
   val inflightTable = Module(new InflightCoalReqTable(config))
   val io = IO(new Bundle {
     // generated coalesced request, connected to the output of the coalescer.
     val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
     // invalidate signal coming out of coalescer.
-    val invalidate = Input(coalInvalidateT.cloneType)
+    val invalidate = Input(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
     // coalescing window, connected to the contents of the request queues.
     // Uncoalescer looks at the queue entries that got coalesced into `coalReq`
     // in order to record which lanes this coalReq originally came from.
-    val window = Input(queueT.io.cloneType)
+    // We only care about window.elts because the coalescer would have made
+    // sure it only looked at the valid entries.
+    // TODO: duplicate type construction
+    val windowElts = Input(Vec(config.numLanes, Vec(config.queueDepth, nonCoalReqT)))
     val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
     val uncoalResps = Output(
       Vec(
@@ -990,7 +992,7 @@ class Uncoalescer(
       .foreach { case ((laneEntry, laneInv), lane) =>
         (laneEntry.reqs zip laneInv.asBools).zipWithIndex
           .foreach { case ((reqEntry, inv), i) =>
-            val req = io.window.elts(lane)(i)
+            val req = io.windowElts(lane)(i)
             when((io.invalidate.valid && inv)) {
               printf(
                 s"coalescer: reqQueue($lane)($i) got invalidated (source=%d)\n",
