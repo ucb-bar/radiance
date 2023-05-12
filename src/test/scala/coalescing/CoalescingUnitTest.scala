@@ -794,6 +794,7 @@ class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   val nonCoalReqT = new NonCoalescedRequest(config)
   val coalReqT = new CoalescedRequest(config)
+
   it should "work in general case" in {
     test(new Uncoalescer(config, nonCoalReqT, coalReqT))
     // vcs helps with simulation time, but sometimes errors with
@@ -832,6 +833,7 @@ class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
 
       c.io.coalReq.valid.poke(false.B)
+      c.io.invalidate.valid.poke(false.B)
 
       c.clock.step()
 
@@ -859,66 +861,71 @@ class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  // it should "uncoalesce when coalesced to the same word offset" in {
-  //   test(new Uncoalescer(uncoalescerTestConfig))
-  //   // .withAnnotations(Seq(VcsBackendAnnotation))
-  //   { c =>
-  //     val sourceId = 0.U
-  //     val four = c.io.newEntry.sizeEnumT.FOUR
-  //     c.io.coalReqValid.poke(true.B)
-  //     c.io.newEntry.source.poke(sourceId)
-  //     c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
-  //     c.io.newEntry.lanes(0).reqs(0).source.poke(0.U)
-  //     c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
-  //     c.io.newEntry.lanes(0).reqs(0).sizeEnum.poke(four)
-  //     c.io.newEntry.lanes(0).reqs(1).valid.poke(false.B)
-  //     c.io.newEntry.lanes(1).reqs(0).valid.poke(true.B)
-  //     c.io.newEntry.lanes(1).reqs(0).source.poke(1.U)
-  //     c.io.newEntry.lanes(1).reqs(0).offset.poke(1.U)
-  //     c.io.newEntry.lanes(1).reqs(0).sizeEnum.poke(four)
-  //     c.io.newEntry.lanes(1).reqs(1).valid.poke(false.B)
-  //     c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
-  //     c.io.newEntry.lanes(2).reqs(0).source.poke(2.U)
-  //     c.io.newEntry.lanes(2).reqs(0).offset.poke(1.U)
-  //     c.io.newEntry.lanes(2).reqs(0).sizeEnum.poke(four)
-  //     c.io.newEntry.lanes(2).reqs(1).valid.poke(false.B)
-  //     c.io.newEntry.lanes(3).reqs(0).valid.poke(true.B)
-  //     c.io.newEntry.lanes(3).reqs(0).source.poke(3.U)
-  //     c.io.newEntry.lanes(3).reqs(0).offset.poke(1.U)
-  //     c.io.newEntry.lanes(3).reqs(0).sizeEnum.poke(four)
-  //     c.io.newEntry.lanes(3).reqs(1).valid.poke(false.B)
+  it should "uncoalesce when coalesced to the same word offset" in {
+    test(new Uncoalescer(config, nonCoalReqT, coalReqT))
+    // .withAnnotations(Seq(VcsBackendAnnotation))
+    { c =>
+      // 4 lanes, queue depth 2
+      c.io.windowElts(0)(0).op.poke(0.U)
+      c.io.windowElts(0)(0).source.poke(0.U)
+      c.io.windowElts(0)(0).address.poke(0x4.U)
+      c.io.windowElts(0)(0).size.poke(2.U)
+      c.io.windowElts(1)(0).op.poke(0.U)
+      c.io.windowElts(1)(0).source.poke(1.U)
+      c.io.windowElts(1)(0).address.poke(0x4.U) // two reqs from one lane
+      c.io.windowElts(1)(0).size.poke(2.U)
+      c.io.windowElts(2)(0).op.poke(0.U)
+      c.io.windowElts(2)(0).source.poke(2.U)
+      c.io.windowElts(2)(0).address.poke(0x4.U)
+      c.io.windowElts(2)(0).size.poke(2.U)
+      c.io.windowElts(3)(0).op.poke(0.U)
+      c.io.windowElts(3)(0).source.poke(3.U)
+      c.io.windowElts(3)(0).address.poke(0x4.U)
+      c.io.windowElts(3)(0).size.poke(2.U)
+      // indicate lanes used for coalescing
+      c.io.invalidate.valid.poke(true.B)
+      c.io.invalidate.bits(0).poke(0x1.U) // 2'b01 for enabling head
+      c.io.invalidate.bits(1).poke(0x1.U)
+      c.io.invalidate.bits(2).poke(0x1.U)
+      c.io.invalidate.bits(3).poke(0x1.U)
 
-  //     c.clock.step()
+      val sourceId = 0.U
+      c.io.coalReq.valid.poke(true.B)
+      c.io.coalReq.bits.source.poke(sourceId)
+      c.io.coalReq.ready.expect(true.B)
 
-  //     c.io.coalReqValid.poke(false.B)
+      c.clock.step()
 
-  //     c.clock.step()
+      c.io.coalReq.valid.poke(false.B)
+      c.io.invalidate.valid.poke(false.B)
 
-  //     c.io.coalResp.valid.poke(true.B)
-  //     c.io.coalResp.bits.source.poke(sourceId)
-  //     val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
-  //     c.io.coalResp.bits.data.poke(lit.U)
+      c.clock.step()
 
-  //     // table lookup is combinational at the same cycle
-  //     // offset is counting from LSB
-  //     c.io.uncoalResps(0)(0).valid.expect(true.B)
-  //     c.io.uncoalResps(0)(0).bits.data.expect(0x5ca1ab1eL.U)
-  //     c.io.uncoalResps(0)(0).bits.source.expect(0.U)
-  //     c.io.uncoalResps(0)(1).valid.expect(false.B)
-  //     c.io.uncoalResps(1)(0).valid.expect(true.B)
-  //     c.io.uncoalResps(1)(0).bits.data.expect(0x5ca1ab1eL.U)
-  //     c.io.uncoalResps(1)(0).bits.source.expect(1.U)
-  //     c.io.uncoalResps(1)(1).valid.expect(false.B)
-  //     c.io.uncoalResps(2)(0).valid.expect(true.B)
-  //     c.io.uncoalResps(2)(0).bits.data.expect(0x5ca1ab1eL.U)
-  //     c.io.uncoalResps(2)(0).bits.source.expect(2.U)
-  //     c.io.uncoalResps(2)(1).valid.expect(false.B)
-  //     c.io.uncoalResps(3)(0).valid.expect(true.B)
-  //     c.io.uncoalResps(3)(0).bits.data.expect(0x5ca1ab1eL.U)
-  //     c.io.uncoalResps(3)(0).bits.source.expect(3.U)
-  //     c.io.uncoalResps(3)(1).valid.expect(false.B)
-  //   }
-  // }
+      c.io.coalResp.valid.poke(true.B)
+      c.io.coalResp.bits.source.poke(sourceId)
+      val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
+      c.io.coalResp.bits.data.poke(lit.U)
+
+      // table lookup is combinational at the same cycle
+      // offset is counting from LSB
+      c.io.uncoalResps(0)(0).valid.expect(true.B)
+      c.io.uncoalResps(0)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(0)(0).bits.source.expect(0.U)
+      c.io.uncoalResps(0)(1).valid.expect(false.B)
+      c.io.uncoalResps(1)(0).valid.expect(true.B)
+      c.io.uncoalResps(1)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(1)(0).bits.source.expect(1.U)
+      c.io.uncoalResps(1)(1).valid.expect(false.B)
+      c.io.uncoalResps(2)(0).valid.expect(true.B)
+      c.io.uncoalResps(2)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(2)(0).bits.source.expect(2.U)
+      c.io.uncoalResps(2)(1).valid.expect(false.B)
+      c.io.uncoalResps(3)(0).valid.expect(true.B)
+      c.io.uncoalResps(3)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(3)(0).bits.source.expect(3.U)
+      c.io.uncoalResps(3)(1).valid.expect(false.B)
+    }
+  }
 }
 
 class CoalInflightTableUnitTest extends AnyFlatSpec with ChiselScalatestTester {
