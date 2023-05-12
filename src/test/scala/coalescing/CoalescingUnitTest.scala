@@ -770,34 +770,25 @@ class CoalShiftQueueTest extends AnyFlatSpec with ChiselScalatestTester {
   }*/
 }
 
-object uncoalescerTestConfig extends CoalescerConfig(
-  enable = true,
-  numLanes = 4,
-  queueDepth = 2,
-  waitTimeout = 8,
-  addressWidth = 24,
-  dataBusWidth = 5,
-  // watermark = 2,
-  wordSizeInBytes = 4,
-  numOldSrcIds = 16,
-  numNewSrcIds = 4,
-  respQueueDepth = 4,
-  coalLogSizes = Seq(4),
-  sizeEnum = DefaultInFlightTableSizeEnum,
-  numCoalReqs = 1,
-  numArbiterOutputPorts = 4,
-  bankStrideInBytes = 64,
-)
-
 class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "uncoalescer"
-  val numLanes = 4
-  val numPerLaneReqs = 2
-  val sourceWidth = 2
-  val sizeWidth = 2
-  // 16B coalescing size
-  val coalDataWidth = 128
-  val numInflightCoalRequests = 4
+  object uncoalescerTestConfig extends CoalescerConfig(
+    enable = true,
+    numLanes = 4,
+    queueDepth = 2,
+    waitTimeout = 8,
+    addressWidth = 24,
+    dataBusWidth = 4, // 128 bit data bus
+    wordSizeInBytes = 4,
+    numOldSrcIds = 16,
+    numNewSrcIds = 4,
+    respQueueDepth = 4,
+    coalLogSizes = Seq(4),
+    sizeEnum = DefaultInFlightTableSizeEnum,
+    numCoalReqs = 1,
+    numArbiterOutputPorts = 4,
+    bankStrideInBytes = 64,
+  )
 
   val config = uncoalescerTestConfig
 
@@ -809,72 +800,62 @@ class UncoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
     // "mutation occurred during iteration" java error
     // .withAnnotations(Seq(VcsBackendAnnotation))
     { c =>
-      val sourceId = 0.U
-      // val four = c.io.newEntry.sizeEnumT.FOUR
-      c.io.coalReq.valid.poke(true.B)
+      // 4 lanes, queue depth 2
       c.io.windowElts(0)(0).op.poke(0.U)
       c.io.windowElts(0)(0).source.poke(1.U)
       c.io.windowElts(0)(0).address.poke(0x4.U)
       c.io.windowElts(0)(0).size.poke(2.U)
       c.io.windowElts(0)(1).op.poke(0.U)
       c.io.windowElts(0)(1).source.poke(2.U)
-      c.io.windowElts(0)(1).address.poke(0x4.U)
+      c.io.windowElts(0)(1).address.poke(0x4.U) // two reqs from one lane
       c.io.windowElts(0)(1).size.poke(2.U)
       c.io.windowElts(2)(0).op.poke(0.U)
-      c.io.windowElts(2)(0).source.poke(1.U)
-      c.io.windowElts(2)(0).address.poke(0x4.U)
+      c.io.windowElts(2)(0).source.poke(2.U)
+      c.io.windowElts(2)(0).address.poke(0x8.U)
       c.io.windowElts(2)(0).size.poke(2.U)
       c.io.windowElts(2)(1).op.poke(0.U)
       c.io.windowElts(2)(1).source.poke(2.U)
-      c.io.windowElts(2)(1).address.poke(0x4.U)
+      c.io.windowElts(2)(1).address.poke(0xc.U)
       c.io.windowElts(2)(1).size.poke(2.U)
-      // c.io.newEntry.source.poke(sourceId)
-      // c.io.newEntry.lanes(0).reqs(0).valid.poke(true.B)
-      // c.io.newEntry.lanes(0).reqs(0).source.poke(1.U)
-      // c.io.newEntry.lanes(0).reqs(0).offset.poke(1.U)
-      // c.io.newEntry.lanes(0).reqs(0).sizeEnum.poke(four)
-      // c.io.newEntry.lanes(0).reqs(1).valid.poke(true.B)
-      // c.io.newEntry.lanes(0).reqs(1).source.poke(2.U)
-      // c.io.newEntry.lanes(0).reqs(1).offset.poke(1.U) // same offset to different lanes
-      // c.io.newEntry.lanes(0).reqs(1).sizeEnum.poke(four)
-      // c.io.newEntry.lanes(1).reqs(0).valid.poke(false.B)
-      // c.io.newEntry.lanes(2).reqs(0).valid.poke(true.B)
-      // c.io.newEntry.lanes(2).reqs(0).source.poke(2.U)
-      // c.io.newEntry.lanes(2).reqs(0).offset.poke(2.U)
-      // c.io.newEntry.lanes(2).reqs(0).sizeEnum.poke(four)
-      // c.io.newEntry.lanes(2).reqs(1).valid.poke(true.B)
-      // c.io.newEntry.lanes(2).reqs(1).source.poke(2.U)
-      // c.io.newEntry.lanes(2).reqs(1).offset.poke(3.U)
-      // c.io.newEntry.lanes(2).reqs(1).sizeEnum.poke(four)
-      // c.io.newEntry.lanes(3).reqs(0).valid.poke(false.B)
+      // indicate lane 0 and 2 are used for coalescing
+      c.io.invalidate.valid.poke(true.B)
+      c.io.invalidate.bits(0).poke(0x3.U) // 2'b11 for depth=2
+      c.io.invalidate.bits(1).poke(0x0.U)
+      c.io.invalidate.bits(2).poke(0x3.U)
+      c.io.invalidate.bits(3).poke(0x0.U)
 
-      // c.clock.step()
+      val sourceId = 0.U
+      c.io.coalReq.valid.poke(true.B)
+      c.io.coalReq.bits.source.poke(sourceId)
+      c.io.coalReq.ready.expect(true.B)
 
-      // c.io.coalReqValid.poke(false.B)
+      c.clock.step()
 
-      // c.clock.step()
+      c.io.coalReq.valid.poke(false.B)
 
-      // c.io.coalResp.valid.poke(true.B)
-      // c.io.coalResp.bits.source.poke(sourceId)
-      // val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
-      // // val lit = BigInt(0x0123456789abcdefL)
-      // c.io.coalResp.bits.data.poke(lit.U)
+      c.clock.step()
 
-      // // table lookup is combinational at the same cycle
-      // c.io.uncoalResps(0)(0).valid.expect(true.B)
-      // c.io.uncoalResps(1)(0).valid.expect(false.B)
-      // c.io.uncoalResps(2)(0).valid.expect(true.B)
-      // c.io.uncoalResps(3)(0).valid.expect(false.B)
+      c.io.coalResp.valid.poke(true.B)
+      c.io.coalResp.bits.source.poke(sourceId)
+      val lit = (BigInt(0x0123456789abcdefL) << 64) | BigInt(0x5ca1ab1edeadbeefL)
+      // val lit = BigInt(0x0123456789abcdefL)
+      c.io.coalResp.bits.data.poke(lit.U)
 
-      // // offset is counting from LSB
-      // c.io.uncoalResps(0)(0).bits.data.expect(0x5ca1ab1eL.U)
-      // c.io.uncoalResps(0)(0).bits.source.expect(1.U)
-      // c.io.uncoalResps(0)(1).bits.data.expect(0x5ca1ab1eL.U)
-      // c.io.uncoalResps(0)(1).bits.source.expect(2.U)
-      // c.io.uncoalResps(2)(0).bits.data.expect(0x89abcdefL.U)
-      // c.io.uncoalResps(2)(0).bits.source.expect(2.U)
-      // c.io.uncoalResps(2)(1).bits.data.expect(0x01234567L.U)
-      // c.io.uncoalResps(2)(1).bits.source.expect(2.U)
+      // table lookup is combinational at the same cycle
+      c.io.uncoalResps(0)(0).valid.expect(true.B)
+      c.io.uncoalResps(1)(0).valid.expect(false.B)
+      c.io.uncoalResps(2)(0).valid.expect(true.B)
+      c.io.uncoalResps(3)(0).valid.expect(false.B)
+
+      // offset is counting from LSB
+      c.io.uncoalResps(0)(0).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(0)(0).bits.source.expect(1.U)
+      c.io.uncoalResps(0)(1).bits.data.expect(0x5ca1ab1eL.U)
+      c.io.uncoalResps(0)(1).bits.source.expect(2.U)
+      c.io.uncoalResps(2)(0).bits.data.expect(0x89abcdefL.U)
+      c.io.uncoalResps(2)(0).bits.source.expect(2.U)
+      c.io.uncoalResps(2)(1).bits.data.expect(0x01234567L.U)
+      c.io.uncoalResps(2)(1).bits.source.expect(2.U)
     }
   }
 
