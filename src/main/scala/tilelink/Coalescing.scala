@@ -93,7 +93,7 @@ object defaultConfig extends CoalescerConfig(
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 16,
-  numNewSrcIds = 4,
+  numNewSrcIds = 8,
   respQueueDepth = 4,
   coalLogSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum,
@@ -663,16 +663,12 @@ class MultiCoalescer(
     )
   }
 
-  val sourceGen = Module(
-    new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds))
-  )
-  sourceGen.io.gen := io.coalReq.fire // use up a source ID only when request is created
-  sourceGen.io.reclaim.valid := false.B // not used
-  sourceGen.io.reclaim.bits := DontCare // not used
+  val coalesceValid = chosenValid
 
-  val coalesceValid = chosenValid && sourceGen.io.id.valid
-
-  io.coalReq.bits.source := sourceGen.io.id.bits
+  // setting source is deferred, because in order to do proper source ID
+  // generation we also have to look at the responses coming back, which
+  // is easier to do at the toplevel.
+  io.coalReq.bits.source := DontCare
   io.coalReq.bits.mask := mask.asUInt
   io.coalReq.bits.data := data.asUInt
   io.coalReq.bits.size := chosenSize
@@ -732,6 +728,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   reqQueues.io.coalescable := coalescer.io.coalescable
   reqQueues.io.invalidate := coalescer.io.invalidate
 
+  val uncoalescer = Module(new Uncoalescer(config, nonCoalReqT, coalReqT))
+
   // ===========================================================================
   // Request flow
   // ===========================================================================
@@ -761,8 +759,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       val deq = reqQueues.io.queue.deq(lane)
       enq.valid := tlIn.a.valid
       enq.bits := req
-      // TODO: deq.ready should respect downstream arbiter
-      deq.ready := true.B
+      // Only allow dequeue when uncoalescer is ready to record the current
+      // queue entries
+      // TODO: deq.ready should also respect downstream arbiter
+      deq.ready := uncoalescer.io.coalReq.ready
       // Stall upstream core or memtrace driver when shiftqueue is not ready
       tlIn.a.ready := enq.ready
       tlOut.a.valid := deq.valid
@@ -831,7 +831,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // queues.
 
   // The maximum number of requests from a single lane that can go into a
-  // coalesced request.  Upper bound is min(DEPTH, 2**sourceWidth).
+  // coalesced request.
   val numPerLaneReqs = config.queueDepth
 
   // FIXME: no need to contain maxCoalLogSize data
@@ -924,12 +924,19 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     dontTouch(tlOut.d)
   }
 
-  val uncoalescer = Module(
-    new Uncoalescer(config, nonCoalReqT, coalReqT)
-  )
   // connect coalesced request that is newly generated and being recorded in
   // the uncoalescer
   uncoalescer.io.coalReq <> coalescer.io.coalReq
+  // We can't simply use coalescer.io.coalReq.valid here.
+  // coalescer.io.coalReq.valid tells us when there exists a valid coalescing
+  // combination, but not when we can actually fire that to downstream, because
+  // we can still be blocked by source ID clashes due to backpressure.
+  // So, we have to overwrite just the valid bit with the final valid that
+  // indicates when we can send this request out.
+  // NOTE(hansung): this feels slightly awkward.  Maybe doing sourcegen inside
+  // the coalescer so that it gives the final call is better, but that may be
+  // too much IO for the coalescer.
+  uncoalescer.io.coalReq.valid := coalReqValid
   uncoalescer.io.invalidate := coalescer.io.invalidate
   val reqQueueHeads = reqQueues.io.queue.deq.map(_.bits)
   uncoalescer.io.windowElts := reqQueues.io.elts
@@ -997,9 +1004,10 @@ class Uncoalescer(
     )
   })
 
-  // Uncoalescer has to be always ready to accept and record new coalesced
-  // requests, so that it doesn't stall the coalescer.
-  io.coalReq.ready := true.B
+  // If inflight table is full, we cannot accept new requests to record them.
+  // This might happen when we sent out many requests and exhausted all source
+  // IDs, but they haven't come back yet.
+  io.coalReq.ready := inflightTable.io.enq.ready
 
   // Construct a new entry for the inflight table using generated coalesced request
   def generateInflightTableEntry: InflightCoalReqTableEntry = {
@@ -1149,7 +1157,6 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
 
   val full = Wire(Bool())
   full := (0 until entries).map(table(_).valid).reduce(_ && _)
-  assert(!full, "inflight table is full and blocking coalescer")
   dontTouch(full)
 
   // Enqueue logic
@@ -1169,9 +1176,8 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   // Lookup logic
   io.lookup.valid := table(io.lookupSourceId).valid
   io.lookup.bits := table(io.lookupSourceId).bits
-  val lookupFire = io.lookup.ready && io.lookup.valid
   // Dequeue as soon as lookup succeeds
-  when(lookupFire) {
+  when(io.lookup.fire) {
     table(io.lookupSourceId).valid := false.B
   }
 
