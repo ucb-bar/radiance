@@ -21,6 +21,15 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
     println(
       s"============ MemTraceDriver instantiated [filename=${param.tracefilename}]"
     )
-    sbus.fromPort(Some("gpu-tracer"))() :=* tracer.node
+    val upstream = p(CoalescerKey) match {
+      case Some(coalParam) => {
+        val coal = LazyModule(new CoalescingUnit(coalParam))
+        println(s"============ CoalescingUnit instantiated [numLanes=${coalParam.numLanes}]")
+        coal.cpuNode :=* tracer.node // N lanes
+        coal.aggregateNode           // N+1 lanes
+      }
+      case None => tracer.node
+    }
+    sbus.fromPort(Some("gpu-tracer"))() :=* upstream
   }
 }

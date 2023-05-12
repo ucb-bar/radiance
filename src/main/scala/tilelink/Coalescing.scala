@@ -16,6 +16,7 @@ case class MemtraceCoreParams(tracefilename: String = "undefined", traceHasSourc
 
 case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None /*default*/)
 case object MemtraceCoreKey extends Field[Option[MemtraceCoreParams]](None /*default*/)
+case object CoalescerKey extends Field[Option[CoalescerConfig]](None /*default*/)
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type
@@ -86,7 +87,7 @@ object defaultConfig extends CoalescerConfig(
   numLanes = 4,
   queueDepth = 1,
   waitTimeout = 8,
-  addressWidth = 24,
+  addressWidth = 32,
   dataBusWidth = 3, // 2^3=8 bytes, 64 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
@@ -432,7 +433,8 @@ class MonoCoalescer(
   // }
 
   val size = coalLogSize
-  val addrMask = (((1 << config.addressWidth) - 1) - ((1 << size) - 1)).U
+  // NOTE: be careful with Scala integer overflow when addressWidth >= 32
+  val addrMask = (((1L << config.addressWidth) - 1) - ((1 << size) - 1)).U
   def canMatch(req0: Request, req0v: Bool, req1: Request, req1v: Bool): Bool = {
     (req0.op === req1.op) &&
     (req0v && req1v) &&
@@ -790,13 +792,30 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out.head
-  tlCoal.a.valid := coalescer.io.coalReq.valid
+
+  val sourceGen = Module(
+    new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
+  )
+  sourceGen.io.gen := coalescer.io.coalReq.fire // use up a source ID only when request is created
+  sourceGen.io.reclaim.valid := tlCoal.d.valid
+  sourceGen.io.reclaim.bits := tlCoal.d.bits.source
+
+  val coalReqValid = coalescer.io.coalReq.valid && sourceGen.io.id.valid
+  tlCoal.a.valid := coalReqValid
   tlCoal.a.bits := coalescer.io.coalReq.bits.toTLA(edgeCoal)
+  tlCoal.a.bits.source := sourceGen.io.id.bits
+
   coalescer.io.coalReq.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
   tlCoal.e.valid := false.B
+
+  require(
+    tlCoal.params.sourceBits == log2Ceil(config.numNewSrcIds),
+    s"tlCoal param `sourceBits` (${tlCoal.params.sourceBits}) mismatches coalescer constant"
+      + s" (${log2Ceil(config.numNewSrcIds)})"
+  )
 
   require(
     tlCoal.params.dataBits == (1 << config.dataBusWidth) * 8,
@@ -1830,7 +1849,7 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
+        address = AddressSet(0x0000, 0xffffffff),
         beatBytes = (1 << config.dataBusWidth)
       )
     )
@@ -1874,7 +1893,7 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
+        address = AddressSet(0x0000, 0xffffffff),
         beatBytes = (1 << config.dataBusWidth)
       )
     )
@@ -1928,7 +1947,7 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
+        address = AddressSet(0x0000, 0xffffffff),
         beatBytes = (1 << defaultConfig.dataBusWidth)
       )
     )
