@@ -1,6 +1,7 @@
 package freechips.rocketchip.tilelink.coalescing
 
 import chisel3._
+import chisel3.stage.PrintFullStackTraceAnnotation
 import chiseltest._
 import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
@@ -37,6 +38,42 @@ class MultiPortQueueUnitTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 }
 
+class Splitter(implicit p: Parameters) extends LazyModule {
+  private def noChangeRequired(manager: TLManagerPortParameters) = manager.beatBytes == 4
+  val node = new TLAdapterNode(
+    clientFn = { case c => c },
+    managerFn = { case m => m.v1copy(beatBytes = 32) }) {
+    override def circuitIdentity = edges.out.map(_.manager).forall(noChangeRequired)
+  }
+  lazy val module = new SplitterImp(this)
+}
+
+class SplitterImp(outer: Splitter) extends LazyModuleImp(outer) {
+  val node = outer.node
+  require(node.in.length == 1, "there should only be one edge in")
+  require(node.in.head._2.manager.beatBytes == 32, "edge in should be 256 bits")
+  require(node.out.length == 4, "there should be 4 edges out")
+  require(node.out.head._2.manager.beatBytes == 8, "edge out should be 64 bits")
+
+  val (in, edgeIn) = node.in.head
+
+  in.a.ready := node.out.map(_._1.a.ready).reduce(_ && _)
+  in.d.valid := node.out.map(_._1.d.valid).reduce(_ && _)
+
+  node.out.zipWithIndex.foreach { case ((out, edgeOut), i) =>
+    assert(!in.a.valid || in.a.bits.size === 5.U, "runtime request size is not 256 bits")
+    out.a.valid := in.a.valid
+    out.a.bits := in.a.bits
+    out.a.bits.address := in.a.bits.address | (i << 3).U
+    out.a.bits.data := in.a.bits.data(64 * (i + 1) - 1, 64 * i)
+    out.a.bits.mask := in.a.bits.mask(8 * (i + 1) - 1, 8 * i)
+
+    assert(!out.d.valid || out.d.bits.size === 3.U, "runtime response size is not 64 bits")
+    in.d.bits.data(64 * (i + 1) - 1, 64 * i) := out.d.bits.data
+    out.d.ready := in.d.ready && in.d.valid // this might not conform to deadlock rules
+  }
+}
+
 class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
   val cpuNodes = Seq.tabulate(testConfig.numLanes) { _ =>
     TLClientNode(
@@ -57,26 +94,28 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
 
   val device = new SimpleDevice("dummy", Seq("dummy"))
   val beatBytes = 1 << testConfig.dataBusWidth // 256 bit bus
-  val l2Nodes = Seq.tabulate(5) { _ =>
+  val numBanks = 4
+  val bankWidth = beatBytes / numBanks // 8 bytes
+  val l2Nodes = Seq.tabulate(4) { bank =>
     TLManagerNode(
       Seq(
         TLSlavePortParameters.v1(
           Seq(
             TLManagerParameters(
-              address = Seq(AddressSet(0x0, 0xffffff)), // should be matching cpuNode
+              address = Seq(AddressSet(bank * bankWidth, 0xffffff ^ ((numBanks - 1) * bankWidth))),
               resources = device.reg,
               regionType = RegionType.UNCACHED,
               executable = true,
-              supportsArithmetic = TransferSizes(1, beatBytes),
-              supportsLogical = TransferSizes(1, beatBytes),
-              supportsGet = TransferSizes(1, beatBytes),
-              supportsPutFull = TransferSizes(1, beatBytes),
-              supportsPutPartial = TransferSizes(1, beatBytes),
-              supportsHint = TransferSizes(1, beatBytes),
+              supportsArithmetic = TransferSizes(1, beatBytes min bankWidth),
+              supportsLogical = TransferSizes(1, beatBytes min bankWidth),
+              supportsGet = TransferSizes(1, beatBytes min bankWidth),
+              supportsPutFull = TransferSizes(1, beatBytes min bankWidth),
+              supportsPutPartial = TransferSizes(1, beatBytes min bankWidth),
+              supportsHint = TransferSizes(1, beatBytes min bankWidth),
               fifoId = Some(0)
             )
           ),
-          beatBytes
+          beatBytes min bankWidth
         )
       )
     )
@@ -85,13 +124,27 @@ class DummyCoalescingUnitTB(implicit p: Parameters) extends LazyModule {
   val dut = LazyModule(new CoalescingUnit(testConfig))
 
   cpuNodes.foreach(dut.cpuNode := _)
-  l2Nodes.foreach(_ := dut.aggregateNode)
+
+  val xbar = TLXbar()
+  l2Nodes.foreach(_ := xbar)
+
+  val splitters = Seq.fill(5)(LazyModule(new Splitter()))
+  splitters.foreach(xbar :=* _.node := dut.aggregateNode)
 
   lazy val module = new DummyCoalescingUnitTBImp(this)
 }
 
 class DummyCoalescingUnitTBImp(outer: DummyCoalescingUnitTB) extends LazyModuleImp(outer) {
+//  println(s"aggregate node max transfer size ${outer.dut.aggregateNode.out.head._2.maxTransfer}")
+//  println(s"splitter in max transfer size ${outer.splitters.head.node.in.head._2.maxTransfer}")
+//  println(s"splitter out max transfer size ${outer.splitters.head.node.out.head._2.maxTransfer}")
+
   val coal = outer.dut
+
+//  (outer.splitters.map(_.node.in.head) zip coal.aggregateNode.out).foreach { case ((in, inEdge), (out, outEdge)) =>
+//
+//  }
+
   // FIXME: these need to be separate variables because of implicit naming in makeIOs
   // there has to be a better way
   val coalIO0 = outer.cpuNodes(0).makeIOs()
@@ -242,7 +295,7 @@ class CoalescerUnitTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "coalesce fully consecutive accesses at size 4, only once" in {
     test(LazyModule(new DummyCoalescingUnitTB()(new WithoutTLMonitors())).module)
-    .withAnnotations(Seq(VerilatorBackendAnnotation, VerilatorFlags(Seq("--coverage-line")), WriteFstAnnotation))
+    .withAnnotations(Seq(VerilatorBackendAnnotation, VerilatorFlags(Seq("--coverage-line")), WriteFstAnnotation, PrintFullStackTraceAnnotation))
 //    .withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation))
     { c =>
       val nodes = c.coalIOs.map(_.head)
