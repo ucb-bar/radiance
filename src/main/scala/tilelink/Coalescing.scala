@@ -92,7 +92,7 @@ object defaultConfig extends CoalescerConfig(
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
-  numOldSrcIds = 16,
+  numOldSrcIds = 8,
   numNewSrcIds = 8,
   respQueueDepth = 8,
   coalLogSizes = Seq(3),
@@ -960,47 +960,32 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     dontTouch(tlOut.d)
   }
 
-  // connect coalesced request that is newly generated and being recorded in
-  // the uncoalescer
+  // Uncoalescer input
+  //
+  // connect coalesced request to be recorded in the uncoalescer table
   uncoalescer.io.coalReq <> coalReq
-  // We can't simply use coalescer.io.coalReq.valid here.
-  // coalescer.io.coalReq.valid tells us when there exists a valid coalescing
-  // combination, but not when we can actually fire that to downstream, because
-  // we can still be blocked by source ID clashes due to backpressure.
-  // So, we have to overwrite just the valid bit with the final valid that
-  // indicates when we can send this request out.
-  // NOTE(hansung): this feels slightly awkward.  Maybe doing sourcegen inside
-  // the coalescer so that it gives the final call is better, but that may be
-  // too much IO for the coalescer.
   uncoalescer.io.invalidate := coalescer.io.invalidate
   uncoalescer.io.windowElts := reqQueues.io.elts
-  // connect coalesced response going into the uncoalescer, ready to be
-  // uncoalesced
-  // Cleanup: custom <>?
+  // coalesced response to be used to look up the uncoalescer table
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
   uncoalescer.io.coalResp.bits.fromTLD(tlCoal.d.bits)
+
+  // Uncoalescer output
+  //
+  // Connect uncoalescer results back into response queue
+  (respQueues zip uncoalescer.io.respQueueIO).foreach { case (q, uncoalEnqs) =>
+    require(q.io.enq.length == config.queueDepth + respQueueUncoalPortOffset,
+      s"wrong number of enq ports for MultiPort response queue")
+    // slice the ports reserved for uncoalesced response
+    val qUncoalEnqs = q.io.enq.slice(respQueueUncoalPortOffset, q.io.enq.length)
+    (qUncoalEnqs zip uncoalEnqs).foreach {
+      case (enq, uncoalEnq) => {
+        enq <> uncoalEnq
+      }
+    }
+  }
   // uncoalescer backpressure
   tlCoal.d.ready := uncoalescer.io.coalResp.ready
-
-  // Connect uncoalescer results back into each lane's response queue
-  (respQueues zip uncoalescer.io.uncoalResps).zipWithIndex.foreach {
-    case ((q, perLaneResps), lane) =>
-      perLaneResps.zipWithIndex.foreach { case (resp, i) =>
-        // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
-        // cache.  This should ideally not happen though.
-        assert(
-          q.io.enq(respQueueUncoalPortOffset + i).ready,
-          s"respQueue: enq port for ${i}-th uncoalesced response is blocked for lane ${lane}"
-        )
-        q.io.enq(respQueueUncoalPortOffset + i).valid := resp.valid
-        q.io.enq(respQueueUncoalPortOffset + i).bits := resp.bits
-        // debug
-        // when (resp.valid) {
-        //   printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
-        // }
-        // dontTouch(q.io.enq(respQueueCoalPortOffset))
-      }
-  }
 
   // Debug
   dontTouch(coalescer.io.coalReq)
@@ -1030,11 +1015,8 @@ class Uncoalescer(
     // TODO: duplicate type construction
     val windowElts = Input(Vec(config.numLanes, Vec(config.queueDepth, nonCoalReqT)))
     val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
-    val uncoalResps = Output(
-      Vec(
-        config.numLanes,
-        Vec(config.queueDepth, ValidIO(new NonCoalescedResponse(config)))
-      )
+    val respQueueIO = Vec(config.numLanes,
+      Vec(config.queueDepth, Decoupled(new NonCoalescedResponse(config)))
     )
   })
 
@@ -1110,25 +1092,37 @@ class Uncoalescer(
   }
 
   // Un-coalesce responses back to individual lanes
-  val found = inflightTable.io.lookup.bits
-  (found.lanes zip io.uncoalResps).foreach { case (perLane, ioPerLane) =>
-    perLane.reqs.zipWithIndex.foreach { case (oldReq, depth) =>
-      val ioOldReq = ioPerLane(depth)
+  // Connect uncoalesced results back into each lane's response queue
+  val foundRow = inflightTable.io.lookup.bits
+  (foundRow.lanes zip io.respQueueIO).zipWithIndex.foreach { case ((foundLane, ioEnqs), lane) =>
+    foundLane.reqs.zipWithIndex.foreach { case (foundReq, depth) =>
+      val ioEnq = ioEnqs(depth)
 
+      // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
+      // cache.  This should ideally not happen though.
+      assert(
+        ioEnq.ready,
+        s"respQueue: enq port for ${depth}-th uncoalesced response is blocked for lane ${lane}"
+      )
       // TODO: spatial-only coalescing: only looking at 0th srcId entry
-      ioOldReq.valid := false.B
-      ioOldReq.bits := DontCare
+      ioEnq.valid := false.B
+      ioEnq.bits := DontCare
+      // debug
+      // when (resp.valid) {
+      //   printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
+      // }
+      // dontTouch(q.io.enq(respQueueCoalPortOffset))
 
-      when(inflightTable.io.lookup.valid && oldReq.valid) {
-        ioOldReq.valid := oldReq.valid
-        ioOldReq.bits.source := oldReq.source
-        val logSize = found.sizeEnumT.enumToLogSize(oldReq.sizeEnum)
-        ioOldReq.bits.size := logSize
-        ioOldReq.bits.data :=
+      when(inflightTable.io.lookup.valid && foundReq.valid) {
+        ioEnq.valid := foundReq.valid
+        ioEnq.bits.source := foundReq.source
+        val logSize = foundRow.sizeEnumT.enumToLogSize(foundReq.sizeEnum)
+        ioEnq.bits.size := logSize
+        ioEnq.bits.data :=
           getCoalescedDataChunk(
             io.coalResp.bits.data,
             io.coalResp.bits.data.getWidth,
-            oldReq.offset,
+            foundReq.offset,
             logSize
           )
       }
