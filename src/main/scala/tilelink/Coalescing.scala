@@ -56,7 +56,7 @@ case class CoalescerConfig(
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size
-                          // this has to be at least larger than the word size for
+                          // this has to be at least larger than word size for
                           // the coalescer to perform well
   // watermark = 2,       // minimum buffer occupancy to start coalescing
   wordSizeInBytes: Int,   // 32-bit system
@@ -87,14 +87,14 @@ object defaultConfig extends CoalescerConfig(
   numLanes = 4,
   queueDepth = 1,
   waitTimeout = 8,
-  addressWidth = 32,
+  addressWidth = 24,
   dataBusWidth = 3, // 2^3=8 bytes, 64 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 16,
   numNewSrcIds = 8,
-  respQueueDepth = 4,
+  respQueueDepth = 8,
   coalLogSizes = Seq(3),
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
@@ -694,6 +694,31 @@ class MultiCoalescer(
   if (!config.enable) disable
 }
 
+class CoalescerSourceGen(
+    config: CoalescerConfig,
+    coalReqT: CoalescedRequest,
+    respT: TLBundleD
+) extends Module {
+  val io = IO(new Bundle {
+    val inReq = Flipped(Decoupled(coalReqT.cloneType))
+    val outReq = Decoupled(coalReqT.cloneType)
+    val inResp = Flipped(Decoupled(respT.cloneType))
+  })
+  val sourceGen = Module(
+    new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
+  )
+  sourceGen.io.gen := io.inReq.fire // use up a source ID only when request is created
+  sourceGen.io.reclaim.valid := io.inResp.valid
+  sourceGen.io.reclaim.bits := io.inResp.bits.source
+  io.inResp.ready := true.B // should be always ready to reclaim old ID
+  // TODO: make sourceGen.io.reclaim Decoupled?
+
+  io.outReq <> io.inReq
+  // overwrite bits affected by sourcegen backpressure
+  io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
+  io.outReq.bits.source := sourceGen.io.id.bits
+}
+
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     extends LazyModuleImp(outer) {
   require(
@@ -793,22 +818,34 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out.head
 
-  val sourceGen = Module(
-    new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
-  )
-  sourceGen.io.gen := coalescer.io.coalReq.fire // use up a source ID only when request is created
-  sourceGen.io.reclaim.valid := tlCoal.d.valid
-  sourceGen.io.reclaim.bits := tlCoal.d.bits.source
+  // The request coming out of MultiCoalescer still needs to go through source
+  // ID generation.
+  // We pull the sourcegen part out of MultiCoalescer to a separate Module to
+  // reduce IO bloat in the coalescer and top-level clutter.
+  //
+  // The overall flow looks like:
+  // ┌────────────────┐ ┌─────────────────────┐ ┌────────────────────┐
+  // │ CoalShiftQueue ├─┤ Mono/MultiCoalescer ├─┤ CoalescerSourceGen ├── TileLink req
+  // └────────────────┘ └─────────────────────┘ └────────────────────┘
+  //                                                             ^
+  //                             ┌────────────┐ ┌─────────────┐  │
+  //                             │ RespQueues ├─┤ Uncoalescer ├──┴────── TileLink resp
+  //                             └────────────┘ └─────────────┘
+  //
+  val coalSourceGen = Module(new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits))
+  coalSourceGen.io.inReq <> coalescer.io.coalReq
+  coalSourceGen.io.inResp <> tlCoal.d
+  // This is the final coalesced request.
+  val coalReq = coalSourceGen.io.outReq
+  dontTouch(coalReq)
 
-  val coalReqValid = coalescer.io.coalReq.valid && sourceGen.io.id.valid
-  tlCoal.a.valid := coalReqValid
-  tlCoal.a.bits := coalescer.io.coalReq.bits.toTLA(edgeCoal)
-  tlCoal.a.bits.source := sourceGen.io.id.bits
+  tlCoal.a.valid := coalReq.valid
+  tlCoal.a.bits := coalReq.bits.toTLA(edgeCoal)
 
   coalescer.io.coalReq.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
-  // tlCoal.d.ready := true.B // this should be connected to uncoalescer's ready, done below.
+  // tlCoal.d.ready should be connected to uncoalescer's ready, done below.
   tlCoal.e.valid := false.B
 
   require(
@@ -816,7 +853,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     s"tlCoal param `sourceBits` (${tlCoal.params.sourceBits}) mismatches coalescer constant"
       + s" (${log2Ceil(config.numNewSrcIds)})"
   )
-
   require(
     tlCoal.params.dataBits == (1 << config.dataBusWidth) * 8,
     s"tlCoal param `dataBits` (${tlCoal.params.dataBits}) mismatches coalescer constant"
@@ -926,7 +962,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
   // connect coalesced request that is newly generated and being recorded in
   // the uncoalescer
-  uncoalescer.io.coalReq <> coalescer.io.coalReq
+  uncoalescer.io.coalReq <> coalReq
   // We can't simply use coalescer.io.coalReq.valid here.
   // coalescer.io.coalReq.valid tells us when there exists a valid coalescing
   // combination, but not when we can actually fire that to downstream, because
@@ -936,9 +972,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // NOTE(hansung): this feels slightly awkward.  Maybe doing sourcegen inside
   // the coalescer so that it gives the final call is better, but that may be
   // too much IO for the coalescer.
-  uncoalescer.io.coalReq.valid := coalReqValid
   uncoalescer.io.invalidate := coalescer.io.invalidate
-  val reqQueueHeads = reqQueues.io.queue.deq.map(_.bits)
   uncoalescer.io.windowElts := reqQueues.io.elts
   // connect coalesced response going into the uncoalescer, ready to be
   // uncoalesced
@@ -1855,7 +1889,7 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffffff),
+        address = AddressSet(0x0000, 0xffffff),
         beatBytes = (1 << config.dataBusWidth)
       )
     )
@@ -1899,7 +1933,7 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffffff),
+        address = AddressSet(0x0000, 0xffffff),
         beatBytes = (1 << config.dataBusWidth)
       )
     )
@@ -1953,7 +1987,7 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
       // edges globally, by way of Diplomacy communicating the TL slave
       // parameters to the upstream nodes.
       new TLRAM(
-        address = AddressSet(0x0000, 0xffffffff),
+        address = AddressSet(0x0000, 0xffffff),
         beatBytes = (1 << defaultConfig.dataBusWidth)
       )
     )
