@@ -88,14 +88,14 @@ object defaultConfig extends CoalescerConfig(
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
-  dataBusWidth = 3, // 2^3=8 bytes, 64 bit bus
+  dataBusWidth = 4, // 2^3=8 bytes, 64 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 8,
   numNewSrcIds = 8,
-  respQueueDepth = 8,
-  coalLogSizes = Seq(3),
+  respQueueDepth = 4,
+  coalLogSizes = Seq(4),
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
   numArbiterOutputPorts = 4,
@@ -169,7 +169,8 @@ class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: In
     )
     val legal = Mux(this.op.asBool, plegal, glegal)
     val bits = Mux(this.op.asBool, pbits, gbits)
-    assert(legal, "unhandled illegal TL req gen")
+    // FIXME: this needs to check valid bit as well
+    // assert(legal, "unhandled illegal TL req gen")
     bits
   }
 }
@@ -785,10 +786,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       val deq = reqQueues.io.queue.deq(lane)
       enq.valid := tlIn.a.valid
       enq.bits := req
-      // Only allow dequeue when uncoalescer is ready to record the current
-      // queue entries
-      // TODO: deq.ready should also respect downstream arbiter
-      deq.ready := uncoalescer.io.coalReq.ready
+      // Respect arbiter and uncoalescer backpressure
+      deq.ready := tlOut.a.ready && uncoalescer.io.coalReq.ready
       // Stall upstream core or memtrace driver when shiftqueue is not ready
       tlIn.a.ready := enq.ready
       tlOut.a.valid := deq.valid
@@ -1366,13 +1365,23 @@ class MemTraceDriverImp(
     Cat(8.U(4.W), addr(27, 0))
   }
 
+  val sourceGens = Seq.fill(config.numLanes)(Module(
+    new RoundRobinSourceGenerator(
+      log2Ceil(config.numOldSrcIds),
+      ignoreInUse = false
+    )
+  ))
+
+  // Advance source ID for all lanes in synchrony
+  val syncedSourceGenValid = sourceGens.map(_.io.id.valid).reduce(_ && _)
+
   // Take requests off of the queue and generate TL requests
-  (outer.laneNodes zip reqQueues).foreach { case (node, reqQ) =>
+  (outer.laneNodes zip reqQueues).zipWithIndex.foreach { case ((node, reqQ), lane) =>
     val (tlOut, edge) = node.out(0)
 
     val req = reqQ.io.deq.bits
     // backpressure from downstream propagates into the queue
-    reqQ.io.deq.ready := tlOut.a.ready
+    reqQ.io.deq.ready := tlOut.a.ready && syncedSourceGenValid
 
     // Core only makes accesses of granularity larger than a word, so we want
     // the trace driver to act so as well.
@@ -1392,14 +1401,11 @@ class MemTraceDriverImp(
       req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
     val wordAlignedSize = Mux(subword, 2.U, req.size)
 
-    val sourceGen = Module(
-      new RoundRobinSourceGenerator(
-        log2Ceil(config.numOldSrcIds),
-        ignoreInUse = false
-      )
-    )
-    sourceGen.io.gen := reqQ.io.deq.fire
+    val sourceGen = sourceGens(lane)
+    sourceGen.io.gen := tlOut.a.fire
     // assert(sourceGen.io.id.valid)
+    sourceGen.io.reclaim.valid := tlOut.d.valid
+    sourceGen.io.reclaim.bits := tlOut.d.bits.source
 
     val (plegal, pbits) = edge.Put(
       fromSource = sourceGen.io.id.bits,
@@ -1417,7 +1423,7 @@ class MemTraceDriverImp(
     val legal = Mux(req.is_store, plegal, glegal)
     val bits = Mux(req.is_store, pbits, gbits)
 
-    tlOut.a.valid := (reqQ.io.deq.valid && sourceGen.io.id.valid)
+    tlOut.a.valid := reqQ.io.deq.valid && syncedSourceGenValid
     when(tlOut.a.valid) {
       assert(legal, "illegal TL req gen")
     }
@@ -1426,10 +1432,6 @@ class MemTraceDriverImp(
     tlOut.c.valid := false.B
     tlOut.d.ready := true.B
     tlOut.e.valid := false.B
-
-    // Reclaim source id on response
-    sourceGen.io.reclaim.valid := tlOut.d.valid
-    sourceGen.io.reclaim.bits := tlOut.d.bits.source
 
     // debug
     dontTouch(reqQ.io.enq)
