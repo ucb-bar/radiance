@@ -591,11 +591,12 @@ class MultiCoalescer(
   val minCoverage =
     1.max(1 << ((config.maxCoalLogSize - config.wordSizeWidth) - 2))
 
-  when(normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
-    chosenSizeIdx := argMax(normalizedHits)
-    chosenValid := true.B
-    printf("coalescing success by coverage policy\n")
-  }.elsewhen(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
+  // when(normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
+  //   chosenSizeIdx := argMax(normalizedHits)
+  //   chosenValid := true.B
+  //   printf("coalescing success by coverage policy\n")
+  // }.else
+  when(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
     chosenSizeIdx := argMax(normalizedMatches)
     chosenValid := true.B
     printf("coalescing success by matches policy\n")
@@ -1431,6 +1432,8 @@ class MemTraceDriverImp(
     sourceGen.io.reclaim.bits := tlOut.d.bits.source
 
     // debug
+    dontTouch(reqQ.io.enq)
+    dontTouch(reqQ.io.deq)
     when(tlOut.a.valid) {
       TLPrintf(
         "MemTraceDriver",
