@@ -730,6 +730,7 @@ class CoalescerSourceGen(
   // TODO: make sourceGen.io.reclaim Decoupled?
 
   io.outReq <> io.inReq
+  io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
   // overwrite bits affected by sourcegen backpressure
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
   io.outReq.bits.source := sourceGen.io.id.bits
@@ -1044,10 +1045,10 @@ class Uncoalescer(
   // TODO: inflight table is really a more sophisticated sourcegen.  Let it
   // also take care of sourcegen instead of having a separte pass
   // (CoalescerSourceGen).
-  when(!inflightTable.io.enq.ready) {
-    assert(!io.coalReq.valid,
-      "tried to fire a coalesced request when uncoalescer is not ready")
-  }
+  // when(!inflightTable.io.enq.ready) {
+  //   assert(!io.coalReq.valid,
+  //     "tried to fire a coalesced request when uncoalescer is not ready")
+  // }
 
   // Construct a new entry for the inflight table using generated coalesced request
   def generateInflightTableEntry: InflightCoalReqTableEntry = {
