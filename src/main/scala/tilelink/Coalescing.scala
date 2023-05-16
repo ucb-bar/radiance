@@ -723,7 +723,7 @@ class CoalescerSourceGen(
   val sourceGen = Module(
     new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
   )
-  sourceGen.io.gen := io.inReq.fire // use up a source ID only when request is created
+  sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
   sourceGen.io.reclaim.valid := io.inResp.fire
   sourceGen.io.reclaim.bits := io.inResp.bits.source
   io.inResp.ready := true.B // should be always ready to reclaim old ID
