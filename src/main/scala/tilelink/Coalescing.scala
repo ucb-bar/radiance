@@ -184,7 +184,7 @@ case class NonCoalescedRequest(config: CoalescerConfig)
 case class CoalescedRequest(config: CoalescerConfig)
     extends Request(
       sourceWidth = log2Ceil(config.numNewSrcIds),
-      sizeWidth = log2Ceil(config.maxCoalLogSize),
+      sizeWidth = log2Ceil(config.maxCoalLogSize + 1),
       addressWidth = config.addressWidth,
       dataWidth = (8 * (1 << config.maxCoalLogSize))
     )
