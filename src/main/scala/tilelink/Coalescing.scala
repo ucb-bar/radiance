@@ -560,7 +560,7 @@ class MonoCoalescer(
 class MultiCoalescer(
     config: CoalescerConfig,
     queueT: CoalShiftQueue[NonCoalescedRequest],
-    coalReqT: Request,
+    coalReqT: CoalescedRequest,
 ) extends Module {
   val invalidateT = Valid(Vec(config.numLanes, UInt(config.queueDepth.W)))
   val io = IO(new Bundle {
@@ -801,7 +801,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       enq.valid := tlIn.a.valid
       enq.bits := req
       // Respect arbiter and uncoalescer backpressure
-      deq.ready := tlOut.a.ready && uncoalescer.io.coalReq.ready
+      // deq.ready := tlOut.a.ready && uncoalescer.io.coalReq.ready
+      deq.ready := tlOut.a.ready
       // Stall upstream core or memtrace driver when shiftqueue is not ready
       tlIn.a.ready := enq.ready
       tlOut.a.valid := deq.valid
@@ -849,6 +850,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   val coalSourceGen = Module(new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits))
   coalSourceGen.io.inReq <> coalescer.io.coalReq
   coalSourceGen.io.inResp <> tlCoal.d
+  // downstream backpressure on the coalesced edge
+  coalSourceGen.io.outReq.ready := tlCoal.a.ready
   // This is the final coalesced request.
   val coalReq = coalSourceGen.io.outReq
   dontTouch(coalReq)
@@ -856,7 +859,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   tlCoal.a.valid := coalReq.valid
   tlCoal.a.bits := coalReq.bits.toTLA(edgeCoal)
 
-  coalescer.io.coalReq.ready := tlCoal.a.ready
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   // tlCoal.d.ready should be connected to uncoalescer's ready, done below.
@@ -977,7 +979,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // Uncoalescer input
   //
   // connect coalesced request to be recorded in the uncoalescer table
-  uncoalescer.io.coalReq <> coalReq
+  uncoalescer.io.coalReq.valid := coalReq.valid
+  uncoalescer.io.coalReq.bits := coalReq.bits
   uncoalescer.io.invalidate := coalescer.io.invalidate
   uncoalescer.io.windowElts := reqQueues.io.elts
   // coalesced response to be used to look up the uncoalescer table
@@ -1018,7 +1021,8 @@ class Uncoalescer(
   val inflightTable = Module(new InflightCoalReqTable(config))
   val io = IO(new Bundle {
     // generated coalesced request, connected to the output of the coalescer.
-    val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
+    // val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
+    val coalReq = Input(Valid(coalReqT.cloneType))
     // invalidate signal coming out of coalescer.
     val invalidate = Input(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
     // coalescing window, connected to the contents of the request queues.
@@ -1034,10 +1038,16 @@ class Uncoalescer(
     )
   })
 
-  // If inflight table is full, we cannot accept new requests to record them.
-  // This might happen when we sent out many requests and exhausted all source
-  // IDs, but they haven't come back yet.
-  io.coalReq.ready := inflightTable.io.enq.ready
+  // Inflight table being full is equivalent to source ID being exhausted.
+  // Therefore, it should never be possible for inflight table to be full and
+  // coalescer to be firing a valid request at the same time.
+  // TODO: inflight table is really a more sophisticated sourcegen.  Let it
+  // also take care of sourcegen instead of having a separte pass
+  // (CoalescerSourceGen).
+  when(!inflightTable.io.enq.ready) {
+    assert(!io.coalReq.valid,
+      "tried to fire a coalesced request when uncoalescer is not ready")
+  }
 
   // Construct a new entry for the inflight table using generated coalesced request
   def generateInflightTableEntry: InflightCoalReqTableEntry = {
