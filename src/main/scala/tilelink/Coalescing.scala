@@ -94,7 +94,7 @@ object defaultConfig extends CoalescerConfig(
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 8,
   numNewSrcIds = 8,
-  respQueueDepth = 4,
+  respQueueDepth = 8,
   coalLogSizes = Seq(4),
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
@@ -241,9 +241,11 @@ class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
   })
-
   val head = RegInit(UInt(sourceWidth.W), 0.U)
   head := Mux(io.gen, head + 1.U, head)
+
+  // for debugging
+  val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
 
   val numSourceId = 1 << sourceWidth
   // true: in use, false: available
@@ -260,6 +262,18 @@ class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
   when(io.reclaim.valid) {
     occupancyTable(io.reclaim.bits).valid := false.B // mark freed
   }
+
+  when(io.gen && io.id.valid) {
+    when (!io.reclaim.valid) {
+      assert(outstanding < (1 << sourceWidth).U)
+      outstanding := outstanding + 1.U
+    }
+  }.elsewhen(io.reclaim.valid) {
+    assert(outstanding > 0.U)
+    outstanding := outstanding - 1.U
+  }
+
+  dontTouch(outstanding)
 }
 
 class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
@@ -710,7 +724,7 @@ class CoalescerSourceGen(
     new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
   )
   sourceGen.io.gen := io.inReq.fire // use up a source ID only when request is created
-  sourceGen.io.reclaim.valid := io.inResp.valid
+  sourceGen.io.reclaim.valid := io.inResp.fire
   sourceGen.io.reclaim.bits := io.inResp.bits.source
   io.inResp.ready := true.B // should be always ready to reclaim old ID
   // TODO: make sourceGen.io.reclaim Decoupled?
@@ -1114,7 +1128,7 @@ class Uncoalescer(
       // dontTouch(q.io.enq(respQueueCoalPortOffset))
 
       when(inflightTable.io.lookup.valid && foundReq.valid) {
-        ioEnq.valid := foundReq.valid
+        ioEnq.valid := io.coalResp.valid && foundReq.valid
         ioEnq.bits.source := foundReq.source
         val logSize = foundRow.sizeEnumT.enumToLogSize(foundReq.sizeEnum)
         ioEnq.bits.size := logSize
@@ -1404,7 +1418,7 @@ class MemTraceDriverImp(
     val sourceGen = sourceGens(lane)
     sourceGen.io.gen := tlOut.a.fire
     // assert(sourceGen.io.id.valid)
-    sourceGen.io.reclaim.valid := tlOut.d.valid
+    sourceGen.io.reclaim.valid := tlOut.d.fire
     sourceGen.io.reclaim.bits := tlOut.d.bits.source
 
     val (plegal, pbits) = edge.Put(
