@@ -88,7 +88,7 @@ object defaultConfig extends CoalescerConfig(
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
-  dataBusWidth = 4, // 2^3=8 bytes, 64 bit bus
+  dataBusWidth = 4, // 2^4=16 bytes, 128 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
