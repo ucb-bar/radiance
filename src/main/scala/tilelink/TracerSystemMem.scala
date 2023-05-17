@@ -29,7 +29,7 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
     println(
       s"============ MemTraceDriver instantiated [filename=${param.tracefilename}]"
     )
-    val upstream = p(CoalescerKey) match {
+    val coalescerNode = p(CoalescerKey) match {
       case Some(coalParam) => {
         val coal = LazyModule(new CoalescingUnit(coalParam))
         println(s"============ CoalescingUnit instantiated [numLanes=${coalParam.numLanes}]")
@@ -39,6 +39,16 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       }
       case None => tracer.node
     }
+    val upstream = p(CoalXbarKey) match {
+      case Some(xbarParam) =>{
+        val priorityXbar = LazyModule(new CoalescerTLPriortyXBar)
+        println(s"============ Using Priority XBar for Coalescer Requests ")
+        priorityXbar.node :=* coalescerNode
+        priorityXbar.node
+      }
+      case None => coalescerNode
+    }
+    
     sbus.fromPort(Some("gpu-tracer"))() :=* upstream
   }
 }

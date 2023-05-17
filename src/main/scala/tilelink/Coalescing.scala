@@ -13,10 +13,12 @@ import freechips.rocketchip.unittest._
 // TODO: find better place for these
 case class SIMTCoreParams(nLanes: Int = 4)
 case class MemtraceCoreParams(tracefilename: String = "undefined", traceHasSource: Boolean = false)
+case class CoalXbarParam()
 
 case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None /*default*/)
 case object MemtraceCoreKey extends Field[Option[MemtraceCoreParams]](None /*default*/)
 case object CoalescerKey extends Field[Option[CoalescerConfig]](None /*default*/)
+case object CoalXbarKey extends Field[Option[CoalXbarParam]](None /*default*/)
 
 trait InFlightTableSizeEnum extends ChiselEnum {
   val INVALID: Type
@@ -69,7 +71,7 @@ case class CoalescerConfig(
   numCoalReqs: Int,       // total number of coalesced requests we can generate in one cycle
   numArbiterOutputPorts: Int, // total of output ports the arbiter will arbitrate into.
                               // this has to match downstream cache's configuration
-  bankStrideInBytes: Int  // cache line strides across the different banks
+  bankStrideInBytes: Int,  // cache line strides across the different banks
 ) {
   // maximum coalesced size
   def maxCoalLogSize: Int = coalLogSizes.max
@@ -2042,6 +2044,7 @@ class TLRAMCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 ////////////
 
 // Lazy Module is needed to instantiate outgoing node
+// I think the following implementation of Coalescer CrossBar is not going to be useful anytime soon
 class CoalescerXbar(config: CoalescerConfig) (implicit p: Parameters) extends LazyModule {
     // Let SIMT's word size be 32, and read/write granularity be 256 
 
@@ -2181,5 +2184,25 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
     coalRespBundle.fromTLD(coalRespRRArbiter.io.out.bits)
     io.coalResp.bits  := coalRespBundle
 
+
+  }
+
+
+  //The current TLPrirotyXBar has a few workaround
+  //1. it doesn't support temporal coalescing (it doesn't allow drift)
+  //2. it's only a a dummy object for testing purpose, we need our own XBar (or Topology) for future L1
+  class CoalescerTLPriortyXBar (implicit p: Parameters) extends LazyModule {
+
+    val coalescerOutputNode = TLIdentityNode()
+    val outputXbar          = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
+    val node                = TLIdentityNode()
+
+    outputXbar.node  :=* TLBuffer(BufferParams.pipe, BufferParams.pipe) :=* coalescerOutputNode
+    node             :=* outputXbar.node
+
+    lazy val module = new Impl
+    class Impl extends LazyModuleImp(this) {
+      //Nonthing
+    }
 
   }
