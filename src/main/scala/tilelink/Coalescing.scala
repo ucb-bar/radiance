@@ -242,12 +242,15 @@ class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
+    val inflight = Output(Bool())
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
   head := Mux(io.gen, head + 1.U, head)
 
   // for debugging
+  // also for indicating if there is at least one inflight request that hasn't been reclaimed
   val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
+  io.inflight := outstanding > 0.U
 
   val numSourceId = 1 << sourceWidth
   // true: in use, false: available
@@ -1481,13 +1484,14 @@ class MemTraceDriverImp(
 
   // Give some slack time after trace EOF to the downstream system to make sure
   // we receive all (hopefully) outstanding responses back.
-  val finishCounter = RegInit(200.U(64.W))
+  val traceFinished = RegInit(false.B)
   when(sim.io.trace_read.finished) {
-    finishCounter := finishCounter - 1.U
+    traceFinished := true.B
   }
-  io.finished := (finishCounter === 0.U)
+  val allReqReclaimed = !(sourceGens.map(_.io.inflight).reduce(_ || _))
 
-  when(io.finished) {
+
+  when(traceFinished && allReqReclaimed) {
     assert(
       false.B,
       "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
