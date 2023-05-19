@@ -250,7 +250,7 @@ class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
   // for debugging
   // also for indicating if there is at least one inflight request that hasn't been reclaimed
   val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
-  io.inflight := outstanding > 0.U
+  io.inflight := (outstanding > 0.U) || io.gen
 
   val numSourceId = 1 << sourceWidth
   // true: in use, false: available
@@ -1488,10 +1488,12 @@ class MemTraceDriverImp(
   when(sim.io.trace_read.finished) {
     traceFinished := true.B
   }
+  //currently the .cc file ouptuts finished=true while it still need to issue one more request
+  val noValidReqs     = sim.io.trace_read.valid === 0.U     
   val allReqReclaimed = !(sourceGens.map(_.io.inflight).reduce(_ || _))
 
 
-  when(traceFinished && allReqReclaimed) {
+  when(traceFinished && allReqReclaimed && noValidReqs) {
     assert(
       false.B,
       "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
