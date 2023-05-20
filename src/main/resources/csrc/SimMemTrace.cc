@@ -72,6 +72,8 @@ void MemTraceReader::parse(const bool has_source) {
       error(fileline, "failed parsing address..size");
     }
     if (infile.get() != '\n') {
+      printf("Error: trailing characters at the end of the line\n");
+      printf("this could also occur if the last line is not an empty line");
       error(fileline, "trailing characters at the end of the line");
     }
 
