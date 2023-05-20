@@ -12,7 +12,10 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
   p(MemtraceCoreKey).map { param =>
     // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
     val simtParam = p(SIMTCoreKey).get
-    val config = defaultConfig.copy(numLanes = simtParam.nLanes)
+    val config = defaultConfig.copy(
+      numLanes = simtParam.nLanes, 
+      numOldSrcIds = simtParam.nSrcIds
+      )
     val numLanes = simtParam.nLanes
     val filename = param.tracefilename
     val tracer = LazyModule(
@@ -33,6 +36,7 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       case Some(coalParam) => {
         val coal = LazyModule(new CoalescingUnit(coalParam))
         println(s"============ CoalescingUnit instantiated [numLanes=${coalParam.numLanes}]")
+        println(s"============ numOldSrcId and numNewSrc are (${coalParam.numOldSrcIds},${coalParam.numNewSrcIds})")
         coal.cpuNode :=* coreSideLogger.node :=* tracer.node // N lanes
         memSideLogger.node :=* coal.aggregateNode            // N+1 lanes
         memSideLogger.node

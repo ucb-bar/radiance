@@ -11,7 +11,9 @@ import freechips.rocketchip.util.MultiPortQueue
 import freechips.rocketchip.unittest._
 
 // TODO: find better place for these
-case class SIMTCoreParams(nLanes: Int = 4)
+
+// Note: numNewSrcId is not a part of CoreParam, because the SIMT core should be agnostic to how inflight coalesced request can be genertated
+case class SIMTCoreParams(nLanes: Int = 4, nSrcIds: Int = 8)
 case class MemtraceCoreParams(tracefilename: String = "undefined", traceHasSource: Boolean = false)
 case class CoalXbarParam()
 
