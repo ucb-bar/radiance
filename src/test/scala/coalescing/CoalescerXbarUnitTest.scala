@@ -22,7 +22,6 @@ object coalArbTestConfig extends CoalescerConfig(
   dataBusWidth = 5,
   // watermark = 2,
   wordSizeInBytes = 4,
-  wordWidth = 2,
   numOldSrcIds = 4,
   numNewSrcIds = 4,
   respQueueDepth = 4,
