@@ -62,13 +62,15 @@ case class CoalescerConfig(
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size
                           // this has to be at least larger than word size for
                           // the coalescer to perform well
+  coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
+                          // each size is log(byteSize)
+                          // max value should match dataBusWidth as the largest-possible
+                          // single-beat coealsced size.
   // watermark = 2,       // minimum buffer occupancy to start coalescing
   wordSizeInBytes: Int,   // 32-bit system
   numOldSrcIds: Int,      // num of outstanding requests per lane, from processor
   numNewSrcIds: Int,      // num of outstanding coalesced requests
   respQueueDepth: Int,    // depth of the response fifo queues
-  coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
-                          // each size is log(byteSize)
   sizeEnum: InFlightTableSizeEnum,
   numCoalReqs: Int,       // total number of coalesced requests we can generate in one cycle
   numArbiterOutputPorts: Int, // total of output ports the arbiter will arbitrate into.
@@ -76,7 +78,16 @@ case class CoalescerConfig(
   bankStrideInBytes: Int,  // cache line strides across the different banks
 ) {
   // maximum coalesced size
-  def maxCoalLogSize: Int = coalLogSizes.max
+  def maxCoalLogSize: Int = {
+    require(coalLogSizes.max <= dataBusWidth,
+      "multi-beat coalesced reads/writes are currently not supported")
+    if (coalLogSizes.max < dataBusWidth) {
+      println("======== Warning: coalescer is coalescing to size " +
+        s"${coalLogSizes.max} which is narrower than data bus width " +
+        s"${dataBusWidth}.  This might indicate misconfiguration.")
+    }
+    coalLogSizes.max
+  }
   def wordSizeWidth: Int = {
     val w = log2Ceil(wordSizeInBytes)
     require(wordSizeInBytes == 1 << w,
@@ -92,14 +103,14 @@ object defaultConfig extends CoalescerConfig(
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
-  dataBusWidth = 4, // 2^4=16 bytes, 128 bit bus
+  dataBusWidth = 4, // if "4": 2^4=16 bytes, 128 bit bus
+  coalLogSizes = Seq(4),
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 8,
   numNewSrcIds = 8,
   respQueueDepth = 8,
-  coalLogSizes = Seq(4),
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
   numArbiterOutputPorts = 4,
@@ -762,10 +773,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     outer.cpuNode.in.head._1.params.addressBits == config.addressWidth,
     s"TL param addressBits (${outer.cpuNode.in.head._1.params.addressBits}) " +
       s"mismatch with config.addressWidth (${config.addressWidth})"
-  )
-  require(
-    config.maxCoalLogSize <= config.dataBusWidth,
-    "multi-beat coalesced reads/writes are currently not supported"
   )
 
   val oldSourceWidth = outer.cpuNode.in.head._1.params.sourceBits
