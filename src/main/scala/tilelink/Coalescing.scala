@@ -238,7 +238,7 @@ case class CoalescedResponse(config: CoalescerConfig)
 
 // If `ignoreInUse`, just keep giving out new IDs without checking if it is in
 // use.
-class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
+class SourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
     extends Module {
   val io = IO(new Bundle {
     val gen = Input(Bool())
@@ -258,11 +258,14 @@ class RoundRobinSourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
   // true: in use, false: available
   val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
   when(reset.asBool) {
-    (0 until numSourceId).foreach { i => occupancyTable(i).valid := false.B }
+    (0 until numSourceId).foreach { occupancyTable(_).valid := false.B }
   }
+  val frees = (0 until numSourceId).map(!occupancyTable(_).valid)
+  val lowestFree = PriorityEncoder(frees)
+  val lowestFreeRow = occupancyTable(lowestFree)
 
-  io.id.valid := (if (ignoreInUse) true.B else !occupancyTable(head).valid)
-  io.id.bits := head
+  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.valid)
+  io.id.bits := lowestFree
   when(io.gen && io.id.valid /* fire */ ) {
     occupancyTable(io.id.bits).valid := true.B // mark in use
   }
@@ -728,7 +731,7 @@ class CoalescerSourceGen(
     val inResp = Flipped(Decoupled(respT.cloneType))
   })
   val sourceGen = Module(
-    new RoundRobinSourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
+    new SourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
   )
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
   sourceGen.io.reclaim.valid := io.inResp.fire
@@ -1398,7 +1401,7 @@ class MemTraceDriverImp(
   }
 
   val sourceGens = Seq.fill(config.numLanes)(Module(
-    new RoundRobinSourceGenerator(
+    new SourceGenerator(
       log2Ceil(config.numOldSrcIds),
       ignoreInUse = false
     )
