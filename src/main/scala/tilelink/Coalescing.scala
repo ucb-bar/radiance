@@ -1036,7 +1036,7 @@ class Uncoalescer(
     nonCoalReqT: NonCoalescedRequest,
     coalReqT: CoalescedRequest,
 ) extends Module {
-  val inflightTable = Module(new InflightCoalReqTable(config))
+  val inflightTable = Module(new InFlightTable(config))
   val io = IO(new Bundle {
     // generated coalesced request, connected to the output of the coalescer.
     // val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
@@ -1068,7 +1068,7 @@ class Uncoalescer(
   // }
 
   // Construct a new entry for the inflight table using generated coalesced request
-  def generateInflightTableEntry: InflightCoalReqTableEntry = {
+  def generateInflightTableEntry: InFlightTableEntry = {
     val newEntry = Wire(inflightTable.entryT)
     newEntry.source := io.coalReq.bits.source
     // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
@@ -1177,14 +1177,14 @@ class Uncoalescer(
 // from, what their original TileLink sourceId were, etc.  We use this info to
 // split the coalesced response back to individual per-lane responses with the
 // right metadata.
-class InflightCoalReqTable(config: CoalescerConfig) extends Module {
-  val offsetBits =
-    config.maxCoalLogSize - config.wordSizeWidth // assumes word offset
-  val entryT = new InflightCoalReqTableEntry(
+class InFlightTable(config: CoalescerConfig) extends Module {
+  val offsetBits = config.maxCoalLogSize - config.wordSizeWidth // assumes word offset
+  val entryT = new InFlightTableEntry(
     config.numLanes,
     config.queueDepth,
     log2Ceil(config.numOldSrcIds),
-    config.maxCoalLogSize,
+    log2Ceil(config.numNewSrcIds),
+    config.maxCoalLogSize, // FIXME: offsetBits?
     config.sizeEnum
   )
 
@@ -1254,18 +1254,18 @@ class InflightCoalReqTable(config: CoalescerConfig) extends Module {
   dontTouch(io.lookup)
 }
 
-class InflightCoalReqTableEntry(
+class InFlightTableEntry(
     val numLanes: Int,
     // Maximum number of requests from a single lane that can get coalesced into a single request
     val numPerLaneReqs: Int,
-    val sourceWidth: Int,
+    val oldSourceWidth: Int,
+    val newSourceWidth: Int,
     val offsetBits: Int,
     val sizeEnumT: InFlightTableSizeEnum
 ) extends Bundle {
   class PerCoreReq extends Bundle {
     val valid = Bool() // FIXME: delete this
-    // FIXME: oldId and newId shares the same width
-    val source = UInt(sourceWidth.W)
+    val source = UInt(oldSourceWidth.W)
     val offset = UInt(offsetBits.W)
     val sizeEnum = sizeEnumT()
   }
@@ -1274,7 +1274,7 @@ class InflightCoalReqTableEntry(
   }
   // sourceId of the coalesced response that just came back.  This will be the
   // key that queries the table.
-  val source = UInt(sourceWidth.W)
+  val source = UInt(newSourceWidth.W)
   val lanes = Vec(numLanes, new PerLane)
 }
 
@@ -1297,8 +1297,8 @@ object TLUtils {
 }
 
 // `traceHasSource` is true if the input trace file has an additional source
-// ID column.  This is useful for using the output trace file genereated by
-// MemTraceLogger as the driver.
+// ID column.  This is useful for feeding back the output trace file genereated
+// by MemTraceLogger as the input to the driver.
 class MemTraceDriver(
     config: CoalescerConfig,
     filename: String,
@@ -1494,8 +1494,8 @@ class MemTraceDriverImp(
     dontTouch(tlOut.d)
   }
 
-  // Give some slack time after trace EOF to the downstream system to make sure
-  // we receive all (hopefully) outstanding responses back.
+  // Give some slack time after trace EOF to get some outstanding responses
+  // back.
   val traceFinished = RegInit(false.B)
   when(sim.io.trace_read.finished) {
     traceFinished := true.B
@@ -1503,7 +1503,6 @@ class MemTraceDriverImp(
   //currently the .cc file ouptuts finished=true while it still need to issue one more request
   val noValidReqs     = sim.io.trace_read.valid === 0.U     
   val allReqReclaimed = !(sourceGens.map(_.io.inflight).reduce(_ || _))
-
 
   when(traceFinished && allReqReclaimed && noValidReqs) {
     assert(
