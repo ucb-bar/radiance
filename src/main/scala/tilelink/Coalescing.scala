@@ -51,7 +51,7 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 //  numPerLaneReqs: Int, <-> config.DEPTH
 //  sourceWidth: Int, <-> log2ceil(config.NUM_OLD_IDS)
 //  sizeWidth: Int, <-> config.sizeEnum.width
-//  coalDataWidth: Int, <-> (1 << config.MAX_SIZE)
+//  maxCoalLogSize: Int, <-> (1 << config.MAX_SIZE)
 //  numInflightCoalRequests: Int <-> config.NUM_NEW_IDS
 case class CoalescerConfig(
   enable: Boolean,        // globally enable or disable coalescing
@@ -759,6 +759,9 @@ class CoalescerSourceGen(
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     extends LazyModuleImp(outer) {
+  println(s"========== CoalescingUnit: aggregateNode out width: " +
+    s"${outer.aggregateNode.out.head._1.params.dataBits}")
+
   require(
     outer.cpuNode.in.length == config.numLanes,
     s"number of incoming edges (${outer.cpuNode.in.length}) is not the same as " +
@@ -1125,7 +1128,7 @@ class Uncoalescer(
     val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
       // FIXME: whether to take the offset from MSB or LSB depends on
-      // endianness.  Right now we're assuming little endian
+      // endianness.  Confirm this is working
       c := data(32 * (o + 1) - 1, 32 * o)
       // If taking from MSB:
       // c := (data >> (dataWidth - (o + 1) * 32)) & sizeMask
