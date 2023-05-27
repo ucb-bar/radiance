@@ -1000,7 +1000,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // Uncoalescer input
   //
   // connect coalesced request to be recorded in the uncoalescer table
-  uncoalescer.io.coalReq.valid := coalReq.valid
+  // Only record to inflight table when fire; otherwise a_valid might be up for
+  // multiple cycles waiting for a_ready, writing bogus data to the row
+  // FIXME: awkward; make uncoalescer.io.coalReq decoupled
+  uncoalescer.io.coalReq.valid := coalReq.fire
   uncoalescer.io.coalReq.bits := coalReq.bits
   uncoalescer.io.invalidate := coalescer.io.invalidate
   uncoalescer.io.windowElts := reqQueues.io.elts
@@ -1095,7 +1098,7 @@ class Uncoalescer(
           }
       }
     assert(
-      !((io.coalReq.valid === true.B) && (io.coalResp.valid === true.B) &&
+      !((io.coalReq.fire === true.B) && (io.coalResp.fire === true.B) &&
         (newEntry.source === io.coalResp.bits.source)),
       "inflight table: enqueueing and looking up the same srcId at the same cycle is not handled"
     )
@@ -1249,6 +1252,12 @@ class InFlightTable(config: CoalescerConfig) extends Module {
   // Lookup logic
   io.lookup.valid := table(io.lookupSourceId).valid
   io.lookup.bits := table(io.lookupSourceId).bits
+  // under normal circumstances, every lookup to the table should succeed
+  // as long as the request gets recorded earlier than the response
+  when(io.lookup.ready) {
+    assert(table(io.lookupSourceId).valid === true.B,
+      "table lookup with a valid sourceId failed")
+  }
   // Dequeue as soon as lookup succeeds
   when(io.lookup.fire) {
     table(io.lookupSourceId).valid := false.B
