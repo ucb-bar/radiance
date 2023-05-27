@@ -790,7 +790,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   reqQueues.io.coalescable := coalescer.io.coalescable
   reqQueues.io.invalidate := coalescer.io.invalidate
 
-  val uncoalescer = Module(new Uncoalescer(config, nonCoalReqT, coalReqT))
+  val inflightTable = Module(new InFlightTable(config, nonCoalReqT, coalReqT))
+  val uncoalescer = Module(new Uncoalescer(config, inflightTable.entryT))
 
   // ===========================================================================
   // Request flow
@@ -871,14 +872,22 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   val coalSourceGen = Module(new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits))
   coalSourceGen.io.inReq <> coalescer.io.coalReq
   coalSourceGen.io.inResp <> tlCoal.d
-  // downstream backpressure on the coalesced edge
-  coalSourceGen.io.outReq.ready := tlCoal.a.ready
-  // This is the final coalesced request.
-  val coalReq = coalSourceGen.io.outReq
-  dontTouch(coalReq)
 
+  // InflightTable IO
+  //
+  // Connect coalesced request to be recorded in the uncoalescer table.
+  inflightTable.io.inCoalReq <> coalSourceGen.io.outReq
+  inflightTable.io.invalidate := coalescer.io.invalidate
+  inflightTable.io.windowElts := reqQueues.io.elts
+
+  // This is the final coalesced request.
+  val coalReq = inflightTable.io.outCoalReq
+  // downstream backpressure on the coalesced edge
+  // TODO: custom <>?
+  inflightTable.io.outCoalReq.ready := tlCoal.a.ready
   tlCoal.a.valid := coalReq.valid
   tlCoal.a.bits := coalReq.bits.toTLA(edgeCoal)
+  dontTouch(coalReq)
 
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
@@ -997,22 +1006,17 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     dontTouch(tlOut.d)
   }
 
-  // Uncoalescer input
+  // Uncoalescer IO
   //
-  // connect coalesced request to be recorded in the uncoalescer table
-  // Only record to inflight table when fire; otherwise a_valid might be up for
-  // multiple cycles waiting for a_ready, writing bogus data to the row
-  // FIXME: awkward; make uncoalescer.io.coalReq decoupled
-  uncoalescer.io.coalReq.valid := coalReq.fire
-  uncoalescer.io.coalReq.bits := coalReq.bits
-  uncoalescer.io.invalidate := coalescer.io.invalidate
-  uncoalescer.io.windowElts := reqQueues.io.elts
-  // coalesced response to be used to look up the uncoalescer table
+  // Connect coalesced response
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
   uncoalescer.io.coalResp.bits.fromTLD(tlCoal.d.bits)
+  // Connect lookup result from InflightTable
+  uncoalescer.io.inflightLookup <> inflightTable.io.lookup
+  // InflightTable IO: Look up the table with incoming coalesced responses
+  // FIXME: this should be done inside uncoalescer
+  inflightTable.io.lookupSourceId := tlCoal.d.bits.source
 
-  // Uncoalescer output
-  //
   // Connect uncoalescer results back into response queue
   (respQueues zip uncoalescer.io.respQueueIO).foreach { case (q, uncoalEnqs) =>
     require(q.io.enq.length == config.queueDepth + respQueueUncoalPortOffset,
@@ -1039,80 +1043,19 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
 class Uncoalescer(
     config: CoalescerConfig,
-    nonCoalReqT: NonCoalescedRequest,
-    coalReqT: CoalescedRequest,
+    inflightEntryT: InFlightTableEntry
 ) extends Module {
-  val inflightTable = Module(new InFlightTable(config))
   val io = IO(new Bundle {
-    // generated coalesced request, connected to the output of the coalescer.
-    // val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
-    val coalReq = Input(Valid(coalReqT.cloneType))
-    // invalidate signal coming out of coalescer.
-    val invalidate = Input(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
-    // coalescing window, connected to the contents of the request queues.
-    // Uncoalescer looks at the queue entries that got coalesced into `coalReq`
-    // in order to record which lanes this coalReq originally came from.
-    // We only care about window.elts because the coalescer would have made
-    // sure it only looked at the valid entries.
-    // TODO: duplicate type construction
-    val windowElts = Input(Vec(config.numLanes, Vec(config.queueDepth, nonCoalReqT)))
+    val inflightLookup = Flipped(Decoupled(inflightEntryT))
     val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
     val respQueueIO = Vec(config.numLanes,
       Vec(config.queueDepth, Decoupled(new NonCoalescedResponse(config)))
     )
   })
 
-  // Inflight table being full is equivalent to source ID being exhausted.
-  // Therefore, it should never be possible for inflight table to be full and
-  // coalescer to be firing a valid request at the same time.
-  // TODO: inflight table is really a more sophisticated sourcegen.  Let it
-  // also take care of sourcegen instead of having a separte pass
-  // (CoalescerSourceGen).
-  // when(!inflightTable.io.enq.ready) {
-  //   assert(!io.coalReq.valid,
-  //     "tried to fire a coalesced request when uncoalescer is not ready")
-  // }
-
-  // Construct a new entry for the inflight table using generated coalesced request
-  def generateInflightTableEntry: InFlightTableEntry = {
-    val newEntry = Wire(inflightTable.entryT)
-    newEntry.source := io.coalReq.bits.source
-    // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
-    // coalescer to every (numLanes * queueDepth) entry in the inflight table.
-    (newEntry.lanes zip io.invalidate.bits).zipWithIndex
-      .foreach { case ((laneEntry, laneInv), lane) =>
-        (laneEntry.reqs zip laneInv.asBools).zipWithIndex
-          .foreach { case ((reqEntry, inv), i) =>
-            val req = io.windowElts(lane)(i)
-            when((io.invalidate.valid && inv)) {
-              printf(
-                s"coalescer: reqQueue($lane)($i) got invalidated (source=%d)\n",
-                req.source
-              )
-            }
-            reqEntry.valid := (io.invalidate.valid && inv)
-            reqEntry.source := req.source
-            reqEntry.offset := ((req.address % (1 << config.maxCoalLogSize).U) >> config.wordSizeWidth)
-            reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(req.size)
-            // TODO: load/store op
-          }
-      }
-    assert(
-      !((io.coalReq.fire === true.B) && (io.coalResp.fire === true.B) &&
-        (newEntry.source === io.coalResp.bits.source)),
-      "inflight table: enqueueing and looking up the same srcId at the same cycle is not handled"
-    )
-    dontTouch(newEntry)
-
-    newEntry
-  }
-  inflightTable.io.enq.valid := io.coalReq.valid
-  inflightTable.io.enq.bits := generateInflightTableEntry
-
-  // Look up the table with incoming coalesced responses
-  inflightTable.io.lookup.ready := io.coalResp.valid
-  inflightTable.io.lookupSourceId := io.coalResp.bits.source
   io.coalResp.ready := true.B // FIXME, see sw model implementation
+  // Lookup table whenever coalesced response is valid
+  io.inflightLookup.ready := io.coalResp.valid
 
   // Un-coalescing logic
   //
@@ -1141,7 +1084,7 @@ class Uncoalescer(
 
   // Un-coalesce responses back to individual lanes
   // Connect uncoalesced results back into each lane's response queue
-  val foundRow = inflightTable.io.lookup.bits
+  val foundRow = io.inflightLookup.bits
   (foundRow.lanes zip io.respQueueIO).zipWithIndex.foreach { case ((foundLane, ioEnqs), lane) =>
     foundLane.reqs.zipWithIndex.foreach { case (foundReq, depth) =>
       val ioEnq = ioEnqs(depth)
@@ -1161,7 +1104,7 @@ class Uncoalescer(
       // }
       // dontTouch(q.io.enq(respQueueCoalPortOffset))
 
-      when(inflightTable.io.lookup.valid && foundReq.valid) {
+      when(io.inflightLookup.valid && foundReq.valid) {
         ioEnq.valid := io.coalResp.valid && foundReq.valid
         ioEnq.bits.source := foundReq.source
         val logSize = foundRow.sizeEnumT.enumToLogSize(foundReq.sizeEnum)
@@ -1179,11 +1122,15 @@ class Uncoalescer(
 }
 
 // InflightCoalReqTable is a table structure that records
-// for each unanswered coalesced request which lane the request originated
+// for each unanswered coalesced request which lanes the request originated
 // from, what their original TileLink sourceId were, etc.  We use this info to
 // split the coalesced response back to individual per-lane responses with the
 // right metadata.
-class InFlightTable(config: CoalescerConfig) extends Module {
+class InFlightTable(
+    config: CoalescerConfig,
+    nonCoalReqT: NonCoalescedRequest,
+    coalReqT: CoalescedRequest,
+) extends Module {
   val offsetBits = config.maxCoalLogSize - config.wordSizeWidth // assumes word offset
   val entryT = new InFlightTableEntry(
     config.numLanes,
@@ -1202,7 +1149,26 @@ class InFlightTable(config: CoalescerConfig) extends Module {
   println(s"=========== table sizeEnumBits: ${entryT.sizeEnumT.getWidth}")
 
   val io = IO(new Bundle {
-    val enq = Flipped(Decoupled(entryT))
+    // Enqueue IO
+    //
+    // generated coalesced request, connected to the output of the coalescer.
+    // val coalReq = Flipped(DecoupledIO(coalReqT.cloneType))
+    // Valid instead of Flipped(Decoupled), because we have to worry about setting
+    // the ready bit right, which is better done from CoalSourceGen.
+    val inCoalReq = Flipped(Decoupled(coalReqT))
+    // invalidate signal coming out of coalescer.  Needed to generate new entry
+    // for the table.
+    val invalidate = Input(Valid(Vec(config.numLanes, UInt(config.queueDepth.W))))
+    // coalescing window, connected to the contents of the request queues.
+    // Need this to generate new entry for the table.
+    // TODO: duplicate type construction
+    val windowElts = Input(Vec(config.numLanes, Vec(config.queueDepth, nonCoalReqT)))
+    // InflightTable also handles sourceID allocation. This is the final
+    // coalesced request that goes to TileLink with a valid sourceId attached.
+    val outCoalReq = Decoupled(coalReqT)
+
+    // Lookup outputs
+    //
     // TODO: return actual stuff
     val lookup = Decoupled(entryT)
     // TODO: put this inside decoupledIO
@@ -1236,17 +1202,53 @@ class InFlightTable(config: CoalescerConfig) extends Module {
   dontTouch(full)
 
   // Enqueue logic
-  io.enq.ready := !full
-  val enqFire = io.enq.ready && io.enq.valid
+  //
+  // Construct a new entry for the inflight table using the coalesced request
+  def generateInflightTableEntry: InFlightTableEntry = {
+    val newEntry = Wire(entryT)
+    newEntry.source := io.inCoalReq.bits.source
+    // Do a 2-D copy from every (numLanes * queueDepth) invalidate output of the
+    // coalescer to every (numLanes * queueDepth) entry in the inflight table.
+    (newEntry.lanes zip io.invalidate.bits).zipWithIndex
+      .foreach { case ((laneEntry, laneInv), lane) =>
+        (laneEntry.reqs zip laneInv.asBools).zipWithIndex
+          .foreach { case ((reqEntry, inv), i) =>
+            val req = io.windowElts(lane)(i)
+            when((io.invalidate.valid && inv)) {
+              printf(
+                s"coalescer: reqQueue($lane)($i) got invalidated (source=%d)\n",
+                req.source
+              )
+            }
+            reqEntry.valid := (io.invalidate.valid && inv)
+            reqEntry.source := req.source
+            reqEntry.offset := ((req.address % (1 << config.maxCoalLogSize).U) >> config.wordSizeWidth)
+            reqEntry.sizeEnum := config.sizeEnum.logSizeToEnum(req.size)
+            // TODO: load/store op
+          }
+      }
+    dontTouch(newEntry)
+
+    newEntry
+  }
+
+  io.outCoalReq <> io.inCoalReq // FIXME: do sourceId allocation
+
+  val enqReady = !full
+  // Make sure to respect downstream ready here as well; otherwise inCoalReq.valid
+  // might be up for multiple cycles waiting for outCoalReq.ready, writing bogus
+  // data to the row
+  val enqFire = enqReady && io.inCoalReq.valid && io.outCoalReq.ready
+  val enqSource = io.inCoalReq.bits.source
   when(enqFire) {
     // TODO: handle enqueueing and looking up the same entry in the same cycle?
-    val entryToWrite = table(io.enq.bits.source)
+    val entryToWrite = table(enqSource)
     assert(
       !entryToWrite.valid,
       "tried to enqueue to an already occupied entry"
     )
     entryToWrite.valid := true.B
-    entryToWrite.bits := io.enq.bits
+    entryToWrite.bits := generateInflightTableEntry
   }
 
   // Lookup logic
@@ -1262,6 +1264,11 @@ class InFlightTable(config: CoalescerConfig) extends Module {
   when(io.lookup.fire) {
     table(io.lookupSourceId).valid := false.B
   }
+  assert(
+    !((enqFire === true.B) && (io.lookup.fire === true.B) &&
+      (enqSource === io.lookupSourceId)),
+    "inflight table: enqueueing and looking up the same srcId at the same cycle is not handled"
+  )
 
   dontTouch(io.lookup)
 }
