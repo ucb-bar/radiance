@@ -811,11 +811,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       req.isStore := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
       req.address := tlIn.a.bits.address
       req.size := tlIn.a.bits.size
-      // FIXME: req.data is still containing TL-aligned data.  This is fine if
-      // we're simply passing through this data out the other end, but not if
-      // the outgoing TL edge (tlOut) has different data width from the incoming
-      // edge (tlIn).  Possible TODO to only store the relevant portion of the
-      // data, at the cost of re-aligning at the outgoing end.
       req.mask := tlIn.a.bits.mask
 
       val enq = reqQueues.io.queue.enq(lane)
@@ -1090,12 +1085,13 @@ class Uncoalescer(
       val ioEnq = ioEnqs(depth)
 
       // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
-      // cache.  This should ideally not happen though.
+      // cache.  This should ideally not happen though (and hasn't happened yet
+      // in testing.)
       assert(
         ioEnq.ready,
         s"respQueue: enq port for ${depth}-th uncoalesced response is blocked for lane ${lane}"
       )
-      // TODO: spatial-only coalescing: only looking at 0th srcId entry
+      // spatial-only coalescing: only looking at 0th srcId entry
       ioEnq.valid := false.B
       ioEnq.bits := DontCare
       // debug
@@ -1241,7 +1237,6 @@ class InFlightTable(
   val enqFire = enqReady && io.inCoalReq.valid && io.outCoalReq.ready
   val enqSource = io.inCoalReq.bits.source
   when(enqFire) {
-    // TODO: handle enqueueing and looking up the same entry in the same cycle?
     val entryToWrite = table(enqSource)
     assert(
       !entryToWrite.valid,
@@ -1359,7 +1354,7 @@ trait HasTraceLine {
 class TraceLine extends Bundle with HasTraceLine {
   val valid = Bool()
   val source = UInt(32.W)
-  val address = UInt(64.W) // FIXME: in Verilog this is the same as data width
+  val address = UInt(64.W)
   val is_store = Bool()
   val size = UInt(8.W) // this is log2(bytesize) as in TL A bundle
   val data = UInt(64.W)
@@ -2043,11 +2038,12 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
 
 // tracedriver --> coalescer --> tlram
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
-  // TODO: use parameters for numLanes
-  val numLanes = 4
+  val numLanes = p(SIMTCoreKey).get.nLanes
+  val config = defaultConfig.copy(numLanes = numLanes)
+
   val filename = "vecadd.core1.thread4.trace"
-  val coal = LazyModule(new CoalescingUnit(defaultConfig))
-  val driver = LazyModule(new MemTraceDriver(defaultConfig, filename))
+  val coal = LazyModule(new CoalescingUnit(config))
+  val driver = LazyModule(new MemTraceDriver(config, filename))
   val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
     LazyModule(
       // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
@@ -2055,7 +2051,7 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
       // parameters to the upstream nodes.
       new TLRAM(
         address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << defaultConfig.dataBusWidth)
+        beatBytes = (1 << config.dataBusWidth)
       )
     )
   )
