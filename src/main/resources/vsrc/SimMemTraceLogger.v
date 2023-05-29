@@ -6,7 +6,8 @@
 
 import "DPI-C" function int memtracelogger_init(
   input bit    is_response,
-  input string filename
+  input string filename,
+  input string filename_suffix
 );
 
 // Make sure to sync the parameters for:
@@ -29,7 +30,8 @@ import "DPI-C" function void memtracelogger_log
 
 module SimMemTraceLogger #(parameter
                            IS_RESPONSE = 0,
-                           FILENAME = "undefined",
+                           FILENAME_BASE = "undefined",
+                           FILENAME_SUFFIX = ".log",
                            NUM_LANES = 4) (
   input                                 clock,
   input                                 reset,
@@ -77,7 +79,7 @@ module SimMemTraceLogger #(parameter
 
   initial begin
     /* $value$plusargs("uartlog=%s", __uartlog); */
-    logger_handle = memtracelogger_init(IS_RESPONSE, FILENAME);
+    logger_handle = memtracelogger_init(IS_RESPONSE, FILENAME_BASE, FILENAME_SUFFIX);
   end
 
   always @(posedge clock) begin

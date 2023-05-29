@@ -2,6 +2,8 @@
 #include <memory>
 #include <fstream>
 
+extern std::string tracefilename;
+
 struct MemTraceLine {
   bool valid = false;
   long cycle = 0;
@@ -54,7 +56,8 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                int           *trace_read_size,
                                unsigned long *trace_read_data,
                                unsigned char *trace_read_finished);
-extern "C" int memtracelogger_init(int is_response, const char *filename);
+extern "C" int memtracelogger_init(int is_response, const char *filename,
+                                   const char *filename_suffix);
 extern "C" void memtracelogger_log(int handle,
                                    unsigned char trace_log_valid,
                                    unsigned long trace_log_cycle,

@@ -41,8 +41,10 @@ void MemTraceWriter::write_line_to_trace(const MemTraceLine line) {
 }
 
 // Returns the "handle" ID for this particular logger instance.
-extern "C" int memtracelogger_init(int is_response, const char *filename) {
+extern "C" int memtracelogger_init(int is_response, const char *filename,
+                                   const char *filename_suffix) {
 #ifndef NO_VPI
+  // If VPI option is given, override filename set from Chisel/Verilog.
   s_vpi_vlog_info info;
   if (!vpi_get_vlog_info(&info)) {
     fprintf(stderr, "fatal: failed to get plusargs from VCS\n");
@@ -59,12 +61,15 @@ extern "C" int memtracelogger_init(int is_response, const char *filename) {
   }
 #endif
 
+  auto fullfilename = std::string{filename} + std::string{filename_suffix};
+
   int handle = loggers.size();
-  loggers.emplace_back(std::make_unique<MemTraceWriter>(is_response, filename));
+  loggers.emplace_back(
+      std::make_unique<MemTraceWriter>(is_response, fullfilename));
   loggers.back()->handle = handle;
 
   printf("memtracelogger_init: handle=%d, is_response=%d, filename=[%s]\n",
-         handle, is_response, filename);
+         handle, is_response, fullfilename.c_str());
 
   return handle;
 }

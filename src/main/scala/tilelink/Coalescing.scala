@@ -1628,11 +1628,11 @@ class MemTraceLogger(
 
     val simReq =
       if (reqEnable)
-        Some(Module(new SimMemTraceLogger(false, s"${filename}.${loggerName}.req", numLanes)))
+        Some(Module(new SimMemTraceLogger(false, s"${filename}", s".${loggerName}.req", numLanes)))
       else None
     val simResp =
       if (respEnable)
-        Some(Module(new SimMemTraceLogger(true, s"${filename}.${loggerName}.resp", numLanes)))
+        Some(Module(new SimMemTraceLogger(true, s"${filename}", s".${loggerName}.resp", numLanes)))
       else None
     if (simReq.isDefined) {
       simReq.get.io.clock := clock
@@ -1800,11 +1800,16 @@ class MemTraceLogger(
 // itself whether it's logging the request stream or the response stream.  This
 // is necessary because we have to generate slightly different trace format
 // depending on this, e.g. response trace will not contain an address column.
-class SimMemTraceLogger(isResponse: Boolean, filename: String, numLanes: Int)
-    extends BlackBox(
+class SimMemTraceLogger(
+    isResponse: Boolean,
+    filenameBase: String,   // usually the same as `filename` of SimMemTrace
+    filenameSuffix: String, // can be ".req", ".resp", .etc
+    numLanes: Int
+) extends BlackBox(
       Map(
         "IS_RESPONSE" -> (if (isResponse) 1 else 0),
-        "FILENAME" -> filename,
+        "FILENAME_BASE" -> filenameBase,
+        "FILENAME_SUFFIX" -> filenameSuffix,
         "NUM_LANES" -> numLanes
       )
     )

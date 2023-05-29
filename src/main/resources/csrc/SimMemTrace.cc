@@ -10,7 +10,10 @@
 #include <unistd.h>
 #include "SimMemTrace.h"
 
-// Global singleton instance
+// Single driver trace file used across the simulation.
+// Currently doesn't support multiple driver traces.
+std::string tracefilename{};
+// Global singleton reader instance
 static std::unique_ptr<MemTraceReader> reader;
 
 MemTraceReader::MemTraceReader(const std::string &filename)
@@ -72,8 +75,6 @@ void MemTraceReader::parse(const bool has_source) {
       error(fileline, "failed parsing address..size");
     }
     if (infile.get() != '\n') {
-      printf("Error: trailing characters at the end of the line\n");
-      printf("this could also occur if the last line is not an empty line");
       error(fileline, "trailing characters at the end of the line");
     }
 
@@ -156,6 +157,7 @@ MemTraceLine MemTraceReader::read_trace_at(const long cycle, const int lane_id,
 
 extern "C" void memtrace_init(const char *filename, bool has_source) {
 #ifndef NO_VPI
+  // If VPI option is given, override filename set from Chisel/Verilog.
   s_vpi_vlog_info info;
   if (!vpi_get_vlog_info(&info)) {
     fprintf(stderr, "fatal: failed to get plusargs from VCS\n");
@@ -166,6 +168,8 @@ extern "C" void memtrace_init(const char *filename, bool has_source) {
     char *input_arg = info.argv[i];
     if (strncmp(input_arg, TRACEFILENAME_PLUSARG,
                 strlen(TRACEFILENAME_PLUSARG)) == 0) {
+      printf(
+          "memtrace_init: +memtracefile given, overriding Verilog parameter\n");
       filename = input_arg + strlen(TRACEFILENAME_PLUSARG);
       break;
     }
@@ -173,6 +177,8 @@ extern "C" void memtrace_init(const char *filename, bool has_source) {
 #endif
 
   printf("memtrace_init: filename=[%s]\n", filename);
+
+  tracefilename = filename;
 
   reader = std::make_unique<MemTraceReader>(filename);
   // parse file upfront
