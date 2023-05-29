@@ -110,7 +110,7 @@ object defaultConfig extends CoalescerConfig(
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
   numOldSrcIds = 8,
   numNewSrcIds = 8,
-  respQueueDepth = 8,
+  respQueueDepth = 4,
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
   numArbiterOutputPorts = 4,
