@@ -4,6 +4,8 @@ import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.BaseSubsystem
 import org.chipsalliance.cde.config.Parameters
 
+// TODO: possibly move to somewhere closer to CoalescingUnit
+
 // The trait is attached to DigitalTop of Chipyard system, informing it indeed
 // has the ability to attach GPU tracer node onto the system bus
 trait CanHaveMemtraceCore { this: BaseSubsystem =>
