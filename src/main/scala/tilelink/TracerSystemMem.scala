@@ -55,6 +55,6 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       case None => coalescerNode
     }
     
-    sbus.fromPort(Some("gpu-tracer"))() :=* upstream
+    sbus.coupleFrom(s"gpu-tracer") { _ :=* upstream }
   }
 }
