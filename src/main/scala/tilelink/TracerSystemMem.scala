@@ -37,8 +37,6 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
     val coalescerNode = p(CoalescerKey) match {
       case Some(coalParam) => {
         val coal = LazyModule(new CoalescingUnit(coalParam))
-        println(s"============ CoalescingUnit instantiated [numLanes=${coalParam.numLanes}]")
-        println(s"============ numOldSrcId and numNewSrc are (${coalParam.numOldSrcIds},${coalParam.numNewSrcIds})")
         coal.cpuNode :=* coreSideLogger.node :=* tracer.node // N lanes
         memSideLogger.node :=* coal.aggregateNode            // N+1 lanes
         memSideLogger.node

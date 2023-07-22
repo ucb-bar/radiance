@@ -59,9 +59,10 @@ case class CoalescerConfig(
   queueDepth: Int,        // request window per lane
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
-  dataBusWidth: Int,      // memory-side downstream TileLink data bus size
-                          // this has to be at least larger than word size for
-                          // the coalescer to perform well
+  dataBusWidth: Int,      // memory-side downstream TileLink data bus size.
+                          // This data bus carries the data bits of coalesced request/responses,
+                          // and so it has to be at least wider than word size for the coalescer
+                          // to perform well
   coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
                           // max value should match dataBusWidth as the largest-possible
@@ -82,8 +83,8 @@ case class CoalescerConfig(
     require(coalLogSizes.max <= dataBusWidth,
       "multi-beat coalesced reads/writes are currently not supported")
     if (coalLogSizes.max < dataBusWidth) {
-      println("======== Warning: coalescer is coalescing to size " +
-        s"${coalLogSizes.max} which is narrower than data bus width " +
+      println("======== Warning: coalescer's max coalescing size is set to " +
+        s"${coalLogSizes.max}, which is narrower than data bus width " +
         s"${dataBusWidth}.  This might indicate misconfiguration.")
     }
     coalLogSizes.max
@@ -759,8 +760,15 @@ class CoalescerSourceGen(
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     extends LazyModuleImp(outer) {
-  println(s"========== CoalescingUnit: aggregateNode out width: " +
-    s"${outer.aggregateNode.out.head._1.params.dataBits}")
+  println(s"CoalescingUnit instantiated with config: {")
+  println(s"    enable: ${config.enable}")
+  println(s"    numLanes: ${config.numLanes}")
+  println(s"    coalLogSizes: ${config.coalLogSizes}")
+  println(s"    numOldSrcIds: ${config.numOldSrcIds}")
+  println(s"    numNewSrcIds: ${config.numNewSrcIds}")
+  println(s"    reqQueueDepth: ${config.queueDepth}")
+  println(s"    respQueueDepth: ${config.respQueueDepth}")
+  println(s"}")
 
   require(
     outer.cpuNode.in.length == config.numLanes,
@@ -1140,9 +1148,11 @@ class InFlightTable(
   val entries = config.numNewSrcIds
   val sourceWidth = log2Ceil(config.numOldSrcIds)
 
-  println(s"=========== table sourceWidth: ${sourceWidth}")
-  println(s"=========== table offsetBits: ${offsetBits}")
-  println(s"=========== table sizeEnumBits: ${entryT.sizeEnumT.getWidth}")
+  println(s"CoalescingUnit InFlightTable config: {")
+  println(s"    sourceWidth: ${sourceWidth}")
+  println(s"    offsetBits: ${offsetBits}")
+  println(s"    sizeEnumBits: ${entryT.sizeEnumT.getWidth}")
+  println(s"}")
 
   val io = IO(new Bundle {
     // Enqueue IO
@@ -1941,7 +1951,6 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // Should not instantiate any memtrace modules.
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
   val numLanes = p(SIMTCoreKey).get.nLanes
-  println(s"============ numLanes: ${numLanes}")
   val config = defaultConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new DummyDriver(config))
