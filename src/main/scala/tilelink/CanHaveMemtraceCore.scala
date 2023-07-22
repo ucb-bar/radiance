@@ -5,6 +5,7 @@ import freechips.rocketchip.subsystem.BaseSubsystem
 import org.chipsalliance.cde.config.Parameters
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
+// TODO: separate coalescer config from CanHaveMemtraceCore
 
 // The trait is attached to DigitalTop of Chipyard system, informing it indeed
 // has the ability to attach GPU tracer node onto the system bus
