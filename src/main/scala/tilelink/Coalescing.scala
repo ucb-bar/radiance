@@ -1069,7 +1069,7 @@ class Uncoalescer(
     val sizeInBits = ((1.U << logSize) << 3.U).asUInt
     assert(
       (dataWidth > 0).B && (dataWidth.U % sizeInBits === 0.U),
-      s"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
+      cf"coalesced data width ($dataWidth) not evenly divisible by core req size ($sizeInBits)"
     )
 
     val numChunks = dataWidth / 32
