@@ -1524,6 +1524,8 @@ class MemTraceDriverImp(
   when(sim.io.trace_read.finished) {
     traceFinished := true.B
   }
+  io.finished := traceFinished
+
   //currently the .cc file ouptuts finished=true while it still need to issue one more request
   val noValidReqs     = sim.io.trace_read.valid === 0.U     
   val allReqReclaimed = !(sourceGens.map(_.io.inflight).reduce(_ || _))
