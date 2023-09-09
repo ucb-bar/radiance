@@ -91,14 +91,22 @@ class VortexTile private(
   val imemNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       sourceId = IdRange(0, 1 << 8), // TODO magic number
-      name = s"Vortex Core I-Mem"
+      name = s"Vortex Core I-Mem",
+      requestFifo = true,
+      supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
     ))
   )))
 
   val dmemNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       sourceId = IdRange(0, 1 << 8), // TODO magic number
-      name = s"Vortex Core D-Mem"
+      name = s"Vortex Core D-Mem",
+      requestFifo = true,
+      supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+      supportsPutFull = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+      supportsPutPartial = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
     ))
   )))
 
