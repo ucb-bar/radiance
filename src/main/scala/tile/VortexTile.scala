@@ -4,6 +4,7 @@
 package tile
 
 import chisel3._
+import chisel3.util.RRArbiter
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -88,30 +89,30 @@ class VortexTile private(
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
-  val imemNode = TLClientNode(Seq(TLMasterPortParameters.v1(
+  val imemNodes = Seq.tabulate(1) { i => TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       sourceId = IdRange(0, 1 << 10), // TODO magic number
-      name = s"Vortex Core I-Mem",
+      name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
       requestFifo = true,
       supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
       supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
     ))
-  )))
+  )))}
 
-  val dmemNode = TLClientNode(Seq(TLMasterPortParameters.v1(
+  val dmemNodes = Seq.tabulate(4) { i => TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       sourceId = IdRange(0, 1 << 10), // TODO magic number
-      name = s"Vortex Core D-Mem",
+      name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
       requestFifo = true,
       supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
       supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
       supportsPutFull = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
       supportsPutPartial = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
     ))
-  )))
+  )))}
 
-  tlMasterXbar.node := imemNode
-  tlMasterXbar.node := dmemNode
+  imemNodes.foreach { tlMasterXbar.node := _ }
+  dmemNodes.foreach { tlMasterXbar.node := _ }
 
   val bus_error_unit = vortexParams.beuAddr map { a =>
     val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
@@ -200,13 +201,32 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
     s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
 
-  val (i_tl_out, _) = outer.imemNode.out.head
-  val (d_tl_out, _) = outer.dmemNode.out.head
+  (core.io.imem zip outer.imemNodes).foreach { case (coreMem, tileNode) =>
+    coreMem.d <> tileNode.out.head._1.d
+    coreMem.a <> tileNode.out.head._1.a
+  }
 
-  core.io.imem.a <> i_tl_out.a
-  core.io.imem.d <> i_tl_out.d
-  core.io.dmem.a <> d_tl_out.a
-  core.io.dmem.d <> d_tl_out.d
+  val arb = Module(new RRArbiter(core.io.dmem.head.d.bits.source.cloneType, 4))
+  val matchingSources = Wire(UInt(4.W))
+  val dmemDs = outer.dmemNodes.map(_.out.head._1.d)
+
+  (arb.io.in zip dmemDs).zipWithIndex.foreach { case ((arbIn, tileNode), i) =>
+    arbIn.valid := tileNode.valid
+    arbIn.bits := tileNode.bits.source
+    // assert(arbIn.ready, "source id arbiter should always be ready")
+  }
+  matchingSources := dmemDs.map(d => (d.bits.source === arb.io.out.bits) && arb.io.out.valid).asUInt
+  arb.io.out.ready := true.B
+
+  (core.io.dmem zip dmemDs).zipWithIndex.foreach { case ((coreMem, tileNode), i) =>
+    coreMem.d.bits := tileNode.bits
+    coreMem.d.valid := tileNode.valid && matchingSources(i)
+    tileNode.ready := coreMem.d.ready && matchingSources(i)
+  }
+
+  (core.io.dmem zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>
+    coreMem.a <> tileNode.out.head._1.a
+  }
 
   core.io.fpu := DontCare
 
