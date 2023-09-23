@@ -12,6 +12,36 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.scie._
 import tile.VortexTile
 
+class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
+  val clock = Input(Clock())
+  val reset = Input(Reset())
+  val hartid = Input(UInt(hartIdLen.W))
+  val reset_vector = Input(UInt(resetVectorLen.W))
+  val interrupts = Input(new CoreInterrupts())
+  
+  // conditionally instantiate ports depending on whether we want to use VX_cache or not
+  val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle { // TODO: magic number
+    val a = tile.imemNodes.head.out.head._1.a.cloneType
+    val d = Flipped(tile.imemNodes.head.out.head._1.d.cloneType)
+  })) else None
+  val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(4, new Bundle {
+    val a = tile.dmemNodes.head.out.head._1.a.cloneType
+    val d = Flipped(tile.dmemNodes.head.out.head._1.d.cloneType)
+  })) else None
+  val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
+    val a = tile.memNode.out.head._1.a.cloneType
+    val d = Flipped(tile.memNode.out.head._1.d.cloneType)
+  }) else None
+
+  val fpu = Flipped(new FPUCoreIO())
+  //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
+  //val trace = Output(new TraceBundle)
+  //val bpwatch = Output(Vec(coreParams.nBreakpoints, new BPWatch(coreParams.retireWidth)))
+  val cease = Output(Bool())
+  val wfi = Output(Bool())
+  val traceStall = Input(Bool())
+}
+
 class Vortex(tile: VortexTile)(implicit p: Parameters)
     extends BlackBox with HasBlackBoxResource {
   // addResource("/vsrc/vortex/hw/unit_tests/generic_queue/testbench.v")
@@ -33,17 +63,9 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // addResource("/vsrc/vortex/hw/syn/modelsim/vortex_tb.v")
   addResource("/vsrc/vortex/hw/rtl/VX_dispatch.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_issue.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_shared_mem.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_core_rsp_merge.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_tag_access.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_core_req_bank_sel.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_bank.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_data_access.sv")
+
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_define.vh")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_flush_ctrl.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_nc_bypass.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_miss_resrv.sv")
+  
   addResource("/vsrc/vortex/hw/rtl/VX_warp_sched.sv")
   // addResource("/vsrc/vortex/hw/rtl/Vortex.sv")
   addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_sat.sv")
@@ -72,7 +94,6 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // unused addResource("/vsrc/vortex/hw/rtl/libs/VX_mux.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_lzc.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_fifo_queue.sv")
-  // unused addResource("/vsrc/vortex/hw/rtl/libs/VX_scope.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_scan.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_find_first.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_multiplier.sv")
@@ -98,7 +119,7 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // unused addResource("/vsrc/vortex/hw/rtl/libs/VX_bypass_buffer.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_sp_ram.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_stream_demux.sv")
-  // addResource("/vsrc/vortex/hw/rtl/libs/VX_pending_size.sv")
+  addResource("/vsrc/vortex/hw/rtl/libs/VX_pending_size.sv")
   // unused addResource("/vsrc/vortex/hw/rtl/libs/VX_index_queue.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_serial_div.sv")
   addResource("/vsrc/vortex/hw/rtl/libs/VX_fair_arbiter.sv")
@@ -110,13 +131,11 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   addResource("/vsrc/vortex/hw/rtl/VX_execute.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_fetch.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_alu_unit.sv")
-  // unused addResource("/vsrc/vortex/hw/rtl/VX_mem_arb.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_platform.vh")
   addResource("/vsrc/vortex/hw/rtl/VX_commit.sv")
-  // unused addResource("/vsrc/vortex/hw/rtl/VX_smem_arb.sv")
+  
   addResource("/vsrc/vortex/hw/rtl/VX_pipeline.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_lsu_unit.sv")
-  // addResource("/vsrc/vortex/hw/rtl/VX_mem_unit.sv")
   addResource("/vsrc/vortex/hw/rtl/VX_csr_unit.sv")
   // addResource("/vsrc/vortex/hw/rtl/Vortex_axi.sv")
   // addResource("/vsrc/vortex/hw/rtl/fp_cores/VX_fp_div.sv")
@@ -196,30 +215,27 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // addResource("/vsrc/vortex/hw/rtl/afu/VX_avs_wrapper.sv")
   // addResource("/vsrc/vortex/hw/rtl/afu/VX_to_mem.sv")
   // addResource("/vsrc/vortex/sim/vlsim/vortex_afu_shim.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_pipeline_wrapper.sv")
-
+  if (tile.vortexParams.useVxCache) {
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_shared_mem.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_core_rsp_merge.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_tag_access.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_core_req_bank_sel.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_bank.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_data_access.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_flush_ctrl.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_nc_bypass.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_miss_resrv.sv")
+    addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
+    addResource("/vsrc/vortex/hw/rtl/VX_mem_arb.sv")
+    addResource("/vsrc/vortex/hw/rtl/VX_smem_arb.sv")
+    addResource("/vsrc/vortex/hw/rtl/VX_mem_unit.sv")
+    addResource("/vsrc/vortex/hw/rtl/VX_core.sv")
+    addResource("/vsrc/vortex/hw/rtl/VX_core_wrapper.sv")
+  } else {
+    addResource("/vsrc/vortex/hw/rtl/VX_pipeline_wrapper.sv")
+  }
 
   val nTotalRoCCCSRs = 0
-  val io = IO(new CoreBundle()(p) {
-    val clock = Input(Clock())
-    val reset = Input(Reset())
-    val hartid = Input(UInt(hartIdLen.W))
-    val reset_vector = Input(UInt(resetVectorLen.W))
-    val interrupts = Input(new CoreInterrupts())
-    val imem = Vec(1, new Bundle { // TODO: magic number
-      val a = tile.imemNodes.head.out.head._1.a.cloneType
-      val d = Flipped(tile.imemNodes.head.out.head._1.d.cloneType)
-    })
-    val dmem = Vec(4, new Bundle {
-      val a = tile.dmemNodes.head.out.head._1.a.cloneType
-      val d = Flipped(tile.dmemNodes.head.out.head._1.d.cloneType)
-    })
-    val fpu = Flipped(new FPUCoreIO())
-    //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
-    //val trace = Output(new TraceBundle)
-    //val bpwatch = Output(Vec(coreParams.nBreakpoints, new BPWatch(coreParams.retireWidth)))
-    val cease = Output(Bool())
-    val wfi = Output(Bool())
-    val traceStall = Input(Bool())
-  })
+  val coreBundle = new VortexBundle(tile)
+  val io = IO(coreBundle)
 }
