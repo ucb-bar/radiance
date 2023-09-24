@@ -111,18 +111,18 @@ class VortexTile private(
 
   val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << 10), // TODO magic number
+      sourceId = IdRange(0, 1 << 10), // TODO magic numbers
       name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
       requestFifo = true,
-      supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsPutFull = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsPutPartial = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-    ))
+      supportsProbe = TransferSizes(16, 16),
+      supportsGet = TransferSizes(16, 16),
+      supportsPutFull = TransferSizes(16, 16),
+      supportsPutPartial = TransferSizes(16, 16)
+    )),
   )))
   
   if (vortexParams.useVxCache) {
-    tlMasterXbar.node := memNode
+    tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
     imemNodes.foreach { tlMasterXbar.node := _ }
     dmemNodes.foreach { tlMasterXbar.node := _ }
@@ -222,6 +222,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
 
   if (outer.vortexParams.useVxCache) {
+    println(s"width of a channel data ${core.io.mem.get.a.bits.data.getWidth}")
+    println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
     core.io.mem.get.a <> outer.memNode.out.head._1.a
     core.io.mem.get.d <> outer.memNode.out.head._1.d
   }
