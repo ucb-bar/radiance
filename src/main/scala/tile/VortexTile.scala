@@ -24,6 +24,7 @@ case class RocketTileBoundaryBufferParams(force: Boolean = false)
 
 case class VortexTileParams(
     core: RocketCoreParams = RocketCoreParams(),
+    useVxCache: Boolean = false,
     icache: Option[ICacheParams] = None /* Some(ICacheParams()) */,
     dcache: Option[DCacheParams] = None /* Some(DCacheParams()) */,
     btb: Option[BTBParams] = None, // Some(BTBParams()),
@@ -36,10 +37,7 @@ case class VortexTileParams(
     boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
     ) extends InstantiableTileParams[VortexTile] {
   // require(icache.isDefined)
-  // require(dcache.isDefined)
-  require(icache.isDefined == dcache.isDefined)
-  
-  def useVxCache: Boolean = !icache.isDefined; 
+  // require(dcache.isDefined) 
 
   def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): VortexTile = {
     new VortexTile(this, crossing, lookup)
