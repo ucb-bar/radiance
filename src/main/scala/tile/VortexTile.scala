@@ -111,7 +111,7 @@ class VortexTile private(
 
   val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << 10), // TODO magic numbers
+      sourceId = IdRange(0, 1 << 15), // TODO magic numbers
       name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
       requestFifo = true,
       supportsProbe = TransferSizes(16, 16),
