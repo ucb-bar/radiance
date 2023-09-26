@@ -114,6 +114,8 @@ class VortexTile private(
   imemNodes.foreach { tlMasterXbar.node := _ }
   dmemNodes.foreach { tlMasterXbar.node := _ }
 
+  /* below are copied from rocket */
+
   val bus_error_unit = vortexParams.beuAddr map { a =>
     val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
     intOutwardNode := beu.intNode
@@ -206,6 +208,11 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     coreMem.a <> tileNode.out.head._1.a
   }
 
+
+  // pick source id and:
+  // - lie to core that response is not valid if source doesn't match picked
+  // - lie to downstream that core is not ready if source doesn't match picked
+
   val arb = Module(new RRArbiter(core.io.dmem.head.d.bits.source.cloneType, 4))
   val matchingSources = Wire(UInt(4.W))
   val dmemDs = outer.dmemNodes.map(_.out.head._1.d)
@@ -213,7 +220,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   (arb.io.in zip dmemDs).zipWithIndex.foreach { case ((arbIn, tileNode), i) =>
     arbIn.valid := tileNode.valid
     arbIn.bits := tileNode.bits.source
-    // assert(arbIn.ready, "source id arbiter should always be ready")
   }
   matchingSources := dmemDs.map(d => (d.bits.source === arb.io.out.bits) && arb.io.out.valid).asUInt
   arb.io.out.ready := true.B
