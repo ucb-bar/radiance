@@ -53,7 +53,7 @@ extern "C" void memtrace_query(unsigned char trace_read_ready,
                                unsigned char *trace_read_valid,
                                unsigned long *trace_read_address,
                                unsigned char *trace_read_is_store,
-                               int           *trace_read_size,
+                               unsigned char *trace_read_size,
                                unsigned long *trace_read_data,
                                unsigned char *trace_read_finished);
 extern "C" int memtracelogger_init(int is_response, const char *filename,

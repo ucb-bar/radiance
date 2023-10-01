@@ -20,7 +20,7 @@ import "DPI-C" function void memtrace_query
   output bit     trace_read_valid,
   output longint trace_read_address,
   output bit     trace_read_is_store,
-  output int     trace_read_size,
+  output byte    trace_read_size,
   output longint trace_read_data,
   output bit     trace_read_finished
 );
