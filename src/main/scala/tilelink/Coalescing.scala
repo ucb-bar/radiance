@@ -1460,11 +1460,11 @@ class MemTraceDriverImp(
     val subword = req.size < log2Ceil(config.wordSizeInBytes).U
 
     // `mask` is currently unused
-    val mask = Wire(UInt(config.wordSizeInBytes.W))
+    // val mask = Wire(UInt(config.wordSizeInBytes.W))
     val wordData = Wire(UInt((config.wordSizeInBytes * 8 * 2).W))
     val sizeInBytes = Wire(UInt((sizeW + 1).W))
     sizeInBytes := (1.U) << req.size
-    mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
+    // mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
     wordData := Mux(subword, req.data << (offsetInWord * 8.U), req.data)
     val wordAlignedAddress =
       req.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
@@ -1710,7 +1710,8 @@ class MemTraceLogger(
         }
         val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
         val dataW = tlIn.params.dataBits
-        val mask = ~(~(0.U(dataW.W)) << ((1.U << tlIn.a.bits.size) * 8.U))
+        val sizeInBits = (1.U(1.W) << tlIn.a.bits.size) << 3.U
+        val mask = ~(~(0.U(dataW.W)) << sizeInBits)
         req.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
         // when (req.valid) {
         //   printf("trailingZerosInMask=%d, mask=%x, data=%x\n", trailingZerosInMask, mask, req.data)
