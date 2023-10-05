@@ -59,16 +59,17 @@ case class CoalescerConfig(
   queueDepth: Int,        // request window per lane
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
-  dataBusWidth: Int,      // memory-side downstream TileLink data bus size.
+  dataBusWidth: Int,      // memory-side downstream TileLink data bus size.  Nominally, this has
+                          // to be the maximum coalLogSizes.
                           // This data bus carries the data bits of coalesced request/responses,
                           // and so it has to be at least wider than word size for the coalescer
-                          // to perform well
+                          // to perform well.
   coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
                           // max value should match dataBusWidth as the largest-possible
                           // single-beat coealsced size.
   // watermark = 2,       // minimum buffer occupancy to start coalescing
-  wordSizeInBytes: Int,   // 32-bit system
+  wordSizeInBytes: Int,   // word size of the request that each lane makes
   numOldSrcIds: Int,      // num of outstanding requests per lane, from processor
   numNewSrcIds: Int,      // num of outstanding coalesced requests
   respQueueDepth: Int,    // depth of the response fifo queues
@@ -119,19 +120,19 @@ object defaultConfig extends CoalescerConfig(
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
+  // WIP:
   // Nexus node that captures the incoming TL requests, rewrites coalescable requests,
   // and arbitrates between non-coalesced and coalesced requests to a fix number of outputs
   // before sending it out to memory. This node is what's visible to upstream and downstream nodes.
-
-  // WIP:
-//  val node = TLNexusNode(
-//    clientFn  = c => c.head,
-//    managerFn = m => m.head  // assuming arbiter generated ids are distinct between edges
-//  )
-//  node.in.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.wordSizeInBytes,
-//    s"input edges into coalescer node does not have beatBytes = ${config.wordSizeInBytes}"))
-//  node.out.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.maxCoalLogSize,
-//    s"output edges into coalescer node does not have beatBytes = ${config.maxCoalLogSize}"))
+  //
+  //  val node = TLNexusNode(
+  //    clientFn  = c => c.head,
+  //    managerFn = m => m.head  // assuming arbiter generated ids are distinct between edges
+  //  )
+  //  node.in.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.wordSizeInBytes,
+  //    s"input edges into coalescer node does not have beatBytes = ${config.wordSizeInBytes}"))
+  //  node.out.map(_._2).foreach(edge => require(edge.manager.beatBytes == config.maxCoalLogSize,
+  //    s"output edges into coalescer node does not have beatBytes = ${config.maxCoalLogSize}"))
 
   val aggregateNode = TLIdentityNode()
   val cpuNode = TLIdentityNode()
@@ -151,7 +152,12 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
     Seq(TLMasterPortParameters.v1(coalParam))
   )
 
-  // merge coalescerNode and cpuNode
+  // Merge coalescerNode and cpuNode
+  //
+  // Expand per-lane requests to the wide coalesced size.  As a result, the
+  // output edges of the coalescer all have the same wide width.  This
+  // simplifies cache interface where the cache can always serve same-sized
+  // wide requests, and the coalescer handles taking the right bytes.
   aggregateNode :=* coalescerNode
   aggregateNode :=* TLWidthWidget(config.wordSizeInBytes) :=* cpuNode
 
