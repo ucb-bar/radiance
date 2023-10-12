@@ -217,9 +217,11 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // outer.traceSourceNode.bundle <> core.io.trace
   core.io.traceStall := outer.traceAuxSinkNode.bundle.stall
   // outer.bpwatchSourceNode.bundle <> core.io.bpwatch
-  core.io.hartid := outer.hartIdSinkNode.bundle
-  require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
-    s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
+
+  // Copypasted from Rocket; not necessary for Vortex as hartId is set via Verilog parameter
+  // core.io.hartid := outer.hartIdSinkNode.bundle
+  // require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
+  //   s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
 
   if (outer.vortexParams.useVxCache) {
     println(s"width of a channel data ${core.io.mem.get.a.bits.data.getWidth}")
@@ -256,7 +258,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     }
   }
 
-  core.io.fpu := DontCare
+  // core.io.fpu := DontCare
 
   // TODO eliminate this redundancy
   // val h = dcachePorts.size
@@ -268,6 +270,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // dcacheArb.io.requestor <> dcachePorts.toSeq
 }
 
+// FIXME: unsure this is necessary
 trait HasFpuOpt { this: RocketTileModuleImp =>
   val fpuOpt = outer.tileParams.core.fpu.map(params => Module(new FPU(params)(outer.p)))
 }

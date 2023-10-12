@@ -15,7 +15,7 @@ import tile.VortexTile
 class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
   val clock = Input(Clock())
   val reset = Input(Reset())
-  val hartid = Input(UInt(hartIdLen.W))
+  // val hartid = Input(UInt(hartIdLen.W))
   val reset_vector = Input(UInt(resetVectorLen.W))
   val interrupts = Input(new CoreInterrupts())
   
@@ -33,7 +33,7 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
     val d = Flipped(tile.memNode.out.head._1.d.cloneType)
   }) else None
 
-  val fpu = Flipped(new FPUCoreIO())
+  // val fpu = Flipped(new FPUCoreIO())
   //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
   //val trace = Output(new TraceBundle)
   //val bpwatch = Output(Vec(coreParams.nBreakpoints, new BPWatch(coreParams.retireWidth)))
