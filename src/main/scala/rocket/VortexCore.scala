@@ -43,7 +43,13 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
 }
 
 class Vortex(tile: VortexTile)(implicit p: Parameters)
-    extends BlackBox with HasBlackBoxResource {
+    extends BlackBox(
+      // Each Vortex core gets tied-off hartId of 0, 1, 2, 3, ...
+      // The actual MHARTID read by the program is different by warp, not core;
+      // see VX_csr_data that implements the read logic for CSR_MHARTID/GWID.
+      Map("CORE_ID" -> tile.tileParams.hartId)
+    )
+    with HasBlackBoxResource {
   // addResource("/vsrc/vortex/hw/unit_tests/generic_queue/testbench.v")
   // addResource("/vsrc/vortex/hw/unit_tests/VX_divide_tb.v")
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpm/rf2_256x19_wm0/rf2_256x19_wm0_rtl.v")
