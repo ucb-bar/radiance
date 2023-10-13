@@ -14,6 +14,7 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem.TileCrossingParamsLike
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.ClockSinkParameters
+import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tile._
 import rocket.Vortex
 
@@ -71,6 +72,15 @@ class VortexTile private(
   val intOutwardNode = IntIdentityNode()
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
+
+  val regDevice = new SimpleDevice("vortex-reg", Seq("vortex-reg"))
+  val regNode = TLRegisterNode(
+    address = Seq(AddressSet(0x7c000000, 0xfff)),
+    device = regDevice,
+    beatBytes = 4,
+    concurrency = 1)
+
+  regNode := tlSlaveXbar.node
 
   // val dmemDevice = new SimpleDevice("dtim", Seq("sifive,dtim0"))
   /*val dmemNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
@@ -180,6 +190,10 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
   // reset vector is connected in the Frontend to s2_pc
   core.io.reset_vector := DontCare
+
+  outer.regNode.regmap(
+    0x00 -> Seq(RegField.r(32, core.io.cease))
+  )
 
   // Report when the tile has ceased to retire instructions; for now the only cause is clock gating
   outer.reportCease(outer.vortexParams.core.clockGate.option(
