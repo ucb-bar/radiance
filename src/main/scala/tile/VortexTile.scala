@@ -18,8 +18,6 @@ import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tile._
 import rocket.Vortex
 
-import scala.collection.mutable.ListBuffer
-
 case class RocketTileBoundaryBufferParams(force: Boolean = false)
 
 case class VortexTileParams(
@@ -35,26 +33,31 @@ case class VortexTileParams(
     blockerCtrlAddr: Option[BigInt] = None,
     clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
     boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
-    ) extends InstantiableTileParams[VortexTile] {
+) extends InstantiableTileParams[VortexTile] {
   // require(icache.isDefined)
-  // require(dcache.isDefined) 
+  // require(dcache.isDefined)
 
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters): VortexTile = {
+  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(
+      implicit p: Parameters
+  ): VortexTile = {
     new VortexTile(this, crossing, lookup)
   }
 }
 
-class VortexTile private(
-        val vortexParams: VortexTileParams,
-        crossing: ClockCrossingType,
-        lookup: LookupByHartIdImpl,
-        q: Parameters)
-    extends BaseTile(vortexParams, crossing, lookup, q)
+class VortexTile private (
+    val vortexParams: VortexTileParams,
+    crossing: ClockCrossingType,
+    lookup: LookupByHartIdImpl,
+    q: Parameters
+) extends BaseTile(vortexParams, crossing, lookup, q)
     with SinksExternalInterrupts
-    with SourcesExternalNotifications
-{
+    with SourcesExternalNotifications {
   // Private constructor ensures altered LazyModule.p is used implicitly
-  def this(params: VortexTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
+  def this(
+      params: VortexTileParams,
+      crossing: TileCrossingParamsLike,
+      lookup: LookupByHartIdImpl
+  )(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
   val intOutwardNode = IntIdentityNode()
@@ -87,40 +90,66 @@ class VortexTile private(
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
-  val imemNodes = Seq.tabulate(1) { i => TLClientNode(Seq(TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << 10), // TODO magic number
-      name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
-      requestFifo = true,
-      supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-    ))
-  )))}
+  val imemNodes = Seq.tabulate(1) { i =>
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          clients = Seq(
+            TLMasterParameters.v1(
+              sourceId = IdRange(0, 1 << 10), // TODO magic number
+              name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
+              requestFifo = true,
+              supportsProbe =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+            )
+          )
+        )
+      )
+    )
+  }
 
-  val dmemNodes = Seq.tabulate(4) { i => TLClientNode(Seq(TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << 10), // TODO magic number
-      name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
-      requestFifo = true,
-      supportsProbe = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsPutFull = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsPutPartial = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-    ))
-  )))}
+  val dmemNodes = Seq.tabulate(4) { i =>
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          clients = Seq(
+            TLMasterParameters.v1(
+              sourceId = IdRange(0, 1 << 10), // TODO magic number
+              name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
+              requestFifo = true,
+              supportsProbe =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutFull =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutPartial =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+            )
+          )
+        )
+      )
+    )
+  }
 
-  val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << 15), // TODO magic numbers
-      name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
-      requestFifo = true,
-      supportsProbe = TransferSizes(16, 16),
-      supportsGet = TransferSizes(16, 16),
-      supportsPutFull = TransferSizes(16, 16),
-      supportsPutPartial = TransferSizes(16, 16)
-    )),
-  )))
-  
+  val memNode = TLClientNode(
+    Seq(
+      TLMasterPortParameters.v1(
+        clients = Seq(
+          TLMasterParameters.v1(
+            sourceId = IdRange(0, 1 << 15), // TODO magic numbers
+            name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
+            requestFifo = true,
+            supportsProbe = TransferSizes(16, 16),
+            supportsGet = TransferSizes(16, 16),
+            supportsPutFull = TransferSizes(16, 16),
+            supportsPutPartial = TransferSizes(16, 16)
+          )
+        )
+      )
+    )
+  )
+
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
@@ -131,7 +160,8 @@ class VortexTile private(
   /* below are copied from rocket */
 
   val bus_error_unit = vortexParams.beuAddr map { a =>
-    val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
+    val beu =
+      LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
     intOutwardNode := beu.intNode
     connectTLSlave(beu.node, xBytes)
     beu
@@ -139,31 +169,42 @@ class VortexTile private(
 
   val tile_master_blocker =
     tileParams.blockerCtrlAddr
-      .map(BasicBusBlockerParams(_, xBytes, masterPortBeatBytes, deadlock = true))
+      .map(
+        BasicBusBlockerParams(_, xBytes, masterPortBeatBytes, deadlock = true)
+      )
       .map(bp => LazyModule(new BasicBusBlocker(bp)))
 
   tile_master_blocker.foreach(lm => connectTLSlave(lm.controlNode, xBytes))
 
   // TODO: this doesn't block other masters, e.g. RoCCs
-  tlOtherMastersNode := tile_master_blocker.map { _.node := tlMasterXbar.node } getOrElse { tlMasterXbar.node }
+  tlOtherMastersNode := tile_master_blocker.map {
+    _.node := tlMasterXbar.node
+  } getOrElse { tlMasterXbar.node }
   masterNode :=* tlOtherMastersNode
   DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
 
-  val dtimProperty = Nil //Seq(dmemDevice.asProperty).flatMap(p => Map("sifive,dtim" -> p))
+  val dtimProperty =
+    Nil // Seq(dmemDevice.asProperty).flatMap(p => Map("sifive,dtim" -> p))
 
-  val itimProperty = Nil //frontend.icache.itimProperty.toSeq.flatMap(p => Map("sifive,itim" -> p))
+  val itimProperty =
+    Nil // frontend.icache.itimProperty.toSeq.flatMap(p => Map("sifive,itim" -> p))
 
-  val beuProperty = bus_error_unit.map(d => Map(
-          "sifive,buserror" -> d.device.asProperty)).getOrElse(Nil)
+  val beuProperty = bus_error_unit
+    .map(d => Map("sifive,buserror" -> d.device.asProperty))
+    .getOrElse(Nil)
 
-  val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq(s"sifive,vortex${tileParams.hartId}", "riscv")) {
-    override def parent = Some(ResourceAnchors.cpus)
-    override def describe(resources: ResourceBindings): Description = {
-      val Description(name, mapping) = super.describe(resources)
-      Description(name, mapping ++ cpuProperties ++ nextLevelCacheProperty
-                  ++ tileProperties ++ dtimProperty ++ itimProperty ++ beuProperty)
+  val cpuDevice: SimpleDevice =
+    new SimpleDevice("cpu", Seq("sifive,vortex0", "riscv")) {
+      override def parent = Some(ResourceAnchors.cpus)
+      override def describe(resources: ResourceBindings): Description = {
+        val Description(name, mapping) = super.describe(resources)
+        Description(
+          name,
+          mapping ++ cpuProperties ++ nextLevelCacheProperty
+            ++ tileProperties ++ dtimProperty ++ itimProperty ++ beuProperty
+        )
+      }
     }
-  }
 
   ResourceBinding {
     Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
@@ -171,15 +212,33 @@ class VortexTile private(
 
   override lazy val module = new VortexTileModuleImp(this)
 
-  override def makeMasterBoundaryBuffers(crossing: ClockCrossingType)(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
-    case (Some(RocketTileBoundaryBufferParams(true )), _)                   => TLBuffer()
-    case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) => TLBuffer(BufferParams.none, BufferParams.flow, BufferParams.none, BufferParams.flow, BufferParams(1))
+  override def makeMasterBoundaryBuffers(
+      crossing: ClockCrossingType
+  )(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
+    case (Some(RocketTileBoundaryBufferParams(true)), _) => TLBuffer()
+    case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) =>
+      TLBuffer(
+        BufferParams.none,
+        BufferParams.flow,
+        BufferParams.none,
+        BufferParams.flow,
+        BufferParams(1)
+      )
     case _ => TLBuffer(BufferParams.none)
   }
 
-  override def makeSlaveBoundaryBuffers(crossing: ClockCrossingType)(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
-    case (Some(RocketTileBoundaryBufferParams(true )), _)                   => TLBuffer()
-    case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) => TLBuffer(BufferParams.flow, BufferParams.none, BufferParams.none, BufferParams.none, BufferParams.none)
+  override def makeSlaveBoundaryBuffers(
+      crossing: ClockCrossingType
+  )(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
+    case (Some(RocketTileBoundaryBufferParams(true)), _) => TLBuffer()
+    case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) =>
+      TLBuffer(
+        BufferParams.flow,
+        BufferParams.none,
+        BufferParams.none,
+        BufferParams.none,
+        BufferParams.none
+      )
     case _ => TLBuffer(BufferParams.none)
   }
 }
@@ -188,7 +247,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   Annotated.params(this, outer.vortexParams)
 
   val core = Module(new Vortex(outer)(outer.p))
-  
+
   core.io.clock := clock
   core.io.reset := reset
 
@@ -200,8 +259,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   )
 
   // Report when the tile has ceased to retire instructions; for now the only cause is clock gating
-  outer.reportCease(outer.vortexParams.core.clockGate.option(
-    core.io.cease))
+  outer.reportCease(outer.vortexParams.core.clockGate.option(core.io.cease))
 
   outer.reportWFI(Some(core.io.wfi))
 
@@ -228,14 +286,19 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
     core.io.mem.get.a <> outer.memNode.out.head._1.a
     core.io.mem.get.d <> outer.memNode.out.head._1.d
-  }
-  else {
+  } else {
     (core.io.imem.get zip outer.imemNodes).foreach { case (coreMem, tileNode) =>
       coreMem.d <> tileNode.out.head._1.d
       coreMem.a <> tileNode.out.head._1.a
     }
 
-    val arb = Module(new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, 4))
+    // pick source id and:
+    // - lie to core that response is not valid if source doesn't match picked
+    // - lie to downstream that core is not ready if source doesn't match picked
+
+    val arb = Module(
+      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, 4)
+    )
     val matchingSources = Wire(UInt(4.W))
     val dmemDs = outer.dmemNodes.map(_.out.head._1.d)
 
@@ -244,13 +307,16 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       arbIn.bits := tileNode.bits.source
       // assert(arbIn.ready, "source id arbiter should always be ready")
     }
-    matchingSources := dmemDs.map(d => (d.bits.source === arb.io.out.bits) && arb.io.out.valid).asUInt
+    matchingSources := dmemDs
+      .map(d => (d.bits.source === arb.io.out.bits) && arb.io.out.valid)
+      .asUInt
     arb.io.out.ready := true.B
 
-    (core.io.dmem.get zip dmemDs).zipWithIndex.foreach { case ((coreMem, tileNode), i) =>
-      coreMem.d.bits := tileNode.bits
-      coreMem.d.valid := tileNode.valid && matchingSources(i)
-      tileNode.ready := coreMem.d.ready && matchingSources(i)
+    (core.io.dmem.get zip dmemDs).zipWithIndex.foreach {
+      case ((coreMem, tileNode), i) =>
+        coreMem.d.bits := tileNode.bits
+        coreMem.d.valid := tileNode.valid && matchingSources(i)
+        tileNode.ready := coreMem.d.ready && matchingSources(i)
     }
 
     (core.io.dmem.get zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>
@@ -262,7 +328,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
   // TODO eliminate this redundancy
   // val h = dcachePorts.size
-  //val c = core.dcacheArbPorts
+  // val c = core.dcacheArbPorts
   // val o = outer.nDCachePorts
   // require(h == c, s"port list size was $h, core expected $c")
   // require(h == o, s"port list size was $h, outer counted $o")
@@ -272,5 +338,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
 // FIXME: unsure this is necessary
 trait HasFpuOpt { this: RocketTileModuleImp =>
-  val fpuOpt = outer.tileParams.core.fpu.map(params => Module(new FPU(params)(outer.p)))
+  val fpuOpt =
+    outer.tileParams.core.fpu.map(params => Module(new FPU(params)(outer.p)))
 }
