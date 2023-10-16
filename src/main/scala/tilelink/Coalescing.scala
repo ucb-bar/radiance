@@ -2243,7 +2243,7 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
     // For the uncoalesced data response
     (outer.nonCoalNarrowNodes zip io.nonCoalResps).foreach{
       case(node,resp) => 
-        val (tlOut, edgeOut)  = node.out(0)
+        val (tlOut, _)  = node.out(0)
         val nonCoalResp = Wire(respNonCoalEntryT)
         nonCoalResp.fromTLD(tlOut.d.bits)
         tlOut.d.ready  := resp.ready
@@ -2259,7 +2259,7 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
                                   )
     outer.coalReqNodes.zipWithIndex.foreach{
       case(node, idx) =>
-        val (tlOut, edgeOut)  = node.out(0)
+        val (tlOut, _)  = node.out(0)
         coalRespRRArbiter.io.in(idx) <> tlOut.d
     }
     //Connect output of arbiter to coalesced reponse output
