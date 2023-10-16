@@ -271,17 +271,19 @@ class SourceGenerator[T <: Data](
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
-    // for debugging; indicates whether there is at least one inflight request
-    // that hasn't been reclaimed yet
-    val inflight = Output(Bool())
-    // below are used when metadata is not None
+    // below are used only when metadata is not None
+    // `meta` is used as input when a request succeeds id generation to store
+    // its value to the table.
     // `peek` is the retrieved metadata saved for the request when corresponding
-    // request has come back (and hence `reclaim` was set).
+    // request has come back, setting `reclaim`.
     // Although these do not use ValidIO, it is safe because any in-flight
     // response coming back should have allocated a valid entry in the table
     // when it went out.
     val meta = Input(metadata.getOrElse(UInt(0.W)))
     val peek = Output(metadata.getOrElse(UInt(0.W)))
+    // for debugging; indicates whether there is at least one inflight request
+    // that hasn't been reclaimed yet
+    val inflight = Output(Bool())
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
   head := Mux(io.gen, head + 1.U, head)
@@ -292,7 +294,7 @@ class SourceGenerator[T <: Data](
   val numSourceId = 1 << sourceWidth
   val row = new Bundle {
     val meta = metadata match {
-      case Some(gen) => gen.cloneType
+      case Some(gen) => chiselTypeOf(gen)
       case None => UInt(0.W)
     }
     val id = Valid(UInt(sourceWidth.W))
@@ -319,6 +321,9 @@ class SourceGenerator[T <: Data](
     // @perf: would this require multiple write ports?
     occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
   }
+  io.peek := {
+    if (metadata.isDefined) occupancyTable(io.reclaim.bits).meta else 0.U
+  }
 
   when(io.gen && io.id.valid) {
     when (!io.reclaim.valid) {
@@ -329,11 +334,6 @@ class SourceGenerator[T <: Data](
     assert(outstanding > 0.U)
     outstanding := outstanding - 1.U
   }
-
-  if (metadata.isDefined) {
-    io.peek := occupancyTable(io.reclaim.bits).meta
-  }
-
   dontTouch(outstanding)
 }
 
@@ -783,9 +783,10 @@ class CoalescerSourceGen(
     // in/out means upstream/downstream
     val inReq = Flipped(Decoupled(coalReqT.cloneType))
     val outReq = Decoupled(coalReqT.cloneType)
-    // no need for inResp, since CoalShiftQueue/Mono/MultiCoalescer only generates
-    // requests and do not take in responses.  Coalesced responses are
-    // separately taken in by InflightTable.
+    // outResp is only needed for telling the downstream TL node that this
+    // sourcegen module is always ready to take in responses.
+    // No need for inResp, since coalescerNode is directly replied by the
+    // outResp TileLink bundle.
     val outResp = Flipped(Decoupled(respT.cloneType))
   })
   val sourceGen = Module(
@@ -794,6 +795,7 @@ class CoalescerSourceGen(
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
   sourceGen.io.reclaim.valid := io.outResp.fire
   sourceGen.io.reclaim.bits := io.outResp.bits.source
+  sourceGen.io.meta := DontCare
   // TODO: make sourceGen.io.reclaim Decoupled?
 
   // passthrough logic
@@ -1523,6 +1525,7 @@ class MemTraceDriverImp(
     // assert(sourceGen.io.id.valid)
     sourceGen.io.reclaim.valid := tlOut.d.fire
     sourceGen.io.reclaim.bits := tlOut.d.bits.source
+    sourceGen.io.meta := DontCare
 
     val (plegal, pbits) = edge.Put(
       fromSource = sourceGen.io.id.bits,
