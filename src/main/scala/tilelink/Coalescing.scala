@@ -267,6 +267,10 @@ class SourceGenerator[T <: Data](
   metadata: Option[T] = None,
   ignoreInUse: Boolean = false
 ) extends Module {
+  def getMetadataType = metadata match {
+    case Some(gen) => gen.cloneType
+    case None => UInt(0.W)
+  }
   val io = IO(new Bundle {
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
@@ -279,8 +283,8 @@ class SourceGenerator[T <: Data](
     // Although these do not use ValidIO, it is safe because any in-flight
     // response coming back should have allocated a valid entry in the table
     // when it went out.
-    val meta = Input(metadata.getOrElse(UInt(0.W)))
-    val peek = Output(metadata.getOrElse(UInt(0.W)))
+    val meta = Input(getMetadataType)
+    val peek = Output(getMetadataType)
     // for debugging; indicates whether there is at least one inflight request
     // that hasn't been reclaimed yet
     val inflight = Output(Bool())
@@ -293,10 +297,7 @@ class SourceGenerator[T <: Data](
 
   val numSourceId = 1 << sourceWidth
   val row = new Bundle {
-    val meta = metadata match {
-      case Some(gen) => chiselTypeOf(gen)
-      case None => UInt(0.W)
-    }
+    val meta = getMetadataType
     val id = Valid(UInt(sourceWidth.W))
   }
   // valid: in use, invalid: available
