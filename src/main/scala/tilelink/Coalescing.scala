@@ -765,25 +765,30 @@ class CoalescerSourceGen(
     respT: TLBundleD
 ) extends Module {
   val io = IO(new Bundle {
+    // in/out means upstream/downstream
     val inReq = Flipped(Decoupled(coalReqT.cloneType))
     val outReq = Decoupled(coalReqT.cloneType)
-    val inResp = Flipped(Decoupled(respT.cloneType))
+    // no need for inResp, since CoalShiftQueue/Mono/MultiCoalescer only generates
+    // requests and do not take in responses.  Coalesced responses are
+    // separately taken in by InflightTable.
+    val outResp = Flipped(Decoupled(respT.cloneType))
   })
   val sourceGen = Module(
     new SourceGenerator(log2Ceil(config.numNewSrcIds), ignoreInUse = false)
   )
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
-  sourceGen.io.reclaim.valid := io.inResp.fire
-  sourceGen.io.reclaim.bits := io.inResp.bits.source
-  io.inResp.ready := true.B // should be always ready to reclaim old ID
+  sourceGen.io.reclaim.valid := io.outResp.fire
+  sourceGen.io.reclaim.bits := io.outResp.bits.source
   // TODO: make sourceGen.io.reclaim Decoupled?
 
+  // passthrough logic
   io.outReq <> io.inReq
   // "man-in-the-middle"
   io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
   // overwrite bits affected by sourcegen backpressure
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
   io.outReq.bits.source := sourceGen.io.id.bits
+  io.outResp.ready := true.B // should be always ready to reclaim old ID
 }
 
 class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
@@ -902,7 +907,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   //
   val coalSourceGen = Module(new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits))
   coalSourceGen.io.inReq <> coalescer.io.coalReq
-  coalSourceGen.io.inResp <> tlCoal.d
+  coalSourceGen.io.outResp <> tlCoal.d
 
   // InflightTable IO
   //
