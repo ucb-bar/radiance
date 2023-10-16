@@ -3,6 +3,8 @@ package freechips.rocketchip.tilelink
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.BaseSubsystem
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.rocket
+
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore
@@ -44,16 +46,39 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       }
       case None => tracer.node
     }
-    val upstream = p(CoalXbarKey) match {
+    val coalXbar = p(CoalXbarKey) match {
       case Some(xbarParam) =>{
-        val priorityXbar = LazyModule(new CoalescerTLPriortyXBar)
-        println(s"============ Using Priority XBar for Coalescer Requests ")
-        priorityXbar.node :=* coalescerNode
-        priorityXbar.node
+        val coXbar = LazyModule(new TLXbar)
+        println(s"============ Using TLXBar for Coalescer Requests ")
+        coXbar.node :=* coalescerNode
+        coXbar.node
       }
       case None => coalescerNode
     }
+
+    val vortexBank = p(VortexFatBankKey) match {
+      case Some(fatBankParam) =>{
+        val vx_fatbank = LazyModule(new VortexFatBank(fatBankParam))
+        println(s"============ Using Vortex FatBank as L1 ")
+        vx_fatbank.coalToVxCacheNode :=* coalXbar
+        vx_fatbank.vxCacheToL2Node
+      }
+      case None => coalXbar
+    }
     
+    
+    //If there is only 1 bank, the code below is useless
+    val upstream = p(CoalXbarKey) match {
+      case Some(xbarParam) =>{
+        val tileXbar = LazyModule(new TLXbar)
+        println(s"============ Using TLXBar for L1 Requests ")
+        tileXbar.node :=* vortexBank
+        tileXbar.node
+      }
+      case None => vortexBank
+    }
+  
+
     sbus.coupleFrom(s"gpu-tracer") { _ :=* upstream }
   }
 }

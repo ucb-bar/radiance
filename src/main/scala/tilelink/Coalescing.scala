@@ -829,6 +829,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   println(s"    numNewSrcIds: ${config.numNewSrcIds}")
   println(s"    reqQueueDepth: ${config.reqQueueDepth}")
   println(s"    respQueueDepth: ${config.respQueueDepth}")
+  println(s"    addressWidth: ${config.addressWidth}")
   println(s"}")
 
   require(
