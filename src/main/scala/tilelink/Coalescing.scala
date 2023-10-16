@@ -254,41 +254,59 @@ case class CoalescedResponse(config: CoalescerConfig)
       dataWidth = (8 * (1 << config.maxCoalLogSize))
     )
 
-// If `ignoreInUse`, just keep giving out new IDs without checking if it is in
-// use.
-class SourceGenerator(sourceWidth: Int, ignoreInUse: Boolean = true)
+// `metadata` is an extra field in the sourceId table that can be used for
+// storing e.g. the UUID originally attached to a request.  This is useful for
+// using this module as a source ID converter / compressor.  If `None`, this
+// field is not instantiated.
+// TODO: implement lookup logic.
+//
+// If `ignoreInUse`, just keep giving out new IDs without any collision checking.
+// This might result in TL violation.
+class SourceGenerator[T <: Data](
+  sourceWidth: Int,
+  metadata: Option[T] = None,
+  ignoreInUse: Boolean = true
+)
     extends Module {
   val io = IO(new Bundle {
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
+    // for debugging; indicates whether there is at least one inflight request
+    // that hasn't been reclaimed yet
     val inflight = Output(Bool())
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
   head := Mux(io.gen, head + 1.U, head)
 
-  // for debugging
-  // also for indicating if there is at least one inflight request that hasn't been reclaimed
   val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
   io.inflight := (outstanding > 0.U) || io.gen
 
   val numSourceId = 1 << sourceWidth
-  // true: in use, false: available
-  val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
-  when(reset.asBool) {
-    (0 until numSourceId).foreach { occupancyTable(_).valid := false.B }
+  val row = new Bundle {
+    val meta = metadata match {
+      case Some(gen) => gen.cloneType
+      case None => UInt(0.W)
+    }
+    val id = Valid(UInt(sourceWidth.W))
   }
-  val frees = (0 until numSourceId).map(!occupancyTable(_).valid)
+  // valid: in use, invalid: available
+  // val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
+  val occupancyTable = Mem(numSourceId, row)
+  when(reset.asBool) {
+    (0 until numSourceId).foreach { occupancyTable(_).id.valid := false.B }
+  }
+  val frees = (0 until numSourceId).map(!occupancyTable(_).id.valid)
   val lowestFree = PriorityEncoder(frees)
   val lowestFreeRow = occupancyTable(lowestFree)
 
-  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.valid)
+  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.id.valid)
   io.id.bits := lowestFree
   when(io.gen && io.id.valid /* fire */ ) {
-    occupancyTable(io.id.bits).valid := true.B // mark in use
+    occupancyTable(io.id.bits).id.valid := true.B // mark in use
   }
   when(io.reclaim.valid) {
-    occupancyTable(io.reclaim.bits).valid := false.B // mark freed
+    occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
   }
 
   when(io.gen && io.id.valid) {
@@ -738,6 +756,9 @@ class MultiCoalescer(
   if (!config.enable) disable
 }
 
+// This module mostly handles the correct ready/valid handshake depending on
+// sourceId availability.  Actual generation logic is done by the
+// SourceGenerator module.
 class CoalescerSourceGen(
     config: CoalescerConfig,
     coalReqT: CoalescedRequest,
@@ -758,6 +779,7 @@ class CoalescerSourceGen(
   // TODO: make sourceGen.io.reclaim Decoupled?
 
   io.outReq <> io.inReq
+  // "man-in-the-middle"
   io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
   // overwrite bits affected by sourcegen backpressure
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
