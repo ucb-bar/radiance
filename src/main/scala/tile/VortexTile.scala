@@ -4,7 +4,7 @@
 package tile
 
 import chisel3._
-import chisel3.util.RRArbiter
+import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
@@ -90,6 +90,8 @@ class VortexTile private (
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
+  val numLanes = 4 // FIXME: hardcoded
+
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
       Seq(
@@ -109,7 +111,7 @@ class VortexTile private (
     )
   }
 
-  val dmemNodes = Seq.tabulate(4) { i =>
+  val dmemNodes = Seq.tabulate(numLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -289,39 +291,57 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   } else {
     (core.io.imem.get zip outer.imemNodes).foreach { case (coreMem, tileNode) =>
       coreMem.d <> tileNode.out.head._1.d
-      coreMem.a <> tileNode.out.head._1.a
+      tileNode.out.head._1.a <> coreMem.a
     }
 
-    // pick source id and:
+    // Since the individual per-lane TL requests might come back out-of-sync between
+    // the lanes, but Vortex core expects the lane requests to be synced,
+    // we need to selectively fire responses that have the same source, and
+    // delay others.  Below is the logic that implements this.
+
+    // choose one source out of the arriving per-lane TL D channels
+    val arb = Module(
+      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
+    )
+    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
+    arb.io.out.ready := true.B
+    (arb.io.in zip dmemTLBundles).foreach { case (arbIn, tlBundle) =>
+      arbIn.valid := tlBundle.d.valid
+      arbIn.bits := tlBundle.d.bits.source
+    }
+    val matchingSources = Wire(UInt(outer.numLanes.W))
+    matchingSources := dmemTLBundles
+      .map(b => (b.d.bits.source === arb.io.out.bits) && arb.io.out.valid)
+      .asUInt
+
+    // connection: VortexBundle <--> sourceGen <--> dmemNodes
+    val sourceGens = Seq.tabulate(outer.numLanes) { _ =>
+      Module(new VortexSourceGen(
+        2, // FIXME: hardcoded
+        dmemTLBundles.head.a.bits,
+        dmemTLBundles.head.d.bits,
+      ))
+    }
+    (core.io.dmem.get zip sourceGens) foreach { case (coreMem, sourceGen) =>
+      sourceGen.io.inReq <> coreMem.a
+      coreMem.d <> sourceGen.io.inResp
+    }
+    (sourceGens zip dmemTLBundles) foreach { case (sourceGen, tlBundle) =>
+      tlBundle.a <> sourceGen.io.outReq
+    }
+    // using the chosen source id,
     // - lie to core that response is not valid if source doesn't match picked
     // - lie to downstream that core is not ready if source doesn't match picked
-
-    val arb = Module(
-      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, 4)
-    )
-    val matchingSources = Wire(UInt(4.W))
-    val dmemDs = outer.dmemNodes.map(_.out.head._1.d)
-
-    (arb.io.in zip dmemDs).zipWithIndex.foreach { case ((arbIn, tileNode), i) =>
-      arbIn.valid := tileNode.valid
-      arbIn.bits := tileNode.bits.source
-      // assert(arbIn.ready, "source id arbiter should always be ready")
-    }
-    matchingSources := dmemDs
-      .map(d => (d.bits.source === arb.io.out.bits) && arb.io.out.valid)
-      .asUInt
-    arb.io.out.ready := true.B
-
-    (core.io.dmem.get zip dmemDs).zipWithIndex.foreach {
-      case ((coreMem, tileNode), i) =>
-        coreMem.d.bits := tileNode.bits
-        coreMem.d.valid := tileNode.valid && matchingSources(i)
-        tileNode.ready := coreMem.d.ready && matchingSources(i)
+    (sourceGens zip dmemTLBundles).zipWithIndex.foreach {
+      case ((sourceGen, tlBundle), i) =>
+        sourceGen.io.outResp.bits := tlBundle.d.bits
+        sourceGen.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
+        tlBundle.d.ready := sourceGen.io.outResp.ready && matchingSources(i)
     }
 
-    (core.io.dmem.get zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>
-      coreMem.a <> tileNode.out.head._1.a
-    }
+    // (core.io.dmem.get zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>
+    //   tileNode.out.head._1.a <> coreMem.a
+    // }
   }
 
   // core.io.fpu := DontCare
@@ -334,6 +354,45 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // require(h == o, s"port list size was $h, outer counted $o")
   // TODO figure out how to move the below into their respective mix-ins
   // dcacheArb.io.requestor <> dcachePorts.toSeq
+}
+
+// TODO: Currently in/out are assumed to be the same TL bundle with the same
+// sourceWidth; this needs to be more flexible.
+//
+// Some @copypaste from CoalescerSourceGen.
+class VortexSourceGen(
+  newSourceWidth: Int,
+  reqT: TLBundleA,
+  respT: TLBundleD
+) extends Module {
+  val io = IO(new Bundle {
+    // in/out means upstream/downstream
+    val inReq = Flipped(Decoupled(reqT.cloneType))
+    val outReq = Decoupled(reqT.cloneType)
+    val inResp = Decoupled(respT.cloneType)
+    val outResp = Flipped(Decoupled(respT.cloneType))
+  })
+  val sourceGen = Module(new SourceGenerator(
+    newSourceWidth,
+    Some(chiselTypeOf(reqT.source)),
+    ignoreInUse = false
+  ))
+  sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
+  sourceGen.io.reclaim.valid := io.outResp.fire
+  sourceGen.io.reclaim.bits := io.outResp.bits.source
+  sourceGen.io.meta := io.inReq.bits.source
+
+  // passthrough logic
+  io.outReq <> io.inReq
+  // "man-in-the-middle"
+  io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
+  io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
+  // FIXME: Fill is a hack; just change downstream to the right sourceWidth
+  // io.outReq.bits.source := Fill(newSourceWidth, sourceGen.io.id.bits)
+  io.outReq.bits.source := sourceGen.io.id.bits
+  io.inResp <> io.outResp
+  // translate upstream response back to its old sourceId
+  io.inResp.bits.source := sourceGen.io.peek
 }
 
 // FIXME: unsure this is necessary
