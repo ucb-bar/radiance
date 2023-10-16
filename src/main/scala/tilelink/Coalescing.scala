@@ -265,9 +265,8 @@ case class CoalescedResponse(config: CoalescerConfig)
 class SourceGenerator[T <: Data](
   sourceWidth: Int,
   metadata: Option[T] = None,
-  ignoreInUse: Boolean = true
-)
-    extends Module {
+  ignoreInUse: Boolean = false
+) extends Module {
   val io = IO(new Bundle {
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
@@ -275,6 +274,14 @@ class SourceGenerator[T <: Data](
     // for debugging; indicates whether there is at least one inflight request
     // that hasn't been reclaimed yet
     val inflight = Output(Bool())
+    // below are used when metadata is not None
+    // `peek` is the retrieved metadata saved for the request when corresponding
+    // request has come back (and hence `reclaim` was set).
+    // Although these do not use ValidIO, it is safe because any in-flight
+    // response coming back should have allocated a valid entry in the table
+    // when it went out.
+    val meta = Input(metadata.getOrElse(UInt(0.W)))
+    val peek = Output(metadata.getOrElse(UInt(0.W)))
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
   head := Mux(io.gen, head + 1.U, head)
@@ -304,8 +311,12 @@ class SourceGenerator[T <: Data](
   io.id.bits := lowestFree
   when(io.gen && io.id.valid /* fire */ ) {
     occupancyTable(io.id.bits).id.valid := true.B // mark in use
+    if (metadata.isDefined) {
+      occupancyTable(io.id.bits).meta := io.meta
+    }
   }
   when(io.reclaim.valid) {
+    // @perf: would this require multiple write ports?
     occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
   }
 
@@ -317,6 +328,10 @@ class SourceGenerator[T <: Data](
   }.elsewhen(io.reclaim.valid) {
     assert(outstanding > 0.U)
     outstanding := outstanding - 1.U
+  }
+
+  if (metadata.isDefined) {
+    io.peek := occupancyTable(io.reclaim.bits).meta
   }
 
   dontTouch(outstanding)
