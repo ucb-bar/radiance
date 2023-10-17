@@ -290,10 +290,18 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     core.io.mem.get.a <> outer.memNode.out.head._1.a
     core.io.mem.get.d <> outer.memNode.out.head._1.d
   } else {
-    (core.io.imem.get zip outer.imemNodes).foreach { case (coreMem, tileNode) =>
-      coreMem.d <> tileNode.out.head._1.d
-      tileNode.out.head._1.a <> coreMem.a
-    }
+    val imemTLAdapter =  Module(new VortexTLAdapter(
+        outer.sourceWidth,
+        new VortexBundleA(),
+        new VortexBundleD(),
+        chiselTypeOf(outer.imemNodes.head.out.head._1.a.bits),
+        chiselTypeOf(outer.imemNodes.head.out.head._1.d.bits),
+    ))
+    // TODO: make imemNodes not a vector
+    imemTLAdapter.io.inReq <> core.io.imem.get(0).a
+    core.io.imem.get(0).d <> imemTLAdapter.io.inResp
+    outer.imemNodes(0).out(0)._1.a <> imemTLAdapter.io.outReq
+    imemTLAdapter.io.outResp <> outer.imemNodes(0).out(0)._1.d
 
     // Since the individual per-lane TL requests might come back out-of-sync between
     // the lanes, but Vortex core expects the lane requests to be synced,
@@ -315,8 +323,10 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       .map(b => (b.d.bits.source === arb.io.out.bits) && arb.io.out.valid)
       .asUInt
 
-    // connection: VortexBundle <--> sourceGen <--> dmemNodes
-    val sourceGens = Seq.tabulate(outer.numLanes) { _ =>
+    // connection: VortexBundle <--> VortexTLAdapter <--> dmemNodes
+    // @perf: this would duplicate SourceGenerator table for every lane and eat
+    // up some area
+    val tlAdapters = Seq.tabulate(outer.numLanes) { _ =>
       Module(new VortexTLAdapter(
         outer.sourceWidth,
         new VortexBundleA(),
@@ -325,21 +335,21 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         chiselTypeOf(dmemTLBundles.head.d.bits),
       ))
     }
-    (core.io.dmem.get zip sourceGens) foreach { case (coreMem, sourceGen) =>
-      sourceGen.io.inReq <> coreMem.a
-      coreMem.d <> sourceGen.io.inResp
+    (core.io.dmem.get zip tlAdapters) foreach { case (coreMem, tlAdapter) =>
+      tlAdapter.io.inReq <> coreMem.a
+      coreMem.d <> tlAdapter.io.inResp
     }
-    (sourceGens zip dmemTLBundles) foreach { case (sourceGen, tlBundle) =>
-      tlBundle.a <> sourceGen.io.outReq
+    (tlAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlBundle) =>
+      tlBundle.a <> tlAdapter.io.outReq
     }
     // using the chosen source id,
     // - lie to core that response is not valid if source doesn't match picked
     // - lie to downstream that core is not ready if source doesn't match picked
-    (sourceGens zip dmemTLBundles).zipWithIndex.foreach {
-      case ((sourceGen, tlBundle), i) =>
-        sourceGen.io.outResp.bits := tlBundle.d.bits
-        sourceGen.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
-        tlBundle.d.ready := sourceGen.io.outResp.ready && matchingSources(i)
+    (tlAdapters zip dmemTLBundles).zipWithIndex.foreach {
+      case ((tlAdapter, tlBundle), i) =>
+        tlAdapter.io.outResp.bits := tlBundle.d.bits
+        tlAdapter.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
+        tlBundle.d.ready := tlAdapter.io.outResp.ready && matchingSources(i)
     }
 
     // (core.io.dmem.get zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>

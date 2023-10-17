@@ -34,9 +34,9 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val interrupts = Input(new CoreInterrupts())
   
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
-  val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle { // TODO: magic number
-    val a = tile.imemNodes.head.out.head._1.a.cloneType
-    val d = Flipped(tile.imemNodes.head.out.head._1.d.cloneType)
+  val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
+    val a = Decoupled(new VortexBundleA())
+    val d = Flipped(Decoupled(new VortexBundleD()))
   })) else None
   val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
     val a = Decoupled(new VortexBundleA())
