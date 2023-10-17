@@ -16,7 +16,7 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci.ClockSinkParameters
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tile._
-import rocket.Vortex
+import rocket.{Vortex, VortexBundleA, VortexBundleD}
 
 case class RocketTileBoundaryBufferParams(force: Boolean = false)
 
@@ -42,22 +42,6 @@ case class VortexTileParams(
   ): VortexTile = {
     new VortexTile(this, crossing, lookup)
   }
-}
-
-class VortexBundleA extends Bundle {
-  val opcode = UInt(3.W) // FIXME: hardcoded
-  val size = UInt(4.W) // FIXME: hardcoded
-  val source = UInt(10.W) // FIXME: hardcoded
-  val address = UInt(32.W) // FIXME: hardcoded
-  val mask = UInt(4.W) // FIXME: hardcoded
-  val data = UInt(32.W) // FIXME: hardcoded
-}
-
-class VortexBundleD extends Bundle {
-  val opcode = UInt(3.W) // FIXME: hardcoded
-  val size = UInt(4.W) // FIXME: hardcoded
-  val source = UInt(10.W) // FIXME: hardcoded
-  val data = UInt(32.W) // FIXME: hardcoded
 }
 
 class VortexTile private (
@@ -106,7 +90,7 @@ class VortexTile private (
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
-  val numLanes = 4 // FIXME: hardcoded
+  val numLanes = 4 // TODO: use Parameters for this
   val sourceWidth = 1 // TODO: use Parameters for this
 
   val imemNodes = Seq.tabulate(1) { i =>
@@ -375,9 +359,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // dcacheArb.io.requestor <> dcachePorts.toSeq
 }
 
-// TODO: Currently in/out are assumed to be the same TL bundle with the same
-// sourceWidth; this needs to be more flexible.
-//
 // Some @copypaste from CoalescerSourceGen.
 class VortexTLAdapter(
   newSourceWidth: Int,
@@ -388,7 +369,6 @@ class VortexTLAdapter(
 ) extends Module {
   val io = IO(new Bundle {
     // in/out means upstream/downstream
-    // TODO: change inReq/inResp to VortexBundle
     val inReq = Flipped(Decoupled(inReqT))
     val outReq = Decoupled(outReqT)
     val inResp = Decoupled(inRespT)
@@ -427,8 +407,6 @@ class VortexTLAdapter(
   // "man-in-the-middle"
   io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
-  // FIXME: Fill is a hack; just change downstream to the right sourceWidth
-  // io.outReq.bits.source := Fill(newSourceWidth, sourceGen.io.id.bits)
   io.outReq.bits.source := sourceGen.io.id.bits
   // translate upstream response back to its old sourceId
   io.inResp.bits.source := sourceGen.io.peek

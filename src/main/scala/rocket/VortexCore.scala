@@ -8,7 +8,23 @@ import chisel3.util._
 import chisel3.experimental._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile._
-import tile.{VortexTile, VortexBundleA, VortexBundleD}
+import tile.VortexTile
+
+class VortexBundleA extends Bundle {
+  val opcode = UInt(3.W) // FIXME: hardcoded
+  val size = UInt(4.W) // FIXME: hardcoded
+  val source = UInt(10.W) // FIXME: hardcoded
+  val address = UInt(32.W) // FIXME: hardcoded
+  val mask = UInt(4.W) // FIXME: hardcoded
+  val data = UInt(32.W) // FIXME: hardcoded
+}
+
+class VortexBundleD extends Bundle {
+  val opcode = UInt(3.W) // FIXME: hardcoded
+  val size = UInt(4.W) // FIXME: hardcoded
+  val source = UInt(10.W) // FIXME: hardcoded
+  val data = UInt(32.W) // FIXME: hardcoded
+}
 
 class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
   val clock = Input(Clock())
