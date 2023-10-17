@@ -44,6 +44,22 @@ case class VortexTileParams(
   }
 }
 
+class VortexBundleA extends Bundle {
+  val opcode = UInt(3.W) // FIXME: hardcoded
+  val size = UInt(4.W) // FIXME: hardcoded
+  val source = UInt(10.W) // FIXME: hardcoded
+  val address = UInt(32.W) // FIXME: hardcoded
+  val mask = UInt(4.W) // FIXME: hardcoded
+  val data = UInt(32.W) // FIXME: hardcoded
+}
+
+class VortexBundleD extends Bundle {
+  val opcode = UInt(3.W) // FIXME: hardcoded
+  val size = UInt(4.W) // FIXME: hardcoded
+  val source = UInt(10.W) // FIXME: hardcoded
+  val data = UInt(32.W) // FIXME: hardcoded
+}
+
 class VortexTile private (
     val vortexParams: VortexTileParams,
     crossing: ClockCrossingType,
@@ -91,6 +107,7 @@ class VortexTile private (
     minLatency = 1)))*/
 
   val numLanes = 4 // FIXME: hardcoded
+  val sourceWidth = 1 // TODO: use Parameters for this
 
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
@@ -98,7 +115,7 @@ class VortexTile private (
         TLMasterPortParameters.v1(
           clients = Seq(
             TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << 10), // TODO magic number
+              sourceId = IdRange(0, 1 << 10), // TODO: magic numbers
               name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
               requestFifo = true,
               supportsProbe =
@@ -117,7 +134,7 @@ class VortexTile private (
         TLMasterPortParameters.v1(
           clients = Seq(
             TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << 10), // TODO magic number
+              sourceId = IdRange(0, 1 << sourceWidth),
               name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
               requestFifo = true,
               supportsProbe =
@@ -316,10 +333,12 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
     // connection: VortexBundle <--> sourceGen <--> dmemNodes
     val sourceGens = Seq.tabulate(outer.numLanes) { _ =>
-      Module(new VortexSourceGen(
-        2, // FIXME: hardcoded
-        dmemTLBundles.head.a.bits,
-        dmemTLBundles.head.d.bits,
+      Module(new VortexTLAdapter(
+        outer.sourceWidth,
+        new VortexBundleA(),
+        new VortexBundleD(),
+        chiselTypeOf(dmemTLBundles.head.a.bits),
+        chiselTypeOf(dmemTLBundles.head.d.bits),
       ))
     }
     (core.io.dmem.get zip sourceGens) foreach { case (coreMem, sourceGen) =>
@@ -360,21 +379,24 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 // sourceWidth; this needs to be more flexible.
 //
 // Some @copypaste from CoalescerSourceGen.
-class VortexSourceGen(
+class VortexTLAdapter(
   newSourceWidth: Int,
-  reqT: TLBundleA,
-  respT: TLBundleD
+  inReqT: VortexBundleA,
+  inRespT: VortexBundleD,
+  outReqT: TLBundleA,
+  outRespT: TLBundleD
 ) extends Module {
   val io = IO(new Bundle {
     // in/out means upstream/downstream
-    val inReq = Flipped(Decoupled(reqT.cloneType))
-    val outReq = Decoupled(reqT.cloneType)
-    val inResp = Decoupled(respT.cloneType)
-    val outResp = Flipped(Decoupled(respT.cloneType))
+    // TODO: change inReq/inResp to VortexBundle
+    val inReq = Flipped(Decoupled(inReqT))
+    val outReq = Decoupled(outReqT)
+    val inResp = Decoupled(inRespT)
+    val outResp = Flipped(Decoupled(outRespT))
   })
   val sourceGen = Module(new SourceGenerator(
     newSourceWidth,
-    Some(chiselTypeOf(reqT.source)),
+    Some(inReqT.source),
     ignoreInUse = false
   ))
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
@@ -382,15 +404,32 @@ class VortexSourceGen(
   sourceGen.io.reclaim.bits := io.outResp.bits.source
   sourceGen.io.meta := io.inReq.bits.source
 
-  // passthrough logic
-  io.outReq <> io.inReq
+  // io passthrough logic
+  // TLBundleA <> VortexBundleA
+  io.outReq.valid := io.inReq.valid
+  io.outReq.bits.opcode := io.inReq.bits.opcode
+  io.outReq.bits.param := 0.U
+  io.outReq.bits.size := io.inReq.bits.size
+  io.outReq.bits.source := io.inReq.bits.source
+  io.outReq.bits.address := io.inReq.bits.address
+  io.outReq.bits.mask := io.inReq.bits.mask
+  io.outReq.bits.data := io.inReq.bits.data
+  io.outReq.bits.corrupt := 0.U
+  io.inReq.ready := io.outReq.ready
+  // VortexBundleD <> TLBundleD
+  io.inResp.valid := io.outResp.valid
+  io.inResp.bits.opcode := io.outResp.bits.opcode
+  io.inResp.bits.size := io.outResp.bits.size
+  io.inResp.bits.source := io.outResp.bits.source
+  io.inResp.bits.data := io.outResp.bits.data
+  io.outResp.ready := io.inResp.ready
+
   // "man-in-the-middle"
   io.inReq.ready := io.outReq.ready && sourceGen.io.id.valid
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
   // FIXME: Fill is a hack; just change downstream to the right sourceWidth
   // io.outReq.bits.source := Fill(newSourceWidth, sourceGen.io.id.bits)
   io.outReq.bits.source := sourceGen.io.id.bits
-  io.inResp <> io.outResp
   // translate upstream response back to its old sourceId
   io.inResp.bits.source := sourceGen.io.peek
 }

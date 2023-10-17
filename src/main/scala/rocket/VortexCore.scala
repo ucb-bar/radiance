@@ -8,7 +8,7 @@ import chisel3.util._
 import chisel3.experimental._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile._
-import tile.VortexTile
+import tile.{VortexTile, VortexBundleA, VortexBundleD}
 
 class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
   val clock = Input(Clock())
@@ -22,9 +22,9 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
     val a = tile.imemNodes.head.out.head._1.a.cloneType
     val d = Flipped(tile.imemNodes.head.out.head._1.d.cloneType)
   })) else None
-  val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(4, new Bundle {
-    val a = tile.dmemNodes.head.out.head._1.a.cloneType
-    val d = Flipped(tile.dmemNodes.head.out.head._1.d.cloneType)
+  val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
+    val a = Decoupled(new VortexBundleA())
+    val d = Flipped(Decoupled(new VortexBundleD()))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = tile.memNode.out.head._1.a.cloneType
