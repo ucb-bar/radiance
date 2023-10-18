@@ -91,7 +91,7 @@ class VortexTile private (
     minLatency = 1)))*/
 
   val numLanes = 4 // TODO: use Parameters for this
-  val sourceWidth = 1 // TODO: use Parameters for this
+  val sourceWidth = 4 // TODO: use Parameters for this
 
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
@@ -99,7 +99,7 @@ class VortexTile private (
         TLMasterPortParameters.v1(
           clients = Seq(
             TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << 10), // TODO: magic numbers
+              sourceId = IdRange(0, 1 << sourceWidth),
               name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
               requestFifo = true,
               supportsProbe =
