@@ -61,9 +61,9 @@ class VortexTile private(
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
-  val regDevice = new SimpleDevice("vortex-reg", Seq("vortex-reg"))
+  val regDevice = new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
   val regNode = TLRegisterNode(
-    address = Seq(AddressSet(0x7c000000, 0xfff)),
+    address = Seq(AddressSet(0x7c000000 + 0x1000 * tileParams.hartId, 0xfff)),
     device = regDevice,
     beatBytes = 4,
     concurrency = 1)
@@ -156,7 +156,7 @@ class VortexTile private(
   val beuProperty = bus_error_unit.map(d => Map(
           "sifive,buserror" -> d.device.asProperty)).getOrElse(Nil)
 
-  val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("sifive,vortex0", "riscv")) {
+  val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq(s"sifive,vortex${tileParams.hartId}", "riscv")) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
       val Description(name, mapping) = super.describe(resources)
