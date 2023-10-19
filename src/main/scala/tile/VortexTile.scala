@@ -135,15 +135,16 @@ class VortexTile private (
     )
   }
 
+  println(s"============= lazyCoreParamsView.coreDataBytes=${lazyCoreParamsView.coreDataBytes}")
   val memNode = TLClientNode(
     Seq(
       TLMasterPortParameters.v1(
         clients = Seq(
           TLMasterParameters.v1(
-            sourceId = IdRange(0, 1 << 15), // TODO magic numbers
+            sourceId = IdRange(0, 1 << sourceWidth),
             name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
             requestFifo = true,
-            supportsProbe = TransferSizes(16, 16),
+            supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
             supportsGet = TransferSizes(16, 16),
             supportsPutFull = TransferSizes(16, 16),
             supportsPutPartial = TransferSizes(16, 16)
@@ -284,16 +285,35 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
   //   s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
 
+  // ---------------------------------------------
+  // Translate Vortex memory interface to TileLink
+  // ---------------------------------------------
+
   if (outer.vortexParams.useVxCache) {
     println(s"width of a channel data ${core.io.mem.get.a.bits.data.getWidth}")
     println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
-    core.io.mem.get.a <> outer.memNode.out.head._1.a
-    core.io.mem.get.d <> outer.memNode.out.head._1.d
+
+    val memTLAdapter =  Module(new VortexTLAdapter(
+      outer.sourceWidth,
+      chiselTypeOf(core.io.mem.get.a.bits),
+      chiselTypeOf(core.io.mem.get.d.bits),
+      chiselTypeOf(outer.memNode.out.head._1.a.bits),
+      chiselTypeOf(outer.memNode.out.head._1.d.bits),
+    ))
+
+    // connection: VortexBundle <--> VortexTLAdapter <--> TL memNode
+    memTLAdapter.io.inReq <> core.io.mem.get.a
+    core.io.mem.get.d <> memTLAdapter.io.inResp
+    outer.memNode.out(0)._1.a <> memTLAdapter.io.outReq
+    memTLAdapter.io.outResp <> outer.memNode.out(0)._1.d
+
+    // core.io.mem.get.a <> outer.memNode.out.head._1.a
+    // core.io.mem.get.d <> outer.memNode.out.head._1.d
   } else {
     val imemTLAdapter =  Module(new VortexTLAdapter(
         outer.sourceWidth,
-        new VortexBundleA(),
-        new VortexBundleD(),
+        chiselTypeOf(core.io.imem.get(0).a.bits),
+        chiselTypeOf(core.io.imem.get(0).d.bits),
         chiselTypeOf(outer.imemNodes.head.out.head._1.a.bits),
         chiselTypeOf(outer.imemNodes.head.out.head._1.d.bits),
     ))
@@ -326,26 +346,26 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     // connection: VortexBundle <--> VortexTLAdapter <--> dmemNodes
     // @perf: this would duplicate SourceGenerator table for every lane and eat
     // up some area
-    val tlAdapters = Seq.tabulate(outer.numLanes) { _ =>
+    val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
       Module(new VortexTLAdapter(
         outer.sourceWidth,
-        new VortexBundleA(),
-        new VortexBundleD(),
+        chiselTypeOf(core.io.dmem.get(0).a.bits),
+        chiselTypeOf(core.io.dmem.get(0).d.bits),
         chiselTypeOf(dmemTLBundles.head.a.bits),
         chiselTypeOf(dmemTLBundles.head.d.bits),
       ))
     }
-    (core.io.dmem.get zip tlAdapters) foreach { case (coreMem, tlAdapter) =>
+    (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
       tlAdapter.io.inReq <> coreMem.a
       coreMem.d <> tlAdapter.io.inResp
     }
-    (tlAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlBundle) =>
+    (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlBundle) =>
       tlBundle.a <> tlAdapter.io.outReq
     }
     // using the chosen source id,
     // - lie to core that response is not valid if source doesn't match picked
     // - lie to downstream that core is not ready if source doesn't match picked
-    (tlAdapters zip dmemTLBundles).zipWithIndex.foreach {
+    (dmemTLAdapters zip dmemTLBundles).zipWithIndex.foreach {
       case ((tlAdapter, tlBundle), i) =>
         tlAdapter.io.outResp.bits := tlBundle.d.bits
         tlAdapter.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
