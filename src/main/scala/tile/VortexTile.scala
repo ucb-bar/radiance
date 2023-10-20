@@ -209,6 +209,7 @@ class VortexTile private (
         )
       }
     }
+  }
 
   ResourceBinding {
     Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
