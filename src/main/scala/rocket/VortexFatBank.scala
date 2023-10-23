@@ -10,6 +10,88 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.{Parameters, Field}
 
 
+
+
+//<FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
+//we should just use the one in coalescing.scala written by hansung
+
+class NewSourceGenerator[T <: Data](
+  sourceWidth: Int,
+  metadata: Option[T] = None,
+  ignoreInUse: Boolean = false
+) extends Module {
+  def getMetadataType = metadata match {
+    case Some(gen) => gen.cloneType
+    case None => UInt(0.W)
+  }
+  val io = IO(new Bundle {
+    val gen = Input(Bool())
+    val reclaim = Input(Valid(UInt(sourceWidth.W)))
+    val id = Output(Valid(UInt(sourceWidth.W)))
+    // below are used only when metadata is not None
+    // `meta` is used as input when a request succeeds id generation to store
+    // its value to the table.
+    // `peek` is the retrieved metadata saved for the request when corresponding
+    // request has come back, setting `reclaim`.
+    // Although these do not use ValidIO, it is safe because any in-flight
+    // response coming back should have allocated a valid entry in the table
+    // when it went out.
+    val meta = Input(getMetadataType)
+    val peek = Output(getMetadataType)
+    // for debugging; indicates whether there is at least one inflight request
+    // that hasn't been reclaimed yet
+    val inflight = Output(Bool())
+  })
+  val head = RegInit(UInt(sourceWidth.W), 0.U)
+  head := Mux(io.gen, head + 1.U, head)
+
+  val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
+  io.inflight := (outstanding > 0.U) || io.gen
+
+  val numSourceId = 1 << sourceWidth
+  val row = new Bundle {
+    val meta = getMetadataType
+    val id = Valid(UInt(sourceWidth.W))
+  }
+  // valid: in use, invalid: available
+  // val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
+  val occupancyTable = Mem(numSourceId, row)
+  when(reset.asBool) {
+    (0 until numSourceId).foreach { occupancyTable(_).id.valid := false.B }
+  }
+  val frees = (0 until numSourceId).map(!occupancyTable(_).id.valid)
+  val lowestFree = PriorityEncoder(frees)
+  val lowestFreeRow = occupancyTable(lowestFree)
+
+  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.id.valid)
+  io.id.bits := lowestFree
+  when(io.gen && io.id.valid /* fire */ ) {
+    occupancyTable(io.id.bits).id.valid := true.B // mark in use
+    if (metadata.isDefined) {
+      occupancyTable(io.id.bits).meta := io.meta
+    }
+  }
+  when(io.reclaim.valid) {
+    // @perf: would this require multiple write ports?
+    occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
+  }
+  io.peek := {
+    if (metadata.isDefined) occupancyTable(io.reclaim.bits).meta else 0.U
+  }
+
+  when(io.gen && io.id.valid) {
+    when (!io.reclaim.valid) {
+      assert(outstanding < (1 << sourceWidth).U)
+      outstanding := outstanding + 1.U
+    }
+  }.elsewhen(io.reclaim.valid) {
+    assert(outstanding > 0.U)
+    outstanding := outstanding - 1.U
+  }
+  dontTouch(outstanding)
+}
+
+
 // VortexTile has dmemNodes, imemNodes
 
 //Param and Key are used during SoC Generation
@@ -21,6 +103,8 @@ case class VortexFatBankConfig(
     wordSize: Int,      //This is the read/write granularity of the L1 cache
     cacheLineSize: Int,
     coreTagWidth: Int,
+    writeInfoReqQSize: Int,
+    mshrSize: Int
 ) {
     def coreTagPlusSizeWidth: Int = {
         log2Ceil(wordSize) + coreTagWidth
@@ -31,6 +115,8 @@ object defaultFatBankConfig extends VortexFatBankConfig(
     wordSize = 16,
     cacheLineSize = 16,
     coreTagWidth = 8,
+    writeInfoReqQSize = 16,
+    mshrSize = 8
 )
 
 
@@ -83,7 +169,8 @@ class VortexFatBankImp (
     val vxCache = Module(new VX_cache(
         WORD_SIZE=config.wordSize, 
         CACHE_LINE_SIZE=config.cacheLineSize,
-        CORE_TAG_WIDTH= config.coreTagPlusSizeWidth
+        CORE_TAG_WIDTH= config.coreTagPlusSizeWidth,
+        MSHR_SIZE= config.mshrSize
         )
     );
 
@@ -94,16 +181,13 @@ class VortexFatBankImp (
         val id = UInt(32.W)
         val size = UInt(32.W)
     }
-    
 
-    //<FIXME> assuming this is never full
-    val rcvWriteReqInfo = Module(new Queue((new WriteReqInfo).cloneType, 64, true, false))
-    
     class ReadReqInfo(config: VortexFatBankConfig) extends Bundle {
         val size = UInt(log2Ceil(config.wordSize).W)
         val id   = UInt(config.coreTagWidth.W)
     }
 
+    val rcvWriteReqInfo = Module(new Queue((new WriteReqInfo).cloneType, config.writeInfoReqQSize, true, false))
     val readReqInfo = Wire(new ReadReqInfo(config))
 
     // Translate TL request from Coalescer to requests for VX_cache
@@ -112,16 +196,17 @@ class VortexFatBankImp (
         // coal -> vxCache request on channel A
         val coalToBankA = coalToBankBundle.a;
         
-        coalToBankA.ready := vxCache.io.core_req_ready
+        coalToBankA.ready := vxCache.io.core_req_ready && rcvWriteReqInfo.io.enq.ready //not optimal
         vxCache.io.core_req_valid := coalToBankA.valid
 
         // read = 0, write = 1
         vxCache.io.core_req_rw     := !(coalToBankA.bits.opcode === TLMessages.Get)
         //4 is also hardcoded, it should be log2WordSize
-        vxCache.io.core_req_addr   := coalToBankA.bits.address(31, 4)
+        vxCache.io.core_req_addr   := coalToBankA.bits.address(31, log2Ceil(config.wordSize))
         vxCache.io.core_req_byteen := coalToBankA.bits.mask
         vxCache.io.core_req_data   := coalToBankA.bits.data
         
+        //combine size and tag field into one big wire, to put into vxCache.io.core_req_tag
         readReqInfo.id   := coalToBankA.bits.source
         readReqInfo.size := coalToBankA.bits.size
         vxCache.io.core_req_tag := readReqInfo.asTypeOf(vxCache.io.core_req_tag)
@@ -135,9 +220,7 @@ class VortexFatBankImp (
         // if we don't send ack, the coalescer will run out of IDs, and can't generate new request
 
         // for read request, we send AckData when the FatBank has a valid output
-        // for write request, we can immediate Ack on the next clock cycle (not the same clock cycle, otherwise critical path too long)
-        // It's possible that on the same cycle, we need to do both "AckData" and "Ack"
-        //    in this case, we always priorize "Ack", this makes the design easier
+        // for write request, we can ack whenever we have a valid entry in rcvWriteReqInfo Queue
 
         //I think this just shows the flaws of Tilelink. CPU never waits for an Ack upon regular write request
         //the Core should unconditionally move forward after every regular write request
@@ -150,39 +233,29 @@ class VortexFatBankImp (
         rcvWriteReqInfo.io.enq.bits.id   := coalToBankA.bits.source
         rcvWriteReqInfo.io.enq.bits.size := coalToBankA.bits.size
 
-
-        rcvWriteReqInfo.io.deq.ready := coalToBankD.ready
+        //prioritize Ack for Read, so we only deque from writeReqInfo, if we don't have a readReq we need to ack
+        //vxCache.io.core_rsp_valid means readDataAck
+        rcvWriteReqInfo.io.deq.ready := coalToBankD.ready && ~vxCache.io.core_rsp_valid 
         
-        //if we "need" to do Ack
-        //we unconditionally set the vxCache.ready to be false, so it gets delayed
-        vxCache.io.core_rsp_ready := Mux(
-            rcvWriteReqInfo.io.deq.valid,
-            false.B,
-            coalToBankD.ready
-        )
-
-        coalToBankD.valid := Mux(
-            rcvWriteReqInfo.io.deq.valid,
-            true.B,
-            vxCache.io.core_rsp_valid
-        )
+        vxCache.io.core_rsp_ready := coalToBankD.ready
+        coalToBankD.valid := vxCache.io.core_rsp_valid || rcvWriteReqInfo.io.deq.valid
 
         coalToBankD.bits.source := Mux(
-            rcvWriteReqInfo.io.deq.valid,
-            rcvWriteReqInfo.io.deq.bits.id,
-            vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).id
+            vxCache.io.core_rsp_valid,
+            vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).id,
+            rcvWriteReqInfo.io.deq.bits.id
         )
 
         coalToBankD.bits.opcode  := Mux(
-            rcvWriteReqInfo.io.deq.valid,
-            TLMessages.AccessAck,
-            TLMessages.AccessAckData
+            vxCache.io.core_rsp_valid,
+            TLMessages.AccessAckData,
+            TLMessages.AccessAck
         )
 
         coalToBankD.bits.size := Mux(
-            rcvWriteReqInfo.io.deq.valid,
-            rcvWriteReqInfo.io.deq.bits.size,
-            vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).size
+            vxCache.io.core_rsp_valid,
+            vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).size,
+            rcvWriteReqInfo.io.deq.bits.size
         )
 
         coalToBankD.bits.param   := 0.U
@@ -190,7 +263,7 @@ class VortexFatBankImp (
         coalToBankD.bits.denied  := false.B
         coalToBankD.bits.corrupt := false.B
 
-        coalToBankD.bits.data   := vxCache.io.core_rsp_data
+        coalToBankD.bits.data    := vxCache.io.core_rsp_data
     }
 
 
@@ -200,10 +273,10 @@ class VortexFatBankImp (
     //vx_cache can indeed guarantee that all active read operation has unique ID
     //However, since the cache is write_through, so it can't ensure unique ID for write operation
     //Therefore, we need our own internal source_ID generator for all write operation
-    //
-    //Now, we allocate id range: 0-15 for all write operation
-    //                    and    16-> above for read operation
-    val sourceGen = Module( new SourceGenerator(log2Ceil(16), ignoreInUse = false))
+    
+
+    val sourceGen = Module( new NewSourceGenerator(log2Ceil(config.mshrSize), metadata = Some(UInt(32.W)), ignoreInUse = false))
+    
 
 
     // Translate VX_cache mem request to a TL request to be sent to L2
@@ -215,13 +288,9 @@ class VortexFatBankImp (
 
         //Read Operation is ready as long as downstream L2 is ready
 
-        vxCache.io.mem_req_ready := vxCacheToL2A.ready
+        vxCache.io.mem_req_ready := vxCacheToL2A.ready 
 
-        vxCacheToL2A.valid := Mux(
-            vxCache.io.mem_req_rw,
-            vxCache.io.mem_req_valid && sourceGen.io.id.valid,
-            vxCache.io.mem_req_valid
-        )
+        vxCacheToL2A.valid := vxCache.io.mem_req_valid && sourceGen.io.id.valid
 
         vxCacheToL2A.bits.opcode := Mux(
             vxCache.io.mem_req_rw, 
@@ -230,21 +299,19 @@ class VortexFatBankImp (
         )
 
         vxCacheToL2A.bits.address := Cat(vxCache.io.mem_req_addr, 0.U(4.W))
+
         vxCacheToL2A.bits.mask    := Mux(
             vxCache.io.mem_req_rw, 
             vxCache.io.mem_req_byteen,
             0xFFFF.U
         )
+
         vxCacheToL2A.bits.data    := vxCache.io.mem_req_data
 
-        
-        vxCacheToL2A.bits.source  := Mux(
-            vxCache.io.mem_req_rw,
-            sourceGen.io.id.bits,
-            vxCache.io.mem_req_tag + 16.U
-        )
-        //mark current source_id as in-use
-        sourceGen.io.gen := vxCache.io.mem_req_rw && vxCacheToL2A.ready && vxCacheToL2A.valid
+        vxCacheToL2A.bits.source  := sourceGen.io.id.bits
+
+        sourceGen.io.gen  := vxCacheToL2A.ready && vxCacheToL2A.valid
+        sourceGen.io.meta := vxCache.io.mem_req_tag //save the old read id
 
         vxCacheToL2A.bits.param   := 0.U
         vxCacheToL2A.bits.size    := 4.U
@@ -257,10 +324,11 @@ class VortexFatBankImp (
         vxCacheToL2D.ready := vxCache.io.mem_rsp_ready
 
         vxCache.io.mem_rsp_valid := vxCacheToL2D.valid && vxCacheToL2D.bits.opcode === TLMessages.AccessAckData
-        vxCache.io.mem_rsp_tag   := vxCacheToL2D.bits.source - 16.U // -16 for read resp, we can safely do this, since write-ack wouldn't pass through
-        vxCache.io.mem_rsp_data := vxCacheToL2D.bits.data
+        vxCache.io.mem_rsp_tag   := sourceGen.io.peek
+        vxCache.io.mem_rsp_data  := vxCacheToL2D.bits.data
 
-        sourceGen.io.reclaim.valid := vxCacheToL2D.ready && vxCacheToL2D.valid && vxCacheToL2D.bits.opcode === TLMessages.AccessAck
+        // all ids needs to be reclaimed
+        sourceGen.io.reclaim.valid := vxCacheToL2D.ready && vxCacheToL2D.valid
         sourceGen.io.reclaim.bits := vxCacheToL2D.bits.source
 
     }
