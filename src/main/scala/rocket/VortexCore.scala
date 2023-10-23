@@ -8,7 +8,6 @@ import chisel3.util._
 import chisel3.experimental._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile._
-import tile.VortexTile
 
 class VortexBundleA(
   sourceWidth: Int,

@@ -1,7 +1,7 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package tile
+package freechips.rocketchip.tile
 
 import chisel3._
 import chisel3.util._
@@ -18,10 +18,8 @@ import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tile._
 import rocket.{Vortex, VortexBundleA, VortexBundleD}
 
-case class RocketTileBoundaryBufferParams(force: Boolean = false)
-
 case class VortexTileParams(
-    core: RocketCoreParams = RocketCoreParams(),
+    core: VortexCoreParams = VortexCoreParams(),
     useVxCache: Boolean = false,
     icache: Option[ICacheParams] = None /* Some(ICacheParams()) */,
     dcache: Option[DCacheParams] = None /* Some(DCacheParams()) */,
@@ -44,6 +42,65 @@ case class VortexTileParams(
   }
 }
 
+// TODO: move to VortexCore
+// VortexTileParams extends from TileParams that require a `core: CoreParams`
+// field, so VortexCoreParams needs to also extend from that, requiring all
+// these fields to be initialized. TODO.
+case class VortexCoreParams(
+  bootFreqHz: BigInt = 0,
+  useVM: Boolean = true,
+  useUser: Boolean = false,
+  useSupervisor: Boolean = false,
+  useHypervisor: Boolean = false,
+  useDebug: Boolean = true,
+  useAtomics: Boolean = true,
+  useAtomicsOnlyForIO: Boolean = false,
+  useCompressed: Boolean = true,
+  useRVE: Boolean = false,
+  useSCIE: Boolean = false,
+  useBitManip: Boolean = false,
+  useBitManipCrypto: Boolean = false,
+  useCryptoNIST: Boolean = false,
+  useCryptoSM: Boolean = false,
+  useConditionalZero: Boolean = false,
+  nLocalInterrupts: Int = 0,
+  useNMI: Boolean = false,
+  nBreakpoints: Int = 1,
+  useBPWatch: Boolean = false,
+  mcontextWidth: Int = 0,
+  scontextWidth: Int = 0,
+  nPMPs: Int = 8,
+  nPerfCounters: Int = 0,
+  haveBasicCounters: Boolean = true,
+  haveCFlush: Boolean = false,
+  misaWritable: Boolean = true,
+  nL2TLBEntries: Int = 0,
+  nL2TLBWays: Int = 1,
+  nPTECacheEntries: Int = 8,
+  mtvecInit: Option[BigInt] = Some(BigInt(0)),
+  mtvecWritable: Boolean = true,
+  fastLoadWord: Boolean = true,
+  fastLoadByte: Boolean = false,
+  branchPredictionModeCSR: Boolean = false,
+  clockGate: Boolean = false,
+  mvendorid: Int = 0, // 0 means non-commercial implementation
+  mimpid: Int = 0x20181004, // release date in BCD
+  mulDiv: Option[MulDivParams] = Some(MulDivParams()),
+  fpu: Option[FPUParams] = Some(FPUParams()),
+  debugROB: Boolean = false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
+  haveCease: Boolean = true, // non-standard CEASE instruction
+  haveSimTimeout: Boolean = true // add plusarg for simulation timeout
+) extends CoreParams {
+  val haveFSDirty = false
+  val pmpGranularity: Int = if (useHypervisor) 4096 else 4
+  val fetchWidth: Int = if (useCompressed) 2 else 1
+  val decodeWidth: Int = fetchWidth / (if (useCompressed) 2 else 1)
+  val retireWidth: Int = 1
+  val instBits: Int = if (useCompressed) 16 else 32
+  val lrscCycles: Int = 80 // worst case is 14 mispredicted branches + slop
+  val traceHasWdata: Boolean = false // ooo wb, so no wdata in trace
+}
+
 class VortexTile private (
     val vortexParams: VortexTileParams,
     crossing: ClockCrossingType,
@@ -64,6 +121,8 @@ class VortexTile private (
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
+  // Memory-mapped region for HTIF communication
+  // We use fixed addresses instead of tohost/fromhost
   val regDevice = new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
   val regNode = TLRegisterNode(
     address = Seq(AddressSet(0x7c000000 + 0x1000 * tileParams.hartId, 0xfff)),
@@ -256,6 +315,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   core.io.clock := clock
   core.io.reset := reset
 
+  // begin @copypaste from RocketTile ------------------------------------------
+
   // reset vector is connected in the Frontend to s2_pc
   core.io.reset_vector := DontCare
 
@@ -281,10 +342,12 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   core.io.traceStall := outer.traceAuxSinkNode.bundle.stall
   // outer.bpwatchSourceNode.bundle <> core.io.bpwatch
 
-  // Copypasted from Rocket; not necessary for Vortex as hartId is set via Verilog parameter
+  // not necessary for Vortex as hartId is set via Verilog parameter
   // core.io.hartid := outer.hartIdSinkNode.bundle
   // require(core.io.hartid.getWidth >= outer.hartIdSinkNode.bundle.getWidth,
   //   s"core hartid wire (${core.io.hartid.getWidth}b) truncates external hartid wire (${outer.hartIdSinkNode.bundle.getWidth}b)")
+
+  // end @copypaste from RocketTile --------------------------------------------
 
   // ---------------------------------------------
   // Translate Vortex memory interface to TileLink
@@ -307,9 +370,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     core.io.mem.get.d <> memTLAdapter.io.inResp
     outer.memNode.out(0)._1.a <> memTLAdapter.io.outReq
     memTLAdapter.io.outResp <> outer.memNode.out(0)._1.d
-
-    // core.io.mem.get.a <> outer.memNode.out.head._1.a
-    // core.io.mem.get.d <> outer.memNode.out.head._1.d
   } else {
     val imemTLAdapter =  Module(new VortexTLAdapter(
         outer.sourceWidth,
@@ -325,7 +385,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     imemTLAdapter.io.outResp <> outer.imemNodes(0).out(0)._1.d
 
     // Since the individual per-lane TL requests might come back out-of-sync between
-    // the lanes, but Vortex core expects the lane requests to be synced,
+    // the lanes, but Vortex core expects the per-lane responses to be synced,
     // we need to selectively fire responses that have the same source, and
     // delay others.  Below is the logic that implements this.
 
@@ -333,8 +393,9 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     val arb = Module(
       new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
     )
-    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
     arb.io.out.ready := true.B
+
+    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
     (arb.io.in zip dmemTLBundles).foreach { case (arbIn, tlBundle) =>
       arbIn.valid := tlBundle.d.valid
       arbIn.bits := tlBundle.d.bits.source
@@ -372,10 +433,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         tlAdapter.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
         tlBundle.d.ready := tlAdapter.io.outResp.ready && matchingSources(i)
     }
-
-    // (core.io.dmem.get zip outer.dmemNodes).foreach { case (coreMem, tileNode) =>
-    //   tileNode.out.head._1.a <> coreMem.a
-    // }
   }
 
   // core.io.fpu := DontCare
@@ -388,6 +445,61 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   // require(h == o, s"port list size was $h, outer counted $o")
   // TODO figure out how to move the below into their respective mix-ins
   // dcacheArb.io.requestor <> dcachePorts.toSeq
+}
+
+/** VortexCore wraps around the Vortex BlackBox module and exposes TileLink
+  * nodes for the core-cache memory interface.
+  */
+class VortexCore(implicit p: Parameters) extends LazyModule {
+  val numLanes = 4 // TODO: use Parameters for this
+  val sourceWidth = 4 // TODO: use Parameters for this
+
+  // val imemNodes = Seq.tabulate(1) { i =>
+  //   TLClientNode(
+  //     Seq(
+  //       TLMasterPortParameters.v1(
+  //         clients = Seq(
+  //           TLMasterParameters.v1(
+  //             sourceId = IdRange(0, 1 << sourceWidth),
+  //             name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
+  //             requestFifo = true,
+  //             supportsProbe =
+  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+  //             supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+  //           )
+  //         )
+  //       )
+  //     )
+  //   )
+  // }
+
+  // val dmemNodes = Seq.tabulate(numLanes) { i =>
+  //   TLClientNode(
+  //     Seq(
+  //       TLMasterPortParameters.v1(
+  //         clients = Seq(
+  //           TLMasterParameters.v1(
+  //             sourceId = IdRange(0, 1 << sourceWidth),
+  //             name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
+  //             requestFifo = true,
+  //             supportsProbe =
+  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+  //             supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+  //             supportsPutFull =
+  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+  //             supportsPutPartial =
+  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+  //           )
+  //         )
+  //       )
+  //     )
+  //   )
+  // }
+
+  lazy val module = new VortexCoreModuleImp(this)
+}
+
+class VortexCoreModuleImp(outer: VortexCore) extends LazyModuleImp(outer) {
 }
 
 // Some @copypaste from CoalescerSourceGen.
@@ -441,10 +553,4 @@ class VortexTLAdapter(
   io.outReq.bits.source := sourceGen.io.id.bits
   // translate upstream response back to its old sourceId
   io.inResp.bits.source := sourceGen.io.peek
-}
-
-// FIXME: unsure this is necessary
-trait HasFpuOpt { this: RocketTileModuleImp =>
-  val fpuOpt =
-    outer.tileParams.core.fpu.map(params => Module(new FPU(params)(outer.p)))
 }
