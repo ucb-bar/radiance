@@ -258,7 +258,6 @@ case class CoalescedResponse(config: CoalescerConfig)
 // storing e.g. the UUID originally attached to a request.  This is useful for
 // using this module as a source ID converter / compressor.  If `None`, this
 // field is not instantiated.
-// TODO: implement lookup logic.
 //
 // If `ignoreInUse`, just keep giving out new IDs without any collision checking.
 // This might result in TL violation.
