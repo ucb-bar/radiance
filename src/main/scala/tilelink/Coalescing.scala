@@ -99,14 +99,14 @@ case class CoalescerConfig(
 }
 
 
-object defaultConfig extends CoalescerConfig(
+object DefaultCoalescerConfig extends CoalescerConfig(
   enable = true,
   numLanes = 4,
   queueDepth = 1,
   waitTimeout = 8,
   addressWidth = 24,
-  dataBusWidth = 4, // if "4": 2^4=16 bytes, 128 bit bus
-  coalLogSizes = Seq(4),
+  dataBusWidth = 4,      // if "4": 2^4=16 bytes, 128 bit bus
+  coalLogSizes = Seq(4), // if "4": 2^4=16 bytes, 128 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
@@ -2008,7 +2008,7 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // Should not instantiate any memtrace modules.
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
   val numLanes = p(SIMTCoreKey).get.nLanes
-  val config = defaultConfig.copy(numLanes = numLanes)
+  val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new DummyDriver(config))
   val rams = Seq.fill(config.numLanes + 1)( // +1 for coalesced edge
@@ -2045,7 +2045,7 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     extends LazyModule {
   val numLanes = p(SIMTCoreKey).get.nLanes
-  val config = defaultConfig.copy(numLanes = numLanes)
+  val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new MemTraceDriver(config, filename))
   val coreSideLogger = LazyModule(
@@ -2105,7 +2105,7 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
 // tracedriver --> coalescer --> tlram
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   val numLanes = p(SIMTCoreKey).get.nLanes
-  val config = defaultConfig.copy(numLanes = numLanes)
+  val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val filename = "vecadd.core1.thread4.trace"
   val coal = LazyModule(new CoalescingUnit(config))

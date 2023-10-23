@@ -15,7 +15,7 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
   p(MemtraceCoreKey).map { param =>
     // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
     val simtParam = p(SIMTCoreKey).get
-    val config = defaultConfig.copy(
+    val config = DefaultCoalescerConfig.copy(
       numLanes = simtParam.nLanes, 
       numOldSrcIds = simtParam.nSrcIds
       )
