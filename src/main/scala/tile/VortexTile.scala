@@ -43,9 +43,9 @@ case class VortexTileParams(
 }
 
 // TODO: move to VortexCore
-// VortexTileParams extends from TileParams that require a `core: CoreParams`
-// field, so VortexCoreParams needs to also extend from that, requiring all
-// these fields to be initialized. TODO.
+// VortexTileParams extends TileParams which require a `core: CoreParams`
+// field, so VortexCoreParams needs to extend from that, requiring all
+// these fields to be initialized.  Most of this is unnecessary though. TODO
 case class VortexCoreParams(
   bootFreqHz: BigInt = 0,
   useVM: Boolean = true,
@@ -53,9 +53,9 @@ case class VortexCoreParams(
   useSupervisor: Boolean = false,
   useHypervisor: Boolean = false,
   useDebug: Boolean = true,
-  useAtomics: Boolean = true,
+  useAtomics: Boolean = false,
   useAtomicsOnlyForIO: Boolean = false,
-  useCompressed: Boolean = true,
+  useCompressed: Boolean = false,
   useRVE: Boolean = false,
   useSCIE: Boolean = false,
   useBitManip: Boolean = false,
@@ -121,6 +121,8 @@ class VortexTile private (
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
+  println(s"======= found CoalescerKey: ${q(CoalescerKey).get.dataBusWidth}")
+
   // Memory-mapped region for HTIF communication
   // We use fixed addresses instead of tohost/fromhost
   val regDevice = new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
@@ -149,75 +151,76 @@ class VortexTile private (
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
-  val numLanes = 4 // TODO: use Parameters for this
-  val sourceWidth = 4 // TODO: use Parameters for this
+  val numLanes = p(SIMTCoreKey) match {
+    case Some(simtParam) => simtParam.nLanes
+    case None => 4
+  }
+  val sourceWidth = p(SIMTCoreKey) match {
+    // TODO: respect coalescer newSrcIds
+    case Some(simtParam) => log2Ceil(simtParam.nSrcIds)
+    case None => 4
+  }
 
   val imemNodes = Seq.tabulate(1) { i =>
-    TLClientNode(
-      Seq(
-        TLMasterPortParameters.v1(
-          clients = Seq(
-            TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << sourceWidth),
-              name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
-              requestFifo = true,
-              supportsProbe =
-                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-            )
-          )
-        )
-      )
-    )
+    TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        sourceId = IdRange(0, 1 << sourceWidth),
+        name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
+        requestFifo = true,
+        supportsProbe =
+          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+        supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+      ))
+    )))
   }
 
   val dmemNodes = Seq.tabulate(numLanes) { i =>
-    TLClientNode(
-      Seq(
-        TLMasterPortParameters.v1(
-          clients = Seq(
-            TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << sourceWidth),
-              name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
-              requestFifo = true,
-              supportsProbe =
-                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-              supportsPutFull =
-                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-              supportsPutPartial =
-                TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-            )
-          )
-        )
-      )
-    )
+    TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        sourceId = IdRange(0, 1 << sourceWidth),
+        name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
+        requestFifo = true,
+        supportsProbe =
+          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+        supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+        supportsPutFull =
+          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+        supportsPutPartial =
+          TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+      ))
+    )))
   }
+  // combine outgoing per-lane dmemNode into 1 idenity node
+  val dmemAggregateNode = TLIdentityNode()
+  dmemNodes.foreach { n => dmemAggregateNode := n }
 
-  println(s"============= lazyCoreParamsView.coreDataBytes=${lazyCoreParamsView.coreDataBytes}")
-  val memNode = TLClientNode(
-    Seq(
-      TLMasterPortParameters.v1(
-        clients = Seq(
-          TLMasterParameters.v1(
-            sourceId = IdRange(0, 1 << sourceWidth),
-            name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
-            requestFifo = true,
-            supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
-            supportsGet = TransferSizes(16, 16),
-            supportsPutFull = TransferSizes(16, 16),
-            supportsPutPartial = TransferSizes(16, 16)
-          )
-        )
-      )
-    )
-  )
+  val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
+    clients = Seq(TLMasterParameters.v1(
+      sourceId = IdRange(0, 1 << sourceWidth),
+      name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
+      requestFifo = true,
+      supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
+      supportsGet = TransferSizes(16, 16),
+      supportsPutFull = TransferSizes(16, 16),
+      supportsPutPartial = TransferSizes(16, 16)
+    ))
+  )))
+
+  // Conditionally instantiate memory coalescer
+  val coalescerNode = p(CoalescerKey) match {
+    case Some(coalescerParam) => {
+      val coal = LazyModule(new CoalescingUnit(coalescerParam))
+      coal.cpuNode :=* dmemAggregateNode
+      coal.aggregateNode // N+1 lanes
+    }
+    case None => dmemAggregateNode
+  }
 
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
     imemNodes.foreach { tlMasterXbar.node := _ }
-    dmemNodes.foreach { tlMasterXbar.node := _ }
+    tlMasterXbar.node :=* coalescerNode
   }
 
   /* below are copied from rocket */
@@ -435,71 +438,9 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     }
   }
 
-  // core.io.fpu := DontCare
-
-  // TODO eliminate this redundancy
-  // val h = dcachePorts.size
-  // val c = core.dcacheArbPorts
-  // val o = outer.nDCachePorts
-  // require(h == c, s"port list size was $h, core expected $c")
-  // require(h == o, s"port list size was $h, outer counted $o")
-  // TODO figure out how to move the below into their respective mix-ins
-  // dcacheArb.io.requestor <> dcachePorts.toSeq
-}
-
-/** VortexCore wraps around the Vortex BlackBox module and exposes TileLink
-  * nodes for the core-cache memory interface.
-  */
-class VortexCore(implicit p: Parameters) extends LazyModule {
-  val numLanes = 4 // TODO: use Parameters for this
-  val sourceWidth = 4 // TODO: use Parameters for this
-
-  // val imemNodes = Seq.tabulate(1) { i =>
-  //   TLClientNode(
-  //     Seq(
-  //       TLMasterPortParameters.v1(
-  //         clients = Seq(
-  //           TLMasterParameters.v1(
-  //             sourceId = IdRange(0, 1 << sourceWidth),
-  //             name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
-  //             requestFifo = true,
-  //             supportsProbe =
-  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-  //             supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-  //           )
-  //         )
-  //       )
-  //     )
-  //   )
-  // }
-
-  // val dmemNodes = Seq.tabulate(numLanes) { i =>
-  //   TLClientNode(
-  //     Seq(
-  //       TLMasterPortParameters.v1(
-  //         clients = Seq(
-  //           TLMasterParameters.v1(
-  //             sourceId = IdRange(0, 1 << sourceWidth),
-  //             name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
-  //             requestFifo = true,
-  //             supportsProbe =
-  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-  //             supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-  //             supportsPutFull =
-  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-  //             supportsPutPartial =
-  //               TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-  //           )
-  //         )
-  //       )
-  //     )
-  //   )
-  // }
-
-  lazy val module = new VortexCoreModuleImp(this)
-}
-
-class VortexCoreModuleImp(outer: VortexCore) extends LazyModuleImp(outer) {
+  // TODO: generalize for useVxCache
+  if (!outer.vortexParams.useVxCache) {
+  }
 }
 
 // Some @copypaste from CoalescerSourceGen.
