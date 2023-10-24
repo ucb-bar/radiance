@@ -233,9 +233,9 @@ class Response(sourceWidth: Int, sizeWidth: Int, dataWidth: Int)
     Mux(this.op.asBool, apBits, agBits)
   }
 
-  def fromTLD(bundle: TLBundleD): Unit = {
+  def fromTLD(bundle: TLBundleD, checkOpcode: Bool): Unit = {
     this.source := bundle.source
-    this.op := TLUtils.DOpcodeIsStore(bundle.opcode)
+    this.op := TLUtils.DOpcodeIsStore(bundle.opcode, checkOpcode)
     this.size := bundle.size
     this.data := bundle.data
     this.error := bundle.denied
@@ -864,7 +864,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       // Request queue
       val req = Wire(nonCoalReqT)
 
-      req.op := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
+      req.op := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode, tlIn.a.fire)
       req.source := tlIn.a.bits.source
       req.isStore := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
       req.address := tlIn.a.bits.address
@@ -1022,7 +1022,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       // coalesced responses and serve them back to the core side.
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
-      resp.fromTLD(tlOut.d.bits)
+      resp.fromTLD(tlOut.d.bits, tlOut.d.fire)
 
       // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
       // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
@@ -1063,7 +1063,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   //
   // Connect coalesced response
   uncoalescer.io.coalResp.valid := tlCoal.d.valid
-  uncoalescer.io.coalResp.bits.fromTLD(tlCoal.d.bits)
+  uncoalescer.io.coalResp.bits.fromTLD(tlCoal.d.bits, tlCoal.d.fire)
   // Connect lookup result from InflightTable
   uncoalescer.io.inflightLookup <> inflightTable.io.lookup
   // InflightTable IO: Look up the table with incoming coalesced responses
@@ -1353,20 +1353,25 @@ class InFlightTableEntry(
 }
 
 object TLUtils {
-  def AOpcodeIsStore(opcode: UInt): Bool = {
+  def AOpcodeIsStore(opcode: UInt, checkOpcode: Bool): Bool = {
     // 0: PutFullData, 1: PutPartialData, 4: Get
-    assert(
-      opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
-      "unhandled TL A opcode found"
-    )
-    opcode === TLMessages.PutFullData
+    when(checkOpcode) {
+      assert(
+        opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
+        "unhandled TL A opcode found"
+      )
+    }
+    Mux(opcode === TLMessages.PutFullData, true.B, false.B)
   }
-  def DOpcodeIsStore(opcode: UInt): Bool = {
-    assert(
-      opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
-      "unhandled TL D opcode found"
-    )
-    opcode === TLMessages.AccessAck
+  def DOpcodeIsStore(opcode: UInt, checkOpcode: Bool): Bool = {
+    printf("DOpcodeIsStore: opcode=%d\n", opcode)
+    when(checkOpcode) {
+      assert(
+        opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
+        "unhandled TL D opcode found"
+      )
+    }
+    Mux(opcode === TLMessages.AccessAck, true.B, false.B)
   }
 }
 
@@ -1724,7 +1729,7 @@ class MemTraceLogger(
         // and transaction happened.
         req.valid := tlIn.a.fire
         req.size := tlIn.a.bits.size
-        req.is_store := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode)
+        req.is_store := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode, tlIn.a.fire)
         req.source := tlIn.a.bits.source
         // TL always carries the exact unaligned address that the client
         // originally requested, so no postprocessing required
@@ -1774,7 +1779,7 @@ class MemTraceLogger(
         // and transaction happened.
         resp.valid := tlOut.d.fire
         resp.size := tlOut.d.bits.size
-        resp.is_store := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode)
+        resp.is_store := TLUtils.DOpcodeIsStore(tlOut.d.bits.opcode, tlOut.d.fire)
         resp.source := tlOut.d.bits.source
         // NOTE: TL D channel doesn't carry address nor mask, so there's no easy
         // way to figure out which bytes the master actually use.  Since we
@@ -2263,7 +2268,7 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
       case(node,resp) => 
         val (tlOut, _)  = node.out(0)
         val nonCoalResp = Wire(respNonCoalEntryT)
-        nonCoalResp.fromTLD(tlOut.d.bits)
+        nonCoalResp.fromTLD(tlOut.d.bits, tlOut.d.fire)
         tlOut.d.ready  := resp.ready
         resp.valid     := tlOut.d.valid
         resp.bits      := nonCoalResp
@@ -2284,7 +2289,7 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
     io.coalResp.valid := coalRespRRArbiter.io.out.valid
     coalRespRRArbiter.io.out.ready := io.coalResp.ready
     val coalRespBundle = Wire(respCoalBundleT)
-    coalRespBundle.fromTLD(coalRespRRArbiter.io.out.bits)
+    coalRespBundle.fromTLD(coalRespRRArbiter.io.out.bits, coalRespRRArbiter.io.out.fire)
     io.coalResp.bits  := coalRespBundle
 
 
