@@ -216,7 +216,7 @@ class VortexTile private (
   // Conditionally instantiate memory coalescer
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalescerParam) => {
-      val coal = LazyModule(new CoalescingUnit(coalescerParam.copy(enable = false)))
+      val coal = LazyModule(new CoalescingUnit(coalescerParam.copy(enable = true)))
       coal.cpuNode :=* dmemAggregateNode
       coal.aggregateNode // N+1 lanes
     }
@@ -415,11 +415,10 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     val matchingSources = Wire(UInt(outer.numLanes.W))
     matchingSources := dmemTLBundles
       .map(b =>
-          // If there is no valid response across all lanes, matchingSources
-          // should always be 1, or otherwise downstream would think upstream
-          // is blocked and re-try sending
-          !arb.io.out.valid
-          || (b.d.bits.source === arb.io.out.bits))
+          // If there is no valid response pending across all lanes,
+          // matchingSources should not filter out upstream ready signals, so
+          // set it to all-1
+          !arb.io.out.valid || (b.d.bits.source === arb.io.out.bits))
       .asUInt
 
     // connection: VortexBundle <--> VortexTLAdapter <--> dmemNodes

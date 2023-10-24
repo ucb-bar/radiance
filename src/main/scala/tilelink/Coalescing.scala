@@ -1032,11 +1032,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       )
       respQueue.io.enq(respQueueNoncoalPort).valid := tlOut.d.valid
       respQueue.io.enq(respQueueNoncoalPort).bits := resp
-      // TODO: deq.ready should respect upstream ready
-      respQueue.io.deq(respQueueNoncoalPort).ready := true.B
+      assert(respQueue.io.deq.length == 1,
+        "respQueue should have only one dequeue port to the upstream")
+      respQueue.io.deq.head.ready := tlIn.d.ready
 
-      tlIn.d.valid := respQueue.io.deq(respQueueNoncoalPort).valid
-      tlIn.d.bits := respQueue.io.deq(respQueueNoncoalPort).bits.toTLD(edgeIn)
+      tlIn.d.valid := respQueue.io.deq.head.valid
+      tlIn.d.bits := respQueue.io.deq.head.bits.toTLD(edgeIn)
+      // Stall downstream when respQueue is full of entries waiting to enter core
+      tlOut.d.ready := respQueue.io.enq(respQueueNoncoalPort).ready
 
       // Debug only
       val inflightCounter = RegInit(UInt(32.W), 0.U)
@@ -1082,7 +1085,8 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       }
     }
   }
-  // uncoalescer backpressure
+  // Uncoalescer backpressure: stall downstream when uncoalescer is not ready
+  // to accept new coalesced response
   tlCoal.d.ready := uncoalescer.io.coalResp.ready
 
   // Debug
@@ -1138,20 +1142,20 @@ class Uncoalescer(
   // Un-coalesce responses back to individual lanes
   // Connect uncoalesced results back into each lane's response queue
   val foundRow = io.inflightLookup.bits
-  (foundRow.lanes zip io.respQueueIO).zipWithIndex.foreach { case ((foundLane, ioEnqs), lane) =>
+  (foundRow.lanes zip io.respQueueIO).zipWithIndex.foreach { case ((foundLane, enqIOs), lane) =>
     foundLane.reqs.zipWithIndex.foreach { case (foundReq, depth) =>
-      val ioEnq = ioEnqs(depth)
+      val enqIO = enqIOs(depth)
 
       // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
       // cache.  This should ideally not happen though (and hasn't happened yet
       // in testing.)
       assert(
-        ioEnq.ready,
+        enqIO.ready,
         s"respQueue: enq port for ${depth}-th uncoalesced response is blocked for lane ${lane}"
       )
       // spatial-only coalescing: only looking at 0th srcId entry
-      ioEnq.valid := false.B
-      ioEnq.bits := DontCare
+      enqIO.valid := false.B
+      enqIO.bits := DontCare
       // debug
       // when (resp.valid) {
       //   printf(s"${i}-th uncoalesced response came back from lane ${lane}\n")
@@ -1159,11 +1163,11 @@ class Uncoalescer(
       // dontTouch(q.io.enq(respQueueCoalPortOffset))
 
       when(io.inflightLookup.valid && foundReq.valid) {
-        ioEnq.valid := io.coalResp.valid && foundReq.valid
-        ioEnq.bits.source := foundReq.source
+        enqIO.valid := io.coalResp.valid && foundReq.valid
+        enqIO.bits.source := foundReq.source
         val logSize = foundRow.sizeEnumT.enumToLogSize(foundReq.sizeEnum)
-        ioEnq.bits.size := logSize
-        ioEnq.bits.data :=
+        enqIO.bits.size := logSize
+        enqIO.bits.data :=
           getCoalescedDataChunk(
             io.coalResp.bits.data,
             io.coalResp.bits.data.getWidth,
@@ -1364,7 +1368,6 @@ object TLUtils {
     Mux(opcode === TLMessages.PutFullData, true.B, false.B)
   }
   def DOpcodeIsStore(opcode: UInt, checkOpcode: Bool): Bool = {
-    printf("DOpcodeIsStore: opcode=%d\n", opcode)
     when(checkOpcode) {
       assert(
         opcode === TLMessages.AccessAck || opcode === TLMessages.AccessAckData,
