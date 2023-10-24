@@ -102,7 +102,7 @@ case class CoalescerConfig(
 object DefaultCoalescerConfig extends CoalescerConfig(
   enable = true,
   numLanes = 4,
-  queueDepth = 1,
+  queueDepth = 1, // 1-deep request queues
   waitTimeout = 8,
   addressWidth = 24,
   dataBusWidth = 4,      // if "4": 2^4=16 bytes, 128 bit bus
