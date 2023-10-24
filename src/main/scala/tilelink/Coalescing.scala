@@ -1145,14 +1145,6 @@ class Uncoalescer(
   (foundRow.lanes zip io.respQueueIO).zipWithIndex.foreach { case ((foundLane, enqIOs), lane) =>
     foundLane.reqs.zipWithIndex.foreach { case (foundReq, depth) =>
       val enqIO = enqIOs(depth)
-
-      // TODO: rather than crashing, deassert tlOut.d.ready to stall downtream
-      // cache.  This should ideally not happen though (and hasn't happened yet
-      // in testing.)
-      assert(
-        enqIO.ready,
-        s"respQueue: enq port for ${depth}-th uncoalesced response is blocked for lane ${lane}"
-      )
       // spatial-only coalescing: only looking at 0th srcId entry
       enqIO.valid := false.B
       enqIO.bits := DontCare
