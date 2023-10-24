@@ -177,12 +177,13 @@ class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: In
   val mask = UInt((dataWidth / 8).W) // write only
   val data = UInt(dataWidth.W) // write only
 
-  def toTLA(edgeOut: TLEdgeOut): TLBundleA = {
+  def toTLA(edgeOut: TLEdgeOut): (Bool, TLBundleA) = {
     val (plegal, pbits) = edgeOut.Put(
       fromSource = this.source,
       toAddress = this.address,
       lgSize = this.size,
-      data = this.data
+      data = this.data,
+      mask = this.mask
     )
     val (glegal, gbits) = edgeOut.Get(
       fromSource = this.source,
@@ -191,9 +192,7 @@ class Request(sourceWidth: Int, sizeWidth: Int, addressWidth: Int, dataWidth: In
     )
     val legal = Mux(this.op.asBool, plegal, glegal)
     val bits = Mux(this.op.asBool, pbits, gbits)
-    // FIXME: this needs to check valid bit as well
-    // assert(legal, "unhandled illegal TL req gen")
-    bits
+    (legal, bits)
   }
 }
 case class NonCoalescedRequest(config: CoalescerConfig)
@@ -721,8 +720,13 @@ class MultiCoalescer(
   val data = Wire(Vec(maxWords, UInt((config.wordSizeInBytes * 8).W)))
   val mask = Wire(Vec(maxWords, UInt(config.wordSizeInBytes.W)))
 
+  // Reconstruct data and mask bit of the coalesced request;
+  // important for coalesced writes
   for (i <- 0 until maxWords) {
-    val sel = flatReqs.zip(flatMatches).map { case (req, m) =>
+    // Construct select bits that represent per-lane requests that actually got
+    // coalesced into the current request, AND occupies the current i-th
+    // word-slot in the data/mask bits
+    val sel = (flatReqs zip flatMatches).map { case (req, m) =>
       // note: ANDing against addrMask is to conform to active byte lanes requirements
       // if aligning to LSB suffices, we should add the bitwise AND back
       m && ((req.address(
@@ -733,13 +737,13 @@ class MultiCoalescer(
     // TODO: SW uses priority encoder, not sure about behavior of MuxCase
     data(i) := MuxCase(
       DontCare,
-      flatReqs.zip(sel).map { case (req, s) =>
+      (flatReqs zip sel).map { case (req, s) =>
         s -> req.data
       }
     )
     mask(i) := MuxCase(
       0.U,
-      flatReqs.zip(sel).map { case (req, s) =>
+      (flatReqs zip sel).map { case (req, s) =>
         s -> req.mask
       }
     )
@@ -751,6 +755,7 @@ class MultiCoalescer(
   // generation we also have to look at the responses coming back, which
   // is easier to do at the toplevel.
   io.coalReq.bits.source := DontCare
+  // Flatten data and mask Vecs into wide UInt
   io.coalReq.bits.mask := mask.asUInt
   io.coalReq.bits.data := data.asUInt
   io.coalReq.bits.size := chosenSize
@@ -886,7 +891,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       // Stall upstream core or memtrace driver when shiftqueue is not ready
       tlIn.a.ready := enq.ready
       tlOut.a.valid := deq.valid
-      tlOut.a.bits := deq.bits.toTLA(edgeOut)
+      val (legal, tlBits) = deq.bits.toTLA(edgeOut)
+      tlOut.a.bits := tlBits
+      when(tlOut.a.fire) {
+        assert(legal, "unhandled illegal TL req gen")
+      }
 
       // debug
       // when (tlIn.a.valid) {
@@ -944,7 +953,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // TODO: custom <>?
   inflightTable.io.outCoalReq.ready := tlCoal.a.ready
   tlCoal.a.valid := coalReq.valid
-  tlCoal.a.bits := coalReq.bits.toTLA(edgeCoal)
+  val (legal, tlBits) = coalReq.bits.toTLA(edgeCoal)
+  tlCoal.a.bits := tlBits
+  when(tlCoal.a.fire) {
+    assert(legal, "unhandled illegal TL req gen")
+  }
   dontTouch(coalReq)
 
   tlCoal.b.ready := true.B
@@ -1220,8 +1233,8 @@ class InFlightTable(
     // Need this to generate new entry for the table.
     // TODO: duplicate type construction
     val windowElts = Input(Vec(config.numLanes, Vec(config.queueDepth, nonCoalReqT)))
-    // InflightTable also handles sourceID allocation. This is the final
-    // coalesced request that goes to TileLink with a valid sourceId attached.
+    // InflightTable simply passes through the inCoalReq to outCoalReq, only snooping
+    // on its data to record what's necessary.
     val outCoalReq = Decoupled(coalReqT)
 
     // Lookup outputs
@@ -1289,15 +1302,16 @@ class InFlightTable(
     newEntry
   }
 
-  io.outCoalReq <> io.inCoalReq // FIXME: do sourceId allocation
+  io.outCoalReq <> io.inCoalReq
 
   val enqReady = !full
   // Make sure to respect downstream ready here as well; otherwise inCoalReq.valid
-  // might be up for multiple cycles waiting for outCoalReq.ready, writing bogus
+  // might be up for multiple cycles waiting for downstream and write bogus
   // data to the row
   val enqFire = enqReady && io.inCoalReq.valid && io.outCoalReq.ready
   val enqSource = io.inCoalReq.bits.source
   when(enqFire) {
+    // Inflight table is indexed by coalReq's source id
     val entryToWrite = table(enqSource)
     assert(
       !entryToWrite.valid,
@@ -1549,7 +1563,7 @@ class MemTraceDriverImp(
     val bits = Mux(req.is_store, pbits, gbits)
 
     tlOut.a.valid := reqQ.io.deq.valid && syncedSourceGenValid
-    when(tlOut.a.valid) {
+    when(tlOut.a.fire) {
       assert(legal, "illegal TL req gen")
     }
     tlOut.a.bits := bits
@@ -2254,7 +2268,11 @@ class CoalescerXbarImpl(outer: CoalescerXbar,
         val (tlOut, edgeOut)  = node.out(0)
         q.io.deq.ready := tlOut.a.ready
         tlOut.a.valid  := q.io.deq.valid
-        tlOut.a.bits   := q.io.deq.bits.toTLA(edgeOut)
+        val (legal, tlBits) = q.io.deq.bits.toTLA(edgeOut)
+        tlOut.a.bits   := tlBits
+        when(tlOut.a.fire) {
+          assert(legal, "unhandled illegal TL req gen")
+        }
     }
     //The XBar will take care of the rest
 
