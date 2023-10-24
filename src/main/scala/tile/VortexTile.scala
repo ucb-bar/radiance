@@ -121,8 +121,6 @@ class VortexTile private (
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
-  println(s"======= found CoalescerKey: ${q(CoalescerKey).get.dataBusWidth}")
-
   // Memory-mapped region for HTIF communication
   // We use fixed addresses instead of tohost/fromhost
   val regDevice = new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
@@ -151,6 +149,8 @@ class VortexTile private (
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
+  require(p(SIMTCoreKey).isDefined,
+    "SIMTCoreKey not defined; make sure to use WithSimtLanes when using VortexTile")
   val numLanes = p(SIMTCoreKey) match {
     case Some(simtParam) => simtParam.nLanes
     case None => 4
@@ -191,8 +191,15 @@ class VortexTile private (
     )))
   }
   // combine outgoing per-lane dmemNode into 1 idenity node
+  //
+  // NOTE: We need TLWidthWidget here because there might be a data width
+  // mismatch between Vortex's per-lane response and the system bus when we
+  // don't instantiate either L1 or the coalescer.  This _should_ be optimized
+  // out when we instantiate coalescer which should handle data width conversion
+  // internally (which it does by... using TLWidthWidget), but probably not
+  // the cleanest way to do this.
   val dmemAggregateNode = TLIdentityNode()
-  dmemNodes.foreach { n => dmemAggregateNode := n }
+  dmemNodes.foreach { dmemAggregateNode := TLWidthWidget(4) := _ }
 
   val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -219,7 +226,7 @@ class VortexTile private (
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
-    imemNodes.foreach { tlMasterXbar.node := _ }
+    imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
     tlMasterXbar.node :=* coalescerNode
   }
 
@@ -366,6 +373,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       chiselTypeOf(core.io.mem.get.d.bits),
       chiselTypeOf(outer.memNode.out.head._1.a.bits),
       chiselTypeOf(outer.memNode.out.head._1.d.bits),
+      outer.memNode.out.head._2
     ))
 
     // connection: VortexBundle <--> VortexTLAdapter <--> TL memNode
@@ -380,6 +388,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         chiselTypeOf(core.io.imem.get(0).d.bits),
         chiselTypeOf(outer.imemNodes.head.out.head._1.a.bits),
         chiselTypeOf(outer.imemNodes.head.out.head._1.d.bits),
+        outer.imemNodes.head.out.head._2
     ))
     // TODO: make imemNodes not a vector
     imemTLAdapter.io.inReq <> core.io.imem.get(0).a
@@ -418,6 +427,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         chiselTypeOf(core.io.dmem.get(0).d.bits),
         chiselTypeOf(dmemTLBundles.head.a.bits),
         chiselTypeOf(dmemTLBundles.head.d.bits),
+        outer.dmemNodes(0).out.head._2
       ))
     }
     (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
@@ -449,7 +459,8 @@ class VortexTLAdapter(
   inReqT: VortexBundleA,
   inRespT: VortexBundleD,
   outReqT: TLBundleA,
-  outRespT: TLBundleD
+  outRespT: TLBundleD,
+  edge: TLEdge
 ) extends Module {
   val io = IO(new Bundle {
     // in/out means upstream/downstream
@@ -476,7 +487,8 @@ class VortexTLAdapter(
   io.outReq.bits.size := io.inReq.bits.size
   io.outReq.bits.source := io.inReq.bits.source
   io.outReq.bits.address := io.inReq.bits.address
-  io.outReq.bits.mask := io.inReq.bits.mask
+  // generate TL-correct mask
+  io.outReq.bits.mask := edge.mask(io.inReq.bits.address, io.inReq.bits.size)
   io.outReq.bits.data := io.inReq.bits.data
   io.outReq.bits.corrupt := 0.U
   io.inReq.ready := io.outReq.ready
