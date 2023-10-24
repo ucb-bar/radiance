@@ -464,7 +464,12 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
   io.elts := elts.map(x => VecInit(x.map(_.bits)))
 }
 
-// Software model: coalescer.py
+// Main coalescing logic that finds which lanes with valid requests can be coalesced
+// into a wider request.  This works for a single given coalescing size `coalLogSize`,
+// and MultiCoalescer will choose the best size between the multiple options given by
+// multiple MonoCoalescers.
+//
+// See coalescer.py for the software model implementation.
 class MonoCoalescer(
     config: CoalescerConfig,
     coalLogSize: Int,
