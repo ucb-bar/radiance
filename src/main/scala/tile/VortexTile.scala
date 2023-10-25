@@ -502,7 +502,9 @@ class VortexTLAdapter(
   io.outReq.bits.corrupt := 0.U
   io.inReq.ready := io.outReq.ready
   // VortexBundleD <> TLBundleD
-  io.inResp.valid := io.outResp.valid
+  // Do not reply to write requests; Vortex core does not expect ack on writes
+  io.inResp.valid := io.outResp.valid &&
+                     !TLUtils.DOpcodeIsStore(io.outResp.bits.opcode, false.B)
   io.inResp.bits.opcode := io.outResp.bits.opcode
   io.inResp.bits.size := io.outResp.bits.size
   io.inResp.bits.source := io.outResp.bits.source
