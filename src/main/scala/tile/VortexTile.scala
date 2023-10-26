@@ -405,29 +405,9 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     // we need to selectively fire responses that have the same source, and
     // delay others.  Below is the logic that implements this.
 
-    // choose one source out of the arriving per-lane TL D channels
-    val arb = Module(
-      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
-    )
-    arb.io.out.ready := true.B
-
-    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
-    (arb.io.in zip dmemTLBundles).foreach { case (arbIn, tlBundle) =>
-      arbIn.valid := tlBundle.d.valid
-      arbIn.bits := tlBundle.d.bits.source
-    }
-    val matchingSources = Wire(UInt(outer.numLanes.W))
-    matchingSources := dmemTLBundles
-      .map(b =>
-          // If there is no valid response pending across all lanes,
-          // matchingSources should not filter out upstream ready signals, so
-          // set it to all-1
-          !arb.io.out.valid || (b.d.bits.source === arb.io.out.bits))
-      .asUInt
-
-    // connection: VortexBundle <--> VortexTLAdapter <--> dmemNodes
     // @perf: this would duplicate SourceGenerator table for every lane and eat
     // up some area
+    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
     val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
       Module(new VortexTLAdapter(
         outer.sourceWidth,
@@ -438,21 +418,43 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         outer.dmemNodes(0).out.head._2
       ))
     }
+
+    // choose one source out of the arriving per-lane TL D channels
+    val arb = Module(
+      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
+    )
+    arb.io.out.ready := true.B
+    val dmemBundles = dmemTLAdapters.map(_.io.inResp)
+    (arb.io.in zip dmemBundles).foreach { case (arbIn, vxDmem) =>
+      arbIn.valid := vxDmem.valid
+      arbIn.bits := vxDmem.bits.source
+    }
+    val matchingSources = Wire(UInt(outer.numLanes.W))
+    matchingSources := dmemBundles
+      .map(b =>
+          // If there is no valid response pending across all lanes,
+          // matchingSources should not filter out upstream ready signals, so
+          // set it to all-1
+          !arb.io.out.valid || (b.bits.source === arb.io.out.bits))
+      .asUInt
+
+    // make connection:
+    // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
     (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
       tlAdapter.io.inReq <> coreMem.a
       coreMem.d <> tlAdapter.io.inResp
     }
-    (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlBundle) =>
-      tlBundle.a <> tlAdapter.io.outReq
-    }
     // using the chosen source id,
     // - lie to core that response is not valid if source doesn't match picked
     // - lie to downstream that core is not ready if source doesn't match picked
-    (dmemTLAdapters zip dmemTLBundles).zipWithIndex.foreach {
-      case ((tlAdapter, tlBundle), i) =>
-        tlAdapter.io.outResp.bits := tlBundle.d.bits
-        tlAdapter.io.outResp.valid := tlBundle.d.valid && matchingSources(i)
-        tlBundle.d.ready := tlAdapter.io.outResp.ready && matchingSources(i)
+    (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
+      case ((coreMem, tlAdapter), i) =>
+      coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
+      tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
+    }
+    (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
+      tlOut.a <> tlAdapter.io.outReq
+      tlAdapter.io.outResp <> tlOut.d
     }
 
     outer.dmemAggregateNode.out.foreach { bo =>
