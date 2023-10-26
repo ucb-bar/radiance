@@ -375,9 +375,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       outer.sourceWidth,
       chiselTypeOf(core.io.mem.get.a.bits),
       chiselTypeOf(core.io.mem.get.d.bits),
-      chiselTypeOf(outer.memNode.out.head._1.a.bits),
-      chiselTypeOf(outer.memNode.out.head._1.d.bits),
-      outer.memNode.out.head._2
+      outer.memNode.out.head
     ))
 
     // connection: VortexBundle <--> VortexTLAdapter <--> TL memNode
@@ -390,9 +388,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         outer.sourceWidth,
         chiselTypeOf(core.io.imem.get(0).a.bits),
         chiselTypeOf(core.io.imem.get(0).d.bits),
-        chiselTypeOf(outer.imemNodes.head.out.head._1.a.bits),
-        chiselTypeOf(outer.imemNodes.head.out.head._1.d.bits),
-        outer.imemNodes.head.out.head._2
+        outer.imemNodes.head.out.head
     ))
     // TODO: make imemNodes not a vector
     imemTLAdapter.io.inReq <> core.io.imem.get(0).a
@@ -413,9 +409,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         outer.sourceWidth,
         chiselTypeOf(core.io.dmem.get(0).a.bits),
         chiselTypeOf(core.io.dmem.get(0).d.bits),
-        chiselTypeOf(dmemTLBundles.head.a.bits),
-        chiselTypeOf(dmemTLBundles.head.d.bits),
-        outer.dmemNodes(0).out.head._2
+        outer.dmemNodes(0).out.head
       ))
     }
 
@@ -473,17 +467,16 @@ class VortexTLAdapter(
   newSourceWidth: Int,
   inReqT: VortexBundleA,
   inRespT: VortexBundleD,
-  outReqT: TLBundleA,
-  outRespT: TLBundleD,
-  edge: TLEdge
+  outTL: (TLBundle, TLEdge)
 ) extends Module {
   val io = IO(new Bundle {
     // in/out means upstream/downstream
     val inReq = Flipped(Decoupled(inReqT))
-    val outReq = Decoupled(outReqT)
+    val outReq = chiselTypeOf(outTL._1.a)
     val inResp = Decoupled(inRespT)
-    val outResp = Flipped(Decoupled(outRespT))
+    val outResp = chiselTypeOf(outTL._1.d)
   })
+  val edge = outTL._2
   val sourceGen = Module(new SourceGenerator(
     newSourceWidth,
     Some(inReqT.source),
@@ -509,8 +502,7 @@ class VortexTLAdapter(
   io.inReq.ready := io.outReq.ready
   // VortexBundleD <> TLBundleD
   // Do not reply to write requests; Vortex core does not expect ack on writes
-  io.inResp.valid := io.outResp.valid &&
-                     !TLUtils.DOpcodeIsStore(io.outResp.bits.opcode, false.B)
+  io.inResp.valid := io.outResp.valid && edge.hasData(io.outResp.bits)
   io.inResp.bits.opcode := io.outResp.bits.opcode
   io.inResp.bits.size := io.outResp.bits.size
   io.inResp.bits.source := io.outResp.bits.source
