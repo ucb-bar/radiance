@@ -160,6 +160,10 @@ class VortexTile private (
     case Some(simtParam) => log2Ceil(simtParam.nSrcIds)
     case None => 4
   }
+  require(sourceWidth >= 4,
+    "Allocating a small number of sourceIds may cause correctness bug inside " +
+    "Vortex core due to unconstrained synchronization issues between warps." +
+    "We recommend setting nSrcIds to at least 16.")
 
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(Seq(TLMasterPortParameters.v1(
