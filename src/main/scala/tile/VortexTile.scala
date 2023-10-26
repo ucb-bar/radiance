@@ -396,11 +396,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     outer.imemNodes(0).out(0)._1.a <> imemTLAdapter.io.outReq
     imemTLAdapter.io.outResp <> outer.imemNodes(0).out(0)._1.d
 
-    // Since the individual per-lane TL requests might come back out-of-sync between
-    // the lanes, but Vortex core expects the per-lane responses to be synced,
-    // we need to selectively fire responses that have the same source, and
-    // delay others.  Below is the logic that implements this.
-
     // @perf: this would duplicate SourceGenerator table for every lane and eat
     // up some area
     val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
@@ -413,7 +408,25 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       ))
     }
 
-    // choose one source out of the arriving per-lane TL D channels
+    // Since the individual per-lane TL requests might come back out-of-sync between
+    // the lanes, but Vortex core expects the per-lane responses to be synced,
+    // we need to selectively fire responses that have the same source, and
+    // delay others.
+    //
+    // In order to do that, we pick a source from one of the valid lanes using e.g.
+    // an arbiter.  Then using the chosen source id, we
+    // - lie to core that response is not valid if source doesn't match picked, and
+    // - lie to downstream that core is not ready if source doesn't match picked.
+    //
+    // Note that we cannot do this filtering logic using TileLink source ID, because
+    // we're allocating source for each lane independently.  In that case, it's
+    // possible that lane 0's source matches lane 1/2/3's source by chance,
+    // even when they originated from different warps.  Using Vortex's dcache req tag
+    // solves this issue because they use a UUID that is unique across all requests
+    // in the program.
+    //
+    // TODO: A cleaner solution would be to simply do a synchronized allocation
+    // of a same source id for all lanes.
     val arb = Module(
       new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
     )
@@ -438,9 +451,6 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       tlAdapter.io.inReq <> coreMem.a
       coreMem.d <> tlAdapter.io.inResp
     }
-    // using the chosen source id,
-    // - lie to core that response is not valid if source doesn't match picked
-    // - lie to downstream that core is not ready if source doesn't match picked
     (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
       case ((coreMem, tlAdapter), i) =>
       coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
