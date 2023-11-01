@@ -56,7 +56,7 @@ object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
 case class CoalescerConfig(
   enable: Boolean,        // globally enable or disable coalescing
   numLanes: Int,          // number of lanes (or threads) in a warp
-  reqQueueDepth: Int,        // request window per lane
+  reqQueueDepth: Int,     // request window per lane
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size.  Nominally, this has
@@ -1380,7 +1380,8 @@ object TLUtils {
     // 0: PutFullData, 1: PutPartialData, 4: Get
     when(checkOpcode) {
       assert(
-        opcode === TLMessages.PutFullData || opcode === TLMessages.Get,
+        opcode === TLMessages.PutFullData || opcode === TLMessages.PutPartialData ||
+        opcode === TLMessages.Get,
         "unhandled TL A opcode found"
       )
     }
