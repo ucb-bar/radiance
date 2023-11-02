@@ -9,11 +9,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.{Parameters, Field}
 
-
-
-
-//<FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
-//we should just use the one in coalescing.scala written by hansung
+// <FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
+// we should just use the one in coalescing.scala written by hansung
 
 class NewSourceGenerator[T <: Data](
   sourceWidth: Int,
@@ -94,7 +91,7 @@ class NewSourceGenerator[T <: Data](
 
 // VortexTile has dmemNodes, imemNodes
 
-//Param and Key are used during SoC Generation
+// Param and Key are used during SoC Generation
 
 case class VortexFatBankParam(wordSize: Int = 16, busWidthInBytes: Int = 8)
 case object VortexFatBankKey extends Field[Option[VortexFatBankConfig]](None /*default*/)
@@ -111,7 +108,7 @@ case class VortexFatBankConfig(
     }
 }
 
-object defaultFatBankConfig extends VortexFatBankConfig(
+object DefaultFatBankConfig extends VortexFatBankConfig(
     wordSize = 16,
     cacheLineSize = 16,
     coreTagWidth = 8,
@@ -121,7 +118,6 @@ object defaultFatBankConfig extends VortexFatBankConfig(
 
 
 class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
-
     val clientParam = Seq(TLMasterPortParameters.v1(
         clients = Seq(
             TLMasterParameters.v1(
@@ -167,18 +163,17 @@ class VortexFatBankImp (
 ) extends LazyModuleImp(outer) {
 
     val vxCache = Module(new VX_cache(
-        WORD_SIZE=config.wordSize, 
-        CACHE_LINE_SIZE=config.cacheLineSize,
-        CORE_TAG_WIDTH= config.coreTagPlusSizeWidth,
-        MSHR_SIZE= config.mshrSize
-        )
-    );
+        WORD_SIZE       = config.wordSize, 
+        CACHE_LINE_SIZE = config.cacheLineSize,
+        CORE_TAG_WIDTH  = config.coreTagPlusSizeWidth, // tag also includes size field of inbound tilelink requests
+        MSHR_SIZE       = config.mshrSize
+    ));
 
     vxCache.io.clk := clock
     vxCache.io.reset := reset
 
     class WriteReqInfo extends Bundle {
-        val id = UInt(32.W)
+        val id   = UInt(32.W)
         val size = UInt(32.W)
     }
 
@@ -201,7 +196,6 @@ class VortexFatBankImp (
 
         // read = 0, write = 1
         vxCache.io.core_req_rw     := !(coalToBankA.bits.opcode === TLMessages.Get)
-        //4 is also hardcoded, it should be log2WordSize
         vxCache.io.core_req_addr   := coalToBankA.bits.address(31, log2Ceil(config.wordSize))
         vxCache.io.core_req_byteen := coalToBankA.bits.mask
         vxCache.io.core_req_data   := coalToBankA.bits.data
@@ -222,19 +216,18 @@ class VortexFatBankImp (
         // for read request, we send AckData when the FatBank has a valid output
         // for write request, we can ack whenever we have a valid entry in rcvWriteReqInfo Queue
 
-        //I think this just shows the flaws of Tilelink. CPU never waits for an Ack upon regular write request
-        //the Core should unconditionally move forward after every regular write request
+        // I think this just shows the flaws of Tilelink. CPU never waits for an Ack upon regular write request
+        // the Core should unconditionally move forward after every regular write request
 
         val coalToBankD = coalToBankBundle.d;
 
-
-        //<FIXME> currently assuming below buffer is never full
+        // <FIXME> currently assuming below buffer is never full
         rcvWriteReqInfo.io.enq.valid     := !(coalToBankA.bits.opcode === TLMessages.Get) && coalToBankA.valid && coalToBankA.ready
         rcvWriteReqInfo.io.enq.bits.id   := coalToBankA.bits.source
         rcvWriteReqInfo.io.enq.bits.size := coalToBankA.bits.size
 
-        //prioritize Ack for Read, so we only deque from writeReqInfo, if we don't have a readReq we need to ack
-        //vxCache.io.core_rsp_valid means readDataAck
+        // prioritize Ack for Read, so we only deque from writeReqInfo, if we don't have a readReq we need to ack
+        // vxCache.io.core_rsp_valid means readDataAck
         rcvWriteReqInfo.io.deq.ready := coalToBankD.ready && ~vxCache.io.core_rsp_valid 
         
         vxCache.io.core_rsp_ready := coalToBankD.ready
@@ -266,18 +259,18 @@ class VortexFatBankImp (
         coalToBankD.bits.data    := vxCache.io.core_rsp_data
     }
 
+    // Using Hansung's Source Generator
+    // Why do we need to do this?
+    // Tilelink requires all inflight Read and Write Request to have a unique source ID
+    // vx_cache can indeed guarantee that all active read operation has unique ID
+    // However, since the cache is write_through, so it can't ensure unique ID for write operation
+    // Therefore, we need our own internal source ID generator for all write operation
 
-    //Using Hansung's Source Generator
-    //Why do we need to do this, what is the issue ?
-    //Tilelink requires all inflight Read and Write Request to have a unique source_ID
-    //vx_cache can indeed guarantee that all active read operation has unique ID
-    //However, since the cache is write_through, so it can't ensure unique ID for write operation
-    //Therefore, we need our own internal source_ID generator for all write operation
-    
-
-    val sourceGen = Module( new NewSourceGenerator(log2Ceil(config.mshrSize), metadata = Some(UInt(32.W)), ignoreInUse = false))
-    
-
+    val sourceGen = Module(new NewSourceGenerator(
+        log2Ceil(config.mshrSize), 
+        metadata = Some(UInt(32.W)), 
+        ignoreInUse = false
+    ))
 
     // Translate VX_cache mem request to a TL request to be sent to L2
     def VXReq2TLReq = {
@@ -286,7 +279,7 @@ class VortexFatBankImp (
         val vxCacheToL2A = vxCacheToL2Bundle.a;
         
 
-        //Read Operation is ready as long as downstream L2 is ready
+        // Read Operation is ready as long as downstream L2 is ready
 
         vxCache.io.mem_req_ready := vxCacheToL2A.ready 
 
@@ -353,7 +346,7 @@ class VX_cache (
     CORE_TAG_WIDTH: Int = 10, // source ID ranges from 0 to 1 << 10, we need to allocate upper bits to save size
     CORE_TAG_ID_BITS: Int = 5, // no idea what this is, just match it with default L1 dcache
     BANK_ADDR_OFFSET: Int = 0,
-    NC_ENABLE: Int = 0, //NC_ENABLE=1 means the cache becomes a passthrough
+    NC_ENABLE: Int = 0, // NC_ENABLE=1 means the cache becomes a passthrough
     WORD_ADDR_WIDTH: Int = 28, // 16 byte "word" = 4 bits
     MEM_TAG_WIDTH: Int = 14, // Elaborated value is also completely different from (32 - log2Ceil(CACHE_LINE_SIZE)). This should match with sourceIds on client node associated with this cache
     MEM_ADDR_WIDTH: Int = 28 // 16 byte cache line = 4 bits
