@@ -223,6 +223,27 @@ class VortexTile private (
       val coal = LazyModule(new CoalescingUnit(coalescerParam.copy(enable = true)))
       coal.cpuNode :=* dmemAggregateNode
       coal.aggregateNode // N+1 lanes
+      //Conditionally instantiate fat-bank, we can only use fatbank in the presence of coalescer
+      val coalFatbankNode = p(VortexFatBankKey) match {
+        case Some(fatBankParam) =>{
+          println(s"============ Using Vortex FatBank as L1 =================")
+          val vx_fatbank  = LazyModule(new VortexFatBank(fatBankParam))
+          val passThrough = LazyModule(new FatBankPassThrough(fatBankParam))
+          val coalXbar    = LazyModule(new TLXbar)
+          coalXbar.node :=* coal.aggregateNode
+          vx_fatbank.coalToVxCacheNode  :=* coalXbar.node
+          passThrough.coalToVxCacheNode :=* coalXbar.node
+          //merge these two into one identity node
+          val fatBankSystem = TLIdentityNode()
+          fatBankSystem := vx_fatbank.vxCacheToL2Node
+          fatBankSystem := passThrough.vxCacheToL2Node
+          fatBankSystem
+        }
+        case None => coal.aggregateNode //if no fatbank, simply return coalescer.aggregateNode
+      }
+
+      coalFatbankNode
+
     }
     case None => dmemAggregateNode
   }

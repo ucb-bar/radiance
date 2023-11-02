@@ -73,6 +73,7 @@ class NewSourceGenerator[T <: Data](
   }
   when(io.reclaim.valid) {
     // @perf: would this require multiple write ports?
+    assert(occupancyTable(io.reclaim.bits).id.valid === true.B, "tried to reclaim a non-used id")
     occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
   }
   io.peek := {
@@ -104,7 +105,8 @@ case class VortexFatBankConfig(
     cacheLineSize: Int,
     coreTagWidth: Int,
     writeInfoReqQSize: Int,
-    mshrSize: Int
+    mshrSize: Int,
+    uncachedAddrSets: Seq[AddressSet]
 ) {
     def coreTagPlusSizeWidth: Int = {
         log2Ceil(wordSize) + coreTagWidth
@@ -116,11 +118,12 @@ object defaultFatBankConfig extends VortexFatBankConfig(
     cacheLineSize = 16,
     coreTagWidth = 8,
     writeInfoReqQSize = 16,
-    mshrSize = 8
+    mshrSize = 8,
+    uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xFFL))
 )
 
 
-class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
+class FatBankPassThrough(config:VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
 
     val clientParam = Seq(TLMasterPortParameters.v1(
         clients = Seq(
@@ -139,7 +142,64 @@ class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) exten
         beatBytes = config.wordSize,
         managers = Seq(
             TLSlaveParameters.v1(
-                address            = Seq(AddressSet(0x80000000L, 0xfffffff)), // 0x80000000 -> 0x90000000 are possible address tracer can emit
+                address = config.uncachedAddrSets,
+                regionType         = RegionType.IDEMPOTENT, 
+                executable         = false,
+                supportsGet        = TransferSizes(1, config.wordSize),
+                supportsPutPartial = TransferSizes(1, config.wordSize),
+                supportsPutFull    = TransferSizes(1, config.wordSize),
+                fifoId             = Some(0)
+            )
+        )
+    ))
+
+    val coalToVxCacheNode = TLManagerNode(managerParam)
+    val vxCacheFetchNode  = TLClientNode(clientParam)
+    val vxCacheToL2Node   = TLIdentityNode()
+    vxCacheToL2Node      := TLWidthWidget(config.cacheLineSize) := vxCacheFetchNode
+
+    //the implementation to make everything a pass through
+    lazy val module = new LazyModuleImp(this) {
+        val (upstream, _) = coalToVxCacheNode.in(0)
+        val (downstream, _) = vxCacheFetchNode.out(0)
+        
+        downstream.a <> upstream.a 
+        upstream.d <> downstream.d
+    }
+
+}
+
+
+class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
+
+
+    //Generate AddressSet by excluding Addr we don't want
+    def generateAddressSets(excludeSets: Seq[AddressSet]): Seq[AddressSet] = {
+        var remainingSets: Seq[AddressSet] = Seq(AddressSet(0x00000000L, 0xFFFFFFFFL))
+        for(excludeSet <- excludeSets) {
+            remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
+        }
+        remainingSets
+    }
+
+    val clientParam = Seq(TLMasterPortParameters.v1(
+        clients = Seq(
+            TLMasterParameters.v1(
+                name = "VortexFatBank",
+                sourceId = IdRange(0, 1 << 14), // FIXME: magic number
+                supportsProbe = TransferSizes(1, config.wordSize),
+                supportsGet = TransferSizes(1, config.wordSize),
+                supportsPutFull = TransferSizes(1, config.wordSize),
+                supportsPutPartial = TransferSizes(1, config.wordSize)
+            )
+        )
+    ))
+
+    val managerParam = Seq(TLSlavePortParameters.v1(
+        beatBytes = config.wordSize,
+        managers = Seq(
+            TLSlaveParameters.v1(
+                address = generateAddressSets(config.uncachedAddrSets),
                 regionType         = RegionType.IDEMPOTENT, // idk what this does
                 executable         = false,
                 supportsGet        = TransferSizes(1, config.wordSize),
@@ -177,6 +237,24 @@ class VortexFatBankImp (
     vxCache.io.clk := clock
     vxCache.io.reset := reset
 
+
+    val writeReqCount = RegInit(UInt(32.W), 0.U)
+    val writeInputFire = Wire(Bool())
+    val writeOutputFire = Wire(Bool())
+     
+
+    when(writeInputFire && ~writeOutputFire){
+        writeReqCount := writeReqCount + 1.U
+    }.elsewhen(~writeInputFire && writeOutputFire){
+        writeReqCount := writeReqCount - 1.U
+    }
+
+    dontTouch(writeInputFire)
+    dontTouch(writeOutputFire)
+    dontTouch(writeReqCount)
+
+
+
     class WriteReqInfo extends Bundle {
         val id = UInt(32.W)
         val size = UInt(32.W)
@@ -211,7 +289,8 @@ class VortexFatBankImp (
         readReqInfo.size := coalToBankA.bits.size
         vxCache.io.core_req_tag := readReqInfo.asTypeOf(vxCache.io.core_req_tag)
         
-        
+        writeInputFire := vxCache.io.core_req_rw && coalToBankA.fire
+
         // we ignore param, size, corrupt fields
 
         // vxCache -> coal response on channel D
@@ -275,7 +354,7 @@ class VortexFatBankImp (
     //Therefore, we need our own internal source_ID generator for all write operation
     
 
-    val sourceGen = Module( new NewSourceGenerator(log2Ceil(config.mshrSize), metadata = Some(UInt(32.W)), ignoreInUse = false))
+    val sourceGen = Module( new NewSourceGenerator(3, metadata = Some(UInt(32.W)), ignoreInUse = false))
     
 
 
@@ -288,9 +367,14 @@ class VortexFatBankImp (
 
         //Read Operation is ready as long as downstream L2 is ready
 
-        vxCache.io.mem_req_ready := vxCacheToL2A.ready 
+        vxCache.io.mem_req_ready := vxCacheToL2A.ready && sourceGen.io.id.valid
 
         vxCacheToL2A.valid := vxCache.io.mem_req_valid && sourceGen.io.id.valid
+
+        sourceGen.io.gen := vxCacheToL2A.fire 
+
+
+        writeOutputFire := vxCacheToL2A.fire && vxCache.io.mem_req_rw
 
         vxCacheToL2A.bits.opcode := Mux(
             vxCache.io.mem_req_rw, 
@@ -310,7 +394,6 @@ class VortexFatBankImp (
 
         vxCacheToL2A.bits.source  := sourceGen.io.id.bits
 
-        sourceGen.io.gen  := vxCacheToL2A.ready && vxCacheToL2A.valid
         sourceGen.io.meta := vxCache.io.mem_req_tag //save the old read id
 
         vxCacheToL2A.bits.param   := 0.U
@@ -328,7 +411,7 @@ class VortexFatBankImp (
         vxCache.io.mem_rsp_data  := vxCacheToL2D.bits.data
 
         // all ids needs to be reclaimed
-        sourceGen.io.reclaim.valid := vxCacheToL2D.ready && vxCacheToL2D.valid
+        sourceGen.io.reclaim.valid := vxCacheToL2D.fire
         sourceGen.io.reclaim.bits := vxCacheToL2D.bits.source
 
     }
