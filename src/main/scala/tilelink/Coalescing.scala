@@ -1150,11 +1150,8 @@ class Uncoalescer(
     val chunks = Wire(Vec(numChunks, UInt(32.W)))
     val offsets = (0 until numChunks)
     (chunks zip offsets).foreach { case (c, o) =>
-      // FIXME: whether to take the offset from MSB or LSB depends on
-      // endianness.  Confirm this is working
+      // NOTE: Should take offset starting from LSB
       c := data(32 * (o + 1) - 1, 32 * o)
-      // If taking from MSB:
-      // c := (data >> (dataWidth - (o + 1) * 32)) & sizeMask
     }
     chunks(offset) // MUX
   }
