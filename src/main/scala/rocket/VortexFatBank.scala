@@ -11,119 +11,67 @@ import org.chipsalliance.cde.config.{Parameters, Field}
 
 
 
-
-//<FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
-//we should just use the one in coalescing.scala written by hansung
-
-class NewSourceGenerator[T <: Data](
-  sourceWidth: Int,
-  metadata: Option[T] = None,
-  ignoreInUse: Boolean = false
-) extends Module {
-  def getMetadataType = metadata match {
-    case Some(gen) => gen.cloneType
-    case None => UInt(0.W)
-  }
-  val io = IO(new Bundle {
-    val gen = Input(Bool())
-    val reclaim = Input(Valid(UInt(sourceWidth.W)))
-    val id = Output(Valid(UInt(sourceWidth.W)))
-    // below are used only when metadata is not None
-    // `meta` is used as input when a request succeeds id generation to store
-    // its value to the table.
-    // `peek` is the retrieved metadata saved for the request when corresponding
-    // request has come back, setting `reclaim`.
-    // Although these do not use ValidIO, it is safe because any in-flight
-    // response coming back should have allocated a valid entry in the table
-    // when it went out.
-    val meta = Input(getMetadataType)
-    val peek = Output(getMetadataType)
-    // for debugging; indicates whether there is at least one inflight request
-    // that hasn't been reclaimed yet
-    val inflight = Output(Bool())
-  })
-  val head = RegInit(UInt(sourceWidth.W), 0.U)
-  head := Mux(io.gen, head + 1.U, head)
-
-  val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
-  io.inflight := (outstanding > 0.U) || io.gen
-
-  val numSourceId = 1 << sourceWidth
-  val row = new Bundle {
-    val meta = getMetadataType
-    val id = Valid(UInt(sourceWidth.W))
-  }
-  // valid: in use, invalid: available
-  // val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
-  val occupancyTable = Mem(numSourceId, row)
-  when(reset.asBool) {
-    (0 until numSourceId).foreach { occupancyTable(_).id.valid := false.B }
-  }
-  val frees = (0 until numSourceId).map(!occupancyTable(_).id.valid)
-  val lowestFree = PriorityEncoder(frees)
-  val lowestFreeRow = occupancyTable(lowestFree)
-
-  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.id.valid)
-  io.id.bits := lowestFree
-  when(io.gen && io.id.valid /* fire */ ) {
-    occupancyTable(io.id.bits).id.valid := true.B // mark in use
-    if (metadata.isDefined) {
-      occupancyTable(io.id.bits).meta := io.meta
-    }
-  }
-  when(io.reclaim.valid) {
-    // @perf: would this require multiple write ports?
-    assert(occupancyTable(io.reclaim.bits).id.valid === true.B, "tried to reclaim a non-used id")
-    occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
-  }
-  io.peek := {
-    if (metadata.isDefined) occupancyTable(io.reclaim.bits).meta else 0.U
-  }
-
-  when(io.gen && io.id.valid) {
-    when (!io.reclaim.valid) {
-      assert(outstanding < (1 << sourceWidth).U)
-      outstanding := outstanding + 1.U
-    }
-  }.elsewhen(io.reclaim.valid) {
-    assert(outstanding > 0.U)
-    outstanding := outstanding - 1.U
-  }
-  dontTouch(outstanding)
-}
-
-
-// VortexTile has dmemNodes, imemNodes
-
 //Param and Key are used during SoC Generation
 
-case class VortexFatBankParam(wordSize: Int = 16, busWidthInBytes: Int = 8)
-case object VortexFatBankKey extends Field[Option[VortexFatBankConfig]](None /*default*/)
+case class L1SystemParam(wordSize: Int = 16, busWidthInBytes: Int = 8)
+case object L1SystemKey extends Field[Option[L1SystemConfig]](None /*default*/)
 
-case class VortexFatBankConfig(
+case class L1SystemConfig(
+    numBanks: Int,
     wordSize: Int,      //This is the read/write granularity of the L1 cache
     cacheLineSize: Int,
     coreTagWidth: Int,
     writeInfoReqQSize: Int,
     mshrSize: Int,
-    uncachedAddrSets: Seq[AddressSet]
+    uncachedAddrSets: Seq[AddressSet],
+    icacheInstAddrSets: Seq[AddressSet]
 ) {
     def coreTagPlusSizeWidth: Int = {
         log2Ceil(wordSize) + coreTagWidth
     }
 }
 
-object defaultFatBankConfig extends VortexFatBankConfig(
+object defaultL1SystemConfig extends L1SystemConfig(
+    numBanks = 4,
     wordSize = 16,
     cacheLineSize = 16,
     coreTagWidth = 8,
     writeInfoReqQSize = 16,
     mshrSize = 8,
-    uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xFFL))
+    uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xFFL)),
+    icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0xFFFFFFFL))
 )
 
+class L1System (config:L1SystemConfig) (implicit p: Parameters) extends LazyModule {
 
-class FatBankPassThrough(config:VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
+    //icache bank
+    val icache_bank =  LazyModule(new VortexFatBank(config, 0, isICache=true))
+
+    //dcache banks
+    val dcache_banks = Seq.tabulate(config.numBanks) { bankId =>
+        val bank = LazyModule(new VortexFatBank(config, bankId))
+        bank
+    }
+    //passthrough
+    val passThrough = LazyModule(new FatBankPassThrough(config))
+
+    //L1System exposes to upstream as a dmemXbar
+    val dmemXbar    = LazyModule(new TLXbar)
+    dcache_banks.foreach { _.coalToVxCacheNode :=* dmemXbar.node}
+    passThrough.coalToVxCacheNode :=* dmemXbar.node
+
+    //L1System exposes to downstream as one tileLink Identity Node
+    val L1SystemToL2Node = TLIdentityNode()
+    dcache_banks.foreach{ L1SystemToL2Node := _.vxCacheToL2Node}
+    L1SystemToL2Node := passThrough.vxCacheToL2Node
+    L1SystemToL2Node := icache_bank.vxCacheToL2Node
+
+    lazy val module = new LazyModuleImp(this)
+
+}
+
+
+class FatBankPassThrough(config:L1SystemConfig) (implicit p: Parameters) extends LazyModule {
 
     val clientParam = Seq(TLMasterPortParameters.v1(
         clients = Seq(
@@ -170,16 +118,32 @@ class FatBankPassThrough(config:VortexFatBankConfig) (implicit p: Parameters) ex
 }
 
 
-class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) extends LazyModule {
+
+
+class VortexFatBank (config: L1SystemConfig, bankId: Int, isICache: Boolean = false) 
+    (implicit p: Parameters) extends LazyModule {
 
 
     //Generate AddressSet by excluding Addr we don't want
-    def generateAddressSets(excludeSets: Seq[AddressSet]): Seq[AddressSet] = {
-        var remainingSets: Seq[AddressSet] = Seq(AddressSet(0x00000000L, 0xFFFFFFFFL))
-        for(excludeSet <- excludeSets) {
-            remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
+    def generateAddressSets(): Seq[AddressSet] = {
+        
+        if (isICache){
+            //config.icacheInstAddrSets
+            Seq(AddressSet(0x00000000L, 0xFFFFFFFFL))
+        } else {
+            //suppose have 4 bank
+            //base for bank 1: ...000000|01|0000
+            //mask for bank 1;    111111|00|1111
+            val mask = 0xFFFFFFFFL ^ ((config.numBanks-1)*config.wordSize)
+            val base = 0x00000000L | (bankId * config.wordSize)
+            
+            val excludeSets = (config.uncachedAddrSets ++ config.icacheInstAddrSets)
+            var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))
+            for(excludeSet <- excludeSets) {
+                remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
+            }
+            remainingSets
         }
-        remainingSets
     }
 
     val clientParam = Seq(TLMasterPortParameters.v1(
@@ -199,7 +163,7 @@ class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) exten
         beatBytes = config.wordSize,
         managers = Seq(
             TLSlaveParameters.v1(
-                address = generateAddressSets(config.uncachedAddrSets),
+                address = generateAddressSets(),
                 regionType         = RegionType.IDEMPOTENT, // idk what this does
                 executable         = false,
                 supportsGet        = TransferSizes(1, config.wordSize),
@@ -223,7 +187,7 @@ class VortexFatBank (config: VortexFatBankConfig) (implicit p: Parameters) exten
 
 class VortexFatBankImp (
     outer: VortexFatBank,
-    config: VortexFatBankConfig
+    config: L1SystemConfig
 ) extends LazyModuleImp(outer) {
 
     val vxCache = Module(new VX_cache(
@@ -260,7 +224,7 @@ class VortexFatBankImp (
         val size = UInt(32.W)
     }
 
-    class ReadReqInfo(config: VortexFatBankConfig) extends Bundle {
+    class ReadReqInfo(config: L1SystemConfig) extends Bundle {
         val size = UInt(log2Ceil(config.wordSize).W)
         val id   = UInt(config.coreTagWidth.W)
     }
@@ -423,7 +387,7 @@ class VortexFatBankImp (
 
 class VX_cache (
     CACHE_ID: Int = 0,
-    CACHE_SIZE: Int = 16384,
+    CACHE_SIZE: Int = 16384/4, //<FIXME, divided by 4 for faster simulation
     CACHE_LINE_SIZE: Int = 16,
     NUM_PORTS: Int = 1, 
     WORD_SIZE: Int = 16, // hack - one "word" is enough to satisfy all 4 warps after decoalescing.
@@ -625,5 +589,120 @@ class VX_cache (
     addResource("/vsrc/vortex/hw/rtl/cache/VX_nc_bypass.sv")
     addResource("/vsrc/vortex/hw/rtl/cache/VX_miss_resrv.sv")
     addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
+
+}
+
+
+
+
+//<FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
+//we should just use the one in coalescing.scala written by hansung
+
+class NewSourceGenerator[T <: Data](
+  sourceWidth: Int,
+  metadata: Option[T] = None,
+  ignoreInUse: Boolean = false
+) extends Module {
+  def getMetadataType = metadata match {
+    case Some(gen) => gen.cloneType
+    case None => UInt(0.W)
+  }
+  val io = IO(new Bundle {
+    val gen = Input(Bool())
+    val reclaim = Input(Valid(UInt(sourceWidth.W)))
+    val id = Output(Valid(UInt(sourceWidth.W)))
+    // below are used only when metadata is not None
+    // `meta` is used as input when a request succeeds id generation to store
+    // its value to the table.
+    // `peek` is the retrieved metadata saved for the request when corresponding
+    // request has come back, setting `reclaim`.
+    // Although these do not use ValidIO, it is safe because any in-flight
+    // response coming back should have allocated a valid entry in the table
+    // when it went out.
+    val meta = Input(getMetadataType)
+    val peek = Output(getMetadataType)
+    // for debugging; indicates whether there is at least one inflight request
+    // that hasn't been reclaimed yet
+    val inflight = Output(Bool())
+  })
+  val head = RegInit(UInt(sourceWidth.W), 0.U)
+  head := Mux(io.gen, head + 1.U, head)
+
+  val outstanding = RegInit(UInt((sourceWidth + 1).W), 0.U)
+  io.inflight := (outstanding > 0.U) || io.gen
+
+  val numSourceId = 1 << sourceWidth
+  val row = new Bundle {
+    val meta = getMetadataType
+    val id = Valid(UInt(sourceWidth.W))
+    val age = UInt(32.W)     // New age field for debugging
+  }
+  // valid: in use, invalid: available
+  // val occupancyTable = Mem(numSourceId, Valid(UInt(sourceWidth.W)))
+  val occupancyTable = Mem(numSourceId, row)
+  when(reset.asBool) {
+    (0 until numSourceId).foreach { i => 
+      occupancyTable(i).id.valid := false.B
+      occupancyTable(i).age := 0.U  // Reset age during reset
+    }
+  }
+  val frees = (0 until numSourceId).map(!occupancyTable(_).id.valid)
+  val lowestFree = PriorityEncoder(frees)
+  val lowestFreeRow = occupancyTable(lowestFree)
+
+  io.id.valid := (if (ignoreInUse) true.B else !lowestFreeRow.id.valid)
+  io.id.bits := lowestFree
+  when(io.gen && io.id.valid /* fire */ ) {
+    occupancyTable(io.id.bits).id.valid := true.B // mark in use
+    occupancyTable(io.id.bits).age := 0.U         // reset age upon issuing, double safety
+    if (metadata.isDefined) {
+      occupancyTable(io.id.bits).meta := io.meta
+    }
+  }
+
+  // Increase age of all inflight IDs by 1, except for the one being reclaimed
+    for(i <- 0 until numSourceId) {
+    when(occupancyTable(i).id.valid && (i.U =/= io.reclaim.bits || !io.reclaim.valid)) {
+        occupancyTable(i).age := occupancyTable(i).age + 1.U
+        }
+    }
+
+    when(io.reclaim.valid) {
+        assert(occupancyTable(io.reclaim.bits).id.valid === true.B, "tried to reclaim a non-used id")
+        occupancyTable(io.reclaim.bits).id.valid := false.B // mark freed
+        occupancyTable(io.reclaim.bits).age := 0.U
+    }
+
+
+  io.peek := {
+    if (metadata.isDefined) occupancyTable(io.reclaim.bits).meta else 0.U
+  }
+
+  when(io.gen && io.id.valid) {
+    when (!io.reclaim.valid) {
+      assert(outstanding < (1 << sourceWidth).U)
+      outstanding := outstanding + 1.U
+    }
+  }.elsewhen(io.reclaim.valid) {
+    assert(outstanding > 0.U)
+    outstanding := outstanding - 1.U
+  }
+
+  // Debugging wires
+  val ages = VecInit((0 until numSourceId).map(i => occupancyTable(i).age))
+  val oldestIndex = PriorityEncoder(ages.map(a => a === ages.reduce((x, y) => Mux(x > y, x, y))))
+  val oldestIdInflight = Wire(UInt(sourceWidth.W))
+  val oldestMetadata = Wire(getMetadataType)
+  val oldestAge = Wire(UInt(32.W))
+  
+  oldestIdInflight := oldestIndex
+  oldestMetadata := occupancyTable(oldestIndex).meta
+  oldestAge := occupancyTable(oldestIndex).age
+  assert(oldestAge <= 2000.U, "One id in the SourceGen is not released for long time, potential bug !")
+  
+  dontTouch(oldestIdInflight)
+  dontTouch(oldestMetadata)
+  dontTouch(oldestAge)
+  dontTouch(outstanding)
 
 }

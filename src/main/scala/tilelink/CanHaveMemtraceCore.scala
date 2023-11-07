@@ -56,15 +56,9 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       case None => coalescerNode
     }
 
-    val vortexBank = p(VortexFatBankKey) match {
-      case Some(fatBankParam) =>{
-        val vx_fatbank = LazyModule(new VortexFatBank(fatBankParam))
-        println(s"============ Using Vortex FatBank as L1 ")
-        vx_fatbank.coalToVxCacheNode :=* coalXbar
-        vx_fatbank.vxCacheToL2Node
-      }
-      case None => coalXbar
-    }
+    
+    val vortexBank = coalXbar
+    
     
     
     //If there is only 1 bank, the code below is useless
