@@ -274,11 +274,12 @@ class SourceGenerator[T <: Data](
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
-    // below are used only when metadata is not None
+    // Below are used only when metadata is not None
+    //
     // `meta` is used as input when a request succeeds id generation to store
     // its value to the table.
-    // `peek` is the retrieved metadata saved for the request when corresponding
-    // request has come back, setting `reclaim`.
+    // `peek` is the retrieved metadata saved for the request when
+    // corresponding request has come back, setting `reclaim`.
     // Although these do not use ValidIO, it is safe because any in-flight
     // response coming back should have allocated a valid entry in the table
     // when it went out.
@@ -390,7 +391,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
     }
     .reduce(_ || _)
   val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
-  // valid && !fire means we enable enqueueing to a full queue, provided the
+  // valid && !ready means we enable enqueueing to a full queue, provided the
   // arbiter is taking away all remaining valid queue heads in the next cycle so
   // that we make space for the entire next warp.
   val syncedDeqValidNextCycle =
@@ -1126,6 +1127,7 @@ class Uncoalescer(
     val inflightLookup = Flipped(Decoupled(inflightEntryT))
     val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
     val respQueueIO = Vec(config.numLanes,
+      // FIXME: does this have to be respQueueDepth?
       Vec(config.reqQueueDepth, Decoupled(new NonCoalescedResponse(config)))
     )
   })
@@ -1191,11 +1193,11 @@ class Uncoalescer(
   }
 }
 
-// InflightCoalReqTable is a table structure that records
-// for each unanswered coalesced request which lanes the request originated
-// from, what their original TileLink sourceId were, etc.  We use this info to
-// split the coalesced response back to individual per-lane responses with the
-// right metadata.
+// InflightCoalReqTable is a table structure that records for each unanswered
+// coalesced request which lanes the request originated from, what their
+// original TileLink sourceId were, etc.  We use this info to split the
+// coalesced response back to individual per-lane responses with the right
+// metadata.
 class InFlightTable(
     config: CoalescerConfig,
     nonCoalReqT: NonCoalescedRequest,
