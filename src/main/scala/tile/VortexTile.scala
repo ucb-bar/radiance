@@ -155,12 +155,27 @@ class VortexTile private (
     case Some(simtParam) => simtParam.nLanes
     case None => 4
   }
-  val sourceWidth = p(SIMTCoreKey) match {
+
+  // CAUTION: imemSourceWidth is dependent on the ibuffer size.  We have to
+  // make sure (1 << imemSourceWidth) is smaller than the per-warp ibuffer
+  // size; otherwise, more requests than what ibuffer can accommodate can fire,
+  // and responses might stall in the downstream.  This migth cause issues when
+  // there are also outstanding dmem responses that might get blocked from
+  // going back to the core by a previous imem response due to serialization at
+  // the narrow tile<->sbus port, leading to a deadlock.
+  //
+  // This condition should ideally be asserted at elaboration time, but since
+  // ibuffer size is set as a hardcoded macro IBUF_SIZE that's uncontrollable
+  // from Chisel, there's no easy solution.  We at least don't expose this as a
+  // Parameter and leave as a hardcoded value here.
+  val imemSourceWidth = 1 // 1 << 2 == IBUF_SIZE = 4
+
+  val dmemSourceWidth = p(SIMTCoreKey) match {
     // TODO: respect coalescer newSrcIds
     case Some(simtParam) => log2Ceil(simtParam.nSrcIds)
     case None => 4
   }
-  require(sourceWidth >= 4,
+  require(dmemSourceWidth >= 4,
     "Allocating a small number of sourceIds may cause correctness bug inside " +
     "Vortex core due to unconstrained synchronization issues between warps." +
     "We recommend setting nSrcIds to at least 16.")
@@ -168,7 +183,7 @@ class VortexTile private (
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
-        sourceId = IdRange(0, 1 << sourceWidth),
+        sourceId = IdRange(0, 1 << imemSourceWidth),
         name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
         requestFifo = true,
         supportsProbe =
@@ -181,7 +196,7 @@ class VortexTile private (
   val dmemNodes = Seq.tabulate(numLanes) { i =>
     TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
-        sourceId = IdRange(0, 1 << sourceWidth),
+        sourceId = IdRange(0, 1 << dmemSourceWidth),
         name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
         requestFifo = true,
         supportsProbe =
@@ -207,7 +222,8 @@ class VortexTile private (
 
   val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      sourceId = IdRange(0, 1 << sourceWidth),
+      // FIXME: need to also respect imemSourceWidth
+      sourceId = IdRange(0, 1 << dmemSourceWidth),
       name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
       requestFifo = true,
       supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
@@ -402,7 +418,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
 
     val memTLAdapter =  Module(new VortexTLAdapter(
-      outer.sourceWidth,
+      outer.dmemSourceWidth,
       chiselTypeOf(core.io.mem.get.a.bits),
       chiselTypeOf(core.io.mem.get.d.bits),
       outer.memNode.out.head
@@ -415,7 +431,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     memTLAdapter.io.outResp <> outer.memNode.out(0)._1.d
   } else {
     val imemTLAdapter =  Module(new VortexTLAdapter(
-        outer.sourceWidth,
+        outer.imemSourceWidth,
         chiselTypeOf(core.io.imem.get(0).a.bits),
         chiselTypeOf(core.io.imem.get(0).d.bits),
         outer.imemNodes.head.out.head
@@ -431,7 +447,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
     val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
       Module(new VortexTLAdapter(
-        outer.sourceWidth,
+        outer.dmemSourceWidth,
         chiselTypeOf(core.io.dmem.get(0).a.bits),
         chiselTypeOf(core.io.dmem.get(0).d.bits),
         outer.dmemNodes(0).out.head
