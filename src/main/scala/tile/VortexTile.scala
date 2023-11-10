@@ -176,8 +176,8 @@ class VortexTile private (
     case None => 4
   }
   require(dmemSourceWidth >= 4,
-    "Allocating a small number of sourceIds may cause correctness bug inside " +
-    "Vortex core due to unconstrained synchronization issues between warps." +
+    "Setting a small number of sourceIds may cause correctness bug inside " +
+    "Vortex core due to synchronization issues in vx_wspawn. " +
     "We recommend setting nSrcIds to at least 16.")
 
   val imemNodes = Seq.tabulate(1) { i =>
@@ -234,50 +234,43 @@ class VortexTile private (
   )))
 
   // Conditionally instantiate memory coalescer
-  val coalescerL1Node = p(CoalescerKey) match {
+  val coalescerNode = p(CoalescerKey) match {
     case Some(coalescerParam) => {
       val coal = LazyModule(new CoalescingUnit(coalescerParam.copy(enable = true)))
       coal.cpuNode :=* dmemAggregateNode
       coal.aggregateNode // N+1 lanes
-      //Conditionally instantiate fat-bank, we can only use fatbank in the presence of coalescer
-      
-      val L1SystemNode = p(L1SystemKey) match {
-        case Some(l1SystemCfg) =>{
-          println(s"============ Using Vortex FatBank as L1 System =================")
-
-
-          val L1System    = LazyModule(new L1System(l1SystemCfg))
-          //Currently we have an architectural deadlock
-          //we CAN NOT direcrly connect core's instruction fetch to TL-MasterXBar, that leads to a deadlock
-
-          //Connect L1System with imem_fetch_interface without XBar
-          //coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
-          imemNodes.foreach { L1System.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
-
-          //connect L1System with dmem_req from coalescer
-          L1System.dmemXbar.node :=* coal.aggregateNode
-
-          //L1System appears to downstream as one Identity Node
-          L1System.L1SystemToL2Node
-          
-        }
-        
-        case None => {
-          imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ } //need to bind imem directly if not using FatBank
-          coal.aggregateNode //if no fatbank, simply return coalescer.aggregateNode
-        }
-      }
-
-      L1SystemNode
-
     }
     case None => dmemAggregateNode
+  }
+
+  // Conditionally instantiate L1 cache
+  val l1Node = p(L1SystemKey) match {
+    case Some(l1SystemCfg) =>{
+      println(s"============ Using Vortex FatBank as L1 System =================")
+      require(p(CoalescerKey).isDefined,
+        "Vortex L1 configuration currently only works when coalescer is also enabled.")
+
+      val L1System = LazyModule(new L1System(l1SystemCfg))
+      // Connect L1System with imem_fetch_interface without XBar
+      // coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
+      // imemNodes.foreach { L1System.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
+      imemNodes.foreach { L1System.dmemXbar.node := TLWidthWidget(4) := _ }
+      L1System.dmemXbar.node :=* coalescerNode
+      L1System.L1SystemToL2Node
+    }
+    case None => {
+      // Regardless of using coalescer or not, if we're not using L1, imemNode
+      // goes directly to tile exit xbar
+      // FIXME: unnatural, have L1 just handle dmem
+      imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
+      coalescerNode
+    }
   }
 
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
-    tlMasterXbar.node :=* coalescerL1Node
+    tlMasterXbar.node :=* l1Node
   }
 
   /* below are copied from rocket */
