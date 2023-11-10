@@ -47,49 +47,50 @@ case class VortexTileParams(
 // field, so VortexCoreParams needs to extend from that, requiring all
 // these fields to be initialized.  Most of this is unnecessary though. TODO
 case class VortexCoreParams(
-  bootFreqHz: BigInt = 0,
-  useVM: Boolean = true,
-  useUser: Boolean = false,
-  useSupervisor: Boolean = false,
-  useHypervisor: Boolean = false,
-  useDebug: Boolean = true,
-  useAtomics: Boolean = false,
-  useAtomicsOnlyForIO: Boolean = false,
-  useCompressed: Boolean = false,
-  useRVE: Boolean = false,
-  useSCIE: Boolean = false,
-  useBitManip: Boolean = false,
-  useBitManipCrypto: Boolean = false,
-  useCryptoNIST: Boolean = false,
-  useCryptoSM: Boolean = false,
-  useConditionalZero: Boolean = false,
-  nLocalInterrupts: Int = 0,
-  useNMI: Boolean = false,
-  nBreakpoints: Int = 1,
-  useBPWatch: Boolean = false,
-  mcontextWidth: Int = 0,
-  scontextWidth: Int = 0,
-  nPMPs: Int = 8,
-  nPerfCounters: Int = 0,
-  haveBasicCounters: Boolean = true,
-  haveCFlush: Boolean = false,
-  misaWritable: Boolean = true,
-  nL2TLBEntries: Int = 0,
-  nL2TLBWays: Int = 1,
-  nPTECacheEntries: Int = 8,
-  mtvecInit: Option[BigInt] = Some(BigInt(0)),
-  mtvecWritable: Boolean = true,
-  fastLoadWord: Boolean = true,
-  fastLoadByte: Boolean = false,
-  branchPredictionModeCSR: Boolean = false,
-  clockGate: Boolean = false,
-  mvendorid: Int = 0, // 0 means non-commercial implementation
-  mimpid: Int = 0x20181004, // release date in BCD
-  mulDiv: Option[MulDivParams] = Some(MulDivParams()),
-  fpu: Option[FPUParams] = Some(FPUParams()),
-  debugROB: Boolean = false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
-  haveCease: Boolean = true, // non-standard CEASE instruction
-  haveSimTimeout: Boolean = true // add plusarg for simulation timeout
+    bootFreqHz: BigInt = 0,
+    useVM: Boolean = true,
+    useUser: Boolean = false,
+    useSupervisor: Boolean = false,
+    useHypervisor: Boolean = false,
+    useDebug: Boolean = true,
+    useAtomics: Boolean = false,
+    useAtomicsOnlyForIO: Boolean = false,
+    useCompressed: Boolean = false,
+    useRVE: Boolean = false,
+    useSCIE: Boolean = false,
+    useBitManip: Boolean = false,
+    useBitManipCrypto: Boolean = false,
+    useCryptoNIST: Boolean = false,
+    useCryptoSM: Boolean = false,
+    useConditionalZero: Boolean = false,
+    nLocalInterrupts: Int = 0,
+    useNMI: Boolean = false,
+    nBreakpoints: Int = 1,
+    useBPWatch: Boolean = false,
+    mcontextWidth: Int = 0,
+    scontextWidth: Int = 0,
+    nPMPs: Int = 8,
+    nPerfCounters: Int = 0,
+    haveBasicCounters: Boolean = true,
+    haveCFlush: Boolean = false,
+    misaWritable: Boolean = true,
+    nL2TLBEntries: Int = 0,
+    nL2TLBWays: Int = 1,
+    nPTECacheEntries: Int = 8,
+    mtvecInit: Option[BigInt] = Some(BigInt(0)),
+    mtvecWritable: Boolean = true,
+    fastLoadWord: Boolean = true,
+    fastLoadByte: Boolean = false,
+    branchPredictionModeCSR: Boolean = false,
+    clockGate: Boolean = false,
+    mvendorid: Int = 0, // 0 means non-commercial implementation
+    mimpid: Int = 0x20181004, // release date in BCD
+    mulDiv: Option[MulDivParams] = Some(MulDivParams()),
+    fpu: Option[FPUParams] = Some(FPUParams()),
+    debugROB: Boolean =
+      false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
+    haveCease: Boolean = true, // non-standard CEASE instruction
+    haveSimTimeout: Boolean = true // add plusarg for simulation timeout
 ) extends CoreParams {
   val haveFSDirty = false
   val pmpGranularity: Int = if (useHypervisor) 4096 else 4
@@ -123,12 +124,14 @@ class VortexTile private (
 
   // Memory-mapped region for HTIF communication
   // We use fixed addresses instead of tohost/fromhost
-  val regDevice = new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
+  val regDevice =
+    new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
   val regNode = TLRegisterNode(
     address = Seq(AddressSet(0x7c000000 + 0x1000 * tileParams.hartId, 0xfff)),
     device = regDevice,
     beatBytes = 4,
-    concurrency = 1)
+    concurrency = 1
+  )
 
   regNode := tlSlaveXbar.node
 
@@ -149,11 +152,13 @@ class VortexTile private (
     beatBytes = lazyCoreParamsView.coreDataBytes,
     minLatency = 1)))*/
 
-  require(p(SIMTCoreKey).isDefined,
-    "SIMTCoreKey not defined; make sure to use WithSimtLanes when using VortexTile")
+  require(
+    p(SIMTCoreKey).isDefined,
+    "SIMTCoreKey not defined; make sure to use WithSimtLanes when using VortexTile"
+  )
   val numLanes = p(SIMTCoreKey) match {
     case Some(simtParam) => simtParam.nLanes
-    case None => 4
+    case None            => 4
   }
 
   // CAUTION: imemSourceWidth is dependent on the ibuffer size.  We have to
@@ -168,46 +173,60 @@ class VortexTile private (
   // ibuffer size is set as a hardcoded macro IBUF_SIZE that's uncontrollable
   // from Chisel, there's no easy solution.  We at least don't expose this as a
   // Parameter and leave as a hardcoded value here.
-  val imemSourceWidth = 1 // 1 << 2 == IBUF_SIZE = 4
+  val imemSourceWidth = 6 // 1 << imemSourceWidth == IBUF_SIZE
 
   val dmemSourceWidth = p(SIMTCoreKey) match {
     // TODO: respect coalescer newSrcIds
     case Some(simtParam) => log2Ceil(simtParam.nSrcIds)
-    case None => 4
+    case None            => 4
   }
-  require(dmemSourceWidth >= 4,
+  require(
+    dmemSourceWidth >= 4,
     "Setting a small number of sourceIds may cause correctness bug inside " +
-    "Vortex core due to synchronization issues in vx_wspawn. " +
-    "We recommend setting nSrcIds to at least 16.")
+      "Vortex core due to synchronization issues in vx_wspawn. " +
+      "We recommend setting nSrcIds to at least 16."
+  )
 
   val imemNodes = Seq.tabulate(1) { i =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        sourceId = IdRange(0, 1 << imemSourceWidth),
-        name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
-        requestFifo = true,
-        supportsProbe =
-          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-        supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-      ))
-    )))
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          clients = Seq(
+            TLMasterParameters.v1(
+              sourceId = IdRange(0, 1 << imemSourceWidth),
+              name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
+              requestFifo = true,
+              supportsProbe =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+            )
+          )
+        )
+      )
+    )
   }
 
   val dmemNodes = Seq.tabulate(numLanes) { i =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        sourceId = IdRange(0, 1 << dmemSourceWidth),
-        name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
-        requestFifo = true,
-        supportsProbe =
-          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-        supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-        supportsPutFull =
-          TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-        supportsPutPartial =
-          TransferSizes(1, lazyCoreParamsView.coreDataBytes)
-      ))
-    )))
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          clients = Seq(
+            TLMasterParameters.v1(
+              sourceId = IdRange(0, 1 << dmemSourceWidth),
+              name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
+              requestFifo = true,
+              supportsProbe =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutFull =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutPartial =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+            )
+          )
+        )
+      )
+    )
   }
   // combine outgoing per-lane dmemNode into 1 idenity node
   //
@@ -220,23 +239,31 @@ class VortexTile private (
   val dmemAggregateNode = TLIdentityNode()
   dmemNodes.foreach { dmemAggregateNode := TLWidthWidget(4) := _ }
 
-  val memNode = TLClientNode(Seq(TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
-      // FIXME: need to also respect imemSourceWidth
-      sourceId = IdRange(0, 1 << dmemSourceWidth),
-      name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
-      requestFifo = true,
-      supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
-      supportsGet = TransferSizes(16, 16),
-      supportsPutFull = TransferSizes(16, 16),
-      supportsPutPartial = TransferSizes(16, 16)
-    ))
-  )))
+  val memNode = TLClientNode(
+    Seq(
+      TLMasterPortParameters.v1(
+        clients = Seq(
+          TLMasterParameters.v1(
+            // FIXME: need to also respect imemSourceWidth
+            sourceId = IdRange(0, 1 << dmemSourceWidth),
+            name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
+            requestFifo = true,
+            supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
+            supportsGet = TransferSizes(16, 16),
+            supportsPutFull = TransferSizes(16, 16),
+            supportsPutPartial = TransferSizes(16, 16)
+          )
+        )
+      )
+    )
+  )
 
   // Conditionally instantiate memory coalescer
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalescerParam) => {
-      val coal = LazyModule(new CoalescingUnit(coalescerParam.copy(enable = true)))
+      val coal = LazyModule(
+        new CoalescingUnit(coalescerParam.copy(enable = true))
+      )
       coal.cpuNode :=* dmemAggregateNode
       coal.aggregateNode // N+1 lanes
     }
@@ -245,10 +272,14 @@ class VortexTile private (
 
   // Conditionally instantiate L1 cache
   val l1Node = p(L1SystemKey) match {
-    case Some(l1SystemCfg) =>{
-      println(s"============ Using Vortex FatBank as L1 System =================")
-      require(p(CoalescerKey).isDefined,
-        "Vortex L1 configuration currently only works when coalescer is also enabled.")
+    case Some(l1SystemCfg) => {
+      println(
+        s"============ Using Vortex FatBank as L1 System ================="
+      )
+      require(
+        p(CoalescerKey).isDefined,
+        "Vortex L1 configuration currently only works when coalescer is also enabled."
+      )
 
       val L1System = LazyModule(new L1System(l1SystemCfg))
       // Connect L1System with imem_fetch_interface without XBar
@@ -309,17 +340,18 @@ class VortexTile private (
     .map(d => Map("sifive,buserror" -> d.device.asProperty))
     .getOrElse(Nil)
 
-  val cpuDevice: SimpleDevice =
-    new SimpleDevice("cpu", Seq("sifive,vortex0", "riscv")) {
-      override def parent = Some(ResourceAnchors.cpus)
-      override def describe(resources: ResourceBindings): Description = {
-        val Description(name, mapping) = super.describe(resources)
-        Description(
-          name,
-          mapping ++ cpuProperties ++ nextLevelCacheProperty
-            ++ tileProperties ++ dtimProperty ++ itimProperty ++ beuProperty
-        )
-      }
+  val cpuDevice: SimpleDevice = new SimpleDevice(
+    "cpu",
+    Seq(s"sifive,vortex${tileParams.hartId}", "riscv")
+  ) {
+    override def parent = Some(ResourceAnchors.cpus)
+    override def describe(resources: ResourceBindings): Description = {
+      val Description(name, mapping) = super.describe(resources)
+      Description(
+        name,
+        mapping ++ cpuProperties ++ nextLevelCacheProperty
+          ++ tileProperties ++ dtimProperty ++ itimProperty ++ beuProperty
+      )
     }
   }
 
@@ -410,12 +442,14 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     println(s"width of a channel data ${core.io.mem.get.a.bits.data.getWidth}")
     println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
 
-    val memTLAdapter =  Module(new VortexTLAdapter(
-      outer.dmemSourceWidth,
-      chiselTypeOf(core.io.mem.get.a.bits),
-      chiselTypeOf(core.io.mem.get.d.bits),
-      outer.memNode.out.head
-    ))
+    val memTLAdapter = Module(
+      new VortexTLAdapter(
+        outer.dmemSourceWidth,
+        chiselTypeOf(core.io.mem.get.a.bits),
+        chiselTypeOf(core.io.mem.get.d.bits),
+        outer.memNode.out.head
+      )
+    )
 
     // connection: VortexBundle <--> VortexTLAdapter <--> TL memNode
     memTLAdapter.io.inReq <> core.io.mem.get.a
@@ -423,12 +457,14 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     outer.memNode.out(0)._1.a <> memTLAdapter.io.outReq
     memTLAdapter.io.outResp <> outer.memNode.out(0)._1.d
   } else {
-    val imemTLAdapter =  Module(new VortexTLAdapter(
+    val imemTLAdapter = Module(
+      new VortexTLAdapter(
         outer.imemSourceWidth,
         chiselTypeOf(core.io.imem.get(0).a.bits),
         chiselTypeOf(core.io.imem.get(0).d.bits),
         outer.imemNodes.head.out.head
-    ))
+      )
+    )
     // TODO: make imemNodes not a vector
     imemTLAdapter.io.inReq <> core.io.imem.get(0).a
     core.io.imem.get(0).d <> imemTLAdapter.io.inResp
@@ -439,12 +475,14 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     // up some area
     val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
     val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
-      Module(new VortexTLAdapter(
-        outer.dmemSourceWidth,
-        chiselTypeOf(core.io.dmem.get(0).a.bits),
-        chiselTypeOf(core.io.dmem.get(0).d.bits),
-        outer.dmemNodes(0).out.head
-      ))
+      Module(
+        new VortexTLAdapter(
+          outer.dmemSourceWidth,
+          chiselTypeOf(core.io.dmem.get(0).a.bits),
+          chiselTypeOf(core.io.dmem.get(0).d.bits),
+          outer.dmemNodes(0).out.head
+        )
+      )
     }
 
     // Since the individual per-lane TL requests might come back out-of-sync between
@@ -467,7 +505,10 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     // TODO: A cleaner solution would be to simply do a synchronized allocation
     // of a same source id for all lanes.
     val arb = Module(
-      new RRArbiter(core.io.dmem.get.head.d.bits.source.cloneType, outer.numLanes)
+      new RRArbiter(
+        core.io.dmem.get.head.d.bits.source.cloneType,
+        outer.numLanes
+      )
     )
     arb.io.out.ready := true.B
     val dmemBundles = dmemTLAdapters.map(_.io.inResp)
@@ -478,10 +519,11 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     val matchingSources = Wire(UInt(outer.numLanes.W))
     matchingSources := dmemBundles
       .map(b =>
-          // If there is no valid response pending across all lanes,
-          // matchingSources should not filter out upstream ready signals, so
-          // set it to all-1
-          !arb.io.out.valid || (b.bits.source === arb.io.out.bits))
+        // If there is no valid response pending across all lanes,
+        // matchingSources should not filter out upstream ready signals, so
+        // set it to all-1
+        !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
+      )
       .asUInt
 
     // make connection:
@@ -492,8 +534,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     }
     (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
       case ((coreMem, tlAdapter), i) =>
-      coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
-      tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
+        coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
+        tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
     }
     (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
       tlOut.a <> tlAdapter.io.outReq
@@ -507,16 +549,15 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
   }
 
   // TODO: generalize for useVxCache
-  if (!outer.vortexParams.useVxCache) {
-  }
+  if (!outer.vortexParams.useVxCache) {}
 }
 
 // Some @copypaste from CoalescerSourceGen.
 class VortexTLAdapter(
-  newSourceWidth: Int,
-  inReqT: VortexBundleA,
-  inRespT: VortexBundleD,
-  outTL: (TLBundle, TLEdge)
+    newSourceWidth: Int,
+    inReqT: VortexBundleA,
+    inRespT: VortexBundleD,
+    outTL: (TLBundle, TLEdge)
 ) extends Module {
   val io = IO(new Bundle {
     // in/out means upstream/downstream
@@ -526,11 +567,13 @@ class VortexTLAdapter(
     val outResp = chiselTypeOf(outTL._1.d)
   })
   val edge = outTL._2
-  val sourceGen = Module(new SourceGenerator(
-    newSourceWidth,
-    Some(inReqT.source),
-    ignoreInUse = false
-  ))
+  val sourceGen = Module(
+    new SourceGenerator(
+      newSourceWidth,
+      Some(inReqT.source),
+      ignoreInUse = false
+    )
+  )
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
   sourceGen.io.reclaim.valid := io.outResp.fire
   sourceGen.io.reclaim.bits := io.outResp.bits.source
