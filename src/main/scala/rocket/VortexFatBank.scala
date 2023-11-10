@@ -24,6 +24,8 @@ case class L1SystemConfig(
   def coreTagPlusSizeWidth: Int = {
     log2Ceil(wordSize) + coreTagWidth
   }
+  require(mshrSize == l2ReqSourceGenSize,
+    "MSHR size must match the number of sourceIds to downstream.")
 }
 
 object defaultL1SystemConfig
@@ -37,9 +39,7 @@ object defaultL1SystemConfig
       l2ReqSourceGenSize = 8,
       uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffL)),
       icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0xfffffffL))
-    ) {
-  require(mshrSize != l2ReqSourceGenSize)
-}
+    )
 
 class L1System(config: L1SystemConfig)(implicit p: Parameters)
     extends LazyModule {
