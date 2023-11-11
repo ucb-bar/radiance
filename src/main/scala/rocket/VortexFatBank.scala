@@ -3,15 +3,13 @@ package freechips.rocketchip.tilelink
 import chisel3._
 import chisel3.util._
 import chisel3.experimental._
-import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.{Parameters, Field}
 
-case class L1SystemParam(wordSize: Int = 16, busWidthInBytes: Int = 8)
-case object L1SystemKey extends Field[Option[L1SystemConfig]](None /*default*/ )
+case object VortexL1Key extends Field[Option[VortexL1Config]](None /*default*/ )
 
-case class L1SystemConfig(
+case class VortexL1Config(
     numBanks: Int,
     wordSize: Int, // This is the read/write granularity of the L1 cache
     cacheLineSize: Int,
@@ -24,12 +22,14 @@ case class L1SystemConfig(
   def coreTagPlusSizeWidth: Int = {
     log2Ceil(wordSize) + coreTagWidth
   }
-  require(mshrSize == l2ReqSourceGenSize,
-    "MSHR size must match the number of sourceIds to downstream.")
+  require(
+    mshrSize == l2ReqSourceGenSize,
+    "MSHR size must match the number of sourceIds to downstream."
+  )
 }
 
-object defaultL1SystemConfig
-    extends L1SystemConfig(
+object defaultVortexL1Config
+    extends VortexL1Config(
       numBanks = 4,
       wordSize = 16,
       cacheLineSize = 16,
@@ -41,7 +41,7 @@ object defaultL1SystemConfig
       icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0xfffffffL))
     )
 
-class L1System(config: L1SystemConfig)(implicit p: Parameters)
+class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
   // icache bank
   val icache_bank = LazyModule(new VortexFatBank(config, 0, isICache = true))
@@ -54,23 +54,27 @@ class L1System(config: L1SystemConfig)(implicit p: Parameters)
   // passthrough
   val passThrough = LazyModule(new FatBankPassThrough(config))
 
-  // L1System exposes to upstream as a dmemXbar
-  val dmemXbar = LazyModule(new TLXbar)
-  dcache_banks.foreach { _.coalToVxCacheNode :=* dmemXbar.node }
-  passThrough.coalToVxCacheNode :=* dmemXbar.node
-  icache_bank.coalToVxCacheNode :=* dmemXbar.node
+  // visibility node that exposes to upstream
+  val coresideNode = TLIdentityNode()
 
-  // L1System exposes to downstream as one tileLink Identity Node
-  val L1SystemToL2Node = TLIdentityNode()
-  dcache_banks.foreach { L1SystemToL2Node := _.vxCacheToL2Node }
-  L1SystemToL2Node := passThrough.vxCacheToL2Node
-  L1SystemToL2Node := icache_bank.vxCacheToL2Node
+  // core-side crossbar that arbitrates core requests to banks
+  protected val bankXbar = LazyModule(new TLXbar)
+  bankXbar.node :=* coresideNode
+  dcache_banks.foreach { _.coalToVxCacheNode :=* bankXbar.node }
+  passThrough.coalToVxCacheNode :=* bankXbar.node
+  icache_bank.coalToVxCacheNode :=* bankXbar.node
+
+  // master node that exposes to and drives the downstream
+  val masterNode = TLIdentityNode()
+  dcache_banks.foreach { masterNode := _.vxCacheToL2Node }
+  masterNode := passThrough.vxCacheToL2Node
+  masterNode := icache_bank.vxCacheToL2Node
 
   lazy val module = new LazyModuleImp(this)
 }
 
 // TODO: Make the FatBank Pass Through a Blocking Module
-class FatBankPassThrough(config: L1SystemConfig)(implicit p: Parameters)
+class FatBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
   // Slave node to upstream
   val managerParam = Seq(
@@ -122,7 +126,7 @@ class FatBankPassThrough(config: L1SystemConfig)(implicit p: Parameters)
 }
 
 class VortexFatBank(
-    config: L1SystemConfig,
+    config: VortexL1Config,
     bankId: Int,
     isICache: Boolean = false
 )(implicit p: Parameters)
@@ -195,7 +199,7 @@ class VortexFatBank(
 
 class VortexFatBankImp(
     outer: VortexFatBank,
-    config: L1SystemConfig
+    config: VortexL1Config
 ) extends LazyModuleImp(outer) {
   val vxCache = Module(
     new VX_cache(
@@ -228,7 +232,7 @@ class VortexFatBankImp(
     val size = UInt(32.W)
   }
 
-  class ReadReqInfo(config: L1SystemConfig) extends Bundle {
+  class ReadReqInfo(config: VortexL1Config) extends Bundle {
     val size = UInt(log2Ceil(config.wordSize).W)
     val id = UInt(config.coreTagWidth.W)
   }

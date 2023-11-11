@@ -271,8 +271,8 @@ class VortexTile private (
   }
 
   // Conditionally instantiate L1 cache
-  val l1Node = p(L1SystemKey) match {
-    case Some(l1SystemCfg) => {
+  val l1Node = p(VortexL1Key) match {
+    case Some(vortexL1Config) => {
       println(
         s"============ Using Vortex FatBank as L1 System ================="
       )
@@ -281,13 +281,13 @@ class VortexTile private (
         "Vortex L1 configuration currently only works when coalescer is also enabled."
       )
 
-      val L1System = LazyModule(new L1System(l1SystemCfg))
-      // Connect L1System with imem_fetch_interface without XBar
+      val l1cache = LazyModule(new VortexL1Cache(vortexL1Config))
+      // Connect L1 with imem_fetch_interface without XBar
       // coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
-      // imemNodes.foreach { L1System.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
-      imemNodes.foreach { L1System.dmemXbar.node := TLWidthWidget(4) := _ }
-      L1System.dmemXbar.node :=* coalescerNode
-      L1System.L1SystemToL2Node
+      // imemNodes.foreach { l1cache.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
+      imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
+      l1cache.coresideNode :=* coalescerNode
+      l1cache.masterNode
     }
     case None => {
       // Regardless of using coalescer or not, if we're not using L1, imemNode
