@@ -237,7 +237,7 @@ class VortexBankImp(
     val id = UInt(config.coreTagWidth.W)
   }
 
-  val rcvWriteReqInfo = Module(
+  val coreWriteReqQueue = Module(
     new Queue(
       (new WriteReqInfo).cloneType,
       config.writeInfoReqQSize,
@@ -249,31 +249,31 @@ class VortexBankImp(
 
   // Translate TL request from Coalescer to requests for VX_cache
   def TLReq2VXReq = {
-    val (coalToBankBundle, _) = outer.coalToVxCacheNode.in.head
-    // coal -> vxCache request on channel A
-    val coalToBankA = coalToBankBundle.a;
+    val (tlInFromCoal, _) = outer.coalToVxCacheNode.in.head
 
-    coalToBankA.ready := vxCache.io.core_req_ready && rcvWriteReqInfo.io.enq.ready // not optimal
-    vxCache.io.core_req_valid := coalToBankA.valid
+    // coal -> vxCache
+    tlInFromCoal.a.ready :=
+      vxCache.io.core_req_ready && coreWriteReqQueue.io.enq.ready // not optimal
+    vxCache.io.core_req_valid := tlInFromCoal.a.valid
 
     // read = 0, write = 1
-    vxCache.io.core_req_rw := !(coalToBankA.bits.opcode === TLMessages.Get)
+    vxCache.io.core_req_rw := !(tlInFromCoal.a.bits.opcode === TLMessages.Get)
     // 4 is also hardcoded, it should be log2WordSize
-    vxCache.io.core_req_addr := coalToBankA.bits.address(
+    vxCache.io.core_req_addr := tlInFromCoal.a.bits.address(
       31,
       log2Ceil(config.wordSize)
     )
-    vxCache.io.core_req_byteen := coalToBankA.bits.mask
-    vxCache.io.core_req_data := coalToBankA.bits.data
+    vxCache.io.core_req_byteen := tlInFromCoal.a.bits.mask
+    vxCache.io.core_req_data := tlInFromCoal.a.bits.data
 
-    // combine size and tag field into one big wire, to put into vxCache.io.core_req_tag
-    readReqInfo.id := coalToBankA.bits.source
-    readReqInfo.size := coalToBankA.bits.size
+    // combine size and tag field into one big wire, to put into
+    // vxCache.io.core_req_tag
+    readReqInfo.id := tlInFromCoal.a.bits.source
+    readReqInfo.size := tlInFromCoal.a.bits.size
+    // ignore param, size, corrupt
     vxCache.io.core_req_tag := readReqInfo.asTypeOf(vxCache.io.core_req_tag)
 
-    writeInputFire := vxCache.io.core_req_rw && coalToBankA.fire
-
-    // ignore param, size, corrupt fields
+    writeInputFire := vxCache.io.core_req_rw && tlInFromCoal.a.fire
 
     // vxCache -> coal response on channel D
     // ok ... this part is a little tricky, the downstream coalescer requires
@@ -281,50 +281,49 @@ class VortexBankImp(
     // an inflight ID has retired if we don't send ack, the coalescer will run
     // out of IDs, and can't generate new request
 
-    // for read request, we send AckData when the bank has a valid output
+    // Optimization: for write requests from upstream (i.e. coalescer), we send
+    // back ack as soon as we can without waiting for the actual ack from
+    // downstream (i.e. L2).
     //
-    // for write request, we can ack whenever we have a valid entry in
-    // rcvWriteReqInfo Queue
-
-    val coalToBankD = coalToBankBundle.d;
+    // We still need to store these pending core write requests somewhere,
+    // because we can't always ack them in the next cycle, ex. when there's a
+    // competing read response.
 
     // FIXME: currently assuming below buffer is never full
-    rcvWriteReqInfo.io.enq.valid := !(coalToBankA.bits.opcode === TLMessages.Get) && coalToBankA.valid && coalToBankA.ready
-    rcvWriteReqInfo.io.enq.bits.id := coalToBankA.bits.source
-    rcvWriteReqInfo.io.enq.bits.size := coalToBankA.bits.size
+    coreWriteReqQueue.io.enq.valid :=
+      tlInFromCoal.a.fire && !(tlInFromCoal.a.bits.opcode === TLMessages.Get)
+    coreWriteReqQueue.io.enq.bits.id := tlInFromCoal.a.bits.source
+    coreWriteReqQueue.io.enq.bits.size := tlInFromCoal.a.bits.size
 
-    // prioritize Ack for Read, so we only deque from writeReqInfo, if we don't
-    // have a readReq we need to ack
-    //
-    // vxCache.io.core_rsp_valid means readDataAck
-    rcvWriteReqInfo.io.deq.ready := coalToBankD.ready && ~vxCache.io.core_rsp_valid
+    // Prioritize ack for any pending reads over write acks in the queue. Don't
+    // ack write if vxCache has a current valid response for reads (vxCache
+    // response is always for reads.)
+    coreWriteReqQueue.io.deq.ready := tlInFromCoal.d.ready && ~vxCache.io.core_rsp_valid
 
-    vxCache.io.core_rsp_ready := coalToBankD.ready
-    coalToBankD.valid := vxCache.io.core_rsp_valid || rcvWriteReqInfo.io.deq.valid
-
-    coalToBankD.bits.source := Mux(
+    // handle competition between a pending read ack response and write ack
+    // response
+    vxCache.io.core_rsp_ready := tlInFromCoal.d.ready
+    tlInFromCoal.d.valid := vxCache.io.core_rsp_valid || coreWriteReqQueue.io.deq.valid
+    tlInFromCoal.d.bits.source := Mux(
       vxCache.io.core_rsp_valid,
       vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).id,
-      rcvWriteReqInfo.io.deq.bits.id
+      coreWriteReqQueue.io.deq.bits.id
     )
-
-    coalToBankD.bits.opcode := Mux(
-      vxCache.io.core_rsp_valid,
+    tlInFromCoal.d.bits.opcode := Mux(
+      vxCache.io.core_rsp_valid, // always for reads
       TLMessages.AccessAckData,
       TLMessages.AccessAck
     )
-
-    coalToBankD.bits.size := Mux(
+    tlInFromCoal.d.bits.size := Mux(
       vxCache.io.core_rsp_valid,
       vxCache.io.core_rsp_tag.asTypeOf(readReqInfo).size,
-      rcvWriteReqInfo.io.deq.bits.size
+      coreWriteReqQueue.io.deq.bits.size
     )
-
-    coalToBankD.bits.param := 0.U
-    coalToBankD.bits.sink := 0.U
-    coalToBankD.bits.denied := false.B
-    coalToBankD.bits.corrupt := false.B
-    coalToBankD.bits.data := vxCache.io.core_rsp_data
+    tlInFromCoal.d.bits.param := 0.U
+    tlInFromCoal.d.bits.sink := 0.U
+    tlInFromCoal.d.bits.denied := false.B
+    tlInFromCoal.d.bits.corrupt := false.B
+    tlInFromCoal.d.bits.data := vxCache.io.core_rsp_data
   }
 
   // Since Vortex L1 is a write-through cache, it doesn't bookkeep writes and
