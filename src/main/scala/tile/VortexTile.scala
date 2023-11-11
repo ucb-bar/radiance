@@ -274,7 +274,7 @@ class VortexTile private (
   val l1Node = p(VortexL1Key) match {
     case Some(vortexL1Config) => {
       println(
-        s"============ Using Vortex FatBank as L1 System ================="
+        s"============ Using Vortex L1 cache ================="
       )
       require(
         p(CoalescerKey).isDefined,

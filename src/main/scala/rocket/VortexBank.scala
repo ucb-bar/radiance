@@ -44,15 +44,15 @@ object defaultVortexL1Config
 class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
   // icache bank
-  val icache_bank = LazyModule(new VortexFatBank(config, 0, isICache = true))
+  val icache_bank = LazyModule(new VortexBank(config, 0, isICache = true))
 
   // dcache banks
   val dcache_banks = Seq.tabulate(config.numBanks) { bankId =>
-    val bank = LazyModule(new VortexFatBank(config, bankId))
+    val bank = LazyModule(new VortexBank(config, bankId))
     bank
   }
   // passthrough
-  val passThrough = LazyModule(new FatBankPassThrough(config))
+  val passThrough = LazyModule(new VortexBankPassThrough(config))
 
   // visibility node that exposes to upstream
   val coresideNode = TLIdentityNode()
@@ -73,8 +73,8 @@ class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
   lazy val module = new LazyModuleImp(this)
 }
 
-// TODO: Make the FatBank Pass Through a Blocking Module
-class FatBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
+// TODO: Make this a Blocking Module
+class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
   // Slave node to upstream
   val managerParam = Seq(
@@ -99,7 +99,7 @@ class FatBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
     TLMasterPortParameters.v1(
       clients = Seq(
         TLMasterParameters.v1(
-          name = "VortexFatBank",
+          name = "VortexBank",
           sourceId = IdRange(0, 1 << (log2Ceil(config.l2ReqSourceGenSize) + 5)),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
@@ -125,7 +125,7 @@ class FatBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
   }
 }
 
-class VortexFatBank(
+class VortexBank(
     config: VortexL1Config,
     bankId: Int,
     isICache: Boolean = false
@@ -175,7 +175,7 @@ class VortexFatBank(
     TLMasterPortParameters.v1(
       clients = Seq(
         TLMasterParameters.v1(
-          name = "VortexFatBank",
+          name = "VortexBank",
           sourceId = IdRange(0, config.l2ReqSourceGenSize),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
@@ -190,15 +190,15 @@ class VortexFatBank(
   val vxCacheToL2Node = TLIdentityNode()
   val vxCacheFetchNode = TLClientNode(clientParam)
 
-  // We need this widthWidget here, because whenever the fatBank is performing
-  // read and write to Mem, it must have the illusion that dataWidth is as big as
-  // as its cacheline size
+  // We need this widthWidget here, because whenever the bank is performing
+  // read and write to Mem, it must have the illusion that dataWidth is as big
+  // as as its cacheline size
   vxCacheToL2Node := TLWidthWidget(config.cacheLineSize) := vxCacheFetchNode
-  lazy val module = new VortexFatBankImp(this, config);
+  lazy val module = new VortexBankImp(this, config);
 }
 
-class VortexFatBankImp(
-    outer: VortexFatBank,
+class VortexBankImp(
+    outer: VortexBank,
     config: VortexL1Config
 ) extends LazyModuleImp(outer) {
   val vxCache = Module(
@@ -281,7 +281,7 @@ class VortexFatBankImp(
     // an inflight ID has retired if we don't send ack, the coalescer will run
     // out of IDs, and can't generate new request
 
-    // for read request, we send AckData when the FatBank has a valid output
+    // for read request, we send AckData when the bank has a valid output
     //
     // for write request, we can ack whenever we have a valid entry in
     // rcvWriteReqInfo Queue
@@ -390,7 +390,7 @@ class VortexFatBankImp(
 }
 
 class VX_cache(
-    CACHE_ID: Int = 0,
+    CACHE_ID: Int = 0, // seems to be only used for debug trace prints
     CACHE_SIZE: Int = 16384 / 4, // <FIXME, divided by 4 for faster simulation
     CACHE_LINE_SIZE: Int = 16,
     NUM_PORTS: Int = 1,
@@ -415,7 +415,7 @@ class VX_cache(
 ) extends BlackBox(
       Map(
         "CACHE_ID" -> CACHE_ID,
-        "NUM_REQS" -> 1, // Force NUM_REQS to be 1, we use their Cache as our individual Bank
+        "NUM_REQS" -> 1, // force to instantiate single bank by setting NUM_REQS to 1
         "CACHE_SIZE" -> CACHE_SIZE,
         "CACHE_LINE_SIZE" -> CACHE_LINE_SIZE,
         "NUM_PORTS" -> NUM_PORTS,
