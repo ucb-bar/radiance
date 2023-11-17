@@ -114,7 +114,6 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
         "CORE_ID" -> tile.tileParams.hartId,
         // TODO: can we get this as a parameter?
         "BOOTROM_HANG100" -> 0x10100,
-        "NUM_THREADS" -> tile.numLanes
       )
     )
     with HasBlackBoxResource {
