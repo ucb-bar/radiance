@@ -716,10 +716,11 @@ class VortexTLAdapter(
   io.outReq.bits.size := io.inReq.bits.size
   io.outReq.bits.source := io.inReq.bits.source
   io.outReq.bits.address := io.inReq.bits.address
+  // this is just to double-check TLWidthWidget is in place
+  require(io.inReq.bits.size.getWidth == bundle.params.sizeBits)
   // Get requires contiguous mask; only copy core's potentially-partial mask
   // when writing
-  io.outReq.bits.mask := Mux(
-    edge.hasData(io.outReq.bits),
+  io.outReq.bits.mask := Mux(edge.hasData(io.outReq.bits),
     io.inReq.bits.mask,
     // generate TL-correct mask
     edge.mask(io.inReq.bits.address, io.inReq.bits.size)
