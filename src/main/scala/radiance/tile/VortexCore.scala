@@ -42,12 +42,12 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = tile.imemTagWidth, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.imemTagWidth, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = 46, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = 46, dataWidth = 32)))
   })) else None
   val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
-    val a = Decoupled(new VortexBundleA(sourceWidth = 46, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(sourceWidth = 46, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = 46, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = 46, dataWidth = 32)))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
