@@ -17,7 +17,8 @@ case class VortexL1Config(
     writeInfoReqQSize: Int,
     mshrSize: Int,
     memSideSourceIds: Int,
-    uncachedAddrSets: Seq[AddressSet]
+    uncachedAddrSets: Seq[AddressSet],
+    icacheInstAddrSets: Seq[AddressSet]
 ) {
   def coreTagPlusSizeWidth: Int = {
     log2Ceil(wordSize) + coreTagWidth
@@ -41,8 +42,8 @@ object defaultVortexL1Config
       writeInfoReqQSize = 16,
       mshrSize = 8,
       memSideSourceIds = 8,
-      // Don't cache CLINT region to ensure coherent access
-      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffffL))
+      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffL)),
+      icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0xfffffffL))
     )
 
 class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
@@ -99,12 +100,7 @@ class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
       clients = Seq(
         TLMasterParameters.v1(
           name = "VortexBank",
-          sourceId = IdRange(
-            0,
-            1 << (log2Ceil(
-              config.memSideSourceIds
-            ) + 5 /*FIXME: give more sourceId so that passthrough doesn't block; hacky*/ )
-          ),
+          sourceId = IdRange(0, 1 << (log2Ceil(config.memSideSourceIds) + 5 /*FIXME: why is this here?*/)),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
           supportsPutFull = TransferSizes(1, config.wordSize),
@@ -423,7 +419,7 @@ class VX_cache_top(
         "WRITE_ENABLE" -> WRITE_ENABLE,
         "UUID_WIDTH" -> UUID_WIDTH,
         "TAG_WIDTH" -> CORE_TAG_WIDTH,
-        // "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH,
+        "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH,
       )
     )
     with HasBlackBoxResource {
