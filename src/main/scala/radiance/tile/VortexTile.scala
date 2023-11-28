@@ -311,19 +311,19 @@ class VortexTile private (
       println(
         s"============ Using Vortex L1 cache ================="
       )
-      // require(
-      //   p(CoalescerKey).isDefined,
-      //   "Vortex L1 configuration currently only works when coalescer is also enabled."
-      // )
+      require(
+        p(CoalescerKey).isDefined,
+        "Vortex L1 configuration currently only works when coalescer is also enabled."
+      )
 
-      val icache = LazyModule(new VortexL1Cache(vortexL1Config))
-      val dcache = LazyModule(new VortexL1Cache(vortexL1Config))
-      // imemNodes.foreach { icache.coresideNode := TLWidthWidget(4) := _ }
-      assert(imemNodes.length == 1) // FIXME
-      icache.coresideNode := TLWidthWidget(4) := imemNodes(0)
+      val l1cache = LazyModule(new VortexL1Cache(vortexL1Config))
+      // Connect L1 with imem_fetch_interface without XBar
+      // coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
+      // imemNodes.foreach { l1cache.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
+      imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
       // dmemNodes go through coalescerNode
-      dcache.coresideNode :=* coalescerNode
-      (icache.masterNode, dcache.masterNode)
+      l1cache.coresideNode :=* coalescerNode
+      l1cache.masterNode
     }
     case None => {
       val imemWideNode = TLIdentityNode()
@@ -716,8 +716,6 @@ class VortexTLAdapter(
   io.outReq.bits.size := io.inReq.bits.size
   io.outReq.bits.source := io.inReq.bits.source
   io.outReq.bits.address := io.inReq.bits.address
-  // this is just to double-check TLWidthWidget is in place
-  require(io.inReq.bits.size.getWidth == bundle.params.sizeBits)
   // Get requires contiguous mask; only copy core's potentially-partial mask
   // when writing
   io.outReq.bits.mask := Mux(edge.hasData(io.outReq.bits),
