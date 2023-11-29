@@ -206,8 +206,6 @@ class VortexBankImp(
       CACHE_LINE_SIZE = config.cacheLineSize,
       CORE_TAG_WIDTH = config.coreTagPlusSizeWidth,
       MSHR_SIZE = config.mshrSize
-      // NUM_BANKS is set to 1 to treat a whole VX_cache_top instance as a
-      // single bank
     )
   );
 
@@ -390,10 +388,10 @@ class VortexBankImp(
 }
 
 class VX_cache_top(
+    // these values should match the default settings in Verilog
     // TODO: INSTANCE_ID
     CACHE_SIZE: Int = 16384 / 4, // <FIXME, divided by 4 for faster simulation
     CACHE_LINE_SIZE: Int = 16,
-    NUM_BANKS: Int = 1,
     NUM_WAYS: Int = 4,
     // for single-bank configuration, set NUM_REQS = 1 and instead set
     // WORD_SIZE to something wider than 4
@@ -406,14 +404,21 @@ class VX_cache_top(
     UUID_WIDTH: Int = 0, // FIXME: should be different for debug
     CORE_TAG_WIDTH: Int =
       16, // source ID ranges from 0 to 1 << 10, we need to allocate upper bits to save size
-    WORD_ADDR_WIDTH: Int = 28, // 16 byte "word" = 4 bits
-    MEM_ADDR_WIDTH: Int = 28 // 16 byte cache line = 4 bits
+    CORE_OUT_REG : Int = 0,
+    MEM_OUT_REG : Int = 0,
 ) extends BlackBox(
       Map(
-        "NUM_REQS" -> 1, // force to instantiate single bank by setting NUM_REQS to 1
+        // NOTE: NUM_REQS is analogous to SIMD width, whereas NUM_BANKS is the
+        // actual number of banks.  VX_cache.sv instantiates VX_stream_xbar
+        // that arbitrates the higher NUM_REQS into NUM_BANKS.  Since we do
+        // that logic ourselves using TL units, fix those params to 1 for the
+        // Verilog side.
+        "NUM_REQS" -> 1,
         "CACHE_SIZE" -> CACHE_SIZE,
         "LINE_SIZE" -> CACHE_LINE_SIZE,
-        "NUM_BANKS" -> NUM_BANKS,
+        // NUM_BANKS is set to 1 to treat a whole VX_cache_top instance as a
+        // single bank
+        "NUM_BANKS" -> 1,
         "NUM_WAYS" -> NUM_WAYS,
         "WORD_SIZE" -> WORD_SIZE,
         "CRSQ_SIZE" -> CRSQ_SIZE,
@@ -422,7 +427,9 @@ class VX_cache_top(
         "MREQ_SIZE" -> MREQ_SIZE,
         "WRITE_ENABLE" -> WRITE_ENABLE,
         "UUID_WIDTH" -> UUID_WIDTH,
-        "TAG_WIDTH" -> CORE_TAG_WIDTH
+        "TAG_WIDTH" -> CORE_TAG_WIDTH,
+        "CORE_OUT_REG" -> CORE_OUT_REG,
+        "MEM_OUT_REG" -> MEM_OUT_REG,
         // Although VX_cache_top exposes it as a parameter, MEM_TAG_WIDTH is
         // not really configurable -- it is set to be a concatenation of the
         // MSHR id and cache bank id.  Instead of trying to configure it from
@@ -435,7 +442,7 @@ class VX_cache_top(
 
   def memTagWidth(mshrSize: Int, numBanks: Int): Int =
     log2Ceil(mshrSize) + log2Ceil(numBanks)
-  val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, NUM_BANKS)
+  val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, 1/* NUM_BANKS */)
 
   val io = IO(new Bundle {
     val clk = Input(Clock())
