@@ -444,6 +444,11 @@ class VX_cache_top(
     log2Ceil(mshrSize) + log2Ceil(numBanks)
   val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, 1/* NUM_BANKS */)
 
+  // These logic is fixed in VX_cache_define.vh
+  val memAddrWidth = 32 // FIXME hardcoded
+  val cacheWordAddrWidth = 32 - log2Ceil(WORD_SIZE)
+  val cacheMemAddrWidth = 32 - log2Ceil(CACHE_LINE_SIZE)
+
   val io = IO(new Bundle {
     val clk = Input(Clock())
     val reset = Input(Reset())
@@ -452,7 +457,7 @@ class VX_cache_top(
     val core_req_valid = Input(Bool())
     val core_req_rw = Input(Bool())
     val core_req_byteen = Input(UInt(WORD_SIZE.W))
-    val core_req_addr = Input(UInt(WORD_ADDR_WIDTH.W))
+    val core_req_addr = Input(UInt(cacheWordAddrWidth.W))
     val core_req_data = Input(UInt((WORD_SIZE * 8).W))
     val core_req_tag = Input(UInt(CORE_TAG_WIDTH.W))
     val core_req_ready = Output(Bool())
