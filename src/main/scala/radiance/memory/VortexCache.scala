@@ -407,7 +407,7 @@ class VX_cache_top(
     CACHE_SIZE: Int = 16384 / 4, // <FIXME, divided by 4 for faster simulation
     CACHE_LINE_SIZE: Int = 16,
     NUM_BANKS: Int = 1,
-    NUM_WAYS: Int = 1,
+    NUM_WAYS: Int = 4,
     // for single-bank configuration, set NUM_REQS = 1 and instead set
     // WORD_SIZE to something wider than 4
     WORD_SIZE: Int = 16,
