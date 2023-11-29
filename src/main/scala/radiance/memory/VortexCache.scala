@@ -218,7 +218,7 @@ class VortexBankImp(
       WORD_SIZE = config.wordSize,
       CACHE_LINE_SIZE = config.cacheLineSize,
       CORE_TAG_WIDTH = config.coreTagPlusSizeWidth,
-      // MSHR_SIZE = config.mshrSize
+      MSHR_SIZE = config.mshrSize
       // NUM_BANKS is set to 1 to treat a whole VX_cache_top instance as a
       // single bank
     )
