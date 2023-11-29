@@ -40,14 +40,20 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val reset_vector = Input(UInt(resetVectorLen.W))
   val interrupts = Input(new CoreInterrupts())
   
+  // TODO: parametrize
+  val NW_WIDTH = 1
+  val uuidWidth = 44
+  val imemTagWidth = uuidWidth + NW_WIDTH
+  val dmemTagWidth = 46 // FIXME: hardcoded; see gpu_pkg.sv
+
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = 46, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = 46, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = imemTagWidth, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = imemTagWidth, dataWidth = 32)))
   })) else None
   val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = 46, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = 46, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = dmemTagWidth, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
