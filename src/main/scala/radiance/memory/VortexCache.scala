@@ -17,8 +17,7 @@ case class VortexL1Config(
     writeInfoReqQSize: Int,
     mshrSize: Int,
     memSideSourceIds: Int,
-    uncachedAddrSets: Seq[AddressSet],
-    icacheInstAddrSets: Seq[AddressSet]
+    uncachedAddrSets: Seq[AddressSet]
 ) {
   def coreTagPlusSizeWidth: Int = {
     log2Ceil(wordSize) + coreTagWidth
@@ -43,19 +42,15 @@ object defaultVortexL1Config
       mshrSize = 8,
       memSideSourceIds = 8,
       // Don't cache CLINT region to ensure coherent access
-      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffffL)),
-      icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0x0fffffffL))
+      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffffL))
     )
 
 class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
-  // icache bank
-  // val icache_bank = LazyModule(new VortexBank(config, 0, isICache = true))
-
-  // dcache banks
-  val dcache_banks = Seq.tabulate(config.numBanks) { bankId =>
-    val dcache_bank = LazyModule(new VortexBank(config, bankId))
-    dcache_bank
+  val banks = Seq.tabulate(config.numBanks) { bankId =>
+    // helps with name mangling in Verilog
+    val bank = LazyModule(new VortexBank(config, bankId))
+    bank
   }
   // passthrough
   val passThrough = LazyModule(new VortexBankPassThrough(config))
@@ -66,15 +61,13 @@ class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
   // core-side crossbar that arbitrates core requests to banks
   protected val bankXbar = LazyModule(new TLXbar)
   bankXbar.node :=* coresideNode
-  dcache_banks.foreach { _.coresideNode :=* bankXbar.node }
+  banks.foreach { _.coresideNode :=* bankXbar.node }
   passThrough.coresideNode :=* bankXbar.node
-  // icache_bank.coresideNode :=* bankXbar.node
 
   // master node that exposes to and drives the downstream
   val masterNode = TLIdentityNode()
   banks.foreach { masterNode := _.vxCacheToL2Node }
   masterNode := passThrough.vxCacheToL2Node
-  // masterNode := icache_bank.vxCacheToL2Node
 
   lazy val module = new LazyModuleImp(this)
 }
@@ -143,22 +136,16 @@ class VortexBank(
     extends LazyModule {
   // Generate AddressSet by excluding Addr we don't want
   def generateAddressSets(): Seq[AddressSet] = {
-    if (isICache) {
-      config.icacheInstAddrSets
-    } else {
-      // suppose have 4 bank
-      // base for bank 1: ...000000|01|0000
-      // mask for bank 1;    111111|00|1111
-      val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
-      val base = 0x00000000L | (bankId * config.wordSize)
+    // suppose have 4 bank
+    // base for bank 1: ...000000|01|0000
+    // mask for bank 1;    111111|00|1111
+    val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
+    val base = 0x00000000L | (bankId * config.wordSize)
 
-      // val excludeSets = (config.uncachedAddrSets ++ config.icacheInstAddrSets)
-      val excludeSets = config.uncachedAddrSets
-      var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))
-      for (excludeSet <- excludeSets) {
-        remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
-      }
-      remainingSets
+    val excludeSets = config.uncachedAddrSets
+    var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))
+    for (excludeSet <- excludeSets) {
+      remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
     }
     remainingSets
   }
@@ -435,7 +422,7 @@ class VX_cache_top(
         "MREQ_SIZE" -> MREQ_SIZE,
         "WRITE_ENABLE" -> WRITE_ENABLE,
         "UUID_WIDTH" -> UUID_WIDTH,
-        "TAG_WIDTH" -> CORE_TAG_WIDTH,
+        "TAG_WIDTH" -> CORE_TAG_WIDTH
         // Although VX_cache_top exposes it as a parameter, MEM_TAG_WIDTH is
         // not really configurable -- it is set to be a concatenation of the
         // MSHR id and cache bank id.  Instead of trying to configure it from
@@ -449,7 +436,6 @@ class VX_cache_top(
   def memTagWidth(mshrSize: Int, numBanks: Int): Int =
     log2Ceil(mshrSize) + log2Ceil(numBanks)
   val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, NUM_BANKS)
-  println(s"====== VortexBank: MEM_TAG_WIDTH = ${MEM_TAG_WIDTH}")
 
   val io = IO(new Bundle {
     val clk = Input(Clock())
