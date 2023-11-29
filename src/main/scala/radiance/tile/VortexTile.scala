@@ -317,19 +317,14 @@ class VortexTile private (
       )
 
       val l1cache = LazyModule(new VortexL1Cache(vortexL1Config))
-      // Connect L1 with imem_fetch_interface without XBar
-      // imemNodes.foreach { l1cache.icache_bank.coresideNode := TLWidthWidget(4) := _ }
-      imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
+      // // Connect L1 with imem_fetch_interface without XBar
+      // // imemNodes.foreach { l1cache.icache_bank.coresideNode := TLWidthWidget(4) := _ }
+      // imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
       // dmemNodes go through coalescerNode
       l1cache.coresideNode :=* coalescerNode
       l1cache.masterNode
     }
-    case None => {
-      val imemWideNode = TLIdentityNode()
-      assert(imemNodes.length == 1) // FIXME
-      imemWideNode := TLWidthWidget(4) := imemNodes(0)
-      (imemWideNode, coalescerNode)
-    }
+    case None => coalescerNode
   }
 
   // Instantiate sharedmem banks
@@ -352,9 +347,8 @@ class VortexTile private (
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
-    // imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
-    tlMasterXbar.node :=* icacheNode
-    tlMasterXbar.node :=* dcacheNode
+    imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
+    tlMasterXbar.node :=* l1Node
   }
 
   /* below are copied from rocket */
