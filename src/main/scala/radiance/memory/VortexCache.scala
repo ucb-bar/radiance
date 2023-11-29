@@ -48,10 +48,13 @@ object defaultVortexL1Config
 
 class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
-  val banks = Seq.tabulate(config.numBanks) { bankId =>
-    // helps with name mangling in Verilog
-    val bank = LazyModule(new VortexBank(config, bankId))
-    bank
+  // icache bank
+  val icache_bank = LazyModule(new VortexBank(config, 0, isICache = true))
+
+  // dcache banks
+  val dcache_banks = Seq.tabulate(config.numBanks) { bankId =>
+    val dcache_bank = LazyModule(new VortexBank(config, bankId))
+    dcache_bank
   }
   // passthrough
   val passThrough = LazyModule(new VortexBankPassThrough(config))
@@ -62,8 +65,9 @@ class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
   // core-side crossbar that arbitrates core requests to banks
   protected val bankXbar = LazyModule(new TLXbar)
   bankXbar.node :=* coresideNode
-  banks.foreach { _.coresideNode :=* bankXbar.node }
+  dcache_banks.foreach { _.coresideNode :=* bankXbar.node }
   passThrough.coresideNode :=* bankXbar.node
+  icache_bank.coresideNode :=* bankXbar.node
 
   // master node that exposes to and drives the downstream
   val masterNode = TLIdentityNode()
@@ -100,7 +104,12 @@ class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
       clients = Seq(
         TLMasterParameters.v1(
           name = "VortexBank",
-          sourceId = IdRange(0, 1 << (log2Ceil(config.memSideSourceIds) + 5 /*FIXME: why is this here?*/)),
+          sourceId = IdRange(
+            0,
+            1 << (log2Ceil(
+              config.memSideSourceIds
+            ) + 5 /*FIXME: give more sourceId so that passthrough doesn't block; hacky*/ )
+          ),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
           supportsPutFull = TransferSizes(1, config.wordSize),
@@ -201,7 +210,9 @@ class VortexBankImp(
       WORD_SIZE = config.wordSize,
       CACHE_LINE_SIZE = config.cacheLineSize,
       CORE_TAG_WIDTH = config.coreTagPlusSizeWidth,
-      MSHR_SIZE = config.mshrSize
+      // MSHR_SIZE = config.mshrSize
+      // NUM_BANKS is set to 1 to treat a whole VX_cache_top instance as a
+      // single bank
     )
   );
 
@@ -401,8 +412,6 @@ class VX_cache_top(
     CORE_TAG_WIDTH: Int =
       16, // source ID ranges from 0 to 1 << 10, we need to allocate upper bits to save size
     WORD_ADDR_WIDTH: Int = 28, // 16 byte "word" = 4 bits
-    MEM_TAG_WIDTH: Int =
-      14, // Elaborated value is also completely different from (32 - log2Ceil(CACHE_LINE_SIZE)). This should match with sourceIds on client node associated with this cache
     MEM_ADDR_WIDTH: Int = 28 // 16 byte cache line = 4 bits
 ) extends BlackBox(
       Map(
@@ -419,12 +428,20 @@ class VX_cache_top(
         "WRITE_ENABLE" -> WRITE_ENABLE,
         "UUID_WIDTH" -> UUID_WIDTH,
         "TAG_WIDTH" -> CORE_TAG_WIDTH,
-        "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH,
+        // Although VX_cache_top exposes it as a parameter, MEM_TAG_WIDTH is
+        // not really configurable -- it is set to be a concatenation of the
+        // MSHR id and cache bank id.  Instead of trying to configure it from
+        // Chisel side, we try to figure out its value that's elaborated in the
+        // Verilog side and configure the Chisel io width correspondingly.
+        // "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH
       )
     )
     with HasBlackBoxResource {
 
-  // require(MEM_)
+  def memTagWidth(mshrSize: Int, numBanks: Int): Int =
+    log2Ceil(mshrSize) + log2Ceil(numBanks)
+  val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, NUM_BANKS)
+  println(s"====== VortexBank: MEM_TAG_WIDTH = ${MEM_TAG_WIDTH}")
 
   val io = IO(new Bundle {
     val clk = Input(Clock())
@@ -460,7 +477,7 @@ class VX_cache_top(
   })
 
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bank.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bypass.sv")
+  // addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bypass.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_data.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_define.vh")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_init.sv")

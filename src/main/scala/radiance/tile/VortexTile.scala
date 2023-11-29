@@ -318,8 +318,7 @@ class VortexTile private (
 
       val l1cache = LazyModule(new VortexL1Cache(vortexL1Config))
       // Connect L1 with imem_fetch_interface without XBar
-      // coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
-      // imemNodes.foreach { l1cache.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
+      // imemNodes.foreach { l1cache.icache_bank.coresideNode := TLWidthWidget(4) := _ }
       imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
       // dmemNodes go through coalescerNode
       l1cache.coresideNode :=* coalescerNode
