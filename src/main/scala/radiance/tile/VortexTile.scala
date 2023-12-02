@@ -311,10 +311,10 @@ class VortexTile private (
       println(
         s"============ Using Vortex L1 cache ================="
       )
-      require(
-        p(CoalescerKey).isDefined,
-        "Vortex L1 configuration currently only works when coalescer is also enabled."
-      )
+      // require(
+      //   p(CoalescerKey).isDefined,
+      //   "Vortex L1 configuration currently only works when coalescer is also enabled."
+      // )
 
       val icache = LazyModule(new VortexL1Cache(vortexL1Config))
       val dcache = LazyModule(new VortexL1Cache(vortexL1Config))
