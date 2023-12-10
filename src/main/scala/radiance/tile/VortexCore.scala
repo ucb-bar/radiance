@@ -41,10 +41,12 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val interrupts = Input(new CoreInterrupts())
   
   // TODO: parametrize
-  val NW_WIDTH = 1
-  val uuidWidth = 44
-  val imemTagWidth = uuidWidth + NW_WIDTH
-  val dmemTagWidth = 46 // FIXME: hardcoded; see gpu_pkg.sv
+  val numWarps = 4
+  val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
+  val UUID_WIDTH = 44
+  val imemTagWidth = UUID_WIDTH + NW_WIDTH
+  val LSUQ_TAG_BITS = 4
+  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
 
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
