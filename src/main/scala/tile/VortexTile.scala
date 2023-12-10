@@ -133,7 +133,7 @@ class VortexTile private (
     concurrency = 1
   )
 
-  regNode := tlSlaveXbar.node
+  regNode := TLFragmenter(4, 64) := tlSlaveXbar.node
 
   // val dmemDevice = new SimpleDevice("dtim", Seq("sifive,dtim0"))
   /*val dmemNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
