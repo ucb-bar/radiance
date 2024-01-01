@@ -325,7 +325,8 @@ class VortexTile private (
 
   // Instantiate sharedmem
   // TODO: parametrize
-  val sharedmem = LazyModule(new TLRAM(AddressSet(0xff000000L, 0x00ffffffL), beatBytes = 4 /*FIXME*/))
+  // FIXME: beatBytes should be wordSize
+  val sharedmem = LazyModule(new TLRAM(AddressSet(0xff000000L, 0x00ffffffL), beatBytes = 4))
   val smemXbar = LazyModule(new TLXbar)
   smemNodes.foreach(smemXbar.node := _)
   sharedmem.node :=* smemXbar.node
@@ -515,8 +516,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         Module(
           new VortexTLAdapter(
             outer.dmemSourceWidth,
-            new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32),
-            new VortexBundleD(tagWidth = outer.dmemTagWidth, dataWidth = 32),
+            chiselTypeOf(core.io.dmem.get(0).a.bits),
+            chiselTypeOf(core.io.dmem.get(0).d.bits),
             outer.dmemNodes(0).out.head
           )
         )
@@ -543,8 +544,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       // of a same source id for all lanes.
       val arb = Module(
         new RRArbiter(
-          // FIXME: should really be source on D channel
-          new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32).source.cloneType,
+          core.io.dmem.get.head.d.bits.source.cloneType,
           outer.numLanes
         )
       )
@@ -557,46 +557,25 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       val matchingSources = Wire(UInt(outer.numLanes.W))
       matchingSources := dmemBundles
         .map(b =>
-          // If there is no valid response pending across all lanes,
-          // matchingSources should not filter out upstream ready signals, so
-          // set it to all-1
-          !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
-        )
+            // If there is no valid response pending across all lanes,
+            // matchingSources should not filter out upstream ready signals, so
+            // set it to all-1
+            !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
+            )
         .asUInt
 
       // make connection:
       // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
-      // 
-      // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
-      // need to flatten everything.
-      dmemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          // tlAdapter.io.inReq <> coreMem.a
-          tlAdapter.io.inReq.valid := core.io.dmem_a_valid(i)
-          tlAdapter.io.inReq.bits.opcode := core.io.dmem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
-          tlAdapter.io.inReq.bits.size := core.io.dmem_a_bits_size(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.source := core.io.dmem_a_bits_source(outer.dmemTagWidth * (i + 1) - 1, outer.dmemTagWidth * i)
-          tlAdapter.io.inReq.bits.address := core.io.dmem_a_bits_address(32 * (i + 1) - 1, 32 * i)
-          tlAdapter.io.inReq.bits.mask := core.io.dmem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.data := core.io.dmem_a_bits_data(32 * (i + 1) - 1, 32 * i)
+      (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
+        tlAdapter.io.inReq <> coreMem.a
+        coreMem.d <> tlAdapter.io.inResp
       }
-      core.io.dmem_a_ready := dmemTLAdapters.map(_.io.inReq.ready).asUInt
-
-      core.io.dmem_d_valid := dmemTLAdapters.map(_.io.inResp.valid).asUInt
-      core.io.dmem_d_bits_opcode := dmemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
-      core.io.dmem_d_bits_size := dmemTLAdapters.map(_.io.inResp.bits.size).asUInt
-      core.io.dmem_d_bits_source := dmemTLAdapters.map(_.io.inResp.bits.source).asUInt
-      core.io.dmem_d_bits_data := dmemTLAdapters.map(_.io.inResp.bits.data).asUInt
-
       // override response channel with matchingSources
-      val dmem_d_valid_vec = Wire(Vec(outer.numLanes, Bool()))
-      dmemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          dmem_d_valid_vec(i) := tlAdapter.io.inResp.valid && matchingSources(i)
-          tlAdapter.io.inResp.ready := core.io.dmem_d_ready(i) && matchingSources(i)
+      (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
+        case ((coreMem, tlAdapter), i) =>
+          coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
+          tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
       }
-      core.io.dmem_d_valid := dmem_d_valid_vec.asUInt
-
       (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
         tlAdapter.io.outResp <> tlOut.d
@@ -616,36 +595,16 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         Module(
           new VortexTLAdapter(
             outer.smemSourceWidth,
-            new VortexBundleA(tagWidth = outer.smemTagWidth, dataWidth = 32),
-            new VortexBundleD(tagWidth = outer.smemTagWidth, dataWidth = 32),
+            chiselTypeOf(core.io.smem.get(0).a.bits),
+            chiselTypeOf(core.io.smem.get(0).d.bits),
             outer.smemNodes(0).out.head
           )
         )
       }
-
-      smemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          // tlAdapter.io.inReq <> coreMem.a
-          tlAdapter.io.inReq.valid := core.io.smem_a_valid(i)
-          tlAdapter.io.inReq.bits.opcode := core.io.smem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
-          tlAdapter.io.inReq.bits.size := core.io.smem_a_bits_size(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.source := core.io.smem_a_bits_source(outer.smemTagWidth * (i + 1) - 1, outer.smemTagWidth * i)
-          tlAdapter.io.inReq.bits.address := core.io.smem_a_bits_address(32 * (i + 1) - 1, 32 * i)
-          tlAdapter.io.inReq.bits.mask := core.io.smem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.data := core.io.smem_a_bits_data(32 * (i + 1) - 1, 32 * i)
+      (core.io.smem.get zip smemTLAdapters) foreach { case (coreMem, tlAdapter) =>
+        tlAdapter.io.inReq <> coreMem.a
+        coreMem.d <> tlAdapter.io.inResp
       }
-      core.io.smem_a_ready := smemTLAdapters.map(_.io.inReq.ready).asUInt
-
-      core.io.smem_d_valid := smemTLAdapters.map(_.io.inResp.valid).asUInt
-      core.io.smem_d_bits_opcode := smemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
-      core.io.smem_d_bits_size := smemTLAdapters.map(_.io.inResp.bits.size).asUInt
-      core.io.smem_d_bits_source := smemTLAdapters.map(_.io.inResp.bits.source).asUInt
-      core.io.smem_d_bits_data := smemTLAdapters.map(_.io.inResp.bits.data).asUInt
-      smemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          tlAdapter.io.inResp.ready := core.io.smem_d_ready(i)
-      }
-
       (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
         tlAdapter.io.outResp <> tlOut.d

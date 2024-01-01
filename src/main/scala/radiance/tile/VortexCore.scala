@@ -47,6 +47,8 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val imemTagWidth = UUID_WIDTH + NW_WIDTH
   val LSUQ_TAG_BITS = 4
   val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
+  // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
+  val smemTagWidth = dmemTagWidth
 
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
@@ -56,6 +58,10 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
     val a = Decoupled(new VortexBundleA(tagWidth = dmemTagWidth, dataWidth = 32))
     val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
+  })) else None
+  val smem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
+    val a = Decoupled(new VortexBundleA(tagWidth = smemTagWidth, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = smemTagWidth, dataWidth = 32)))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
@@ -138,7 +144,6 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpc/rf2_32x128_wm1/rf2_32x128_wm1.v")
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpc/rf2_32x128_wm1/vsim/rf2_32x128_wm1_tb.v")
   // addResource("/vsrc/vortex/hw/syn/modelsim/vortex_tb.v")
-
 
   addResource("/vsrc/vortex/hw/rtl/VX_gpu_pkg.sv")
 
