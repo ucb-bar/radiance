@@ -139,8 +139,8 @@ class VortexBank(
     // suppose have 4 bank
     // base for bank 1: ...000000|01|0000
     // mask for bank 1;    111111|00|1111
-    val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
     val base = 0x00000000L | (bankId * config.wordSize)
+    val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
 
     val excludeSets = config.uncachedAddrSets
     var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))

@@ -323,13 +323,22 @@ class VortexTile private (
     }
   }
 
-  // Instantiate sharedmem
+  // Instantiate sharedmem banks
+  //
+  // Instantiate the same number of banks as there are lanes.
   // TODO: parametrize
-  // FIXME: beatBytes should be wordSize
-  val sharedmem = LazyModule(new TLRAM(AddressSet(0xff000000L, 0x00ffffffL), beatBytes = 4))
+  val smemBanks = Seq.tabulate(numLanes) { bankId =>
+    // Banked-by-word (4 bytes)
+    // base for bank 1: ff...000000|01|00
+    // mask for bank 1; 00...111111|00|11
+    val base = 0xff000000L | (bankId * 4 /*wordSize*/ )
+    val mask = 0x00ffffffL ^ ((numLanes - 1) * 4 /*wordSize*/ )
+    LazyModule(new TLRAM(AddressSet(base, mask), beatBytes = 4 /*wordSize*/ ))
+  }
+  // smem lanes-to-banks crossbar
   val smemXbar = LazyModule(new TLXbar)
   smemNodes.foreach(smemXbar.node := _)
-  sharedmem.node :=* smemXbar.node
+  smemBanks.foreach(_.node := smemXbar.node)
 
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
@@ -557,18 +566,19 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       val matchingSources = Wire(UInt(outer.numLanes.W))
       matchingSources := dmemBundles
         .map(b =>
-            // If there is no valid response pending across all lanes,
-            // matchingSources should not filter out upstream ready signals, so
-            // set it to all-1
-            !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
-            )
+          // If there is no valid response pending across all lanes,
+          // matchingSources should not filter out upstream ready signals, so
+          // set it to all-1
+          !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
+        )
         .asUInt
 
       // make connection:
       // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
-      (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
-        tlAdapter.io.inReq <> coreMem.a
-        coreMem.d <> tlAdapter.io.inResp
+      (core.io.dmem.get zip dmemTLAdapters) foreach {
+        case (coreMem, tlAdapter) =>
+          tlAdapter.io.inReq <> coreMem.a
+          coreMem.d <> tlAdapter.io.inResp
       }
       // override response channel with matchingSources
       (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
@@ -601,9 +611,10 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
           )
         )
       }
-      (core.io.smem.get zip smemTLAdapters) foreach { case (coreMem, tlAdapter) =>
-        tlAdapter.io.inReq <> coreMem.a
-        coreMem.d <> tlAdapter.io.inResp
+      (core.io.smem.get zip smemTLAdapters) foreach {
+        case (coreMem, tlAdapter) =>
+          tlAdapter.io.inReq <> coreMem.a
+          coreMem.d <> tlAdapter.io.inResp
       }
       (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
