@@ -208,7 +208,6 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   addResource("/vsrc/vortex/hw/rtl/mem/VX_shared_mem.sv")
   addResource("/vsrc/vortex/hw/rtl/mem/VX_smem_switch.sv")
 
-
   // tex_unit missing in Vortex 2.0
   // addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_sat.sv")
   // addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_stride.sv")

@@ -189,16 +189,6 @@ class VortexTile private (
 
   val smemSourceWidth = 4 // FIXME: hardcoded
 
-  // TODO: parametrize
-  val numWarps = 4
-  val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
-  val UUID_WIDTH = 44
-  val imemTagWidth = UUID_WIDTH + NW_WIDTH
-  val LSUQ_TAG_BITS = 4
-  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
-  // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
-  val smemTagWidth = dmemTagWidth
-
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
       Seq(
@@ -333,22 +323,12 @@ class VortexTile private (
     }
   }
 
-  // Instantiate sharedmem banks
-  //
-  // Instantiate the same number of banks as there are lanes.
+  // Instantiate sharedmem
   // TODO: parametrize
-  val smemBanks = Seq.tabulate(numLanes) { bankId =>
-    // Banked-by-word (4 bytes)
-    // base for bank 1: ff...000000|01|00
-    // mask for bank 1; 00...111111|00|11
-    val base = 0xff000000L | (bankId * 4 /*wordSize*/ )
-    val mask = 0x00ffffffL ^ ((numLanes - 1) * 4 /*wordSize*/ )
-    LazyModule(new TLRAM(AddressSet(base, mask), beatBytes = 4 /*wordSize*/ ))
-  }
-  // smem lanes-to-banks crossbar
+  val sharedmem = LazyModule(new TLRAM(AddressSet(0xff000000L, 0x00ffffffL), beatBytes = 4 /*FIXME*/))
   val smemXbar = LazyModule(new TLXbar)
   smemNodes.foreach(smemXbar.node := _)
-  smemBanks.foreach(_.node := smemXbar.node)
+  sharedmem.node :=* smemXbar.node
 
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
