@@ -616,6 +616,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
           tlAdapter.io.inResp.ready := core.io.dmem_d_ready(i) && matchingSources(i)
       }
       core.io.dmem_d_valid := dmem_d_valid_vec.asUInt
+
       (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
         tlAdapter.io.outResp <> tlOut.d
@@ -635,17 +636,36 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         Module(
           new VortexTLAdapter(
             outer.smemSourceWidth,
-            chiselTypeOf(core.io.smem.get(0).a.bits),
-            chiselTypeOf(core.io.smem.get(0).d.bits),
+            new VortexBundleA(tagWidth = outer.smemTagWidth, dataWidth = 32),
+            new VortexBundleD(tagWidth = outer.smemTagWidth, dataWidth = 32),
             outer.smemNodes(0).out.head
           )
         )
       }
-      (core.io.smem.get zip smemTLAdapters) foreach {
-        case (coreMem, tlAdapter) =>
-          tlAdapter.io.inReq <> coreMem.a
-          coreMem.d <> tlAdapter.io.inResp
+
+      smemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          // tlAdapter.io.inReq <> coreMem.a
+          tlAdapter.io.inReq.valid := core.io.smem_a_valid(i)
+          tlAdapter.io.inReq.bits.opcode := core.io.smem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
+          tlAdapter.io.inReq.bits.size := core.io.smem_a_bits_size(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.source := core.io.smem_a_bits_source(outer.smemTagWidth * (i + 1) - 1, outer.smemTagWidth * i)
+          tlAdapter.io.inReq.bits.address := core.io.smem_a_bits_address(32 * (i + 1) - 1, 32 * i)
+          tlAdapter.io.inReq.bits.mask := core.io.smem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.data := core.io.smem_a_bits_data(32 * (i + 1) - 1, 32 * i)
       }
+      core.io.smem_a_ready := smemTLAdapters.map(_.io.inReq.ready).asUInt
+
+      core.io.smem_d_valid := smemTLAdapters.map(_.io.inResp.valid).asUInt
+      core.io.smem_d_bits_opcode := smemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
+      core.io.smem_d_bits_size := smemTLAdapters.map(_.io.inResp.bits.size).asUInt
+      core.io.smem_d_bits_source := smemTLAdapters.map(_.io.inResp.bits.source).asUInt
+      core.io.smem_d_bits_data := smemTLAdapters.map(_.io.inResp.bits.data).asUInt
+      smemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          tlAdapter.io.inResp.ready := core.io.smem_d_ready(i)
+      }
+
       (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
         tlAdapter.io.outResp <> tlOut.d

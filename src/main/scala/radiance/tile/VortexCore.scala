@@ -50,8 +50,8 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
     // val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
   })) else None
   val smem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = tile.smemTagWidth, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.smemTagWidth, dataWidth = 32)))
+    // val a = Decoupled(new VortexBundleA(tagWidth = tile.smemTagWidth, dataWidth = 32))
+    // val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.smemTagWidth, dataWidth = 32)))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
@@ -79,6 +79,22 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val dmem_d_bits_source = Input(UInt((tile.numLanes * tile.dmemTagWidth).W))
   val dmem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
   val dmem_d_ready = Output(UInt((tile.numLanes * 1).W))
+
+  val smem_a_ready = Input(UInt((tile.numLanes * 1).W))
+  val smem_a_valid = Output(UInt((tile.numLanes * 1).W))
+  val smem_a_bits_opcode = Output(UInt((tile.numLanes * 3).W))
+  val smem_a_bits_size = Output(UInt((tile.numLanes * 4).W))
+  val smem_a_bits_source = Output(UInt((tile.numLanes * tile.smemTagWidth).W))
+  val smem_a_bits_address = Output(UInt((tile.numLanes * 32).W))
+  val smem_a_bits_mask = Output(UInt((tile.numLanes * 4).W))
+  val smem_a_bits_data = Output(UInt((tile.numLanes * 32).W))
+
+  val smem_d_valid = Input(UInt((tile.numLanes * 1).W))
+  val smem_d_bits_opcode = Input(UInt((tile.numLanes * 3).W))
+  val smem_d_bits_size = Input(UInt((tile.numLanes * 4).W))
+  val smem_d_bits_source = Input(UInt((tile.numLanes * tile.smemTagWidth).W))
+  val smem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
+  val smem_d_ready = Output(UInt((tile.numLanes * 1).W))
 
   // val fpu = Flipped(new FPUCoreIO())
   //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
