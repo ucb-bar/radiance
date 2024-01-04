@@ -40,28 +40,18 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val reset_vector = Input(UInt(resetVectorLen.W))
   val interrupts = Input(new CoreInterrupts())
   
-  // TODO: parametrize
-  val numWarps = 4
-  val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
-  val UUID_WIDTH = 44
-  val imemTagWidth = UUID_WIDTH + NW_WIDTH
-  val LSUQ_TAG_BITS = 4
-  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
-  // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
-  val smemTagWidth = dmemTagWidth
-
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = imemTagWidth, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = imemTagWidth, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = tile.imemTagWidth, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.imemTagWidth, dataWidth = 32)))
   })) else None
   val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = dmemTagWidth, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
+    // val a = Decoupled(new VortexBundleA(tagWidth = tile.dmemTagWidth, dataWidth = 32))
+    // val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
   })) else None
   val smem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
-    val a = Decoupled(new VortexBundleA(tagWidth = smemTagWidth, dataWidth = 32))
-    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = smemTagWidth, dataWidth = 32)))
+    val a = Decoupled(new VortexBundleA(tagWidth = tile.smemTagWidth, dataWidth = 32))
+    val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.smemTagWidth, dataWidth = 32)))
   })) else None
   val mem = if (tile.vortexParams.useVxCache) Some(new Bundle { 
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
@@ -90,22 +80,6 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   val dmem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
   val dmem_d_ready = Output(UInt((tile.numLanes * 1).W))
 
-  val smem_a_ready = Input(UInt((tile.numLanes * 1).W))
-  val smem_a_valid = Output(UInt((tile.numLanes * 1).W))
-  val smem_a_bits_opcode = Output(UInt((tile.numLanes * 3).W))
-  val smem_a_bits_size = Output(UInt((tile.numLanes * 4).W))
-  val smem_a_bits_source = Output(UInt((tile.numLanes * tile.smemTagWidth).W))
-  val smem_a_bits_address = Output(UInt((tile.numLanes * 32).W))
-  val smem_a_bits_mask = Output(UInt((tile.numLanes * 4).W))
-  val smem_a_bits_data = Output(UInt((tile.numLanes * 32).W))
-
-  val smem_d_valid = Input(UInt((tile.numLanes * 1).W))
-  val smem_d_bits_opcode = Input(UInt((tile.numLanes * 3).W))
-  val smem_d_bits_size = Input(UInt((tile.numLanes * 4).W))
-  val smem_d_bits_source = Input(UInt((tile.numLanes * tile.smemTagWidth).W))
-  val smem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
-  val smem_d_ready = Output(UInt((tile.numLanes * 1).W))
-
   // val fpu = Flipped(new FPUCoreIO())
   //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
   //val trace = Output(new TraceBundle)
@@ -124,6 +98,7 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
         "CORE_ID" -> tile.tileParams.hartId,
         // TODO: can we get this as a parameter?
         "BOOTROM_HANG100" -> 0x10100,
+        "NUM_THREADS" -> tile.numLanes
       )
     )
     with HasBlackBoxResource {
@@ -144,6 +119,7 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpc/rf2_32x128_wm1/rf2_32x128_wm1.v")
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpc/rf2_32x128_wm1/vsim/rf2_32x128_wm1_tb.v")
   // addResource("/vsrc/vortex/hw/syn/modelsim/vortex_tb.v")
+
 
   addResource("/vsrc/vortex/hw/rtl/VX_gpu_pkg.sv")
 

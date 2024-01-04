@@ -189,6 +189,16 @@ class VortexTile private (
 
   val smemSourceWidth = 4 // FIXME: hardcoded
 
+  // TODO: parametrize
+  val numWarps = 4
+  val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
+  val UUID_WIDTH = 44
+  val imemTagWidth = UUID_WIDTH + NW_WIDTH
+  val LSUQ_TAG_BITS = 4
+  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
+  // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
+  val smemTagWidth = dmemTagWidth
+
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
       Seq(
@@ -525,8 +535,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         Module(
           new VortexTLAdapter(
             outer.dmemSourceWidth,
-            chiselTypeOf(core.io.dmem.get(0).a.bits),
-            chiselTypeOf(core.io.dmem.get(0).d.bits),
+            new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32),
+            new VortexBundleD(tagWidth = outer.dmemTagWidth, dataWidth = 32),
             outer.dmemNodes(0).out.head
           )
         )
@@ -553,7 +563,8 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       // of a same source id for all lanes.
       val arb = Module(
         new RRArbiter(
-          core.io.dmem.get.head.d.bits.source.cloneType,
+          // FIXME: should really be source on D channel
+          new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32).source.cloneType,
           outer.numLanes
         )
       )
@@ -575,17 +586,36 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
       // make connection:
       // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
-      (core.io.dmem.get zip dmemTLAdapters) foreach {
-        case (coreMem, tlAdapter) =>
-          tlAdapter.io.inReq <> coreMem.a
-          coreMem.d <> tlAdapter.io.inResp
+      // 
+      // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
+      // need to flatten everything.
+      dmemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          // tlAdapter.io.inReq <> coreMem.a
+          tlAdapter.io.inReq.valid := core.io.dmem_a_valid(i)
+          tlAdapter.io.inReq.bits.opcode := core.io.dmem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
+          tlAdapter.io.inReq.bits.size := core.io.dmem_a_bits_size(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.source := core.io.dmem_a_bits_source(outer.dmemTagWidth * (i + 1) - 1, outer.dmemTagWidth * i)
+          tlAdapter.io.inReq.bits.address := core.io.dmem_a_bits_address(32 * (i + 1) - 1, 32 * i)
+          tlAdapter.io.inReq.bits.mask := core.io.dmem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.data := core.io.dmem_a_bits_data(32 * (i + 1) - 1, 32 * i)
       }
+      core.io.dmem_a_ready := dmemTLAdapters.map(_.io.inReq.ready).asUInt
+
+      core.io.dmem_d_valid := dmemTLAdapters.map(_.io.inResp.valid).asUInt
+      core.io.dmem_d_bits_opcode := dmemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
+      core.io.dmem_d_bits_size := dmemTLAdapters.map(_.io.inResp.bits.size).asUInt
+      core.io.dmem_d_bits_source := dmemTLAdapters.map(_.io.inResp.bits.source).asUInt
+      core.io.dmem_d_bits_data := dmemTLAdapters.map(_.io.inResp.bits.data).asUInt
+
       // override response channel with matchingSources
-      (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
-        case ((coreMem, tlAdapter), i) =>
-          coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
-          tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
+      val dmem_d_valid_vec = Wire(Vec(outer.numLanes, Bool()))
+      dmemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          dmem_d_valid_vec(i) := tlAdapter.io.inResp.valid && matchingSources(i)
+          tlAdapter.io.inResp.ready := core.io.dmem_d_ready(i) && matchingSources(i)
       }
+      core.io.dmem_d_valid := dmem_d_valid_vec.asUInt
       (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
         tlAdapter.io.outResp <> tlOut.d
