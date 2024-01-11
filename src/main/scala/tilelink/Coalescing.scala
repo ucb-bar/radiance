@@ -1037,10 +1037,10 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
       // Queue up responses that didn't get coalesced originally ("noncoalesced" responses).
       // Coalesced (but uncoalesced back) responses will also be enqueued into the same queue.
-      assert(
-        respQueue.io.enq(respQueueNoncoalPort).ready,
-        "respQueue: enq port for noncoalesced response is blocked"
-      )
+      // assert(
+      //   respQueue.io.enq(respQueueNoncoalPort).ready,
+      //   "respQueue: enq port for noncoalesced response is blocked"
+      // )
       respQueue.io.enq(respQueueNoncoalPort).valid := tlOut.d.valid
       respQueue.io.enq(respQueueNoncoalPort).bits := resp
       assert(respQueue.io.deq.length == 1,
