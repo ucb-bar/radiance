@@ -135,23 +135,6 @@ class VortexTile private (
 
   regNode := tlSlaveXbar.node
 
-  // val dmemDevice = new SimpleDevice("dtim", Seq("sifive,dtim0"))
-  /*val dmemNode = TLManagerNode(Seq(TLSlavePortParameters.v1(
-    Seq(TLSlaveParameters.v1(
-      address = AddressSet.misaligned(tileParams.dcache.get.scratch.getOrElse(0),
-        tileParams.dcache.get.nSets * tileParams.dcache.get.blockBytes),
-      resources = dmemDevice.reg("mem"),
-      regionType = RegionType.IDEMPOTENT,
-      executable = true,
-      supportsArithmetic = /*if (usingAtomics) TransferSizes(4, coreDataBytes) else*/ TransferSizes.none,
-      supportsLogical = /*if (usingAtomics) TransferSizes(4, coreDataBytes) else*/ TransferSizes.none,
-      supportsPutPartial = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsPutFull = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
-      fifoId = Some(0))), // requests handled in FIFO order
-    beatBytes = lazyCoreParamsView.coreDataBytes,
-    minLatency = 1)))*/
-
   require(
     p(SIMTCoreKey).isDefined,
     "SIMTCoreKey not defined; make sure to use WithSimtLanes when using VortexTile"
@@ -190,11 +173,12 @@ class VortexTile private (
   val smemSourceWidth = 4 // FIXME: hardcoded
 
   // TODO: parametrize
-  val numWarps = 4
+  val numWarps = 16
   val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
   val UUID_WIDTH = 44
   val imemTagWidth = UUID_WIDTH + NW_WIDTH
-  val LSUQ_TAG_BITS = 4
+  // val LSUQ_TAG_BITS = 2 + log2Ceil(numLanes)
+  val LSUQ_TAG_BITS = 6
   val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
   // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
   val smemTagWidth = dmemTagWidth
