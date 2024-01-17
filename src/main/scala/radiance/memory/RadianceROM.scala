@@ -5,7 +5,7 @@ package radiance.memory
 import chisel3._
 import chisel3.util.log2Ceil
 import org.chipsalliance.cde.config.{Config, Field, Parameters}
-import freechips.rocketchip.subsystem.{BaseSubsystem, HasTiles, HierarchicalLocation, InSubsystem, TLBusWrapperLocation}
+import freechips.rocketchip.subsystem.{BaseSubsystem, HierarchicalLocation, InSubsystem, TLBusWrapperLocation}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink._
@@ -25,7 +25,7 @@ object RadianceROM {
     *    at a configurable location, but also drives the tiles' reset vectors to point
     *    at its 'hang' address parameter value.
     */
-  def attach(params: BootROMParams, subsystem: BaseSubsystem with HasTiles, where: TLBusWrapperLocation,
+  def attach(params: BootROMParams, subsystem: BaseSubsystem, where: TLBusWrapperLocation,
              driveResetVector: Boolean = true) (implicit p: Parameters): TLROM = {
     val tlbus = subsystem.locateTLBusWrapper(where)
     val bootROMDomainWrapper = LazyModule(new ClockSinkDomain(take = None))
@@ -46,7 +46,7 @@ object RadianceROM {
     bootrom
   }
 
-  def attachROM(params: RadianceROMParams, subsystem: BaseSubsystem with HasTiles, where: TLBusWrapperLocation)
+  def attachROM(params: RadianceROMParams, subsystem: BaseSubsystem, where: TLBusWrapperLocation)
                 (implicit p: Parameters): Unit = {
     attach(BootROMParams(address = params.address, size = params.size, contentFileName = params.contentFileName),
       subsystem, where, driveResetVector = false)
