@@ -342,6 +342,13 @@ class VortexTile private (
     tlMasterXbar.node :=* dcacheNode
   }
 
+  // // Instantiate Gemmini
+
+  // assert(p(BuildRoCC).size == 1, "only one Gemmini instance is supported")
+  // val gemmini = p(BuildRoCC).map(_(p))(0)
+  // tlMasterXbar.node :=* gemmini.atlNode
+  // tlOtherMastersNode :=* gemmini.tlNode
+
   /* below are copied from rocket */
 
   val bus_error_unit = vortexParams.beuAddr map { a =>
