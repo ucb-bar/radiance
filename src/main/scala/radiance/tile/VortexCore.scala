@@ -45,11 +45,11 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
     val a = Decoupled(new VortexBundleA(tagWidth = tile.imemTagWidth, dataWidth = 32))
     val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.imemTagWidth, dataWidth = 32)))
   })) else None
-  val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
+  val dmem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLsuLanes, new Bundle {
     // val a = Decoupled(new VortexBundleA(tagWidth = tile.dmemTagWidth, dataWidth = 32))
     // val d = Flipped(Decoupled(new VortexBundleD(tagWidth = dmemTagWidth, dataWidth = 32)))
   })) else None
-  val smem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLanes, new Bundle {
+  val smem = if (!tile.vortexParams.useVxCache) Some(Vec(tile.numLsuLanes, new Bundle {
     // val a = Decoupled(new VortexBundleA(tagWidth = tile.smemTagWidth, dataWidth = 32))
     // val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.smemTagWidth, dataWidth = 32)))
   })) else None
@@ -61,40 +61,40 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
   }) else None
 
   // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
-  // everything needs to be 1-D flattened UInt with their widths configurable by numLanes.
+  // everything needs to be 1-D flattened UInt with their widths configurable by numLSULanes.
   //
   // FIXME: hardcoded bitwidths
-  val dmem_a_ready = Input(UInt((tile.numLanes * 1).W))
-  val dmem_a_valid = Output(UInt((tile.numLanes * 1).W))
-  val dmem_a_bits_opcode = Output(UInt((tile.numLanes * 3).W))
-  val dmem_a_bits_size = Output(UInt((tile.numLanes * 4).W))
-  val dmem_a_bits_source = Output(UInt((tile.numLanes * tile.dmemTagWidth).W))
-  val dmem_a_bits_address = Output(UInt((tile.numLanes * 32).W))
-  val dmem_a_bits_mask = Output(UInt((tile.numLanes * 4).W))
-  val dmem_a_bits_data = Output(UInt((tile.numLanes * 32).W))
+  val dmem_a_ready = Input(UInt((tile.numLsuLanes * 1).W))
+  val dmem_a_valid = Output(UInt((tile.numLsuLanes * 1).W))
+  val dmem_a_bits_opcode = Output(UInt((tile.numLsuLanes * 3).W))
+  val dmem_a_bits_size = Output(UInt((tile.numLsuLanes * 4).W))
+  val dmem_a_bits_source = Output(UInt((tile.numLsuLanes * tile.dmemTagWidth).W))
+  val dmem_a_bits_address = Output(UInt((tile.numLsuLanes * 32).W))
+  val dmem_a_bits_mask = Output(UInt((tile.numLsuLanes * 4).W))
+  val dmem_a_bits_data = Output(UInt((tile.numLsuLanes * 32).W))
 
-  val dmem_d_valid = Input(UInt((tile.numLanes * 1).W))
-  val dmem_d_bits_opcode = Input(UInt((tile.numLanes * 3).W))
-  val dmem_d_bits_size = Input(UInt((tile.numLanes * 4).W))
-  val dmem_d_bits_source = Input(UInt((tile.numLanes * tile.dmemTagWidth).W))
-  val dmem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
-  val dmem_d_ready = Output(UInt((tile.numLanes * 1).W))
+  val dmem_d_valid = Input(UInt((tile.numLsuLanes * 1).W))
+  val dmem_d_bits_opcode = Input(UInt((tile.numLsuLanes * 3).W))
+  val dmem_d_bits_size = Input(UInt((tile.numLsuLanes * 4).W))
+  val dmem_d_bits_source = Input(UInt((tile.numLsuLanes * tile.dmemTagWidth).W))
+  val dmem_d_bits_data = Input(UInt((tile.numLsuLanes * 32).W))
+  val dmem_d_ready = Output(UInt((tile.numLsuLanes * 1).W))
 
-  val smem_a_ready = Input(UInt((tile.numLanes * 1).W))
-  val smem_a_valid = Output(UInt((tile.numLanes * 1).W))
-  val smem_a_bits_opcode = Output(UInt((tile.numLanes * 3).W))
-  val smem_a_bits_size = Output(UInt((tile.numLanes * 4).W))
-  val smem_a_bits_source = Output(UInt((tile.numLanes * tile.smemTagWidth).W))
-  val smem_a_bits_address = Output(UInt((tile.numLanes * 32).W))
-  val smem_a_bits_mask = Output(UInt((tile.numLanes * 4).W))
-  val smem_a_bits_data = Output(UInt((tile.numLanes * 32).W))
+  val smem_a_ready = Input(UInt((tile.numLsuLanes * 1).W))
+  val smem_a_valid = Output(UInt((tile.numLsuLanes * 1).W))
+  val smem_a_bits_opcode = Output(UInt((tile.numLsuLanes * 3).W))
+  val smem_a_bits_size = Output(UInt((tile.numLsuLanes * 4).W))
+  val smem_a_bits_source = Output(UInt((tile.numLsuLanes * tile.smemTagWidth).W))
+  val smem_a_bits_address = Output(UInt((tile.numLsuLanes * 32).W))
+  val smem_a_bits_mask = Output(UInt((tile.numLsuLanes * 4).W))
+  val smem_a_bits_data = Output(UInt((tile.numLsuLanes * 32).W))
 
-  val smem_d_valid = Input(UInt((tile.numLanes * 1).W))
-  val smem_d_bits_opcode = Input(UInt((tile.numLanes * 3).W))
-  val smem_d_bits_size = Input(UInt((tile.numLanes * 4).W))
-  val smem_d_bits_source = Input(UInt((tile.numLanes * tile.smemTagWidth).W))
-  val smem_d_bits_data = Input(UInt((tile.numLanes * 32).W))
-  val smem_d_ready = Output(UInt((tile.numLanes * 1).W))
+  val smem_d_valid = Input(UInt((tile.numLsuLanes * 1).W))
+  val smem_d_bits_opcode = Input(UInt((tile.numLsuLanes * 3).W))
+  val smem_d_bits_size = Input(UInt((tile.numLsuLanes * 4).W))
+  val smem_d_bits_source = Input(UInt((tile.numLsuLanes * tile.smemTagWidth).W))
+  val smem_d_bits_data = Input(UInt((tile.numLsuLanes * 32).W))
+  val smem_d_ready = Output(UInt((tile.numLsuLanes * 1).W))
 
   // val fpu = Flipped(new FPUCoreIO())
   //val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
@@ -114,7 +114,7 @@ class Vortex(tile: VortexTile)(implicit p: Parameters)
         "CORE_ID" -> tile.tileParams.hartId,
         // TODO: can we get this as a parameter?
         "BOOTROM_HANG100" -> 0x10100,
-        "NUM_THREADS" -> tile.numLanes
+        "NUM_THREADS" -> tile.numLsuLanes
       )
     )
     with HasBlackBoxResource {

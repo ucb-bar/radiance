@@ -189,12 +189,14 @@ class VortexTile private (
 
   val smemSourceWidth = 4 // FIXME: hardcoded
 
-  // TODO: parametrize
-  val numWarps = 4
+  val numWarps = 4 // TODO: parametrize
   val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
   val UUID_WIDTH = 44
   val imemTagWidth = UUID_WIDTH + NW_WIDTH
-  val LSUQ_TAG_BITS = 4
+  val numLsuLanes = 4
+  // see VX_gpu_pkg.sv
+  val LSUQ_SIZE = 8 * (numLanes / numLsuLanes)
+  val LSUQ_TAG_BITS = log2Ceil(LSUQ_SIZE) + 1 /*DCACHE_BATCH_SEL_BITS*/
   val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
   // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
   val smemTagWidth = dmemTagWidth
@@ -218,7 +220,7 @@ class VortexTile private (
     )
   }
 
-  val dmemNodes = Seq.tabulate(numLanes) { i =>
+  val dmemNodes = Seq.tabulate(numLsuLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -241,7 +243,7 @@ class VortexTile private (
     )
   }
 
-  val smemNodes = Seq.tabulate(numLanes) { i =>
+  val smemNodes = Seq.tabulate(numLsuLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -337,12 +339,12 @@ class VortexTile private (
   //
   // Instantiate the same number of banks as there are lanes.
   // TODO: parametrize
-  val smemBanks = Seq.tabulate(numLanes) { bankId =>
+  val smemBanks = Seq.tabulate(numLsuLanes) { bankId =>
     // Banked-by-word (4 bytes)
     // base for bank 1: ff...000000|01|00
     // mask for bank 1; 00...111111|00|11
     val base = 0xff000000L | (bankId * 4 /*wordSize*/ )
-    val mask = 0x00ffffffL ^ ((numLanes - 1) * 4 /*wordSize*/ )
+    val mask = 0x00ffffffL ^ ((numLsuLanes - 1) * 4 /*wordSize*/ )
     LazyModule(new TLRAM(AddressSet(base, mask), beatBytes = 4 /*wordSize*/ ))
   }
   // smem lanes-to-banks crossbar
@@ -531,7 +533,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       // @perf: this would duplicate SourceGenerator table for every lane and eat
       // up some area
       val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
-      val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
+      val dmemTLAdapters = Seq.tabulate(outer.numLsuLanes) { _ =>
         Module(
           new VortexTLAdapter(
             outer.dmemSourceWidth,
@@ -565,7 +567,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         new RRArbiter(
           // FIXME: should really be source on D channel
           new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32).source.cloneType,
-          outer.numLanes
+          outer.numLsuLanes
         )
       )
       arb.io.out.ready := true.B
@@ -574,7 +576,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
         arbIn.valid := vxDmem.valid
         arbIn.bits := vxDmem.bits.source
       }
-      val matchingSources = Wire(UInt(outer.numLanes.W))
+      val matchingSources = Wire(UInt(outer.numLsuLanes.W))
       matchingSources := dmemBundles
         .map(b =>
           // If there is no valid response pending across all lanes,
@@ -609,7 +611,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       core.io.dmem_d_bits_data := dmemTLAdapters.map(_.io.inResp.bits.data).asUInt
 
       // override response channel with matchingSources
-      val dmem_d_valid_vec = Wire(Vec(outer.numLanes, Bool()))
+      val dmem_d_valid_vec = Wire(Vec(outer.numLsuLanes, Bool()))
       dmemTLAdapters.zipWithIndex.foreach {
         case (tlAdapter, i) =>
           dmem_d_valid_vec(i) := tlAdapter.io.inResp.valid && matchingSources(i)
@@ -632,7 +634,7 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
       // @perf: this would duplicate SourceGenerator table for every lane and eat
       // up some area
       val smemTLBundles = outer.smemNodes.map(_.out.head._1)
-      val smemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
+      val smemTLAdapters = Seq.tabulate(outer.numLsuLanes) { _ =>
         Module(
           new VortexTLAdapter(
             outer.smemSourceWidth,
