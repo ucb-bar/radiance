@@ -43,7 +43,7 @@ class WithRadianceCores(
         nTLBSuperpages = 1,
         blockBytes = site(CacheBlockBytes))))
     List.tabulate(n)(i => VortexTileAttachParams(
-      vortex.copy(hartId = i + idOffset),
+      vortex.copy(tileId = i + idOffset),
       RocketCrossingParams()
     )) ++ prev
   }
@@ -151,7 +151,7 @@ class WithNCustomSmallRocketCores(
         nTLBSuperpages = 1,
         blockBytes = site(CacheBlockBytes))))
     List.tabulate(n)(i => RocketTileAttachParams(
-      med.copy(hartId = i + idOffset),
+      med.copy(tileId = i + idOffset),
       crossing
     )) ++ prev
   }

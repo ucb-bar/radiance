@@ -11,7 +11,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.TileCrossingParamsLike
+import freechips.rocketchip.subsystem.HierarchicalElementCrossingParamsLike
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.ClockSinkParameters
 import freechips.rocketchip.regmapper.RegField
@@ -26,71 +26,69 @@ case class VortexTileParams(
     btb: Option[BTBParams] = None, // Some(BTBParams()),
     dataScratchpadBytes: Int = 0,
     name: Option[String] = Some("vortex_tile"),
-    hartId: Int = 0,
+    tileId: Int = 0,
     beuAddr: Option[BigInt] = None,
     blockerCtrlAddr: Option[BigInt] = None,
     clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
     boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
 ) extends InstantiableTileParams[VortexTile] {
+  // TODO: want to use ICache/DCacheParams as well
   // require(icache.isDefined)
   // require(dcache.isDefined)
 
-  def instantiate(crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(
+  def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
       implicit p: Parameters
   ): VortexTile = {
     new VortexTile(this, crossing, lookup)
   }
+  val baseName = name.getOrElse("radiance_tile")
+  val uniqueName = s"${baseName}_$tileId"
 }
 
 // TODO: move to VortexCore
 // VortexTileParams extends TileParams which require a `core: CoreParams`
-// field, so VortexCoreParams needs to extend from that, requiring all
-// these fields to be initialized.  Most of this is unnecessary though. TODO
+// field, so VortexCoreParams needs to extend from CoreParams as well,
+// requiring all these fields to be initialized.  Most of this is unnecessary
+// though. TODO see how BOOM does that
 case class VortexCoreParams(
-    bootFreqHz: BigInt = 0,
-    useVM: Boolean = true,
-    useUser: Boolean = false,
-    useSupervisor: Boolean = false,
-    useHypervisor: Boolean = false,
-    useDebug: Boolean = true,
-    useAtomics: Boolean = false,
-    useAtomicsOnlyForIO: Boolean = false,
-    useCompressed: Boolean = false,
-    useRVE: Boolean = false,
-    useSCIE: Boolean = false,
-    useBitManip: Boolean = false,
-    useBitManipCrypto: Boolean = false,
-    useCryptoNIST: Boolean = false,
-    useCryptoSM: Boolean = false,
-    useConditionalZero: Boolean = false,
-    nLocalInterrupts: Int = 0,
-    useNMI: Boolean = false,
-    nBreakpoints: Int = 1,
-    useBPWatch: Boolean = false,
-    mcontextWidth: Int = 0,
-    scontextWidth: Int = 0,
-    nPMPs: Int = 8,
-    nPerfCounters: Int = 0,
-    haveBasicCounters: Boolean = true,
-    haveCFlush: Boolean = false,
-    misaWritable: Boolean = true,
-    nL2TLBEntries: Int = 0,
-    nL2TLBWays: Int = 1,
-    nPTECacheEntries: Int = 8,
-    mtvecInit: Option[BigInt] = Some(BigInt(0)),
-    mtvecWritable: Boolean = true,
-    fastLoadWord: Boolean = true,
-    fastLoadByte: Boolean = false,
-    branchPredictionModeCSR: Boolean = false,
-    clockGate: Boolean = false,
-    mvendorid: Int = 0, // 0 means non-commercial implementation
-    mimpid: Int = 0x20181004, // release date in BCD
-    mulDiv: Option[MulDivParams] = Some(MulDivParams()),
-    fpu: Option[FPUParams] = Some(FPUParams()),
-    debugROB: Boolean =
-      false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
-    haveCease: Boolean = true, // non-standard CEASE instruction
-    haveSimTimeout: Boolean = true // add plusarg for simulation timeout
+  bootFreqHz: BigInt = 0,
+  useVM: Boolean = true,
+  useUser: Boolean = false,
+  useSupervisor: Boolean = false,
+  useHypervisor: Boolean = false,
+  useDebug: Boolean = true,
+  useAtomics: Boolean = true,
+  useAtomicsOnlyForIO: Boolean = false,
+  useCompressed: Boolean = true,
+  useRVE: Boolean = false,
+  useConditionalZero: Boolean = false,
+  nLocalInterrupts: Int = 0,
+  useNMI: Boolean = false,
+  nBreakpoints: Int = 1,
+  useBPWatch: Boolean = false,
+  mcontextWidth: Int = 0,
+  scontextWidth: Int = 0,
+  nPMPs: Int = 8,
+  nPerfCounters: Int = 0,
+  haveBasicCounters: Boolean = true,
+  haveCFlush: Boolean = false,
+  misaWritable: Boolean = true,
+  nL2TLBEntries: Int = 0,
+  nL2TLBWays: Int = 1,
+  nPTECacheEntries: Int = 8,
+  mtvecInit: Option[BigInt] = Some(BigInt(0)),
+  mtvecWritable: Boolean = true,
+  fastLoadWord: Boolean = true,
+  fastLoadByte: Boolean = false,
+  branchPredictionModeCSR: Boolean = false,
+  clockGate: Boolean = false,
+  mvendorid: Int = 0, // 0 means non-commercial implementation
+  mimpid: Int = 0x20181004, // release date in BCD
+  mulDiv: Option[MulDivParams] = Some(MulDivParams()),
+  fpu: Option[FPUParams] = Some(FPUParams()),
+  debugROB: Boolean = false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
+  haveCease: Boolean = true, // non-standard CEASE instruction
+  haveSimTimeout: Boolean = true // add plusarg for simulation timeout
 ) extends CoreParams {
   val haveFSDirty = false
   val pmpGranularity: Int = if (useHypervisor) 4096 else 4
@@ -113,21 +111,21 @@ class VortexTile private (
   // Private constructor ensures altered LazyModule.p is used implicitly
   def this(
       params: VortexTileParams,
-      crossing: TileCrossingParamsLike,
+      crossing: HierarchicalElementCrossingParamsLike,
       lookup: LookupByHartIdImpl
   )(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
-  val intOutwardNode = IntIdentityNode()
+  val intOutwardNode = None
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
   // Memory-mapped region for HTIF communication
   // We use fixed addresses instead of tohost/fromhost
   val regDevice =
-    new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.hartId}"))
+    new SimpleDevice("vortex-reg", Seq(s"vortex-reg${tileParams.tileId}"))
   val regNode = TLRegisterNode(
-    address = Seq(AddressSet(0x7c000000 + 0x1000 * tileParams.hartId, 0xfff)),
+    address = Seq(AddressSet(0x7c000000 + 0x1000 * tileParams.tileId, 0xfff)),
     device = regDevice,
     beatBytes = 4,
     concurrency = 1
@@ -208,7 +206,7 @@ class VortexTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << imemSourceWidth),
-              name = s"Vortex Core ${vortexParams.hartId} I-Mem $i",
+              name = s"Vortex Core ${vortexParams.tileId} I-Mem $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -227,7 +225,7 @@ class VortexTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << dmemSourceWidth),
-              name = s"Vortex Core ${vortexParams.hartId} D-Mem Lane $i",
+              name = s"Vortex Core ${vortexParams.tileId} D-Mem Lane $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -250,7 +248,7 @@ class VortexTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << smemSourceWidth),
-              name = s"Vortex Core ${vortexParams.hartId} SharedMem Lane $i",
+              name = s"Vortex Core ${vortexParams.tileId} SharedMem Lane $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -283,7 +281,7 @@ class VortexTile private (
           TLMasterParameters.v1(
             // FIXME: need to also respect imemSourceWidth
             sourceId = IdRange(0, 1 << dmemSourceWidth),
-            name = s"Vortex Core ${vortexParams.hartId} Mem Interface",
+            name = s"Vortex Core ${vortexParams.tileId} Mem Interface",
             requestFifo = true,
             supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
             supportsGet = TransferSizes(16, 16),
@@ -362,13 +360,13 @@ class VortexTile private (
 
   /* below are copied from rocket */
 
-  val bus_error_unit = vortexParams.beuAddr map { a =>
-    val beu =
-      LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
-    intOutwardNode := beu.intNode
-    connectTLSlave(beu.node, xBytes)
-    beu
-  }
+  // val bus_error_unit = vortexParams.beuAddr map { a =>
+  //   val beu =
+  //     LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a)))
+  //   intOutwardNode := beu.intNode
+  //   connectTLSlave(beu.node, xBytes)
+  //   beu
+  // }
 
   val tile_master_blocker =
     tileParams.blockerCtrlAddr
@@ -392,13 +390,13 @@ class VortexTile private (
   val itimProperty =
     Nil // frontend.icache.itimProperty.toSeq.flatMap(p => Map("sifive,itim" -> p))
 
-  val beuProperty = bus_error_unit
-    .map(d => Map("sifive,buserror" -> d.device.asProperty))
-    .getOrElse(Nil)
+  // val beuProperty = bus_error_unit
+  //   .map(d => Map("sifive,buserror" -> d.device.asProperty))
+  //   .getOrElse(Nil)
 
   val cpuDevice: SimpleDevice = new SimpleDevice(
     "cpu",
-    Seq(s"sifive,vortex${tileParams.hartId}", "riscv")
+    Seq(s"sifive,vortex${tileParams.tileId}", "riscv")
   ) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
@@ -406,13 +404,13 @@ class VortexTile private (
       Description(
         name,
         mapping ++ cpuProperties ++ nextLevelCacheProperty
-          ++ tileProperties ++ dtimProperty ++ itimProperty ++ beuProperty
+          ++ tileProperties ++ dtimProperty ++ itimProperty /*++ beuProperty*/
       )
     }
   }
 
   ResourceBinding {
-    Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
+    Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
   override lazy val module = new VortexTileModuleImp(this)
@@ -472,11 +470,11 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
 
   outer.decodeCoreInterrupts(core.io.interrupts) // Decode the interrupt vector
 
-  outer.bus_error_unit.foreach { beu =>
-    core.io.interrupts.buserror.get := beu.module.io.interrupt
-  }
+  // outer.bus_error_unit.foreach { beu =>
+  //   core.io.interrupts.buserror.get := beu.module.io.interrupt
+  // }
 
-  core.io.interrupts.nmi.foreach { nmi => nmi := outer.nmiSinkNode.bundle }
+  core.io.interrupts.nmi.foreach { nmi => nmi := outer.nmiSinkNode.get.bundle }
 
   // Pass through various external constants and reports that were bundle-bridged into the tile
   // outer.traceSourceNode.bundle <> core.io.trace

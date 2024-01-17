@@ -36,9 +36,9 @@ class VortexBundleD(
 class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
   val clock = Input(Clock())
   val reset = Input(Reset())
-  // val hartid = Input(UInt(hartIdLen.W))
+  // val hartid = Input(UInt(tileIdLen.W))
   val reset_vector = Input(UInt(resetVectorLen.W))
-  val interrupts = Input(new CoreInterrupts())
+  val interrupts = Input(new freechips.rocketchip.rocket.CoreInterrupts(false/*hasBeu*/))
   
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
@@ -107,11 +107,11 @@ class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle 
 
 class Vortex(tile: VortexTile)(implicit p: Parameters)
     extends BlackBox(
-      // Each Vortex core gets tied-off hartId of 0, 1, 2, 3, ...
+      // Each Vortex core gets tied-off tileId of 0, 1, 2, 3, ...
       // The actual MHARTID read by the program is different by warp, not core;
       // see VX_csr_data that implements the read logic for CSR_MHARTID/GWID.
       Map(
-        "CORE_ID" -> tile.tileParams.hartId,
+        "CORE_ID" -> tile.tileParams.tileId,
         // TODO: can we get this as a parameter?
         "BOOTROM_HANG100" -> 0x10100,
         "NUM_THREADS" -> tile.numLsuLanes
