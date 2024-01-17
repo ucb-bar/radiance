@@ -1,6 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package freechips.rocketchip.unittest
+package radiance.memory
 
 import chisel3._
 import freechips.rocketchip.amba.ahb._
@@ -11,7 +11,8 @@ import freechips.rocketchip.subsystem.{BaseSubsystemConfig}
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import freechips.rocketchip.subsystem.WithSimtLanes
+import radiance.subsystem.WithSimtLanes
+import freechips.rocketchip.unittest._
 //import rocket.VortexFatBankTest
 
 case object TestDurationMultiplier extends Field[Int]
@@ -19,84 +20,6 @@ case object TestDurationMultiplier extends Field[Int]
 class WithTestDuration(x: Int) extends Config((site, here, up) => {
   case TestDurationMultiplier => x
 })
-
-class WithAMBAUnitTests extends Config((site, here, up) => {
-  case UnitTests => (q: Parameters) => {
-    implicit val p = q
-    val txns = 100 * site(TestDurationMultiplier)
-    val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new AHBBridgeTest(true,         txns=8*txns, timeout=timeout)),
-      Module(new AHBNativeTest(true,         txns=6*txns, timeout=timeout)),
-      Module(new AHBNativeTest(false,        txns=6*txns, timeout=timeout)),
-      Module(new APBBridgeTest(true,         txns=6*txns, timeout=timeout)),
-      Module(new APBBridgeTest(false,        txns=6*txns, timeout=timeout)),
-      Module(new AXI4LiteFuzzRAMTest(        txns=6*txns, timeout=timeout)),
-      Module(new AXI4LiteUserBitsFuzzRAMTest(txns=6*txns, timeout=timeout)),
-      Module(new AXI4FullFuzzRAMTest(        txns=3*txns, timeout=timeout)),
-      Module(new AXI4BridgeTest(             txns=3*txns, timeout=timeout)),
-      Module(new AXI4XbarTest(               txns=1*txns, timeout=timeout)),
-      Module(new AXI4RAMAsyncCrossingTest(   txns=3*txns, timeout=timeout)),
-      Module(new AXI4RAMCreditedCrossingTest(txns=3*txns, timeout=timeout))) }
-})
-
-class WithTLSimpleUnitTests extends Config((site, here, up) => {
-  case UnitTests => (q: Parameters) => {
-    implicit val p = q
-    val txns = 100 * site(TestDurationMultiplier)
-    val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new TLRAMSimpleTest(1,  true, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMSimpleTest(4,  false,txns=15*txns, timeout=timeout)),
-      Module(new TLRAMSimpleTest(16, true, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMZeroDelayTest(4,     txns=15*txns, timeout=timeout)),
-      Module(new TLRAMHintHandlerTest(     txns=15*txns, timeout=timeout)),
-      Module(new TLFuzzRAMTest(            txns= 3*txns, timeout=timeout)),
-      Module(new TLRR0Test(                txns= 3*txns, timeout=timeout)),
-      Module(new TLRR1Test(                txns= 3*txns, timeout=timeout)),
-      Module(new TLDecoupledArbiterLowestTest( txns= 3*txns, timeout=timeout)),
-      Module(new TLDecoupledArbiterHighestTest(txns= 3*txns, timeout=timeout)),
-      Module(new TLDecoupledArbiterRobinTest(  txns= 3*txns, timeout=timeout)),
-      Module(new TLRAMRationalCrossingTest(txns= 3*txns, timeout=timeout)),
-      Module(new TLRAMAsyncCrossingTest(   txns= 5*txns, timeout=timeout)),
-      Module(new TLRAMCreditedCrossingTest(txns= 5*txns, timeout=timeout)),
-      Module(new TLRAMAtomicAutomataTest(  txns=10*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(8, 4, true,  txns=15*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(4, 1, true,  txns=15*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(1, 1, true,  txns=15*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(8, 4, false, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(4, 1, false, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMECCTest(1, 1, false, txns=15*txns, timeout=timeout)) ) }
-})
-
-class WithTLWidthUnitTests extends Config((site, here, up) => {
-  case UnitTests => (q: Parameters) => {
-    implicit val p = q
-    val txns = 100 * site(TestDurationMultiplier)
-    val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new TLRAMFragmenterTest( 4, 256, txns= 5*txns, timeout=timeout)),
-      Module(new TLRAMFragmenterTest(16,  64, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMFragmenterTest( 4,  16, txns=15*txns, timeout=timeout)),
-      Module(new TLRAMWidthWidgetTest( 1,  1, txns= 1*txns, timeout=timeout)),
-      Module(new TLRAMWidthWidgetTest( 4, 64, txns= 4*txns, timeout=timeout)),
-      Module(new TLRAMWidthWidgetTest(64,  4, txns= 5*txns, timeout=timeout)) ) }
-})
-
-class WithTLXbarUnitTests extends Config((site, here, up) => {
-  case UnitTests => (q: Parameters) => {
-    implicit val p = q
-    val txns = 100 * site(TestDurationMultiplier)
-    val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new TLJbarTest(3, 2,           txns=5*txns, timeout=timeout)),
-      Module(new TLRAMXbarTest(1,           txns=5*txns, timeout=timeout)),
-      Module(new TLRAMXbarTest(2,           txns=5*txns, timeout=timeout)),
-      Module(new TLRAMXbarTest(8,           txns=5*txns, timeout=timeout)),
-      Module(new TLMulticlientXbarTest(4,4, txns=2*txns, timeout=timeout)),
-      Module(new TLMasterMuxTest(           txns=5*txns, timeout=timeout)) ) }
-})
-
 class WithCoalescingUnitTests extends Config((site, _, _) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = q

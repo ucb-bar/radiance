@@ -1,7 +1,7 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package freechips.rocketchip.tile
+package radiance.tile
 
 import chisel3._
 import chisel3.util._
@@ -16,7 +16,7 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.prci.ClockSinkParameters
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tile._
-import rocket.{Vortex, VortexBundleA, VortexBundleD}
+import radiance.memory._
 
 case class VortexTileParams(
     core: VortexCoreParams = VortexCoreParams(),

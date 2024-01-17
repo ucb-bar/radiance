@@ -1,10 +1,9 @@
-package freechips.rocketchip.tilelink
+package radiance.memory
 
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem.BaseSubsystem
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.rocket
-
+import freechips.rocketchip.tilelink._
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore
