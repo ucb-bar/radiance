@@ -16,14 +16,18 @@ case class VortexL1Config(
     coreTagWidth: Int,
     writeInfoReqQSize: Int,
     mshrSize: Int,
-    uncachedAddrSets: Seq[AddressSet],
-    icacheInstAddrSets: Seq[AddressSet]
+    memSideSourceIds: Int,
+    uncachedAddrSets: Seq[AddressSet]
 ) {
   def coreTagPlusSizeWidth: Int = {
     log2Ceil(wordSize) + coreTagWidth
   }
+  // NOTE: This assertion depends on the fact that the Vortex cache is
+  // configured to have 1 bank, and that it uses MSHR id as the tag of
+  // memory-side requests.  Otherwise, it will append bank id to the tag as
+  // well and break this requirement.
   require(
-    mshrSize == l2ReqSourceGenSize,
+    mshrSize == memSideSourceIds,
     "MSHR size must match the number of sourceIds to downstream."
   )
 }
@@ -36,18 +40,15 @@ object defaultVortexL1Config
       coreTagWidth = 8,
       writeInfoReqQSize = 16,
       mshrSize = 8,
-      l2ReqSourceGenSize = 8,
-      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffL)),
-      icacheInstAddrSets = Seq(AddressSet(0x80000000L, 0xfffffffL))
+      memSideSourceIds = 8,
+      // Don't cache CLINT region to ensure coherent access
+      uncachedAddrSets = Seq(AddressSet(0x2000000L, 0xffffL))
     )
 
 class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
     extends LazyModule {
-  // icache bank
-  val icache_bank = LazyModule(new VortexBank(config, 0, isICache = true))
-
-  // dcache banks
-  val dcache_banks = Seq.tabulate(config.numBanks) { bankId =>
+  val banks = Seq.tabulate(config.numBanks) { bankId =>
+    // helps with name mangling in Verilog
     val bank = LazyModule(new VortexBank(config, bankId))
     bank
   }
@@ -60,15 +61,13 @@ class VortexL1Cache(config: VortexL1Config)(implicit p: Parameters)
   // core-side crossbar that arbitrates core requests to banks
   protected val bankXbar = LazyModule(new TLXbar)
   bankXbar.node :=* coresideNode
-  dcache_banks.foreach { _.coalToVxCacheNode :=* bankXbar.node }
-  passThrough.coalToVxCacheNode :=* bankXbar.node
-  icache_bank.coalToVxCacheNode :=* bankXbar.node
+  banks.foreach { _.coresideNode :=* bankXbar.node }
+  passThrough.coresideNode :=* bankXbar.node
 
   // master node that exposes to and drives the downstream
   val masterNode = TLIdentityNode()
-  dcache_banks.foreach { masterNode := _.vxCacheToL2Node }
+  banks.foreach { masterNode := _.vxCacheToL2Node }
   masterNode := passThrough.vxCacheToL2Node
-  masterNode := icache_bank.vxCacheToL2Node
 
   lazy val module = new LazyModuleImp(this)
 }
@@ -100,7 +99,12 @@ class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
       clients = Seq(
         TLMasterParameters.v1(
           name = "VortexBank",
-          sourceId = IdRange(0, 1 << (log2Ceil(config.l2ReqSourceGenSize) + 5)),
+          sourceId = IdRange(
+            0,
+            1 << (log2Ceil(
+              config.memSideSourceIds
+            ) + 5 /*FIXME: give more sourceId so that passthrough doesn't block; hacky*/ )
+          ),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
           supportsPutFull = TransferSizes(1, config.wordSize),
@@ -110,14 +114,14 @@ class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
     )
   )
 
-  val coalToVxCacheNode = TLManagerNode(managerParam)
+  val coresideNode = TLManagerNode(managerParam)
   val vxCacheFetchNode = TLClientNode(clientParam)
   val vxCacheToL2Node = TLIdentityNode()
   vxCacheToL2Node := TLWidthWidget(config.cacheLineSize) := vxCacheFetchNode
 
-  // the implementation to make everything a pass through
+  // passthrough logic
   lazy val module = new LazyModuleImp(this) {
-    val (upstream, _) = coalToVxCacheNode.in(0)
+    val (upstream, _) = coresideNode.in(0)
     val (downstream, _) = vxCacheFetchNode.out(0)
 
     downstream.a <> upstream.a
@@ -128,28 +132,22 @@ class VortexBankPassThrough(config: VortexL1Config)(implicit p: Parameters)
 class VortexBank(
     config: VortexL1Config,
     bankId: Int,
-    isICache: Boolean = false
 )(implicit p: Parameters)
     extends LazyModule {
   // Generate AddressSet by excluding Addr we don't want
   def generateAddressSets(): Seq[AddressSet] = {
-    if (isICache) {
-      config.icacheInstAddrSets
-      // Seq(AddressSet(0x00000000L, 0xFFFFFFFFL))
-    } else {
-      // suppose have 4 bank
-      // base for bank 1: ...000000|01|0000
-      // mask for bank 1;    111111|00|1111
-      val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
-      val base = 0x00000000L | (bankId * config.wordSize)
+    // suppose have 4 bank
+    // base for bank 1: ...000000|01|0000
+    // mask for bank 1;    111111|00|1111
+    val base = 0x00000000L | (bankId * config.wordSize)
+    val mask = 0xffffffffL ^ ((config.numBanks - 1) * config.wordSize)
 
-      val excludeSets = (config.uncachedAddrSets ++ config.icacheInstAddrSets)
-      var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))
-      for (excludeSet <- excludeSets) {
-        remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
-      }
-      remainingSets
+    val excludeSets = config.uncachedAddrSets
+    var remainingSets: Seq[AddressSet] = Seq(AddressSet(base, mask))
+    for (excludeSet <- excludeSets) {
+      remainingSets = remainingSets.flatMap(_.subtract(excludeSet))
     }
+    remainingSets
   }
 
   // Slave node to upstream
@@ -176,7 +174,7 @@ class VortexBank(
       clients = Seq(
         TLMasterParameters.v1(
           name = "VortexBank",
-          sourceId = IdRange(0, config.l2ReqSourceGenSize),
+          sourceId = IdRange(0, config.memSideSourceIds),
           supportsProbe = TransferSizes(1, config.wordSize),
           supportsGet = TransferSizes(1, config.wordSize),
           supportsPutFull = TransferSizes(1, config.wordSize),
@@ -186,7 +184,8 @@ class VortexBank(
     )
   )
 
-  val coalToVxCacheNode = TLManagerNode(managerParam)
+  // Core -> VxCache
+  val coresideNode = TLManagerNode(managerParam)
   val vxCacheToL2Node = TLIdentityNode()
   val vxCacheFetchNode = TLClientNode(clientParam)
 
@@ -202,7 +201,7 @@ class VortexBankImp(
     config: VortexL1Config
 ) extends LazyModuleImp(outer) {
   val vxCache = Module(
-    new VX_cache(
+    new VX_cache_top(
       WORD_SIZE = config.wordSize,
       CACHE_LINE_SIZE = config.cacheLineSize,
       CORE_TAG_WIDTH = config.coreTagPlusSizeWidth,
@@ -249,7 +248,7 @@ class VortexBankImp(
 
   // Translate TL request from Coalescer to requests for VX_cache
   def TLReq2VXReq = {
-    val (tlInFromCoal, _) = outer.coalToVxCacheNode.in.head
+    val (tlInFromCoal, _) = outer.coresideNode.in.head
 
     // coal -> vxCache
     tlInFromCoal.a.ready :=
@@ -326,12 +325,12 @@ class VortexBankImp(
     tlInFromCoal.d.bits.data := vxCache.io.core_rsp_data
   }
 
-  // Since Vortex L1 is a write-through cache, it doesn't bookkeep writes and
-  // therefore doesn't allocate a new UUID for write requests.  We use a
-  // separate source ID allocator to solve this.
+  // Since Vortex L1 is a write-through cache, it doesn't bookkeep writes in
+  // its MSHR and therefore doesn't allocate a new tag id for write requests.
+  // We use a separate source ID allocator to solve this.
   val sourceGen = Module(
     new NewSourceGenerator(
-      log2Ceil(config.l2ReqSourceGenSize),
+      log2Ceil(config.memSideSourceIds),
       metadata = Some(UInt(32.W)),
       ignoreInUse = false
     )
@@ -388,70 +387,82 @@ class VortexBankImp(
   VXReq2TLReq
 }
 
-class VX_cache(
-    CACHE_ID: Int = 0, // seems to be only used for debug trace prints
+class VX_cache_top(
+    // these values should match the default settings in Verilog
+    // TODO: INSTANCE_ID
     CACHE_SIZE: Int = 16384 / 4, // <FIXME, divided by 4 for faster simulation
     CACHE_LINE_SIZE: Int = 16,
-    NUM_PORTS: Int = 1,
-    WORD_SIZE: Int =
-      16, // hack - one "word" is enough to satisfy all 4 warps after decoalescing.
-    CREQ_SIZE: Int = 0,
+    NUM_WAYS: Int = 4,
+    // for single-bank configuration, set NUM_REQS = 1 and instead set
+    // WORD_SIZE to something wider than 4
+    WORD_SIZE: Int = 16,
     CRSQ_SIZE: Int = 2,
-    MSHR_SIZE: Int = 8,
+    MSHR_SIZE: Int = 16,
     MRSQ_SIZE: Int = 0,
     MREQ_SIZE: Int = 4,
     WRITE_ENABLE: Int = 1,
+    UUID_WIDTH: Int = 0, // FIXME: should be different for debug
     CORE_TAG_WIDTH: Int =
-      10, // source ID ranges from 0 to 1 << 10, we need to allocate upper bits to save size
-    CORE_TAG_ID_BITS: Int =
-      5, // no idea what this is, just match it with default L1 dcache
-    BANK_ADDR_OFFSET: Int = 0,
-    NC_ENABLE: Int = 0, // NC_ENABLE=1 means the cache becomes a passthrough
-    WORD_ADDR_WIDTH: Int = 28, // 16 byte "word" = 4 bits
-    MEM_TAG_WIDTH: Int =
-      14, // Elaborated value is also completely different from (32 - log2Ceil(CACHE_LINE_SIZE)). This should match with sourceIds on client node associated with this cache
-    MEM_ADDR_WIDTH: Int = 28 // 16 byte cache line = 4 bits
+      16, // source ID ranges from 0 to 1 << 10, we need to allocate upper bits to save size
+    CORE_OUT_REG : Int = 0,
+    MEM_OUT_REG : Int = 0,
 ) extends BlackBox(
       Map(
-        "CACHE_ID" -> CACHE_ID,
-        "NUM_REQS" -> 1, // force to instantiate single bank by setting NUM_REQS to 1
+        // NOTE: NUM_REQS is analogous to SIMD width, whereas NUM_BANKS is the
+        // actual number of banks.  VX_cache.sv instantiates VX_stream_xbar
+        // that arbitrates the higher NUM_REQS into NUM_BANKS.  Since we do
+        // that logic ourselves using TL units, fix those params to 1 for the
+        // Verilog side.
+        "NUM_REQS" -> 1,
         "CACHE_SIZE" -> CACHE_SIZE,
-        "CACHE_LINE_SIZE" -> CACHE_LINE_SIZE,
-        "NUM_PORTS" -> NUM_PORTS,
+        "LINE_SIZE" -> CACHE_LINE_SIZE,
+        // NUM_BANKS is set to 1 to treat a whole VX_cache_top instance as a
+        // single bank
+        "NUM_BANKS" -> 1,
+        "NUM_WAYS" -> NUM_WAYS,
         "WORD_SIZE" -> WORD_SIZE,
-        "CREQ_SIZE" -> CREQ_SIZE,
         "CRSQ_SIZE" -> CRSQ_SIZE,
         "MSHR_SIZE" -> MSHR_SIZE,
         "MRSQ_SIZE" -> MRSQ_SIZE,
         "MREQ_SIZE" -> MREQ_SIZE,
         "WRITE_ENABLE" -> WRITE_ENABLE,
-        "CORE_TAG_WIDTH" -> CORE_TAG_WIDTH,
-        "CORE_TAG_ID_BITS" -> CORE_TAG_ID_BITS,
-        "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH,
-        "BANK_ADDR_OFFSET" -> BANK_ADDR_OFFSET,
-        "NC_ENABLE" -> NC_ENABLE
+        "UUID_WIDTH" -> UUID_WIDTH,
+        "TAG_WIDTH" -> CORE_TAG_WIDTH,
+        "CORE_OUT_REG" -> CORE_OUT_REG,
+        "MEM_OUT_REG" -> MEM_OUT_REG,
+        // Although VX_cache_top exposes it as a parameter, MEM_TAG_WIDTH is
+        // not really configurable -- it is set to be a concatenation of the
+        // MSHR id and cache bank id.  Instead of trying to configure it from
+        // Chisel side, we try to figure out its value that's elaborated in the
+        // Verilog side and configure the Chisel io width correspondingly.
+        // "MEM_TAG_WIDTH" -> MEM_TAG_WIDTH
       )
     )
     with HasBlackBoxResource {
+
+  def memTagWidth(mshrSize: Int, numBanks: Int): Int =
+    log2Ceil(mshrSize) + log2Ceil(numBanks)
+  val MEM_TAG_WIDTH = memTagWidth(MSHR_SIZE, 1/* NUM_BANKS */)
+
+  // These logic is fixed in VX_cache_define.vh
+  val memAddrWidth = 32 // FIXME hardcoded
+  val cacheWordAddrWidth = 32 - log2Ceil(WORD_SIZE)
+  val cacheMemAddrWidth = 32 - log2Ceil(CACHE_LINE_SIZE)
 
   val io = IO(new Bundle {
     val clk = Input(Clock())
     val reset = Input(Reset())
 
-    // We should be able to turn the following into TileLink easily
-
     // CACHE <> CORE
     val core_req_valid = Input(Bool())
     val core_req_rw = Input(Bool())
-    val core_req_addr = Input(UInt(WORD_ADDR_WIDTH.W))
     val core_req_byteen = Input(UInt(WORD_SIZE.W))
+    val core_req_addr = Input(UInt(cacheWordAddrWidth.W))
     val core_req_data = Input(UInt((WORD_SIZE * 8).W))
     val core_req_tag = Input(UInt(CORE_TAG_WIDTH.W))
     val core_req_ready = Output(Bool())
 
     val core_rsp_valid = Output(Bool()) // 1 bit wide
-    val core_rsp_tmask =
-      Output(Bool()) // 1 bit wide, probably can ignore (check waveform)
     val core_rsp_data = Output(UInt((WORD_SIZE * 8).W))
     val core_rsp_tag = Output(UInt(CORE_TAG_WIDTH.W))
     val core_rsp_ready = Input(Bool())
@@ -460,7 +471,7 @@ class VX_cache(
     val mem_req_valid = Output(Bool())
     val mem_req_rw = Output(Bool())
     val mem_req_byteen = Output(UInt(CACHE_LINE_SIZE.W))
-    val mem_req_addr = Output(UInt(MEM_ADDR_WIDTH.W))
+    val mem_req_addr = Output(UInt(cacheMemAddrWidth.W))
     val mem_req_data = Output(UInt((CACHE_LINE_SIZE * 8).W))
     val mem_req_tag = Output(UInt(MEM_TAG_WIDTH.W))
     val mem_req_ready = Input(Bool())
@@ -471,133 +482,15 @@ class VX_cache(
     val mem_rsp_ready = Output(Bool())
   })
 
-  addResource("/vsrc/vortex/hw/rtl/VX_dispatch.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_issue.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bank.sv")
+  // addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bypass.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_data.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_define.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_warp_sched.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_sat.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_stride.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_lerp.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_addr.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_mem.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_format.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_sampler.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_unit.sv")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_define.vh")
-  addResource("/vsrc/vortex/hw/rtl/tex_unit/VX_tex_wrap.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_scope.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_fpu_unit.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_scoreboard.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_writeback.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_muldiv.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_decode.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_ibuffer.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_icache_stage.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_gpu_unit.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_trace_instr.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_gpu_types.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_config.vh")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_lzc.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_fifo_queue.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_scan.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_find_first.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_multiplier.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_bits_remove.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_pipe_register.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_priority_encoder.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_reset_relay.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_popcount.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_bits_insert.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_skid_buffer.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_fixed_arbiter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_shift_register.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_index_buffer.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_onehot_encoder.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_matrix_arbiter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_dp_ram.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_axi_adapter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_elastic_buffer.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_rr_arbiter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_stream_arbiter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_sp_ram.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_stream_demux.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_serial_div.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_fair_arbiter.sv")
-  addResource("/vsrc/vortex/hw/rtl/libs/VX_pending_size.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_define.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_csr_data.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_cache_arb.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_ipdom_stack.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_gpr_stage.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_execute.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_fetch.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_alu_unit.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_platform.vh")
-  addResource("/vsrc/vortex/hw/rtl/VX_commit.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_pipeline.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_lsu_unit.sv")
-  addResource("/vsrc/vortex/hw/rtl/VX_csr_unit.sv")
-  addResource("/vsrc/vortex/hw/VX_config.h")
-  addResource("/vsrc/vortex/sim/common/rvfloats.h")
-  addResource("/vsrc/vortex/sim/common/rvfloats.cpp")
-  addResource("/csrc/softfloat/include/internals.h")
-  addResource("/csrc/softfloat/include/primitives.h")
-  addResource("/csrc/softfloat/include/primitiveTypes.h")
-  addResource("/csrc/softfloat/include/softfloat.h")
-  addResource("/csrc/softfloat/include/softfloat_types.h")
-  addResource("/csrc/softfloat/RISCV/specialize.h")
-  addResource("/vsrc/vortex/hw/dpi/float_dpi.cpp")
-  addResource("/vsrc/vortex/hw/dpi/float_dpi.vh")
-  addResource("/vsrc/vortex/hw/dpi/util_dpi.cpp")
-  addResource("/vsrc/vortex/hw/dpi/util_dpi.vh")
-  addResource("/vsrc/vortex/hw/rtl/fp_cores/VX_fpu_dpi.sv")
-  addResource("/vsrc/vortex/hw/rtl/fp_cores/VX_fpu_define.vh")
-  addResource("/vsrc/vortex/hw/rtl/fp_cores/VX_fpu_types.vh")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_icache_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_dcache_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_tex_csr_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_join_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_ifetch_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_perf_cache_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_perf_memsys_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_gpr_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_decode_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_writeback_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_gpu_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_perf_pipeline_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_gpr_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_cmt_to_csr_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_csr_to_alu_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_ifetch_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_alu_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_csr_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_ibuffer_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_branch_ctl_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_dcache_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_icache_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_lsu_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_wstall_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_mem_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_fpu_to_csr_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_commit_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_tex_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_warp_ctl_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_tex_rsp_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_fetch_to_csr_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_perf_tex_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_mem_req_if.sv")
-  addResource("/vsrc/vortex/hw/rtl/interfaces/VX_fpu_req_if.sv")
-  // addResource("/vsrc/vortex/hw/rtl/cache/VX_shared_mem.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_core_rsp_merge.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_tag_access.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_core_req_bank_sel.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_bank.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_data_access.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_flush_ctrl.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_nc_bypass.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_miss_resrv.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_init.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_mshr.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
-
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_tags.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_top.sv")
 }
 
 // <FIXME> Delete the following NewSourceGenerator when merging with origin/graphics

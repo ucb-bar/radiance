@@ -187,6 +187,18 @@ class VortexTile private (
       "We recommend setting nSrcIds to at least 16."
   )
 
+  val smemSourceWidth = 4 // FIXME: hardcoded
+
+  // TODO: parametrize
+  val numWarps = 4
+  val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
+  val UUID_WIDTH = 44
+  val imemTagWidth = UUID_WIDTH + NW_WIDTH
+  val LSUQ_TAG_BITS = 4
+  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
+  // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
+  val smemTagWidth = dmemTagWidth
+
   val imemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
       Seq(
@@ -228,14 +240,37 @@ class VortexTile private (
       )
     )
   }
+
+  val smemNodes = Seq.tabulate(numLanes) { i =>
+    TLClientNode(
+      Seq(
+        TLMasterPortParameters.v1(
+          clients = Seq(
+            TLMasterParameters.v1(
+              sourceId = IdRange(0, 1 << smemSourceWidth),
+              name = s"Vortex Core ${vortexParams.hartId} SharedMem Lane $i",
+              requestFifo = true,
+              supportsProbe =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsGet = TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutFull =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes),
+              supportsPutPartial =
+                TransferSizes(1, lazyCoreParamsView.coreDataBytes)
+            )
+          )
+        )
+      )
+    )
+  }
+
   // combine outgoing per-lane dmemNode into 1 idenity node
   //
   // NOTE: We need TLWidthWidget here because there might be a data width
   // mismatch between Vortex's per-lane response and the system bus when we
   // don't instantiate either L1 or the coalescer.  This _should_ be optimized
-  // out when we instantiate coalescer which should handle data width conversion
-  // internally (which it does by... using TLWidthWidget), but probably not
-  // the cleanest way to do this.
+  // out when we instantiate either which should handle data width conversion
+  // internally (which it does by... using TLWidthWidget).
   val dmemAggregateNode = TLIdentityNode()
   dmemNodes.foreach { dmemAggregateNode := TLWidthWidget(4) := _ }
 
@@ -262,7 +297,7 @@ class VortexTile private (
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalescerParam) => {
       val coal = LazyModule(
-        new CoalescingUnit(coalescerParam.copy(enable = true))
+        new CoalescingUnit(coalescerParam)
       )
       coal.cpuNode :=* dmemAggregateNode
       coal.aggregateNode // N+1 lanes
@@ -271,37 +306,56 @@ class VortexTile private (
   }
 
   // Conditionally instantiate L1 cache
-  val l1Node = p(VortexL1Key) match {
+  val (icacheNode, dcacheNode): (TLNode, TLNode) = p(VortexL1Key) match {
     case Some(vortexL1Config) => {
       println(
         s"============ Using Vortex L1 cache ================="
       )
-      require(
-        p(CoalescerKey).isDefined,
-        "Vortex L1 configuration currently only works when coalescer is also enabled."
-      )
+      // require(
+      //   p(CoalescerKey).isDefined,
+      //   "Vortex L1 configuration currently only works when coalescer is also enabled."
+      // )
 
-      val l1cache = LazyModule(new VortexL1Cache(vortexL1Config))
-      // Connect L1 with imem_fetch_interface without XBar
-      // coalToVxCacheNode is a bad naming, it really means up steam of vxBank in whihc it takes input
-      // imemNodes.foreach { l1cache.icache_bank.coalToVxCacheNode := TLWidthWidget(4) := _ }
-      imemNodes.foreach { l1cache.coresideNode := TLWidthWidget(4) := _ }
-      l1cache.coresideNode :=* coalescerNode
-      l1cache.masterNode
+      val icache = LazyModule(new VortexL1Cache(vortexL1Config))
+      val dcache = LazyModule(new VortexL1Cache(vortexL1Config))
+      // imemNodes.foreach { icache.coresideNode := TLWidthWidget(4) := _ }
+      assert(imemNodes.length == 1) // FIXME
+      icache.coresideNode := TLWidthWidget(4) := imemNodes(0)
+      // dmemNodes go through coalescerNode
+      dcache.coresideNode :=* coalescerNode
+      (icache.masterNode, dcache.masterNode)
     }
     case None => {
-      // Regardless of using coalescer or not, if we're not using L1, imemNode
-      // goes directly to tile exit xbar
-      // FIXME: unnatural, have L1 just handle dmem
-      imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
-      coalescerNode
+      val imemWideNode = TLIdentityNode()
+      assert(imemNodes.length == 1) // FIXME
+      imemWideNode := TLWidthWidget(4) := imemNodes(0)
+      (imemWideNode, coalescerNode)
     }
   }
+
+  // Instantiate sharedmem banks
+  //
+  // Instantiate the same number of banks as there are lanes.
+  // TODO: parametrize
+  val smemBanks = Seq.tabulate(numLanes) { bankId =>
+    // Banked-by-word (4 bytes)
+    // base for bank 1: ff...000000|01|00
+    // mask for bank 1; 00...111111|00|11
+    val base = 0xff000000L | (bankId * 4 /*wordSize*/ )
+    val mask = 0x00ffffffL ^ ((numLanes - 1) * 4 /*wordSize*/ )
+    LazyModule(new TLRAM(AddressSet(base, mask), beatBytes = 4 /*wordSize*/ ))
+  }
+  // smem lanes-to-banks crossbar
+  val smemXbar = LazyModule(new TLXbar)
+  smemNodes.foreach(smemXbar.node := _)
+  smemBanks.foreach(_.node := smemXbar.node)
 
   if (vortexParams.useVxCache) {
     tlMasterXbar.node := TLWidthWidget(16) := memNode
   } else {
-    tlMasterXbar.node :=* l1Node
+    // imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
+    tlMasterXbar.node :=* icacheNode
+    tlMasterXbar.node :=* dcacheNode
   }
 
   /* below are copied from rocket */
@@ -457,95 +511,170 @@ class VortexTileModuleImp(outer: VortexTile) extends BaseTileModuleImp(outer) {
     outer.memNode.out(0)._1.a <> memTLAdapter.io.outReq
     memTLAdapter.io.outResp <> outer.memNode.out(0)._1.d
   } else {
-    val imemTLAdapter = Module(
-      new VortexTLAdapter(
-        outer.imemSourceWidth,
-        chiselTypeOf(core.io.imem.get(0).a.bits),
-        chiselTypeOf(core.io.imem.get(0).d.bits),
-        outer.imemNodes.head.out.head
-      )
-    )
-    // TODO: make imemNodes not a vector
-    imemTLAdapter.io.inReq <> core.io.imem.get(0).a
-    core.io.imem.get(0).d <> imemTLAdapter.io.inResp
-    outer.imemNodes(0).out(0)._1.a <> imemTLAdapter.io.outReq
-    imemTLAdapter.io.outResp <> outer.imemNodes(0).out(0)._1.d
-
-    // @perf: this would duplicate SourceGenerator table for every lane and eat
-    // up some area
-    val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
-    val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
-      Module(
+    def connectImem = {
+      val imemTLAdapter = Module(
         new VortexTLAdapter(
-          outer.dmemSourceWidth,
-          chiselTypeOf(core.io.dmem.get(0).a.bits),
-          chiselTypeOf(core.io.dmem.get(0).d.bits),
-          outer.dmemNodes(0).out.head
+          outer.imemSourceWidth,
+          chiselTypeOf(core.io.imem.get(0).a.bits),
+          chiselTypeOf(core.io.imem.get(0).d.bits),
+          outer.imemNodes.head.out.head
         )
       )
+      // TODO: make imemNodes not a vector
+      imemTLAdapter.io.inReq <> core.io.imem.get(0).a
+      core.io.imem.get(0).d <> imemTLAdapter.io.inResp
+      outer.imemNodes(0).out(0)._1.a <> imemTLAdapter.io.outReq
+      imemTLAdapter.io.outResp <> outer.imemNodes(0).out(0)._1.d
     }
 
-    // Since the individual per-lane TL requests might come back out-of-sync between
-    // the lanes, but Vortex core expects the per-lane responses to be synced,
-    // we need to selectively fire responses that have the same source, and
-    // delay others.
-    //
-    // In order to do that, we pick a source from one of the valid lanes using e.g.
-    // an arbiter.  Then using the chosen source id, we
-    // - lie to core that response is not valid if source doesn't match picked, and
-    // - lie to downstream that core is not ready if source doesn't match picked.
-    //
-    // Note that we cannot do this filtering logic using TileLink source ID, because
-    // we're allocating source for each lane independently.  In that case, it's
-    // possible that lane 0's source matches lane 1/2/3's source by chance,
-    // even when they originated from different warps.  Using Vortex's dcache req tag
-    // solves this issue because they use a UUID that is unique across all requests
-    // in the program.
-    //
-    // TODO: A cleaner solution would be to simply do a synchronized allocation
-    // of a same source id for all lanes.
-    val arb = Module(
-      new RRArbiter(
-        core.io.dmem.get.head.d.bits.source.cloneType,
-        outer.numLanes
+    def connectDmem = {
+      // @perf: this would duplicate SourceGenerator table for every lane and eat
+      // up some area
+      val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
+      val dmemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
+        Module(
+          new VortexTLAdapter(
+            outer.dmemSourceWidth,
+            new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32),
+            new VortexBundleD(tagWidth = outer.dmemTagWidth, dataWidth = 32),
+            outer.dmemNodes(0).out.head
+          )
+        )
+      }
+
+      // Since the individual per-lane TL requests might come back out-of-sync between
+      // the lanes, but Vortex core expects the per-lane responses to be synced,
+      // we need to selectively fire responses that have the same source, and
+      // delay others.
+      //
+      // In order to do that, we pick a source from one of the valid lanes using e.g.
+      // an arbiter.  Then using the chosen source id, we
+      // - lie to core that response is not valid if source doesn't match picked, and
+      // - lie to downstream that core is not ready if source doesn't match picked.
+      //
+      // Note that we cannot do this filtering logic using TileLink source ID, because
+      // we're allocating source for each lane independently.  In that case, it's
+      // possible that lane 0's source matches lane 1/2/3's source by chance,
+      // even when they originated from different warps.  Using Vortex's dcache req tag
+      // solves this issue because they use a UUID that is unique across all requests
+      // in the program.
+      //
+      // TODO: A cleaner solution would be to simply do a synchronized allocation
+      // of a same source id for all lanes.
+      val arb = Module(
+        new RRArbiter(
+          // FIXME: should really be source on D channel
+          new VortexBundleA(tagWidth = outer.dmemTagWidth, dataWidth = 32).source.cloneType,
+          outer.numLanes
+        )
       )
-    )
-    arb.io.out.ready := true.B
-    val dmemBundles = dmemTLAdapters.map(_.io.inResp)
-    (arb.io.in zip dmemBundles).foreach { case (arbIn, vxDmem) =>
-      arbIn.valid := vxDmem.valid
-      arbIn.bits := vxDmem.bits.source
-    }
-    val matchingSources = Wire(UInt(outer.numLanes.W))
-    matchingSources := dmemBundles
-      .map(b =>
-        // If there is no valid response pending across all lanes,
-        // matchingSources should not filter out upstream ready signals, so
-        // set it to all-1
-        !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
-      )
-      .asUInt
+      arb.io.out.ready := true.B
+      val dmemBundles = dmemTLAdapters.map(_.io.inResp)
+      (arb.io.in zip dmemBundles).foreach { case (arbIn, vxDmem) =>
+        arbIn.valid := vxDmem.valid
+        arbIn.bits := vxDmem.bits.source
+      }
+      val matchingSources = Wire(UInt(outer.numLanes.W))
+      matchingSources := dmemBundles
+        .map(b =>
+          // If there is no valid response pending across all lanes,
+          // matchingSources should not filter out upstream ready signals, so
+          // set it to all-1
+          !arb.io.out.valid || (b.bits.source === arb.io.out.bits)
+        )
+        .asUInt
 
-    // make connection:
-    // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
-    (core.io.dmem.get zip dmemTLAdapters) foreach { case (coreMem, tlAdapter) =>
-      tlAdapter.io.inReq <> coreMem.a
-      coreMem.d <> tlAdapter.io.inResp
-    }
-    (core.io.dmem.get zip dmemTLAdapters).zipWithIndex.foreach {
-      case ((coreMem, tlAdapter), i) =>
-        coreMem.d.valid := tlAdapter.io.inResp.valid && matchingSources(i)
-        tlAdapter.io.inResp.ready := coreMem.d.ready && matchingSources(i)
-    }
-    (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
-      tlOut.a <> tlAdapter.io.outReq
-      tlAdapter.io.outResp <> tlOut.d
+      // make connection:
+      // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
+      // 
+      // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
+      // need to flatten everything.
+      dmemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          // tlAdapter.io.inReq <> coreMem.a
+          tlAdapter.io.inReq.valid := core.io.dmem_a_valid(i)
+          tlAdapter.io.inReq.bits.opcode := core.io.dmem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
+          tlAdapter.io.inReq.bits.size := core.io.dmem_a_bits_size(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.source := core.io.dmem_a_bits_source(outer.dmemTagWidth * (i + 1) - 1, outer.dmemTagWidth * i)
+          tlAdapter.io.inReq.bits.address := core.io.dmem_a_bits_address(32 * (i + 1) - 1, 32 * i)
+          tlAdapter.io.inReq.bits.mask := core.io.dmem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.data := core.io.dmem_a_bits_data(32 * (i + 1) - 1, 32 * i)
+      }
+      core.io.dmem_a_ready := dmemTLAdapters.map(_.io.inReq.ready).asUInt
+
+      core.io.dmem_d_valid := dmemTLAdapters.map(_.io.inResp.valid).asUInt
+      core.io.dmem_d_bits_opcode := dmemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
+      core.io.dmem_d_bits_size := dmemTLAdapters.map(_.io.inResp.bits.size).asUInt
+      core.io.dmem_d_bits_source := dmemTLAdapters.map(_.io.inResp.bits.source).asUInt
+      core.io.dmem_d_bits_data := dmemTLAdapters.map(_.io.inResp.bits.data).asUInt
+
+      // override response channel with matchingSources
+      val dmem_d_valid_vec = Wire(Vec(outer.numLanes, Bool()))
+      dmemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          dmem_d_valid_vec(i) := tlAdapter.io.inResp.valid && matchingSources(i)
+          tlAdapter.io.inResp.ready := core.io.dmem_d_ready(i) && matchingSources(i)
+      }
+      core.io.dmem_d_valid := dmem_d_valid_vec.asUInt
+
+      (dmemTLAdapters zip dmemTLBundles) foreach { case (tlAdapter, tlOut) =>
+        tlOut.a <> tlAdapter.io.outReq
+        tlAdapter.io.outResp <> tlOut.d
+      }
+
+      outer.dmemAggregateNode.out.foreach { bo =>
+        dontTouch(bo._1.a)
+        dontTouch(bo._1.d)
+      }
     }
 
-    outer.dmemAggregateNode.out.foreach { bo =>
-      dontTouch(bo._1.a)
-      dontTouch(bo._1.d)
+    def connectSmem = {
+      // @perf: this would duplicate SourceGenerator table for every lane and eat
+      // up some area
+      val smemTLBundles = outer.smemNodes.map(_.out.head._1)
+      val smemTLAdapters = Seq.tabulate(outer.numLanes) { _ =>
+        Module(
+          new VortexTLAdapter(
+            outer.smemSourceWidth,
+            new VortexBundleA(tagWidth = outer.smemTagWidth, dataWidth = 32),
+            new VortexBundleD(tagWidth = outer.smemTagWidth, dataWidth = 32),
+            outer.smemNodes(0).out.head
+          )
+        )
+      }
+
+      smemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          // tlAdapter.io.inReq <> coreMem.a
+          tlAdapter.io.inReq.valid := core.io.smem_a_valid(i)
+          tlAdapter.io.inReq.bits.opcode := core.io.smem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
+          tlAdapter.io.inReq.bits.size := core.io.smem_a_bits_size(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.source := core.io.smem_a_bits_source(outer.smemTagWidth * (i + 1) - 1, outer.smemTagWidth * i)
+          tlAdapter.io.inReq.bits.address := core.io.smem_a_bits_address(32 * (i + 1) - 1, 32 * i)
+          tlAdapter.io.inReq.bits.mask := core.io.smem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
+          tlAdapter.io.inReq.bits.data := core.io.smem_a_bits_data(32 * (i + 1) - 1, 32 * i)
+      }
+      core.io.smem_a_ready := smemTLAdapters.map(_.io.inReq.ready).asUInt
+
+      core.io.smem_d_valid := smemTLAdapters.map(_.io.inResp.valid).asUInt
+      core.io.smem_d_bits_opcode := smemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
+      core.io.smem_d_bits_size := smemTLAdapters.map(_.io.inResp.bits.size).asUInt
+      core.io.smem_d_bits_source := smemTLAdapters.map(_.io.inResp.bits.source).asUInt
+      core.io.smem_d_bits_data := smemTLAdapters.map(_.io.inResp.bits.data).asUInt
+      smemTLAdapters.zipWithIndex.foreach {
+        case (tlAdapter, i) =>
+          tlAdapter.io.inResp.ready := core.io.smem_d_ready(i)
+      }
+
+      (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
+        tlOut.a <> tlAdapter.io.outReq
+        tlAdapter.io.outResp <> tlOut.d
+      }
     }
+
+    connectImem
+    connectDmem
+    connectSmem
   }
 
   // TODO: generalize for useVxCache
@@ -566,7 +695,7 @@ class VortexTLAdapter(
     val inResp = Decoupled(inRespT)
     val outResp = chiselTypeOf(outTL._1.d)
   })
-  val edge = outTL._2
+  val (bundle, edge) = outTL
   val sourceGen = Module(
     new SourceGenerator(
       newSourceWidth,
@@ -587,14 +716,20 @@ class VortexTLAdapter(
   io.outReq.bits.size := io.inReq.bits.size
   io.outReq.bits.source := io.inReq.bits.source
   io.outReq.bits.address := io.inReq.bits.address
-  // generate TL-correct mask
-  io.outReq.bits.mask := edge.mask(io.inReq.bits.address, io.inReq.bits.size)
+  // Get requires contiguous mask; only copy core's potentially-partial mask
+  // when writing
+  io.outReq.bits.mask := Mux(
+    edge.hasData(io.outReq.bits),
+    io.inReq.bits.mask,
+    // generate TL-correct mask
+    edge.mask(io.inReq.bits.address, io.inReq.bits.size)
+  )
   io.outReq.bits.data := io.inReq.bits.data
   io.outReq.bits.corrupt := 0.U
   io.inReq.ready := io.outReq.ready
   // VortexBundleD <> TLBundleD
-  // Do not reply to write requests; Vortex core does not expect ack on writes
-  io.inResp.valid := io.outResp.valid && edge.hasData(io.outResp.bits)
+  // Filtering out write requests is handled inside the wrapper Verilog
+  io.inResp.valid := io.outResp.valid
   io.inResp.bits.opcode := io.outResp.bits.opcode
   io.inResp.bits.size := io.outResp.bits.size
   io.inResp.bits.source := io.outResp.bits.source

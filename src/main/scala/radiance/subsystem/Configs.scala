@@ -82,7 +82,11 @@ class WithVortexL1Banks(nBanks: Int = 4) extends Config ((site, _, up) => {
   }
 })
 
-class WithCoalescer(nNewSrcIds: Int = 8) extends Config((site, _, up) => {
+// When `enable` is false, we still elaborate Coalescer, but it acts as a
+// pass-through logic that always outputs un-coalesced requests.  This is
+// useful for when we want to keep the generated wire and net names the same
+// to e.g. compare waveforms.
+class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config((site, _, up) => {
   case CoalescerKey => {
     val (nLanes, numOldSrcIds) = up(SIMTCoreKey, site) match {
       case Some(param) => (param.nLanes, param.nSrcIds)
@@ -104,6 +108,7 @@ class WithCoalescer(nNewSrcIds: Int = 8) extends Config((site, _, up) => {
       
     // Note: this config chooses a single-sized coalescing logic by default.
     Some(DefaultCoalescerConfig.copy(
+      enable       = enable,
       numLanes     = nLanes,
       numOldSrcIds = numOldSrcIds,
       numNewSrcIds = nNewSrcIds,
