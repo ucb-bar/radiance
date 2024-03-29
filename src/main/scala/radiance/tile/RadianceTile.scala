@@ -327,8 +327,8 @@ class RadianceTile private (
   }
 
   // Barrier synchronization node
-  // FIXME: hardcoded params
-  val numBarriers = 8
+  // FIXME: hardcoded param eq
+  val numBarriers = numWarps
   def barrierIdBits = log2Ceil(numBarriers)
   val barrierMasterNode = BarrierMasterNode(barrierIdBits)
 
@@ -605,7 +605,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
 
       // make connection:
       // VortexBundle <--> sourceId filter <--> VortexTLAdapter <--> dmemNodes
-      // 
+      //
       // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
       // need to flatten everything.
       dmemTLAdapters.zipWithIndex.foreach {
