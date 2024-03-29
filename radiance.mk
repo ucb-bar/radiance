@@ -9,7 +9,7 @@
 RADPIE_SRC_DIR = $(base_dir)/generators/radiance/radpie
 RADPIE_BUILD_DIR = $(RADPIE_SRC_DIR)/target/release
 
-EXTRA_SIM_REQS += radpie
+# EXTRA_SIM_REQS += radpie
 EXTRA_SIM_LDFLAGS += -L$(RADPIE_BUILD_DIR) -Wl,-rpath,$(RADPIE_BUILD_DIR) -lradpie
 EXTRA_SIM_PREPROC_DEFINES += \
 	+define+SIMULATION \
