@@ -192,8 +192,12 @@ class RadianceTile private (
   }
   val imemTagWidth = UUID_WIDTH + NW_WIDTH
 
-  val LSUQ_SIZE = 8 * numWarps * (numCoreLanes / numLsuLanes)
-  assert(LSUQ_SIZE == p(SIMTCoreKey).get.nSrcIds)
+  require(numWarps >= numLsuLanes,
+          s"Vortex core requires numWarps (${numWarps}) >= numLsuLanes (${numLsuLanes})")
+  val LSUQ_SIZE = 8 * (numCoreLanes / numLsuLanes)
+  require(LSUQ_SIZE == p(SIMTCoreKey).get.nSrcIds,
+          s"LSUQ_SIZE (${LSUQ_SIZE}) != nSrcIds (${p(SIMTCoreKey).get.nSrcIds})"
+          + " which can result in TileLink srcId underutilization")
   val LSUQ_TAG_BITS = log2Ceil(LSUQ_SIZE) + 1 /*DCACHE_BATCH_SEL_BITS*/
   val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
   // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
