@@ -20,13 +20,13 @@ EXTRA_SIM_PREPROC_DEFINES += \
 	+define+ICACHE_DISABLE +define+DCACHE_DISABLE \
 	+define+GBAR_ENABLE \
 	+define+GBAR_CLUSTER_ENABLE \
-	+define+FPU_FPNEW \
-	+define+EXT_T_DISABLE \
-	+define+NUM_BARRIERS=8 \
-	+define+NUM_CORES=2 +define+NUM_THREADS=8 +define+NUM_WARPS=8
-	# Can't increase this to above 14, since the binary accesses 0xff0040..
-	# which is unmapped to any memory
-	# +define+SMEM_LOG_SIZE=14 \
+	+define+NUM_FPU_BLOCKS=2 \
+	+define+NUM_BARRIERS=4 \
+	+define+NUM_LSU_LANES=4 \
+	+define+NUM_CORES=1 +define+NUM_THREADS=32 +define+NUM_WARPS=4
+	# +define+EXT_T_DISABLE \
+	# +define+FPU_FPNEW \
+	# +define+SMEM_LOG_SIZE=15 \
 
 # cargo handles building of Rust files all on its own, so make this a PHONY
 # target to run cargo unconditionally
