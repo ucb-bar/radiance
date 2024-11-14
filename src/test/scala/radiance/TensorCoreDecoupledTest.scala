@@ -9,7 +9,7 @@ class TensorCoreDecoupledTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "TensorCoreDecoupled"
 
   it should "do the right thing" in {
-    test(new TensorCoreDecoupled(8, 8, numSourceIds = 4, tilingParams = TensorTilingParams()))
+    test(new TensorCoreDecoupled(8, 8, numSourceIds = 4, half = true))
       { c =>
         c.io.initiate.valid.poke(true.B)
         c.io.initiate.bits.wid.poke(0.U)
