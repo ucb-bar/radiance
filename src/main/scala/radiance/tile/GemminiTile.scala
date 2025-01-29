@@ -216,6 +216,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val squareBoundsInst = ciscInstT.Lit(_.inst -> 0x1220b07b.U, _.rs1 -> 0.U,
       _.rs2 -> (tileSizeM | (tileSizeM << 16) | (BigInt(tileSizeM) << 32)).U)
   val boundsInst = Mux(ciscId(7), squareBoundsInst, rectBoundsInst)
+  val nopInst = ciscInstT.Lit(_.inst -> 0.U, _.rs1 -> 0.U, _.rs2 -> 0.U)
 
   def genStrideInst(tileA: UInt, tileB: UInt) = {
     val inst = Wire(ciscInstT)
@@ -249,7 +250,9 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
         val accSkipInst = genAccSkipInst(0.U, ((ciscArgs(23, 16) * spadHexadecile.U) << 32).asUInt | 0x238.U)
         ciscInst := microcodeEntry(Seq(boundsInst, strideInst, accSkipInst))
       }
-      is (2.U) {} // no actual invocation, fake job placeholder
+      is (2.U) {
+        ciscInst := microcodeEntry(Seq(nopInst))
+      } // no actual invocation, fake job placeholder
       is (8.U) { // set a, b stride
         val inst = Wire(ciscInstT)
         inst.inst := 0x1820b07b.U
@@ -337,7 +340,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   gemminiIO.bits.inst := Mux(ciscValid, ciscInst.inst.asTypeOf(gemminiIO.bits.inst), regCommand)
   gemminiIO.bits.rs1 := Mux(ciscValid, ciscInst.rs1, Cat(gemminiRs1RegMSB, gemminiRs1RegLSB))
   gemminiIO.bits.rs2 := Mux(ciscValid, ciscInst.rs2, Cat(gemminiRs2RegMSB, gemminiRs2RegLSB))
-  gemminiIO.valid := ciscValid || regValid
+  gemminiIO.valid := (ciscValid && (ciscInst.inst =/= 0.U)) || regValid
   assert(gemminiIO.ready || !gemminiIO.valid)
 
   accSlave.status := RegNext(outer.gemmini.module.io.busy).asUInt
