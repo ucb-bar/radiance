@@ -2,8 +2,7 @@
 # extra variables/targets ingested by the chipyard make system
 ##############################################################
 
-VORTEX_SRC_DIR = $(base_dir)/generators/radiance/src/main/resources/vsrc/vortex
-CYCLOTRON_SRC_DIR = $(base_dir)/generators/radiance/cyclotron
+VORTEX_SRC_DIR = $(base_dir)/generators/radiance/src/main/resources/vsrc/vortex CYCLOTRON_SRC_DIR = $(base_dir)/generators/radiance/cyclotron
 CYCLOTRON_BUILD_DIR = $(CYCLOTRON_SRC_DIR)/target/debug
 # CYCLOTRON_BUILD_DIR = $(CYCLOTRON_SRC_DIR)/target/release
 RADIANCE_CSRC_DIR = $(base_dir)/generators/radiance/src/main/resources/csrc
@@ -13,10 +12,19 @@ RADIANCE_VSRC_DIR = $(base_dir)/generators/radiance/src/main/resources/vsrc
 # THE FOLLOWING MUST BE += operators
 ##################################################################
 
-EXTRA_SIM_REQS += cyclotron
-EXTRA_SIM_LDFLAGS += -L$(CYCLOTRON_BUILD_DIR) -Wl,-rpath,$(CYCLOTRON_BUILD_DIR) -lcyclotron
+# EXTRA_SIM_REQS += cyclotron
+# EXTRA_SIM_LDFLAGS += -L$(CYCLOTRON_BUILD_DIR) -Wl,-rpath,$(CYCLOTRON_BUILD_DIR) -lcyclotron
 ifeq ($(shell echo $(CONFIG) | grep -E "SynConfig$$"),$(CONFIG))
     EXTRA_SIM_PREPROC_DEFINES += +define+SYNTHESIS +define+NDEBUG +define+DPI_DISABLE
+endif
+ifeq ($(shell echo $(CONFIG) | grep -E "FP16Config$$"),$(CONFIG))
+    EXTRA_SIM_PREPROC_DEFINES += +define+NUM_CORES=8
+endif
+ifeq ($(shell echo $(CONFIG) | grep -E "HopperConfig$$"),$(CONFIG))
+    EXTRA_SIM_PREPROC_DEFINES += +define+NUM_CORES=4 +define+EXT_T_HOPPER
+endif
+ifeq ($(shell echo $(CONFIG) | grep -E "FlashConfig$$"),$(CONFIG))
+    EXTRA_SIM_PREPROC_DEFINES += +define+NUM_CORES=4
 endif
 EXTRA_SIM_PREPROC_DEFINES += \
 	+define+SIMULATION \
