@@ -1,3 +1,6 @@
 [submodule "src/main/resources/vsrc/vortex"]
 	path = src/main/resources/vsrc/vortex
 	url = https://github.com/hansungk/vortex.git
+[submodule "cyclotron"]
+	path = cyclotron
+	url = https://github.com/hansungk/cyclotron.git
