@@ -292,7 +292,7 @@ class WithRadianceCluster(
     RadianceClusterParams(clusterId = clusterId),
     crossing)
   case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
-    ClusterBusTopologyParams(
+    RadianceClusterBusTopologyParams(
       clusterId = clusterId,
       csbus = site(SystemBusKey),
       ccbus = site(ControlBusKey).copy(errorDevice = None),

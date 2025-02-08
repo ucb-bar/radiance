@@ -13,7 +13,7 @@ import org.chipsalliance.diplomacy.lazymodule._
 import midas.targetutils.SynthesizePrintf
 import org.chipsalliance.cde.config.Parameters
 import radiance.memory._
-import radiance.subsystem.{RadianceFrameBufferKey, RadianceSharedMemKey}
+import radiance.subsystem._
 
 case class RadianceClusterParams(
   clusterId: Int,
@@ -32,11 +32,13 @@ class RadianceCluster (
   crossing: ClockCrossingType,
   lookup: LookupByClusterIdImpl
 )(implicit p: Parameters) extends Cluster(thisClusterParams, crossing, lookup) {
+  val clbus = tlBusWrapperLocationMap(CLBUS(clusterId)) // like the sbus in the base subsystem
+  clbus.clockGroupNode := allClockGroupsNode
+
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
   val radianceTiles = leafTiles.values.filter(_.isInstanceOf[RadianceTile]).toSeq.asInstanceOf[Seq[RadianceTile]]
 
-  // TODO: this probably needs to be instantiated inside the radiance shared mem module
   def virgoSharedMemComponentsGen() = new VirgoSharedMemComponents(thisClusterParams, gemminiTiles, radianceTiles)
   def virgoSharedMemComponentsImpGen(outer: VirgoSharedMemComponents) = new VirgoSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
