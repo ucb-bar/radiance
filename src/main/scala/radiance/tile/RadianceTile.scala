@@ -103,7 +103,12 @@ case class VortexCoreParams(
   tensorCoreDecoupled: Boolean = false, // hopper-style SMEM operand decoupling
   debugROB: Boolean = false, // if enabled, uses a C++ debug ROB to generate trace-with-wdata
   haveCease: Boolean = true, // non-standard CEASE instruction
-  haveSimTimeout: Boolean = true // add plusarg for simulation timeout
+  haveSimTimeout: Boolean = true, // add plusarg for simulation timeout
+  useZba: Boolean = false,
+  useZbb: Boolean = false,
+  useZbs: Boolean = false,
+  xLen: Int = 32,
+  pgLevels: Int = 2
 ) extends CoreParams {
   val haveFSDirty = false
   val pmpGranularity: Int = if (useHypervisor) 4096 else 4

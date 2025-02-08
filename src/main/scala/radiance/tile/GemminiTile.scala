@@ -57,7 +57,13 @@ case class GemminiCoreParams(
   traceHasWdata: Boolean = false,
   useConditionalZero: Boolean = false,
   bootFreqHz: BigInt = 0,
-  pmpGranularity: Int = 0) extends CoreParams {
+  pmpGranularity: Int = 0,
+  useZba: Boolean = false,
+  useZbb: Boolean = false,
+  useZbs: Boolean = false,
+  xLen: Int = 64,
+  pgLevels: Int = 2,
+  ) extends CoreParams {
 }
 
 case class GemminiTileParams(
