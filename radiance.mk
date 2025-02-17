@@ -31,19 +31,27 @@ EXTRA_SIM_PREPROC_DEFINES += \
 	+define+GPR_RESET \
 	+define+GPR_DUPLICATED \
 	+define+DBG_TRACE_CORE_PIPELINE_VCS \
-	+define+PERF_ENABLE \
 	+define+ICACHE_DISABLE +define+DCACHE_DISABLE \
 	+define+GBAR_ENABLE \
 	+define+GBAR_CLUSTER_ENABLE \
 	+define+FPU_FPNEW
+	# +define+PERF_ENABLE \
 	# +define+LSU_DUP_DISABLE \
 
 EXT_INCDIRS += \
-	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/fpnew/src/common_cells/include \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/cvfpu/src/common_cells/include \
 
+# Verilog package definitions should come before everything else, except that
+# VX_gpu_pkg.sv depends on the header files
 VCS_NONCC_OPTS := \
-	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/fpnew/src/fpnew_pkg.sv \
-	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/fpnew/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/VX_platform.vh \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/VX_config.vh \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/VX_types.vh \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/VX_define.vh \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/VX_gpu_pkg.sv \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/hw/rtl/fpu/VX_fpu_pkg.sv \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/cvfpu/src/fpnew_pkg.sv \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/vortex/third_party/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv \
 	$(VCS_NONCC_OPTS)
 
 VCS_NONCC_OPTS += +vcs+initreg+random

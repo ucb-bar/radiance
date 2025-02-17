@@ -497,15 +497,19 @@ class VX_cache_top(
     val mem_rsp_ready = Output(Bool())
   })
 
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_bank_flush.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bank.sv")
   // addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_bypass.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_data.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_define.vh")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_init.sv")
+  // addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_init.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_flush.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_mshr.sv")
-  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_repl.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_tags.sv")
   addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_top.sv")
+  addResource("/vsrc/vortex/hw/rtl/cache/VX_cache_wrap.sv")
 }
 
 // <FIXME> Delete the following NewSourceGenerator when merging with origin/graphics
