@@ -238,7 +238,9 @@ class RadianceTile private (
     )
   }
 
-  val dmemNodes = Seq.tabulate(numLsuLanes) { i =>
+  // NOTE: In Vortex upstream (25/02/16), memory coalescing reduces dmem width
+  // to 1 lane.
+  val dmemNodes = Seq.tabulate(1) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -575,7 +577,9 @@ class RadianceTileModuleImp(outer: RadianceTile)
       // @perf: this would duplicate SourceGenerator table for every lane and eat
       // up some area
       val dmemTLBundles = outer.dmemNodes.map(_.out.head._1)
-      val dmemTLAdapters = Seq.tabulate(outer.numLsuLanes) { _ =>
+      // NOTE: In Vortex upstream (25/02/16), memory coalescing reduces dmem width
+      // to 1 lane.
+      val dmemTLAdapters = Seq.tabulate(1) { _ =>
         Module(
           new VortexTLAdapter(
             outer.dmemSourceWidth,
@@ -586,6 +590,9 @@ class RadianceTileModuleImp(outer: RadianceTile)
         )
       }
 
+      // FIXME: Below might be unnecessary in upstream Vortex which coalesces dmem
+      // within the core.
+      //
       // Since the individual per-lane TL requests might come back out-of-sync between
       // the lanes, but Vortex core expects the per-lane responses to be synced,
       // we need to selectively fire responses that have the same source, and
@@ -612,7 +619,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
             tagWidth = outer.dmemTagWidth,
             dataWidth = 32
           ).source.cloneType,
-          outer.numLsuLanes
+          1 // coalesced
         )
       )
       arb.io.out.ready := true.B
@@ -656,7 +663,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
       core.io.dmem_d_bits_data := dmemTLAdapters.map(_.io.inResp.bits.data).asUInt
 
       // override response channel with matchingSources
-      val dmem_d_valid_vec = Wire(Vec(outer.numLsuLanes, Bool()))
+      val dmem_d_valid_vec = Wire(Vec(1/*coalesced*/, Bool()))
       dmemTLAdapters.zipWithIndex.foreach {
         case (tlAdapter, i) =>
           dmem_d_valid_vec(i) := tlAdapter.io.inResp.valid && matchingSources(i)

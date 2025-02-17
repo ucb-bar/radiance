@@ -57,22 +57,23 @@ class VortexBundle(tile: RadianceTile)(implicit p: Parameters) extends CoreBundl
   // Chisel doesn't support 2-D array in BlackBox interface to Verilog, so
   // everything needs to be 1-D flattened UInt with their widths configurable by numLSULanes.
   //
-  // FIXME: hardcoded bitwidths
-  val dmem_a_ready = Input(UInt((tile.numLsuLanes * 1).W))
-  val dmem_a_valid = Output(UInt((tile.numLsuLanes * 1).W))
-  val dmem_a_bits_opcode = Output(UInt((tile.numLsuLanes * 3).W))
-  val dmem_a_bits_size = Output(UInt((tile.numLsuLanes * 4).W))
-  val dmem_a_bits_source = Output(UInt((tile.numLsuLanes * tile.dmemTagWidth).W))
-  val dmem_a_bits_address = Output(UInt((tile.numLsuLanes * 32).W))
-  val dmem_a_bits_mask = Output(UInt((tile.numLsuLanes * 4).W))
-  val dmem_a_bits_data = Output(UInt((tile.numLsuLanes * 32).W))
+  // NOTE: In Vortex upstream (25/02/16), memory coalescing reduces dmem width
+  // to 1 lane.
+  val dmem_a_ready = Input(UInt((1).W))
+  val dmem_a_valid = Output(UInt((1).W))
+  val dmem_a_bits_opcode = Output(UInt((3).W))
+  val dmem_a_bits_size = Output(UInt((4).W))
+  val dmem_a_bits_source = Output(UInt((tile.dmemTagWidth).W))
+  val dmem_a_bits_address = Output(UInt((32).W))
+  val dmem_a_bits_mask = Output(UInt((4).W))
+  val dmem_a_bits_data = Output(UInt((32).W))
 
-  val dmem_d_valid = Input(UInt((tile.numLsuLanes * 1).W))
-  val dmem_d_bits_opcode = Input(UInt((tile.numLsuLanes * 3).W))
-  val dmem_d_bits_size = Input(UInt((tile.numLsuLanes * 4).W))
-  val dmem_d_bits_source = Input(UInt((tile.numLsuLanes * tile.dmemTagWidth).W))
-  val dmem_d_bits_data = Input(UInt((tile.numLsuLanes * 32).W))
-  val dmem_d_ready = Output(UInt((tile.numLsuLanes * 1).W))
+  val dmem_d_valid = Input(UInt((1).W))
+  val dmem_d_bits_opcode = Input(UInt((3).W))
+  val dmem_d_bits_size = Input(UInt((4).W))
+  val dmem_d_bits_source = Input(UInt((tile.dmemTagWidth).W))
+  val dmem_d_bits_data = Input(UInt((32).W))
+  val dmem_d_ready = Output(UInt((1).W))
 
   val smem_a_ready = Input(UInt((tile.numLsuLanes * 1).W))
   val smem_a_valid = Output(UInt((tile.numLsuLanes * 1).W))
