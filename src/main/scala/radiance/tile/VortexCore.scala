@@ -156,6 +156,8 @@ class Vortex(tile: RadianceTile)(implicit p: Parameters)
   // addResource("/vsrc/vortex/hw/syn/synopsys/models/memory/cln28hpc/rf2_32x128_wm1/vsim/rf2_32x128_wm1_tb.v")
   // addResource("/vsrc/vortex/hw/syn/modelsim/vortex_tb.v")
 
+  addResource("/vsrc/custom.mems.conf")
+
   addResource("/vsrc/vortex/hw/rtl/VX_gpu_pkg.sv")
 
   // addResource("/vsrc/vortex/hw/rtl/VX_cluster.sv")

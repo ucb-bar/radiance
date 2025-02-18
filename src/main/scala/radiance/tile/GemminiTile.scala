@@ -175,6 +175,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
   val ciscInst = Wire(ciscInstT)
   val startsLoop = WireInit(false.B)
+  val mmioStartsLoop = WireInit(false.B)
   val runningLoops = RegInit(0.U(4.W))
 
   val accCommandQueue = Module(new Queue(UInt(32.W), 4, false, true))
@@ -299,8 +300,9 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   val completionCount = PopCount(outer.gemmini.module.completion_io.completed)
   val loopStarted = Mux(startsLoop, 1.U, 0.U)
-  runningLoops := runningLoops + loopStarted - completionCount
-  assert(runningLoops + loopStarted >= completionCount)
+  val mmioLoopStarted = Mux(mmioStartsLoop, 1.U, 0.U)
+  runningLoops := runningLoops + loopStarted + mmioLoopStarted - completionCount
+  assert(runningLoops + loopStarted + mmioLoopStarted >= completionCount)
 
   val gemminiIO = outer.gemmini.module.io.cmd
 
@@ -348,6 +350,8 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   gemminiIO.bits.rs2 := Mux(ciscValid, ciscInst.rs2, Cat(gemminiRs2RegMSB, gemminiRs2RegLSB))
   gemminiIO.valid := (ciscValid && (ciscInst.inst =/= 0.U)) || regValid
   assert(gemminiIO.ready || !gemminiIO.valid)
+
+  mmioStartsLoop := regValid && (regCommand.funct === GemminiISA.LOOP_WS)
 
   accSlave.status := RegNext(outer.gemmini.module.io.busy).asUInt
 

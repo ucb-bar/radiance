@@ -104,10 +104,12 @@ class VirgoSharedMemComponents(
       }
     }
 
+    gemminis.foreach(g => assert(g.spad.spad_writer.isDefined))
+
     // (banks, subbanks, gemminis)
     val spadReadNodes = Seq.fill(smemBanks)(distAndDuplicate(gemminis.map(_.spad_read_nodes), "r"))
     val spadWriteNodes = Seq.fill(smemBanks)(distAndDuplicate(gemminis.map(_.spad_write_nodes), "w"))
-    val spadSpWriteNodesSingleBank = distAndDuplicate(gemminis.map(_.spad.spad_writer.node), "ws")
+    val spadSpWriteNodesSingleBank = distAndDuplicate(gemminis.map(_.spad.spad_writer.get.node), "ws")
     val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
 
     // tensor core read nodes
@@ -245,7 +247,7 @@ class VirgoSharedMemComponents(
     gemminis.foreach { gemmini =>
       unifiedMemReadNode :=* TLWidthWidget(smemWidth) :=* gemmini.spad_read_nodes
       unifiedMemWriteNode :=* TLWidthWidget(smemWidth) :=* gemmini.spad_write_nodes
-      unifiedMemWriteNode := gemmini.spad.spad_writer.node // this is the dma write node
+      unifiedMemWriteNode := gemmini.spad.spad_writer.get.node // this is the dma write node
     }
 
     val splitterNode = RWSplitterNode()
