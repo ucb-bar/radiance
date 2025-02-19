@@ -189,7 +189,7 @@ class RadianceTile private (
 
   val dmemSourceWidth = p(CoalescerKey) match {
     case Some(coalParam) => log2Ceil(coalParam.numOldSrcIds)
-    case None => smemSourceWidth
+    case None => 4
   }
   // require(
   //   dmemSourceWidth >= 4,
@@ -215,7 +215,8 @@ class RadianceTile private (
         s"Vortex core requires numWarps (${numWarps}) >= numLsuLanes (${numLsuLanes})")
   val LSUQ_SIZE = p(SIMTCoreKey).get.nSrcIds
   val LSUQ_TAG_BITS = log2Ceil(LSUQ_SIZE) + 1 /*DCACHE_BATCH_SEL_BITS*/
-  val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
+  val DCACHE_TAG_ID_BITS = 3 // FIXME: hardcoded
+  val dmemTagWidth = UUID_WIDTH + DCACHE_TAG_ID_BITS
   // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH
   val smemTagWidth = dmemTagWidth
 
@@ -590,8 +591,8 @@ class RadianceTileModuleImp(outer: RadianceTile)
         )
       }
 
-      // FIXME: Below might be unnecessary in upstream Vortex which coalesces dmem
-      // within the core.
+      // FIXME: Below might be unnecessary in upstream Vortex (25-02-17) which
+      // coalesces dmem within the core.
       //
       // Since the individual per-lane TL requests might come back out-of-sync between
       // the lanes, but Vortex core expects the per-lane responses to be synced,
@@ -692,61 +693,6 @@ class RadianceTileModuleImp(outer: RadianceTile)
       outer.dmemAggregateNode.out.foreach { bo =>
         dontTouch(bo._1.a)
         dontTouch(bo._1.d)
-      }
-    }
-
-    def connectSmem = {
-      // @perf: this would duplicate SourceGenerator table for every lane and eat
-      // up some area
-      val smemTLBundles = outer.smemNodes.map(_.out.head._1)
-      val smemTLAdapters = Seq.tabulate(outer.numLsuLanes) { _ =>
-        Module(
-          new VortexTLAdapter(
-            outer.smemSourceWidth,
-            new VortexBundleA(tagWidth = outer.smemTagWidth, dataWidth = 32),
-            new VortexBundleD(tagWidth = outer.smemTagWidth, dataWidth = 32),
-            outer.smemNodes.head.out.head
-          )
-        )
-      }
-
-      smemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          // tlAdapter.io.inReq <> coreMem.a
-          tlAdapter.io.inReq.valid := core.io.smem_a_valid(i)
-          tlAdapter.io.inReq.bits.opcode := core.io.smem_a_bits_opcode(3 * (i + 1) - 1, 3 * i)
-          tlAdapter.io.inReq.bits.size := core.io.smem_a_bits_size(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.source := core.io.smem_a_bits_source(outer.smemTagWidth * (i + 1) - 1, outer.smemTagWidth * i)
-          tlAdapter.io.inReq.bits.address := core.io.smem_a_bits_address(32 * (i + 1) - 1, 32 * i)
-          tlAdapter.io.inReq.bits.mask := core.io.smem_a_bits_mask(4 * (i + 1) - 1, 4 * i)
-          tlAdapter.io.inReq.bits.data := core.io.smem_a_bits_data(32 * (i + 1) - 1, 32 * i)
-      }
-      core.io.smem_a_ready := smemTLAdapters.map(_.io.inReq.ready).asUInt
-
-      core.io.smem_d_valid := smemTLAdapters.map(_.io.inResp.valid).asUInt
-      core.io.smem_d_bits_opcode := smemTLAdapters.map(_.io.inResp.bits.opcode).asUInt
-      core.io.smem_d_bits_size := smemTLAdapters.map(_.io.inResp.bits.size).asUInt
-      core.io.smem_d_bits_source := smemTLAdapters.map(_.io.inResp.bits.source).asUInt
-      core.io.smem_d_bits_data := smemTLAdapters.map(_.io.inResp.bits.data).asUInt
-      smemTLAdapters.zipWithIndex.foreach {
-        case (tlAdapter, i) =>
-          tlAdapter.io.inResp.ready := core.io.smem_d_ready(i)
-      }
-
-      (smemTLAdapters zip smemCounters).foreach { case (a, c) =>
-        when (a.io.inReq.fire && !a.io.inResp.fire) {
-          c.inc()
-        }.elsewhen (a.io.inResp.fire && !a.io.inReq.fire) {
-          c.dec()
-        }
-      }
-
-      performanceCounters(smemTLAdapters.map(_.io.inReq), smemTLAdapters.map(_.io.inResp),
-        desc = s"core${outer.radianceParams.coreId}-smem")
-
-      (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
-        tlOut.a <> tlAdapter.io.outReq
-        tlAdapter.io.outResp <> tlOut.d
       }
     }
 
@@ -858,7 +804,6 @@ class RadianceTileModuleImp(outer: RadianceTile)
 
     connectImem
     connectDmem
-    connectSmem
     connectTensor
     connectBarrier
     connectAccelerator

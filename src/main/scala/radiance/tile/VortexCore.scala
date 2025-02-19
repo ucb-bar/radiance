@@ -75,22 +75,6 @@ class VortexBundle(tile: RadianceTile)(implicit p: Parameters) extends CoreBundl
   val dmem_d_bits_data = Input(UInt((32).W))
   val dmem_d_ready = Output(UInt((1).W))
 
-  val smem_a_ready = Input(UInt((tile.numLsuLanes * 1).W))
-  val smem_a_valid = Output(UInt((tile.numLsuLanes * 1).W))
-  val smem_a_bits_opcode = Output(UInt((tile.numLsuLanes * 3).W))
-  val smem_a_bits_size = Output(UInt((tile.numLsuLanes * 4).W))
-  val smem_a_bits_source = Output(UInt((tile.numLsuLanes * tile.smemTagWidth).W))
-  val smem_a_bits_address = Output(UInt((tile.numLsuLanes * 32).W))
-  val smem_a_bits_mask = Output(UInt((tile.numLsuLanes * 4).W))
-  val smem_a_bits_data = Output(UInt((tile.numLsuLanes * 32).W))
-
-  val smem_d_valid = Input(UInt((tile.numLsuLanes * 1).W))
-  val smem_d_bits_opcode = Input(UInt((tile.numLsuLanes * 3).W))
-  val smem_d_bits_size = Input(UInt((tile.numLsuLanes * 4).W))
-  val smem_d_bits_source = Input(UInt((tile.numLsuLanes * tile.smemTagWidth).W))
-  val smem_d_bits_data = Input(UInt((tile.numLsuLanes * 32).W))
-  val smem_d_ready = Output(UInt((tile.numLsuLanes * 1).W))
-
   val tc_a_valid = Output(UInt(2.W))
   val tc_a_bits_address = Output(UInt((2 * 32).W))
   val tc_a_bits_tag = Output(UInt((2 * 4).W))
