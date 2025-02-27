@@ -1,4 +1,0 @@
-Programming Model
-=================
-
-TODO populate
