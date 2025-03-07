@@ -469,8 +469,6 @@ class RadianceTile private (
 
 class RadianceTileModuleImp(outer: RadianceTile)
     extends BaseTileModuleImp(outer) {
-  Annotated.params(this, outer.radianceParams)
-
   auto.elements.foreach({case (name, _) => 
       println(s"======= RadianceTile.elements.name: ${name}")
   })
