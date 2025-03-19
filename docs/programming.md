@@ -94,21 +94,6 @@ The Muon compiler should:
 * Copy the Neutrino binary into a special section;
 * Include ROM code that delivers the Neutrino binary.
 
-```
-// GEMM Q*KT
-gemmQK_job = job_invoke(MATMUL, dim,
-              smem_Q, smem_K, smem_QK);
-
-// Softmax
-int warps[] = {0,1,2,3};
-simt_job = gemmQK_job.wait(warps);
-do_softmax(smem_QK, smem_P);
-simt_job.complete();
-
-// GEMM P*V
-gemmPV_job = job_invoke(MATMUL, dim,
-              smem_P, smem_V, …);
-```
 
 ## Pipelined synchronization
 
@@ -128,37 +113,105 @@ In this case, you need two synchronization points:
 The `pipe.produce_wait()` and `pipe.consume_wait()` function handles the above
 two synchronizations, respectively.
 
-```
+
+## Memory Orchestration
+
+Shared memory is used as the main data sharing mechanism across jobs.
+Therefore, it makes sense to provide the programmer with high-level primitives
+to memory objects, rather than have them do manual allocation and address
+calculation.
+
+Primitives that need to be supported:
+
+* Memory allocation and de-allocation, i.e. `malloc()` and `free()`
+  * Need to have some alignment requirement to ensure fast SRAM accesses
+* FIFO queue primitives, i.e. `fifo.push()` and `fifo.pop()`
+  * Use case: Double-buffered pipelined scheduling
+  * Circular queue a good mapping for fixed-size SMEM usage
+  * Can be in software, although some SIMT opportunity costs.
+* Stacks, i.e. `stack.push()` and `stack.pop()`.
+  * Use case: BVH traversal stack
+  * Can be in software.
+* What else?
+
+Combining the pipelined sync + memory orchestration above, a double-buffered
+software pipelining loop code might look like:
+
+```cpp
 // pipeline initialization
-pipe = init_pipe();
+pipe = init_pipe(num_stages);
+fifo = init_fifo(num_stages, elem_size);
 pipe.invoke(PRODUCE, MATMUL, ...);
 ...
 
 while (...) {
-  // producer: wait for buffer use
+  // producer: wait for pipeline enqueue
   pipe.produce_wait();
-  producer_buf = pipe.produce_buf();
+  producer_buf = fifo.push();
   matmul_job = pipe.invoke(PRODUCE,
                MATMUL, producer_buf, ...);
 
-  // consumer: wait for buffer fill
+  // consumer: wait for pipeline dequeue
   pipe.consume_wait();
-  consumer_buf = pipe.consume_buf();
+  consumer_buf = fifo.pop();
   do_softmax(consumer_buf);
 
-
-  pipe.complete(CONSUME);
+  pipe.consume_complete();
 }
 ```
 
-### Discussions
+### Questions
 
-[] Should the pipeline usage be kept track in hardware, or in software?
-   * If in software, produce_wait() will block until a variable indicating
-     queue usage goes below 2 (2 stages in double-buffer); consume_wait()
-     will block until that number goes over 0.
-   * There's no real way to implement this other than a spinloop however,
-     because a thread cannot sleep itself; this might necessitate hardware
-     support in Neutrino.
-[] What happens if a job is a consumer of one pipeline and a producer of
-   another pipeline at the same time? 
+* Should the pipeline usage be kept track in hardware, or in software?
+  * If in software, produce_wait() will block until a variable indicating
+    queue usage goes below 2 (2 stages in double-buffer); consume_wait()
+    will block until that number goes over 0.
+  * There's no real way to implement this other than a spinloop however,
+    because a thread cannot sleep itself; this might necessitate hardware
+    support in Neutrino.
+* What happens if a job is a consumer of one pipeline and a producer of
+  another pipeline at the same time?
+
+## Job ID Allocation
+
+```cpp
+// GEMM Q*KT
+gemmQK_job = job_invoke(MATMUL, dim,
+              smem_Q, smem_K, smem_QK);
+
+// Softmax
+int warps[] = {0,1,2,3};
+simt_job = gemmQK_job.wait(warps);
+do_softmax(smem_QK, smem_P);
+simt_job.complete();
+
+// GEMM P*V
+gemmPV_job = job_invoke(MATMUL, dim,
+              smem_P, smem_V, …);
+```
+
+How does the programmer refer to another job in the code to do synchronization
+with it?
+
+- **Within a context**: If referring to jobs in the same thread, this can be done
+  by letting the management unit do allocation, and return the ID to the thread
+  context. Then refer back to the ID that’s stored in the register file (local
+  variable).
+  - This works across loop iterations, as long as you store the IDs across
+    iterations in e.g. an array.
+  - Can also be done statically, e.g. have a bit field in the ID be manually
+    specified in the program, which can simply be the loop iteration.
+- **Across contexts**: How does the programmer specify the job scheduled in a
+  different context (i.e. not at the same thread)? If we do dynamic allocation
+  of job ID independently across contexts, you cannot refer to jobs across
+  contexts easily.
+  - A static mapping scheme, where e.g. each thread gets mapped a static
+    range of job IDs, i.e. a bit field in the ID indicates the thread number.
+  - Programmer still needs to know how jobs are assigned within each thread,
+    e.g. what’s the ray tracing job in another thread
+      - Can be communicated via shared memory?
+      - Or, let the programmer again statically decide allocation scheme:
+        E.g. for each thread, ID offset 1 is matmul, offset 2 is RT. Most
+        flexible, simple, but can be burdensome.
+
+
