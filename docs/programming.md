@@ -105,13 +105,28 @@ execution of the consumer working on the previous data element.
 In this case, you need two synchronization points:
 * Consumer waits for the producer to "enqueue" the data.  This is the "true" data
   dependency that is intrinsic to the operation sequence.
-* Producer waits for the consumer to "dequeue" the data.  This is an "anti"
-  dependency that exists because of the resource constraints in storing
-  intermediate data to memory, e.g. waiting for a free space in the
-  double-buffer.
+* Producer waits for the consumer to "dequeue" the data.  This is a "false"
+  dependency that exists because of the resource constraints of not being able
+  to store an indefinite amount of intermediate data to the memory.
 
 The `pipe.produce_wait()` and `pipe.consume_wait()` function handles the above
 two synchronizations, respectively.
+
+To achieve this synchronization, there exists a semaphore variable that
+represents the current number of jobs enqueued to the pipeline.
+The `pipe.produce_wait()` call will block until the semaphore value becomes
+smaller than `num_stage - 1`, and `pipe.consume_wait()` until the value
+is larger than `0`.
+The actual increment and decrement of the semaphore will happen at
+`pipe.produce_complete()` and `pipe.consume_complete()`.
+
+In this way, you establish a critical region between `consume_wait()` and
+`consume_complete()` calls that guarantees at least one producer job has fully
+completed its operation and stored a valid result to the memory.
+
+This mechanism handles the synchronization aspect; in terms of how the data is
+communicated between the producer and consumer jobs, see [Memory
+Orchestration](#memory-orchestration).
 
 
 ## Memory Orchestration
@@ -171,6 +186,7 @@ while (...) {
     support in Neutrino.
 * What happens if a job is a consumer of one pipeline and a producer of
   another pipeline at the same time?
+
 
 ## Job ID Allocation
 
