@@ -316,7 +316,7 @@ extends Config((site, _, up) => {
 })
 
 class WithMemtraceCore(tracefilename: String, traceHasSource: Boolean = false)
-extends Config((site, _, _) => {
+extends Config((site, _, up) => {
   case MemtraceCoreKey => {
     require(
       site(SIMTCoreKey).isDefined,
@@ -324,6 +324,7 @@ extends Config((site, _, _) => {
     )
     Some(MemtraceCoreParams(tracefilename, traceHasSource))
   }
+  case SubsystemInjectorKey => up(SubsystemInjectorKey) + MemtraceInjector
 })
 
 class WithPriorityCoalXbar extends Config((site, _, up) => {
