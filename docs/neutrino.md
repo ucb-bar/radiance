@@ -91,10 +91,23 @@ At the buffer, the enqueued data must be *packed*. This is the means to convert 
 
 Within a DMA instance, bookkeeping is required to maintain a large number of in flight requests if the response is not guaranteed to be FIFO. Across all DMAs, requests for a common manager (either Get or Put) needs to be arbitrated with the QoS weights.
 > There could also be extensions to the "waist" of the DMA pipeline to reformat data, e.g. quantization or streaming normalization.
-## Programming Model
-As previously mentioned, Neutrino will receive a separate sequence of instructions than the Muon cores, and they will not be binary-compatible. The programming model will orbit around making this paradigm maximally user-friendly and easily implementable.
 
-This separate sequence of instructions are a list of **task handlers**, each behaving like a function, and is assigned an identifier automatically. When Muon wishes to invoke a task, the identifier will be used to select the desired routine for Neutrino to execute.
+## Software stack
+
+As previously mentioned, Neutrino will receive a separate sequence of
+instructions than the Muon cores, and they will not be binary-compatible. The
+programming model will orbit around making this paradigm maximally
+user-friendly and easily implementable.
+
+This separate sequence of instructions are a list of **task handlers**, each
+behaving like a function, and is assigned an identifier automatically. When
+Muon wishes to invoke a task, the identifier will be used to select the desired
+routine for Neutrino to execute.
+
+### Programming Model
+
+See [programming.md](programming.md).
+
 ### ISA Extension
 Since Neutrino needs to maintain compatibility with standard RISC-V software stacks, there will be little ISA modifications. However, to invoke Neutrino, the Muon ISA will require additional custom instructions.
 
@@ -143,99 +156,6 @@ As covered in the ISA commands, each invocation will produce a **run ID**, the i
 Although invocations might not be done by all threads (dependent on participation), all threads that encounters this instruction at all should receive the same run ID. ==TODO==: mechanism for this.
 
 When a run depends on another run, it will not be issued until all dependencies are met. There exists an edge case: if the prerequisite run does not exist, it should be treated as if there is no dependency. This is because if the prerequisite run finishes and retires before the dependent run is invoked, there could be a deadlock.
-### Software Stack
-The SIMT program would resemble this:
-Generated kernel header:
-```c
-typedef uint8_t run_id_t;
-typedef uint8_t task_id_t;
-task_id_t matmul_task = 1;
-typedef struct { void *addr_a; void *addr_b; } matmul_args_t;
-```
-GPU kernel (suppose there's a pipeline preprocess -> matmul -> postprocess):
-```c
-
-run_t preprocess_done;
-run_t matmul_done;
-
-if (warp_should_preprocess) {
-	while (still_have_stuff) {
-		preproc_done = neutrino_invoke(0, NO_DEPS, ASYNC | CLUSTER | MANUAL);
-		do_preprocess_stuff();
-		// notify consumer
-		neutrino_complete(preproc_done, PREPROCESS_WARPS);
-		
-		// kick off matmul asynchronously
-		neutrino_payload((matmul_args_t) {addr_a, addr_b});
-		matmul_done = neutrino_invoke(matmul_task, DEPS(preproc_done), ASYNC | SINGLE_THREAD | SIGNAL);
-	}
-} else if (warp_should_postprocess) {
-	while (still_have_stuff) {
-		// wait for matmul stage done
-		neutrino_invoke(0, DEPS(matmul_done), SYNC | SOME_WARPS | IMMEDIATE);
-		do_postprocess_stuff();
-	}
-}
-
-int stage0;
-int stage1;
-int stage2;
-
-if (preproc) {
-	while (i) {
-		sync();
-		invoke(stage0(i));
-		i++;
-	}
-} else {
-	while (i) {
-		sync();
-		wait(stage0(i));
-		i++;
-	}
-}
-
-function barrier(warps) {
-	neutrino_invoke(0, NO_DEPS, SYNC | warps | IMMEDIATE);
-}
-
-while (more_to_process) {
-	neutrino_payload((matmul_args_t) {addr_a, addr_b});
-	matmul_done = neutrino_invoke(matmul_task, NO_DEPS, ASYNC | SINGLE_THREAD | SIGNAL);
-
-	softmax_done = neutrino_invoke(0, DEPS(prev_matmul_done), SYNC | ALL_WARPS | DUMMY | MANUAL);
-	do_softmax();
-	neutrino_complete(softmax_done, ALL_WARPS);
-
-	prev_matmul_done = matmul_done;
-}
-
-// synchronize the whole cluster
-neutrino_invoke(0, NO_DEPS, SYNC | CLUSTER | DUMMY | IMMEDIATE);
-do_gpu_stuff();
-```
-In reality this is also way too verbose. There is probably a good way of generating all this boilerplate - good target for 265 project?
-
-Neutrino's source:
-```c
-void matmul_task(void *addr_a, void* addr_b) {
-	do_matmul();
-	maybe_complete_the_matmul_run();
-}
-```
-The Neutrino binary compiler, which runs first, should:
-* Assign `matmul_task` a task ID;
-* Identify the function arguments and make a struct;
-* Generate a header file for SIMT so that it could reference both the task ID and the task argument struct;
-* Attach boilerplate such as the interrupt handler;
-* Generate a binary with the task functions.
-
-The Muon compiler should:
-* Automatically include the generated Neutrino header file;
-* Assemble the invoke and complete instructions into single lines;
-* Expand the payload calls into multiple instructions, as required by the payload size;
-* Copy the Neutrino binary into a special section;
-* Include ROM code that delivers the Neutrino binary.
 ### Task Invocation Procedure
 When a task is successfully scheduled, an interrupt is sent to Neutrino, and the task arguments are moved onto the CPU stack by the interrupt handler. Once the stack frame is set-up, the interrupt handler delegates control back to the task function by jumping to a static address corresponding to the task ID.
 

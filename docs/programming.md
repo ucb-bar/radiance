@@ -95,7 +95,7 @@ The Muon compiler should:
 * Include ROM code that delivers the Neutrino binary.
 
 
-## Pipelined synchronization
+## Pipelined Synchronization
 
 A common use case for job orchestration is pipelined synchronization, where the
 producer job and consumer job runs concurrently in a pipelined manner.  The
@@ -118,11 +118,13 @@ The `pipe.produce_wait()` call will block until the semaphore value becomes
 smaller than `num_stage - 1`, and `pipe.consume_wait()` until the value
 is larger than `0`.
 The actual increment and decrement of the semaphore will happen at
-`pipe.produce_complete()` and `pipe.consume_complete()`.
+`pipe.produce_complete()` and `pipe.consume_complete()`, which represents
+enqueueing and dequeueing a job to the pipeline, respectively.
 
 In this way, you establish a critical region between `consume_wait()` and
 `consume_complete()` calls that guarantees at least one producer job has fully
-completed its operation and stored a valid result to the memory.
+completed its operation and stored a valid result to the memory.  The same
+holds for `produce_wait()` and `produce_complete()`.
 
 This mechanism handles the synchronization aspect; in terms of how the data is
 communicated between the producer and consumer jobs, see [Memory
@@ -161,21 +163,38 @@ pipe.invoke(PRODUCE, MATMUL, ...);
 
 while (...) {
   // producer: wait for pipeline enqueue
+  // this will register a SIMT job that waits for semaphore <= n-1
   pipe.produce_wait();
   producer_buf = fifo.push();
+  // this will register a matmul job
   matmul_job = pipe.invoke(PRODUCE,
                MATMUL, producer_buf, ...);
+  // this will associate the matmul job with produce completion signaling,
+  // mark completion to the SIMT producer job,
+  // and asynchronously retire from SIMT
+  pipe.produce_complete_on(matmul_job);
 
   // consumer: wait for pipeline dequeue
+  // this will register a SIMT job that waits for semaphore > 0
   pipe.consume_wait();
   consumer_buf = fifo.pop();
   do_softmax(consumer_buf);
-
+  // this will decrement the semaphore,
+  // mark completion to the SIMT consumer job,
+  // and asynchronously retire from SIMT
   pipe.consume_complete();
 }
 ```
 
-### Questions
+Note on `pipe.produce_complete_on(job)`: This function should inform Neutrino
+that the `job` should signal the pipeline's produce end on completion, in
+addition to marking completion on the SIMT producer job that was registered at
+`pipe.produce_wait()`.  This ensures that the matmul job's completion signals
+the pipeline and not the SIMT's, which completes immediately after
+asynchronously invoking matmul.
+
+
+### Discussions
 
 * Should the pipeline usage be kept track in hardware, or in software?
   * If in software, produce_wait() will block until a variable indicating
