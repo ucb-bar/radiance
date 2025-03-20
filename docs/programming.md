@@ -170,8 +170,8 @@ while (...) {
   matmul_job = pipe.invoke(PRODUCE,
                MATMUL, producer_buf, ...);
   // this will associate the matmul job with produce completion signaling,
-  // mark completion to the SIMT producer job,
-  // and asynchronously retire from SIMT
+  // and mark completion to the SIMT producer job.
+  // this operation will never block.
   pipe.produce_complete_on(matmul_job);
 
   // consumer: wait for pipeline dequeue
@@ -180,8 +180,8 @@ while (...) {
   consumer_buf = fifo.pop();
   do_softmax(consumer_buf);
   // this will decrement the semaphore,
-  // mark completion to the SIMT consumer job,
-  // and asynchronously retire from SIMT
+  // and mark completion to the SIMT consumer job.
+  // this operation will never block.
   pipe.consume_complete();
 }
 ```
@@ -192,7 +192,6 @@ addition to marking completion on the SIMT producer job that was registered at
 `pipe.produce_wait()`.  This ensures that the matmul job's completion signals
 the pipeline and not the SIMT's, which completes immediately after
 asynchronously invoking matmul.
-
 
 ### Discussions
 
@@ -209,44 +208,64 @@ asynchronously invoking matmul.
 
 ## Job ID Allocation
 
+**Problem 1**: When do we de-allocate a job ID: completion or "used"?
+
+If we mark a job as completed but hold on to the job ID without de-allocating
+it, it eliminates any ambiguity to a job's state.  However, it creates pressure
+for the structural resource necessary to store the jobs that are completed.
+Moreover it becomes an issue to decide when it is safe to retire those jobs:
+you can never know ahead-of-time when the job will never be referred again in
+the future in a program.
+
+Therefore we choose to de-allocate a job's ID as soon as it completes.
+However, now an un-allocated ID can mean two things -- the job hasn't started
+yet, or it has completed and retired from the scoreboard.
+
+To work around this issue, we need to differentiate between the two state using
+the _value_ of the ID.  A simple solution is to allocate IDs using an
+ever-incrementing counter.  This implies that if a younger job has a higher ID
+than that of another job that it depends on, but that ID is retired from
+scoreboard, then we can guarantee that job has already run and finished.
+Because the counter is in hardware and has limited bit-width, this creates a
+wrap-around issue; for this, we need to reasonably assume the maximum possible
+number of outstanding jobs, and use that to determine if an older-but-higher ID
+falls within that range from the younger ID.
+
+**Problem 2**: How does the programmer refer to another job to synchronize to
+it, especially when the job is running in a different context (e.g. thread,
+warp, threadblock)?  The current context would have no knowledge on the ID of
+this job because it did not participate in the allocation process in any way.
+
+The simplest solution is to let the programmer allocate the ID completely
+statically and manually.  The ID will contain bit fields that indicate
+(1) the unique ID given to that job, and (2) the ID of the "context" that
+that job was created in, and (3) the monotonically-increasing counter that
+represents causality.  While (3) will be abstracted away in hardware,
+(1) and (2) must be specified manually via the API.
+
+An example use case is in ReSTIR GI, where the spatial re-sampling stage of the
+current thread has to wait until the neighboring pixel thread's initial
+sampling stage finishes.  That code might look like:
+
 ```cpp
-// GEMM Q*KT
-gemmQK_job = job_invoke(MATMUL, dim,
-              smem_Q, smem_K, smem_QK);
+// Initial sampling stage
+initial_job = job_invoke(SIMT, INIT_JOB_ID, tid);
+...
+initial_job.complete();
 
-// Softmax
-int warps[] = {0,1,2,3};
-simt_job = gemmQK_job.wait(warps);
-do_softmax(smem_QK, smem_P);
-simt_job.complete();
-
-// GEMM P*V
-gemmPV_job = job_invoke(MATMUL, dim,
-              smem_P, smem_V, …);
+// Spatial resampling stage
+let neighbors = get_neighbors();
+for neighbor_id in neighbors {
+  job_wait(INIT_JOB_ID, neighbor_id);
+  
+  // access neighbor’s sample data in SMEM
+  rad = smem_reservoirs[neighbor_id];
+  ...
+}
 ```
 
-How does the programmer refer to another job in the code to do synchronization
-with it?
-
-- **Within a context**: If referring to jobs in the same thread, this can be done
-  by letting the management unit do allocation, and return the ID to the thread
-  context. Then refer back to the ID that’s stored in the register file (local
-  variable).
-  - This works across loop iterations, as long as you store the IDs across
-    iterations in e.g. an array.
-  - Can also be done statically, e.g. have a bit field in the ID be manually
-    specified in the program, which can simply be the loop iteration.
-- **Across contexts**: How does the programmer specify the job scheduled in a
-  different context (i.e. not at the same thread)? If we do dynamic allocation
-  of job ID independently across contexts, you cannot refer to jobs across
-  contexts easily.
-  - A static mapping scheme, where e.g. each thread gets mapped a static
-    range of job IDs, i.e. a bit field in the ID indicates the thread number.
-  - Programmer still needs to know how jobs are assigned within each thread,
-    e.g. what’s the ray tracing job in another thread
-      - Can be communicated via shared memory?
-      - Or, let the programmer again statically decide allocation scheme:
-        E.g. for each thread, ID offset 1 is matmul, offset 2 is RT. Most
-        flexible, simple, but can be burdensome.
-
-
+Although it would be great to have `initial_job = job_invoke(...);` bind an ID
+that is unique within a context but consistent across contexts so that you
+could later simply call `initial_job.wait(neighbor_id)`, that prohibits the
+`job_invoke()` function to be called within a data-dependent control branch,
+which is overly strict.
