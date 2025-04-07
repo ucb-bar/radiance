@@ -15,6 +15,7 @@ import radiance.tile._
 import radiance.core._
 import radiance.memory._
 import radiance.subsystem.RadianceGemminiDataType.{BF16, FP16, FP32, Int8}
+import testchipip.soc.{SubsystemInjectorKey}
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
