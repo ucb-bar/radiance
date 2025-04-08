@@ -72,6 +72,54 @@ I1-type instructions will have 1 source register and 1 destination register. Thi
 **Special case for shift-immediate instructions.** Shift amount remains `imm[6:0]`. Shift opcode will still occupy the same bits in the immediate (`[11:7]`); however it will no longer overlap with where `funct7` is in R-types. 
 **Special case for CSR instructions.** The CSR source/dest used to be encoded in the imm12 field; it's now 32-bits (nice and wide, as it should be). The CSR immediate used to be encoded in the 5-bit rs1 address; it will still occupy rs1 in Muon but will expand to use 8 bits.
 
+### Neutrino Instructions
+```
+63  60 59               54 53  52 51  44 43  36 35  28 27  20 19    18   17   16 9 8     7 6           0 
+[pred] [ elem_count[5:0] ] [part] [dep2] [dep1] [dep0] [task] [retire] [sync] [rd] [opext] [op_neutrino]
+```
+
+Free opcodes:  
+Custom 0~3: `0b 2b 5b 7b`  
+Others: `1f 3f 5f 6b 77 ff`
+
+**`opext`** specifies the type of neturino instruction.
+
+* `2'b00` is `nu.invoke`;
+* `2'b01` is `nu.payload`;
+* `2'b10` is `nu.complete`;
+* `2'b11` is reserved.
+
+**`retire`**: specifies the retirement mode.
+
+* `2'b00` is immediate retirement, and is represented with suffix `*.ir*`;
+* `2'b01` is hardware retirement (task specific), suffix `*.hr`;
+* `2'b10` is manual retirement `*.mr`;
+* `2'b11` is reserved.
+
+**`part`**: specifies the participation mode.
+
+* `2'b00` waits for `elem_count + 1` threads, and is represented with suffix `*.pt`;
+* `2'b01` is warps, suffix `*.pw`;
+* `2'b10` is cores, sufffix `*.pc`;
+* `2'b11` is reserved.
+
+Note: `elem_count` stores the number of participants plus one, so the maximum representable value is 256. Minimum is 1 (since at least one thread will execute this instruction). When specifying this value in assembly, there's no need to subtract one as it's handled by the compiler. It is also an immediate, so the value needs to be known beforehand.
+
+**`dep0`** through **`dep2`** specifies the jobs the invocation depends on. Format:
+```
+31         24 23      0
+[pipe_prefix] [counter]
+```
+
+**`task`** is the register address that holds the task ID to invoke. Value of zero means it's a dummy invocation.
+
+**`sync`** when set means the invocation is synchronous, async otherwise.
+
+**Assembly mnemonic**
+* Payload: `nu.payload /*task id=*/t1, /*payload0=*/a0, /*payload1=*/a1, /*payload2=*/a2`
+* Invoke: `nu.invoke.mr.pt.async /*rd=*/t1, /*task id=*/MATMUL, /*dep0=*/t0, /*dep1*/zero, /*dep2=*/zero, /*num_elems=*/1`
+* Complete: `nu.complete.pt /*job id=*/t1, /*num_elems=*/1`
+
 ## New Registers
 
 At 128 registers, we have 96 additional registers to allocate.
@@ -81,51 +129,3 @@ There will be 48 additional `s` registers, for a total of 60
 
 For now we double the number of floating point registers to 64, with each type having the same share of the new 32 (i.e. 8 `a` regs, 12 `s` regs, 12 `t` regs).
 
-
-## TODO list
-
-- [x] Define all instruction types
-- [x] RISCVAsmParser to parse immediates
-- [x] Instruction type IDs in InstrFormats
-- [x] RVInst definitions
-- [x] Immediate generation logic
-- [ ] Fixups
-	- [x] I2 fixups
-	- [x] I3 fixups <- make sure upper 12-bit works
-	- [ ] call fixup, make sure auipc gets the right value
-- [x] CSR instructions format
-- [x] ExpandPseudoInsts to eliminate `lui` and `auipc` insertion logic
-	- [x] lui
-	- [x] auipc (cant really eliminate, esp. with linker relocation)
-- [x] Define the new registers
-- [x] Alias definitions
-- [x] Node patterns
-- [x] Frame lowering (calling convention) register saving
-- [x] Register allocation priority
-- [x] Disassembler
-- [x] AsmParser
-- [x] AsmWriter
-- [x] Get the whole thing to compile
-- [ ] Basic ISA emulator
-	- [x] Fetch
-	- [x] Decode
-	- [x] Execute
-	- [x] Memory
-	- [x] Writeback
-- [ ] Testing
-	- [x] Basic syntax
-	- [ ] Calling convention (register saving, argument passing, etc)
-	- [ ] All immediates
-	- [ ] Base rv32 ISA tests
-	- [x] Directives
-	- [x] Registers above 32, GPR and FP
-	- [ ] PC-relative stuff
-		- [ ] all kinds of jumps
-		- [ ] pc relative loads
-		- [ ] pc relative stores
-		- [ ] function calls
-- [ ] Long term goals
-	- [ ] Implement support for I3 instructions
-		- [ ] add a fixup
-		- [ ] add node pattern match
-		- [ ] 
