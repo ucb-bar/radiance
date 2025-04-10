@@ -15,6 +15,7 @@ import radiance.tile._
 import radiance.core._
 import radiance.memory._
 import radiance.subsystem.RadianceGemminiDataType.{BF16, FP16, FP32, Int8}
+import testchipip.soc.{SubsystemInjectorKey}
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -316,7 +317,7 @@ extends Config((site, _, up) => {
 })
 
 class WithMemtraceCore(tracefilename: String, traceHasSource: Boolean = false)
-extends Config((site, _, _) => {
+extends Config((site, _, up) => {
   case MemtraceCoreKey => {
     require(
       site(SIMTCoreKey).isDefined,
@@ -324,6 +325,7 @@ extends Config((site, _, _) => {
     )
     Some(MemtraceCoreParams(tracefilename, traceHasSource))
   }
+  case SubsystemInjectorKey => up(SubsystemInjectorKey) + MemtraceInjector
 })
 
 class WithPriorityCoalXbar extends Config((site, _, up) => {

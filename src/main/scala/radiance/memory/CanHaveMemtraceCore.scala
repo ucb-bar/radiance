@@ -5,16 +5,16 @@ import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import radiance.core.{SIMTCoreKey, MemtraceCoreKey}
+import testchipip.soc.{SubsystemInjector}
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore
 
 // The trait is attached to DigitalTop of Chipyard system, informing it indeed
 // has the ability to attach GPU tracer node onto the system bus
-trait CanHaveMemtraceCore { this: BaseSubsystem =>
-  implicit val p: Parameters
-
+case object MemtraceInjector extends SubsystemInjector((p, baseSubsystem) => {
   p(MemtraceCoreKey).map { param =>
+    implicit val q: Parameters = p
     // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
     val simtParam = p(SIMTCoreKey).get
     val config = DefaultCoalescerConfig.copy(
@@ -24,7 +24,7 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
     val numLanes = simtParam.nMemLanes
     val filename = param.tracefilename
 
-    val sbus = locateTLBusWrapper(SBUS)
+    val sbus = baseSubsystem.locateTLBusWrapper(SBUS)
     // Need to explicitly generate clock domain; see rocket-chip 8881ccd
     val memtracerDomain = sbus.generateSynchronousDomain
     memtracerDomain {
@@ -77,4 +77,4 @@ trait CanHaveMemtraceCore { this: BaseSubsystem =>
       sbus.coupleFrom(s"gpu-tracer") { _ :=* upstream }
     }
   }
-}
+})
