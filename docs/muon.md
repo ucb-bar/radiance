@@ -41,7 +41,28 @@ power-gating.
 
 ## Key Microarchitecture Features
 
-* Dynamic warp occupancy
+#### Dynamic warp occupancy
+
+Muon adaptively sets the number of warps in multithreaded execution depending
+on the kernel's register usage.  If the kernel uses a small number of
+registers, Muon schedules many warps to increase the opportunity of hiding long
+pipeline stalls with multithreading; if the kernel's register usage is high, it
+scales down concurrent warps to prevent running out of the physical register
+space.
+
+This gives the programmer a useful lever to trade-off thread-level parallelism
+for more register space in the kernel.  While high TLP helps with
+latency-hiding, more register space lets each thread to participate in many
+concurrent operations, which also enables latency-hiding capabilities with
+instruction-level
+[parallelism](https://www.nvidia.com/content/gtc-2010/pdfs/2238_gtc2010.pdf).
+An example is the GEMM kernel with large per-thread tile sizes and aggressive
+loop-unrolling.
+
+Dynamic warp occupancy is also necessary requirement from Muon's ISA, which
+dramatically expands the number of architectural registers from RISC-V's 32 to
+256.  Without virtualizing the architectural registers, it is challenging to
+fit them into the physical space.
 
 * Efficient operand collector
 
