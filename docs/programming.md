@@ -215,7 +215,8 @@ it, it eliminates any ambiguity to a job's state.  However, it creates pressure
 for the structural resource necessary to store the jobs that are completed.
 Moreover it becomes an issue to decide when it is safe to retire those jobs:
 you can never know ahead-of-time when the job will never be referred again in
-the future in a program.
+the future in a program, because you only specify dependencies from the
+consumer's end, not from the producer's.
 
 Therefore we choose to de-allocate a job's ID as soon as it completes.
 However, now an un-allocated ID can mean two things -- the job hasn't started
