@@ -85,7 +85,7 @@ TODO.
 
 ## Performance Target
 
-Let's first discuss the "hyperparameters" for Muon, from which we derive other
+We first discuss the "hyperparameters" for Muon, from which we derive other
 microarchitectural design parameters.
 
 | Hyperparameter                   | Target Value | Unit         | Notes |
@@ -99,8 +99,8 @@ microarchitectural design parameters.
 * **Memory bandwidth**: Needs to be balanced with SIMT compute bandwidth.
   * Register file:
   * L1 cache: `NT * IPC * WORDSIZE = 32 * 1 * 4 = 128 bytes/clk`
-* **Memory latency**: Determines
+* **Memory latency**: Determines LSU queue depth and instruction buffer depth.
   * L1 cache: <10 cycles
   * L2 cache: 10~30 cycles
 
-Reference: [https://jsmemtest.chipsandcheese.com/latencydata]
+Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
