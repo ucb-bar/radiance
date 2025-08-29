@@ -5,6 +5,12 @@ Muon is the SIMT core of the Radiance GPU that executes shader instructions of
 a Radiance device program.  Its design focuses on being stable, flexible, and
 power-efficient.
 
+## Contents
+
+* **Design Goals**: this doc
+* **Performance Target**: this doc
+* **Issue Logic**: [link](issue.md)
+
 ## Design Goals
 
 ### Stability and extensibility
@@ -64,16 +70,37 @@ dramatically expands the number of architectural registers from RISC-V's 32 to
 256.  Without virtualizing the architectural registers, it is challenging to
 fit them into the physical space.
 
-* Efficient operand collector
+* Operand-forwarding paths
+
+TODO.
 
 * Hardware threadblock scheduler
 
-* Operand-forwarding paths
+TODO.
+
+* Efficient operand collector
+
+TODO.
 
 
-## TODO
+## Performance Target
 
-[] Target system and perf/power curve.  Embedded/mobile; desktop; datacenter?
-   Expected power budget?
+Let's first discuss the "hyperparameters" for Muon, from which we derive other
+microarchitectural design parameters.
 
-[] Flesh out microarchitectural features.
+| Hyperparameter                   | Target Value | Unit         | Notes |
+| -------------------------------- | ------------ | ------------ | ----- |
+| Architectural warp width `VLEN`  | 32           | Threads/warp |       |
+| uArchitectural warp width `DLEN` | 16           | Threads/warp |       |
+
+
+### Memory system
+
+* **Memory bandwidth**: Needs to be balanced with SIMT compute bandwidth.
+  * Register file:
+  * L1 cache: `NT * IPC * WORDSIZE = 32 * 1 * 4 = 128 bytes/clk`
+* **Memory latency**: Determines
+  * L1 cache: <10 cycles
+  * L2 cache: 10~30 cycles
+
+Reference: [https://jsmemtest.chipsandcheese.com/latencydata]
