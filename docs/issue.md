@@ -1,10 +1,16 @@
 Issue Logic
 ===========
 
+Module Interface
+----------------
+
+Inputs: TODO
+Outputs: TODO
+
 Reservation Station
 -------------------
 
-Key features of Muon's reservation stations are:
+Key features of Muon's reservation station are:
 
 * **Intra-warp OoO issue**.  Unlike a scoreboard design, the RS looks past a
   blocked head and issues a later independent instruction *inside a single
@@ -29,7 +35,9 @@ A major difference with RS designs in CPU OoO is:
     simplifies the renaming hardware since no freeing of phys regs happen
     during the kernel runtime, and the renaming logic boils down to simple
     linear allocation.
-  * WAR hazard is a non-issue since we don't support precise exceptions.
+  WAR hazard is a non-issue since we don't support precise exceptions.
+
+**TODO**: Determine if "issue queue" is a better terminology than RS.
 
 Operand Fetch
 -------------

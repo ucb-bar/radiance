@@ -85,22 +85,45 @@ TODO.
 
 ## Performance Target
 
-We first discuss the "hyperparameters" for Muon, from which we derive other
-microarchitectural design parameters.
+We first discuss a number of *hyperparameters* for Muon from which we derive
+other microarchitectural design parameters.
 
-| Hyperparameter                   | Target Value | Unit         | Notes |
-| -------------------------------- | ------------ | ------------ | ----- |
-| Architectural warp width `VLEN`  | 32           | Threads/warp |       |
-| uArchitectural warp width `DLEN` | 16           | Threads/warp |       |
+### Capacity
 
+| Parameter                        | Target Value | Unit             | Notes |
+| -------------------------------- | ------------ | ---------------- | ----- |
+| Arch. warp width `VLEN`          | 32           | Threads/warp     |       |
+| Arch. word size	                 | 32           | Bits             |       |
+| Arch. register file size (max)   | 128          | Regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
+| Arch. register file size (min)   | 32           | Regs/thread/warp | Determines # of warp slots in the hardware  |
+| Physical register file size	     | 65536        | Bytes            |       |
 
-### Memory system
+**TODO**: Separate DLEN vs. VLEN.
 
-* **Memory bandwidth**: Needs to be balanced with SIMT compute bandwidth.
-  * Register file:
-  * L1 cache: `NT * IPC * WORDSIZE = 32 * 1 * 4 = 128 bytes/clk`
-* **Memory latency**: Determines LSU queue depth and instruction buffer depth.
-  * L1 cache: <10 cycles
-  * L2 cache: 10~30 cycles
+### Bandwidth
 
-Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
+| Parameter                        | Target Value | Unit              | Notes |
+| -------------------------------- | ------------ | ----------------- | ----- |
+| Max IPC                          | 1            | Warp-inst/cycle   | Single-wide issue per warp; Wide issue across warps is possible. |
+| FP32 SIMT FLOPS                  | 1            | FLOP/thread/cycle |       |
+| FP16 SIMT FLOPS                  | 2            | FLOP/thread/cycle |       |
+| Register operands                | 4            | regs/inst         | rs1/rs2/rs3/rs4 |
+| RF Read Bandwidth                | 256          | Bytes/cycle       | Assumes no bank conflict |
+| L1 Bandwidth                     | 64           | Bytes/cycle       | Word-sized access per thread |
+| L2 Bandwidth                     | 32           | Bytes/cycle       | Requires 2x reuse at L1 |
+
+### Latency
+
+TODO.  Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
+
+## Pipeline Architecture
+
+TODO populate.
+* **Instruction buffer**: Decoupling front-end from back-end instruction buffer & decoupling FE from BE.
+  * Back-end hiccups (e.g. RF conflicts, WAW stalls) should not stall the
+    front-end and reduce instruction fetch throughput.  In OoO CPUs, this is
+    mitigated by deep reservation stations, but deep RS is expensive for GPUs
+    due to high number of threads and large register operand sizes.
+    Instead, we bound the depth of RS, but have a separate instruction buffer
+    before the RS to still achieve high elasticity without enlarging issue
+    window size that directly adds HW complexity.
