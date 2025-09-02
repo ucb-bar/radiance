@@ -92,11 +92,11 @@ other microarchitectural design parameters.
 
 | Parameter                        | Target Value | Unit             | Notes |
 | -------------------------------- | ------------ | ---------------- | ----- |
-| Arch. warp width `VLEN`          | 32           | Threads/warp     |       |
-| Arch. word size	                 | 32           | Bits             |       |
-| Arch. register file size (max)   | 128          | Regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
-| Arch. register file size (min)   | 32           | Regs/thread/warp | Determines # of warp slots in the hardware  |
-| Physical register file size	     | 65536        | Bytes            |       |
+| Arch. warp width `VLEN`          | 32           | threads/warp     |       |
+| Arch. word size	                 | 32           | bits             |       |
+| Arch. register file size (max)   | 128          | regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
+| Arch. register file size (min)   | 32           | regs/thread/warp | Determines # of warp slots in the hardware  |
+| Physical register file size	     | 65536        | bytes            |       |
 
 **TODO**: Separate DLEN vs. VLEN.
 
@@ -104,13 +104,13 @@ other microarchitectural design parameters.
 
 | Parameter                        | Target Value | Unit              | Notes |
 | -------------------------------- | ------------ | ----------------- | ----- |
-| Max IPC                          | 1            | Warp-inst/cycle   | Single-wide issue per warp; Wide issue across warps is possible. |
-| FP32 SIMT FLOPS                  | 1            | FLOP/thread/cycle |       |
-| FP16 SIMT FLOPS                  | 2            | FLOP/thread/cycle |       |
+| Max IPC                          | 1            | warp-inst/cycle   | Single-wide issue per warp; Wide issue across warps is possible |
+| INT32 SIMT FLOPS                 | 1            | FLOP/thread/cycle |       |
+| FP32 SIMT FLOPS                  | 1            | FLOP/thread/cycle | 2x for FP16 |
 | Register operands                | 4            | regs/inst         | rs1/rs2/rs3/rs4 |
-| RF Read Bandwidth                | 256          | Bytes/cycle       | Assumes no bank conflict |
-| L1 Bandwidth                     | 64           | Bytes/cycle       | Word-sized access per thread |
-| L2 Bandwidth                     | 32           | Bytes/cycle       | Requires 2x reuse at L1 |
+| RF Read Bandwidth                | 256          | bytes/cycle       | Assumes no bank conflict |
+| L1 Bandwidth                     | 64           | bytes/cycle       | Word-sized access per thread |
+| L2 Bandwidth                     | 32           | bytes/cycle       | Requires 2x reuse at L1 |
 
 ### Latency
 
@@ -118,12 +118,16 @@ TODO.  Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
 
 ## Pipeline Architecture
 
+![Pipeline architecture](fig/pipeline.svg)
+
 TODO populate.
-* **Instruction buffer**: Decoupling front-end from back-end instruction buffer & decoupling FE from BE.
-  * Back-end hiccups (e.g. RF conflicts, WAW stalls) should not stall the
-    front-end and reduce instruction fetch throughput.  In OoO CPUs, this is
-    mitigated by deep reservation stations, but deep RS is expensive for GPUs
-    due to high number of threads and large register operand sizes.
-    Instead, we bound the depth of RS, but have a separate instruction buffer
-    before the RS to still achieve high elasticity without enlarging issue
-    window size that directly adds HW complexity.
+Descriptions of each pipeline stage:
+
+* **Instruction buffer**: Decouples the core front-end from the back-end.
+  * Back-end hiccups (e.g. RF bank conflicts, FU port conflicts) should not
+    stall the front-end and underutilize the available fetch bandwdith.  In OoO
+    CPUs, this is mitigated by deep issue queue / reservation stations
+    decoupling FE from BE. However, IQ/RS is expensive due to its CAM
+    structure, and moreso with wide SIMT operand bits.  Instead, we put a
+    separate instruction buffer before the RS to achieve high elasticity
+    without enlarging issue window size and incurring HW cost.
