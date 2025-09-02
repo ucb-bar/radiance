@@ -97,3 +97,4 @@ vortex_vsrc.$(CONFIG): $(RADIANCE_EXTERNAL_SRCS)
 		fi; \
 	done
 	touch $@
+
