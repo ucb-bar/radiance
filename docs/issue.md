@@ -183,7 +183,7 @@ future optimization.
 Memory capacity requirement of the scoreboard using a per-reg bit vector
 design:
 
-(`PREG=256` registers) * (1 bit/reg) = **256 bits = 32 bytes**.
+(`PREG=256` registers) * (1 pendingWrite bit/reg + 2 pendingReads bit/reg) = **768 bits (96 bytes)**.
 
 ## Reservation Station
 
