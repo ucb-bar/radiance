@@ -7,6 +7,19 @@ Module Interface
 Inputs: TODO
 Outputs: TODO
 
+Overview
+--------
+
+TODO: Central scoreboard and distributed reservation stations working in conjunction.
+
+![Issue stage](fig/issue.svg)
+
+Scoreboard
+----------
+
+TODO Consideration: Per-reg busy bits vs. vector of counters.
+TODO Number of of bits for per-reg design.
+
 Reservation Station
 -------------------
 
