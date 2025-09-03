@@ -10,17 +10,54 @@ Outputs: TODO
 
 ![Issue stage](fig/issue.svg)
 
-TODO: Central scoreboard and distributed reservation stations working in conjunction.
+Central scoreboard and distributed reservation stations working in conjunction. (TODO)
 
 ## Scoreboard
 
-TODO Consideration: Per-reg busy bits vs. vector of counters.
+The main role of the scoreboard is to bookkeep pending writes and reads to
+registers by in-flight instructions.  Pending write/read checks are necessary
+to correctly stall for WAR/WAW hazards, and determine whether to read operand
+from the PRF or forward from the EX stage for RAW hazards.
+
+See [hazard check](#hazard-check) for the detailed hazard detection logic.
 
 ### Memory requirements
 
 For a per-reg busy bit design:
 
 (`PREG=256` registers) * (1 bit/reg) = **256 bits = 32 bytes**
+
+### Hazard check
+
+**Gate admission to the reservation station.**  
+
+#### RAW hazard
+
+#### WAR hazard
+
+#### WAW hazard
+
+Since we don't eliminate WAW/WAR hazards via full register renaming, we simply
+resolve WAW hazards by stalling.  Specifically, we gate admission of an
+instruction to the RS if the instruction's destination register already has a
+pending write.  This way, we guarantee that there is only one write
+to every register within the RS issue window
+
+```
+i0: add r5 <-   
+i1: sub    <- r5
+i2: add r5 <-     # XXX blocked admission; otherwise younger reads (i3)
+                  # cannot be distinguished from older reads (i1)
+i3: mul    <- r5
+```
+
+The final RS admission logic becomes:
+
+```
+admit[inst] iff:
+    pendingWrite[inst.rd] == 0
+```
+
 
 ## Reservation Station
 
@@ -30,10 +67,10 @@ Key features of Muon's reservation station are:
   blocked head and issues a later independent instruction *inside a single
   warp.* This allows making progress past a long-stalling memory op and
   uncovering some amount of intra-warp ILP.
-* **Operand forwarding and collection**.  The RS stores the data bits for each
-  register operand, not only the busy bits.  This allows the RS to book PRF
-  read request from the operand collector, while at the same time receiving
-  forwarded data from the EX stage.
+* **Unified handling of operand forwarding and collection**.  The RS stores the
+  data bits for each register operand, not only the busy bits.  This allows the
+  RS to book PRF read request from the operand collector, while at the same
+  time receiving forwarded data from the EX stage.
 
 A major difference with RS designs in CPU OoO is:
 
