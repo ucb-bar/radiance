@@ -1,27 +1,28 @@
 Issue Logic
 ===========
 
-Module Interface
-----------------
+## Module Interface
 
 Inputs: TODO
 Outputs: TODO
 
-Overview
---------
-
-TODO: Central scoreboard and distributed reservation stations working in conjunction.
+## Overview
 
 ![Issue stage](fig/issue.svg)
 
-Scoreboard
-----------
+TODO: Central scoreboard and distributed reservation stations working in conjunction.
+
+## Scoreboard
 
 TODO Consideration: Per-reg busy bits vs. vector of counters.
-TODO Number of of bits for per-reg design.
 
-Reservation Station
--------------------
+### Memory requirements
+
+For a per-reg busy bit design:
+
+(`PREG=256` registers) * (1 bit/reg) = **256 bits = 32 bytes**
+
+## Reservation Station
 
 Key features of Muon's reservation station are:
 
@@ -29,10 +30,10 @@ Key features of Muon's reservation station are:
   blocked head and issues a later independent instruction *inside a single
   warp.* This allows making progress past a long-stalling memory op and
   uncovering some amount of intra-warp ILP.
-* **Operand collection**.  The RS stores the data bits for each register
-  operand, not only the busy bits.  This allows the RS to pre-issue operand
-  read from the PRF, potentially overlapping PRF access latency with receiving
-  forwarded data from the functional units.
+* **Operand forwarding and collection**.  The RS stores the data bits for each
+  register operand, not only the busy bits.  This allows the RS to book PRF
+  read request from the operand collector, while at the same time receiving
+  forwarded data from the EX stage.
 
 A major difference with RS designs in CPU OoO is:
 
@@ -52,12 +53,7 @@ A major difference with RS designs in CPU OoO is:
 
 **TODO**: Determine if "issue queue" is a better terminology than RS.
 
-Operand Fetch
--------------
-
-TODO
-
-Operand Forwarding
-------------------
+Operand Collector
+-----------------
 
 TODO
