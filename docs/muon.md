@@ -9,7 +9,9 @@ power-efficient.
 
 * **Design Goals**: this doc
 * **Performance Target**: this doc
-* **Issue Logic**: [link](issue.md)
+* **Issue Stage**: [link](issue.md)
+* **Warp Scheduler**: [link](warp_sched.md)
+* **Register Renaming**: [link](rename.md)
 
 ## Design Goals
 
