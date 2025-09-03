@@ -64,8 +64,9 @@ This requires the scoreboard to keep track of a `pendingReads` signal per regist
 incrementing it when admitting an instruction that reads the register to the
 RS, and decrementing when its PRF read is complete.
 Importantly, `pendingReads` must be incremented only for regs that are
-**actually read from the PRF**.  Otherwise, if the regs are to be forwarded
-from the fabric, their values have no risk to be clobbered by WB.
+**actually read from the PRF**.  Otherwise, if the regs are forwarded
+from the fabric, we don't need to protect them as their values will not be
+clobbered by an out-of-order WB.
 In summary, the logic for `pendingReads` becomes:
 
 ```
@@ -89,16 +90,16 @@ false hazards are frequent.
 ##### Option 2: Stall WB of younger writes
 
 A second option is to use the same `pendingReads` counter, but **stall the
-writeback of the younger write**.  In the above example, we don't gate
-admission of `i1` to the RS.  Instead, we stall writeback of `i1`
-until `pendingReads[r5]` reaches 0.
+writeback of the younger write**.  Going back to the above example, instead of
+gating admission of `i1` to the RS, we stall writeback of `i1` until
+`pendingReads[r5]` reaches 0.  This ensures `i0` reads the correct old value
+from PRF without getting clobbered by `i1`.
 
 **TODO**: this likely requires a writeback buffer so that stalled writebacks do not
 stall the whole EX pipeline.
 
-
-**Non-issue**: By allowing WAR in the RS, it seems like we risk clobbering younger
-reads to the write (`i2` below):
+**Non-issue**: With this option, it seems like we risk clobbering younger reads
+after the WAR (`i2` below):
 
 ```
 i0: lw     <- 0(r5)
@@ -106,9 +107,14 @@ i1: add r5 <-        # write-after-read
 i2: sub    <- r5     # different form i0's r5
 ```
 
-However, this is correctly handled by the RAW hazard logic setting `busy` bit
-in the RS, causing `r5` to be forwarded from `i1` and not from the PRF that
-contains `i0`'s value.
+However, this is correctly handled by the forwarding logic from `i1`,
+preventing `r5` from being read from the PRF that contains `i0`'s value.
+The forwarding is guaranteed by the RAW hazard logic seeing `pendingWrite[r5]
+== 1` and accordingly setting `busy` bit in the RS.
+
+Note that this requires a **must-forward invariant**, i.e. forwarding fabric
+must not drop any value due to arbitrating multiple writebacks.  This further
+necessitates having a writeback buffer (TODO).
 
 
 #### WAW hazard
@@ -133,6 +139,38 @@ The final RS admission logic becomes:
 admitRS[inst] iff:
     pendingWrites[inst.rd] == 0
 ```
+
+##### Optimization: Allow past-WAW admission to RS
+
+Gating RS admission on a WAW gives up opportunity of discovering ILP
+on younger instructions that are completely independent.  For example:
+
+```
+i0: add r5 <-   
+i1: sub    <- r5
+i2: add r5 <-     # XXX blocked admission
+i3: lw     <- r4
+```
+
+`i3` does not consume or produce `r5`, and is safe to enter the RS.  However,
+gating `i2` causes head-of-line blocking at the instruction buffer, since
+IBUF-to-RS admission is done strictly in program-order at the head end of IBUF.
+
+A fence-based scheme is possible to avoid this: Add a per-reg `Fence` bit to
+the scoreboard, and set it upon seeing WAW at IBUF head.
+Then, **look past the head of IBUF**, and **only** gate RS admission if the
+instruction's rs or rd has `Fence` set.
+`Fence` is cleared when the older write completes writeback.
+
+```
+admitRS[inst] iff:
+    (Fence[rs] == 0 for all rs in inst.rs0/1/2) AND
+    (Fence[inst.rd] == 0 AND pendingWrites[inst.rd])
+```
+
+This scheme increases hardware complexity, since now the hazard logic needs to
+sequentially walk IBUF entries past the FIFO head. This is best to be left for
+future optimization.
 
 
 ### Hardware requirements
