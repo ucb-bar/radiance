@@ -100,9 +100,7 @@ other microarchitectural design parameters.
 | Arch. word size	                 | 32           | bits             |       |
 | Arch. register file size (max)   | 128          | regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
 | Arch. register file size (min)   | 32           | regs/thread/warp | Determines # of warp slots in the hardware  |
-| Physical register file size	     | 65536        | bytes            |       |
-
-**TODO**: Separate DLEN vs. VLEN.
+| Physical register file size	     | 16384        | bytes            |       |
 
 ### Bandwidth
 
