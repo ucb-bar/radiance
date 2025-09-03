@@ -15,15 +15,20 @@ Central scoreboard and distributed reservation stations working in conjunction. 
 ## Scoreboard
 
 The main role of the scoreboard is to **bookkeep pending writes and reads to
-registers from in-flight instructions**.  Pending write/read checks are
-necessary to correctly stall for WAR/WAW hazards, and determine whether to read
-operand from the PRF or forward from the EX stage for RAW hazards.
+registers from in-flight instructions**.  Bookkeeping pending register writes
+and reads are crucial to (1) correctly handle WAR/WAW hazards, and also to (2)
+determine whether to read operand from the PRF or forward from EX for RAW
+hazards.
 
-See [hazard check](#hazard-check) for the detailed hazard detection logic.
+The scoreboard is largely left as the bookkeeping states themselves, and the
+combinational logic that handles hazard checks is split to a separate module.
 
 ### Hazard check
 
-**Gate admission to the reservation station.**  
+The main role of the hazard check module is to:
+
+* **Gate admission of an IBUF entry to the reservation station.**
+* **Correctly populate `busy` bit of the RS entry.**
 
 #### RAW hazard
 
