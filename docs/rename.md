@@ -7,61 +7,83 @@ assigns physical register (PR) name to it. The block assumes that per-warp AR
 usage will never exceed the limit specified by the command processor, so it
 does not maintain a free list.
 
+The rename stage also takes the source ARs, which should already be mapped, and
+translate them into physical registers. This done by reading the map table.
+
 The block is instantiated per core, and takes care of all threads of all warps
-in that core.
+in that core. It is **in parallel with Decode** and makes **IBuffer store PRs**.
+As a result, it takes one instruction per clock.
 
 ## Parameters
 
-* Number of total PR (names): tentatively max 128 regs @ 4w: 512 PRs
+* Number of total PR (names): tentatively max 32 regs @ 8w: 256 PRs
+* Max number of warps: 8
 
 ## Top Level IO
 
-* Input valid: derived from whether the instruction writes to RD
-* AR name: derived from the RD field
-* Warp name: which warp is currently active, corresponds to the AR
+From I$ & parallel decode:
+* Input valid: was there a fetch from I$?
+* Write valid: derived from whether the instruction writes to RD (decode)
+* ARD, ARS1, ARS2, ARS3
+* Warp ID
 * (Log) Regs per warp: set by the command processor
 * Reset assignments: Unbinds all ARs seen
 
+To IBuffer:
+* Renamed instruction
+* Warp ID
+
+**Q: IBuffer: stores decoded bundle (uops)?**
+
 ## Operation
 
-TODO: block diagram
+![Block Diagram](fig/rename.png)
 
-Upon reset, the block initializes the map to empty, all warp usage counters to
-0, and all bitmaps to all zeros. The map needs to be a 1R1W dual port SRAM, as
-deep as the total number of PRs.
+Upon reset, the block initializes the map to all point to phyiscal register 0,
+all warp usage counters to 0. Bitmaps set to false. The map needs to be 4R1W,
+`log(PRs)` bits wide, and as deep as the total number of PRs.
+
+Bitmap register is separate to accelerate valid checking before write enable.
+Alternative design point would be to have a valid bit alongside the mapping.
+However, we want to 1. mux this separately, and 2. overprovision number of busy
+bits so that we don't have to do the address calculation first.
+
+Due to the high read requirement and relative small size, this array should be a
+flop array. TODO: check if there's a suitable RF SRAM macro (256x8 4R1W).
 
 ### Stage 0:
-
-R0 is a special case and will always map to P0. Short circuit the request.
 
 When a register rename request comes in, the bitmap register for that warp is
 checked to see if the incoming AR has already been assigned. The inverse of
 this is fed to the enable of the warp usage counter, incrementing it when a new
 assignment is made. The bitmap register is updated.
 
-In parallel, the SRAM address is calculated: `ar + wid << log_regs_per_warp`,
-and read request is passed to the map SRAM, regardless of AR assignment.
+In parallel, the array read address is calculated: `ar + wid <<
+log_regs_per_warp`, and read request is passed to the map array, regardless of
+AR assignment.
+
+AR0 is a special case and will always map to PR0. Short circuit the request.
 
 ### Stage 1:
 
-SRAM read result is available; counter + 1 is flopped. Based on whether a new
-AR was allocated in stage 0, output one of these two.
+Array read result is available after flopping a cycle; counter + 1 is flopped.
+Based on whether a new AR was allocated in stage 0, output one of these two and
+concatenate with other bits of the instruction (demux'd) into the correct
+IBuffer.
 
-In parallel, if a new AR was allocated, initiate a write to the SRAM to store
-the new assignment. If a new request arrived to ask for the same AR, bypass the
-SRAM read (same cycle R/W to same address, undefined behavior) and forward the
-new assignment next cycle. Need to take care this happens 1 time max.
+**Q: If IBuffer is empty, have flow=true?**
+
+In parallel, if a new AR was allocated, initiate a write to the array to store
+the new assignment. If a new request arrived to ask for the same AR in any
+register, bypass the array read and forward the new assignment next cycle. Need
+to take care this happens 1 time max.
 
 ## Future Improvements
 
-### Full Renaming
+### Compiler Static Renaming
 
-It might be desirable to allow one AR to map to multiple PRs to allow WAW and
-WAR elimination. This is possible because an AR with multiple alive PRs will
-eventually settle down on one PR after all instructions are drained. However,
-to ensure fairness among warps, the oversubscription of PRs must be done in a
-uniform fashion. Furthermore, this requires the block to keep track of a free
-list.
+We should not need to do this mapping based on a table if the compiler can
+assign sequential register names.
 
 ### Multiple Renames per Cycle
 
