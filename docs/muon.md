@@ -125,6 +125,35 @@ other microarchitectural design parameters.
 
 Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
 
+## Top-level IO
+
+### Cluster-level IO
+
+This section describes the port IO between the Radiance cluster, which contains
+multiple Muon cores + SMEM + L1$, and the system NoC.
+
+* **1 Command Processor control port**
+  * ~32b total. **TODO** spec out.
+
+* **1 Host/Device DMA TL A/D port**
+  * Port width: `305+278 = 583 bits`
+    * TL A: `1b ready + 1b valid + 3+3b opcode/param + 4b size + 4b source + 32b address + 256b data + 1b corrupt = 305 bits`
+    * TL D: `1b ready + 1b valid + 3+3b opcode/param + 4b size + 4b source + 4b sink + 1b denied + 256b data + 1b corrupt = 278 bits`
+      * Assumes 256b-wide data
+      * **TODO** source/sink/corrupt... metadata fields subject to change.
+
+* **4 L1<->NoC TileLink ports**
+  * 4 L1 banks * 1 TL A/D port/bank
+  * Port width: `176+149 = 325 bits`
+    * TL A: `1b ready + 1b valid + 3+3b opcode/param + 3b size + 4b source + 32b address + 128b data + 1b corrupt = 176 bits`
+    * TL D: `1b ready + 1b valid + 3+3b opcode/param + 3b size + 4b source + 4b sink + 1b denied + 128b data + 1b corrupt = 149 bits`
+      * Data width follows L1 bank width = 16 bytes (64 bytes per warp / 4 banks).
+      * **TODO** source/sink/corrupt... metadata fields subject to change.
+  * Aggregate width: `325 * 4 = 1300 bits`
+
+Note SMEM does not expose ports at the cluster.
+
+
 ## Pipeline Architecture
 
 ![Pipeline architecture](fig/pipeline.svg)
