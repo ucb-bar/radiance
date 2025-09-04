@@ -9,7 +9,9 @@ power-efficient.
 
 * **Design Goals**: this doc
 * **Performance Target**: this doc
-* **Issue Logic**: [link](issue.md)
+* **Issue Stage**: [link](issue.md)
+* **Warp Scheduler**: [link](warp_sched.md)
+* **Register Renaming**: [link](rename.md)
 
 ## Design Goals
 
@@ -92,29 +94,36 @@ other microarchitectural design parameters.
 
 | Parameter                        | Target Value | Unit             | Notes |
 | -------------------------------- | ------------ | ---------------- | ----- |
-| Arch. warp width `VLEN`          | 32           | threads/warp     |       |
+| Arch. warp width `VLEN`          | 16           | threads/warp     |       |
+| uArch. warp width `DLEN`	       | 16           | bits             |       |
+| Warp slots per core	             | 8            | warps            |       |
 | Arch. word size	                 | 32           | bits             |       |
 | Arch. register file size (max)   | 128          | regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
 | Arch. register file size (min)   | 32           | regs/thread/warp | Determines # of warp slots in the hardware  |
-| Physical register file size	     | 65536        | bytes            |       |
-
-**TODO**: Separate DLEN vs. VLEN.
+| Physical register file size	     | 16384        | bytes            |       |
 
 ### Bandwidth
 
 | Parameter                        | Target Value | Unit              | Notes |
 | -------------------------------- | ------------ | ----------------- | ----- |
 | Max IPC                          | 1            | warp-inst/cycle   | Single-wide issue per warp; Wide issue across warps is possible |
-| INT32 SIMT FLOPS                 | 1            | FLOP/thread/cycle |       |
-| FP32 SIMT FLOPS                  | 1            | FLOP/thread/cycle | 2x for FP16 |
+| INT32 SIMT FLOPS                 | 1            | FLOP/thread/cycle | 16 INT PEs for 16-wide warps. |
+| FP32 SIMT FLOPS                  | 0.5          | FLOP/thread/cycle | 8 FP32 PEs for 16-wide warps. |
+| FP16 SIMT FLOPS                  | 1            | FLOP/thread/cycle | Assumes 2x bit-scaling from FP32 |
 | Register operands                | 4            | regs/inst         | rs1/rs2/rs3/rs4 |
-| RF Read Bandwidth                | 256          | bytes/cycle       | Assumes no bank conflict |
-| L1 Bandwidth                     | 64           | bytes/cycle       | Word-sized access per thread |
+| RF Read Bandwidth Requirement    | 256          | bytes/cycle       | Minimum RF BW needed for no conflict, 4 operands |
+| L1 Bandwidth                     | 64           | bytes/cycle       | Provisioned for single-word access per thread |
 | L2 Bandwidth                     | 32           | bytes/cycle       | Requires 2x reuse at L1 |
 
 ### Latency
 
-TODO.  Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
+| Parameter                        | Target Value | Unit              | Notes |
+| -------------------------------- | ------------ | ----------------- | ----- |
+| L1 Hit Latency                   | 8            | cycles            | TODO: Arbitrary. Commercial: 16-32 cycles. |
+| L2 Hit Latency                   | 20           | cycles            | TODO: Arbitrary. Commercial: ~100 cycles. |
+| DRAM Latency                     | 100          | cycles            | TODO: Arbitrary. Commercial: >400 cycles @1GHz, see reference |
+
+Reference: [link](https://jsmemtest.chipsandcheese.com/latencydata)
 
 ## Pipeline Architecture
 

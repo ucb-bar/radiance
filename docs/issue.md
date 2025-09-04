@@ -12,6 +12,11 @@ Outputs: TODO
 
 Central scoreboard and distributed reservation stations working in conjunction. (TODO)
 
+We go after the following key performance opportunities in the issue stage:
+
+* **Past-head-of-line intra-warp ILP.**
+* **Bank conflict smoothing.**
+
 ## Scoreboard
 
 The main role of the scoreboard is to **bookkeep pending writes and reads to
@@ -221,6 +226,12 @@ A major difference with RS designs in CPU OoO is:
 
 Forwarding fabric may be expensive, since operand bits are wide
 (`VLEN*WORDSIZE`=64 bytes) and it must be broadcasted to *all* RS entries.
+
+Memory requirements:
+
+Each RS entry: (3b warp + 32b PC + 7b opcode + 16b tmask + (8b preg# + 1b valid + 1b busy + 16*32b data) * 4 operands = 2146 bits
+
+16-entry RS (2 per warp): 34336 bits = 4292 bytes
 
 **TODO**: Elaborate.
 
