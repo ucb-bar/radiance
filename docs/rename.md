@@ -43,13 +43,10 @@ Upon reset, the block initializes the map to all point to phyiscal register 0,
 all warp usage counters to 0. Bitmaps set to false. The map needs to be 4R1W,
 `log(PRs)` bits wide, and as deep as the total number of PRs.
 
-Bitmap register is separate to accelerate valid checking before write enable.
-Alternative design point would be to have a valid bit alongside the mapping.
-However, we want to 1. mux this separately, and 2. overprovision number of busy
-bits so that we don't have to do the address calculation first.
+Bitmap register is separate to accelerate valid checking before counter
+increment, instead of adding a valid bit to an array entry.
 
-Due to the high read requirement and relative small size, this array should be a
-flop array. TODO: check if there's a suitable RF SRAM macro (256x8 4R1W).
+This array should either be a flop array or two 2R1W SRAMs.
 
 ### Stage 0:
 
@@ -58,9 +55,8 @@ checked to see if the incoming AR has already been assigned. The inverse of
 this is fed to the enable of the warp usage counter, incrementing it when a new
 assignment is made. The bitmap register is updated.
 
-In parallel, the array read address is calculated: `ar + wid <<
-log_regs_per_warp`, and read request is passed to the map array, regardless of
-AR assignment.
+In parallel, the array is being read, using the concatenation of `wid` and `rd`
+through `rs3`. The result is flopped.
 
 AR0 is a special case and will always map to PR0. Short circuit the request.
 
@@ -83,7 +79,8 @@ to take care this happens 1 time max.
 ### Compiler Static Renaming
 
 We should not need to do this mapping based on a table if the compiler can
-assign sequential register names.
+assign sequential register names. This will greatly reduce the total table size
+and eliminate the need for SRAMs.
 
 ### Multiple Renames per Cycle
 
