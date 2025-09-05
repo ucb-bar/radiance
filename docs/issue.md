@@ -224,16 +224,27 @@ A major difference with RS designs in CPU OoO is:
 
 ### Hardware requirements
 
+#### Memory requirements
+
+It is necessary to store the metadata fields used for writeback broadcasting
+separately from the data fields used at the dispatch time, since the two have
+different access characteristics.
+
+* Each RS entry: 1625 bits
+  * Metadata fields: 1b valid + (8b preg# + 1b valid + 1b busy) * 3 operands = 31 bits
+    * Access: CAM for clearing busy bit on writeback
+  * Data fields: (3b warp + 32b PC + 7b opcode + 16b tmask + (16*32b data) * 3 operands = 1594 bits
+    * Access: 1R 1W
+      * 1R: Read 1 entry selected by dispatch scheduler, dispatch it to FU.
+        * **May need >1R** if RS is per-FU-class, serving multiple FU pipes.
+      * 1W: Choose 1 entry out of the ones that matched writeback broadcast in
+        the metadata table, and forward data to it
+* 16-entry RS (2 per warp): 496b metadata table, 25504b data table
+
+#### Wiring requirements
+
 Forwarding fabric may be expensive, since operand bits are wide
 (`VLEN*WORDSIZE`=64 bytes) and it must be broadcasted to *all* RS entries.
-
-Memory requirements:
-
-Each RS entry: (3b warp + 32b PC + 7b opcode + 16b tmask + (8b preg# + 1b valid + 1b busy + 16*32b data) * 4 operands = 2146 bits
-
-16-entry RS (2 per warp): 34336 bits = 4292 bytes
-
-**TODO**: Elaborate.
 
 
 Operand Collector
