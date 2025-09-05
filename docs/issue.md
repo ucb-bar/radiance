@@ -219,7 +219,14 @@ A major difference with RS designs in CPU OoO is:
     linear allocation.
   WAR hazard is a non-issue since we don't support precise exceptions.
 
-**TODO**: Determine if "issue queue" is a better terminology than RS.
+* **TODO**: Decouple data fields from metadata fields to lower forwarding cost
+  * Option: Fewer collector buffers than RS entries; forwarding goes to
+    collector buffers only.  Position collector buffers closer to the FUs to
+    reduce wiring.
+
+* **TODO**: Store age for load/store instructions
+  * Necessary for LSU to determine program order of load/stores within a thread
+  * Capped by in-flight memory ops, i.e. LSU queue depth
 
 
 ### Hardware requirements
