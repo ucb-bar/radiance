@@ -16,8 +16,8 @@ This block is instantiated per core.
 
 ## Parameters
 
-* Max number of warps
-* IPDOM stack size
+* Max number of warps: 8
+* IPDOM stack size: 8
 
 ## Top Level IO
 
@@ -132,6 +132,33 @@ if/else setup, Execute informs the scheduler of which threads are taking the
 
 Upon predecoding a join, the stack is popped or updated; see Stages section.
 
+### I-Cache pipelining & stalls
+
+The warp scheduler will keep running ahead for PC increments and requesing I$.
+The I$, being non-blocking, will pipeline internally. Assuming without misses,
+we assume full throughput every cycle, as well as a small and relatively fixed
+latency. I$ misses can stall the pipeline (relies on internal pipelines to hide
+that miss).
+
+The pre-decoder will be the source of information for cutting the flow from I$
+to IBuffer. It is the job the warp scheduler to prevent any hazardous
+instructions from entering the IBuffer. A pipeline register holds the I$ read
+response while the predecoder processes it; the corresponding PC is fed to the
+stall tracker and the PCs for potential stalling & PC restoration.
+
+If the pre-decoder determines a **stall is not necessary**, the pipeline
+register holding the instruction releases it into the next stage (Rename).
+
+If the pre-decoder determines a **stall is necessary**, The pipeline register
+releases the current instruction it holds and subsequently blocks all incoming
+instructions, **until the warp ID changes**. The PC of that warp rolls back to
+the stalling instruction's PC + 8, and the stall tracker takes note of the
+stalling PC.
+ 
+This means that the I$ will carry the PC and the warp ID through the request and
+back with the response. TODO: can HellaCache support this user data field?
+
+
 ### Branch/jump/mask resolution
 
 The Writeback stage gives the branch/jump destinations, as well as updated
@@ -147,5 +174,17 @@ and the thread mask value is set to all 1s. All of these are done at the same
 time so the state is synchronized when being scheduled.
 
 TODO: do we need to stall CSRs as well?
+
+## SRAM Physical Dimensions
+
+IPDOM stack: max warps * depth * (pc width + tmask width * 2 + 2) = 528B
+(64x66b) 1R1W
+Mask/PC state: max warps * (pc width + tmask width) = peanuts
+Stall tracker: max warps * (pc width + 1) = peanuts
+
+
+
+
+
 
 ## Future Improvements
