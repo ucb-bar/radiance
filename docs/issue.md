@@ -1,6 +1,12 @@
 Issue Logic
 ===========
 
+## Contents
+
+* Scoreboard: [link](#scoreboard)
+* Reservation Station [link](#reservation-station)
+* Operand collector: [link](#operand-collector)
+
 ## Module Interface
 
 Inputs: TODO
@@ -262,8 +268,7 @@ Forwarding fabric may be expensive, since operand bits are wide
 (`VLEN*WORDSIZE`=64 bytes) and it must be broadcasted to *all* RS entries.
 
 
-Operand Collector
------------------
+## Operand Collector
 
 ![Collector stage](fig/collector.svg)
 
@@ -295,7 +300,7 @@ the cost scales with `B*C*NT*XLEN = 8*4*16*32b`.
 Therefore, we need to keep `C` manageable, by potentially storing fewer
 collector entries than there are RS entries.
 
-## Operand Forwarding
+### Operand Forwarding
 
 Upon writeback, the result data may be forwarded to the collector banks
 directly without experiencing latency of PRF write -> PRF read re-arbitration
@@ -310,3 +315,9 @@ When the forwarded WB data wins over PRF read data at the bank egress, this
 should also be notified to the **collector allocator**, so that it knows the
 lost read needs to be re-scheduled.  Therefore, the WB bus needs some
 connectivity to the allocator as well.
+
+**Wiring cost**: Since the forwarding bus is pulled from the bank-local WB bus,
+there is no extra broadcasting fabric to all collector banks, and the
+bank-collector crossbar is reused with low overhead.  This design lowers wiring
+cost compared to an alternative where the WB bus is broadcasted to every
+collector bank with the 2:1 MUX selector positioned at the collector ingress.
