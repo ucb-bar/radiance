@@ -267,22 +267,24 @@ Operand Collector
 
 ![Collector stage](fig/collector.svg)
 
-Operand collector consists of two main storages:
+Operand collector consists of the following components:
 
 * **Physical register file banks.**  PRF is banked by the register number.
   We use a simple, static round-robin banking scheme of `Bank[reg] = reg mod n_banks`.
 * **Collector banks** stage the operand data that are read so far, either from
   the PRF or from the forwarding fabric.
-  Collectors are banked by the FU pipe so that the connectivity to FUs are direct and low-cost.
-  Each collector row contains all operand fields, PC/rs1/rs2/rs3, which makes
-  single-cycle issue straightforward.
+  Collectors are banked by the FU pipe so that the connectivity to FUs is
+  direct and low-cost. Each collector row contains all operand fields,
+  PC/rs1/rs2/rs3, which makes single-cycle issue straightforward.
 * **Collector allocator** serves two purposes:
   * **Arbitrates PRF banks** to choose conflict-free bank accesses.  This
-    requires reading *all* entriy's preg# fields from the RS and
-    solving an M-to-N matching problem.
-  * **Allocates a collector entry** for each RS entry as possible.  This
-    happens when (1) new entry is admitted to RF, and (2) there is available
-    space in the collector bank that matches the instruction's FU type
+    requires reading *all* entry's preg# fields from the RS and finding a
+    combination that maps to as many different banks as possible.
+  * **Allocates a collector entry** for each RS entry.  This happens when (1)
+    a new entry is admitted to the RS, and (2) there exist available space in
+    the collector bank that matches the instruction's FU type.
+    The (2) condition may not always hold when e.g. instruction mix is skewed
+    and a single FU-type collector bank runs out of space.
 
 ### Decoupling collector capacity vs RS
 
@@ -291,8 +293,20 @@ have high wiring cost; for a `B=8` banks and `C=4` collectors,
 the cost scales with `B*C*NT*XLEN = 8*4*16*32b`.
 
 Therefore, we need to keep `C` manageable, by potentially storing fewer
-collector entries than there are RS entries.  This does not add complexity
-with dynamic allocation, because allocation is already required in cases where
-instruction mix is skewed and a per-FU collector bank runs out of space.
+collector entries than there are RS entries.
 
 ## Operand Forwarding
+
+Upon writeback, the result data may be forwarded to the collector banks
+directly without experiencing latency of PRF write -> PRF read re-arbitration
+into collectors.
+
+The forwarded data is pulled from the WB fabric, which is bank-local at the
+write port, and bypassed to the PRF read port, where a 2:1 MUX selects **WB
+data** vs. **PRF read data**.  The WB data is **prioritized** to allow fast
+forwarding and reduce RAW hazard stalls.
+
+When the forwarded WB data wins over PRF read data at the bank egress, this
+should also be notified to the **collector allocator**, so that it knows the
+lost read needs to be re-scheduled.  Therefore, the WB bus needs some
+connectivity to the allocator as well.
