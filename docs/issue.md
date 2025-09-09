@@ -219,10 +219,18 @@ A major difference with RS designs in CPU OoO is:
     linear allocation.
   WAR hazard is a non-issue since we don't support precise exceptions.
 
-* **TODO**: Decouple data fields from metadata fields to lower forwarding cost
-  * Option: Fewer collector buffers than RS entries; forwarding goes to
-    collector buffers only.  Position collector buffers closer to the FUs to
-    reduce wiring.
+### Splitting metadata/data fields across RS/collector
+
+The reservation station stores instruction metadata fields (e.g. op type,
+physical register #, valid/busy bits) separately from the operand data fields.
+This is because the metadata requires high-throughput CAM access for wake-up
+broadcast on writeback and operand collector allocation.  As such, the metadata
+fields are best stored in fast flip-flops.
+
+On the other hand, the operand data fields have modest memory access
+requirements: Single-row access per cycle for operand read and write-back. They
+also have high capacity demand due to their wide bit widths (`NT*XLEN`). SRAM
+arrays serve as the best storage of choice.
 
 * **TODO**: Store age for load/store instructions
   * Necessary for LSU to determine program order of load/stores within a thread
@@ -257,4 +265,4 @@ Forwarding fabric may be expensive, since operand bits are wide
 Operand Collector
 -----------------
 
-TODO
+![Collector stage](fig/collector.svg)
