@@ -1,11 +1,49 @@
-The Muon ISA will be a modified RISC-V ISA that is targeted towards graphics usage.
+Muon ISA
+========
 
-Key features are:
-* 64-bit instead of 32-bit instruction words. No mixed instruction sizes;
-* Up to 4 source operands and 1 destination operand can fit in a single instruction;
-* Support for a predicate register field;
-* Much larger immediate number;
-* Extended opcode space.
+Muon ISA is an extended RISC-V ISA that enables writing kernels that
+reflect performance characteristics of a modern GPU hardware with minimal
+ISA-level overhead.
+
+Its key features are:
+
+* 64-bit instruction encoding, which allows for:
+* **Up to 256 architectural registers** per thread, with microarchitecture
+  support for dynamic warp occupancy;
+* **Up to 4 source operands and 1 destination operand** per instruction;
+* Support for **predicated execution**;
+* **Extended immediate and opcode fields**.
+
+
+## Motivation
+
+RISC-V ISA is originally designed for CPUs that has many architectural
+incompatibilities to GPU programming.  Some of its limitations include:
+
+* **Small register space** of 32 integer and 32 floating-points prevent
+  allocating a high number of registers per-thread.  This creates two problems:
+  * Limited support for **dynamic warp occupancy** that allows the programmer
+    to trade thread-level parallelism for increased instruction-level
+    parallelism.  This mechanism is extensively used in modern GEMM kernels to
+    allow better intra-warp data reuse and increase Tensor Core utilization.
+  * **Increased register spills to the stack.**  GPU kernels heavily rely on
+    loop unrolling and code inlining to increase ILP and reduce
+    branching/function call overheads.  RISC-V's small register space induces
+    frequent spills to the stack memory, which has high overhead in the GPU
+    memory system.
+* **No support for predicated execution** limits the ISA to always rely on
+  explicit branch divergence/reconvergence instructions, which incurs high
+  instruction slot overhead for small branches.
+* **Limited number of opcodes and operand fields** limits mapping specialized
+  operations efficiently to the ISA, e.g. Tensor Core operations with
+  register-pair operands and graphics operations on quad primitives.  This
+  leads to fragmenting an operation to multiple instruction slots, which incurs
+  high cost in the SIMT frontend.
+
+These limitations of RISC-V motivate Muon ISA's key features stated above.
+
+
+## Instruction Format
 
 ### R-type
 R-type instructions will include current RISC-V R-type instructions, as well as R4-type instructions used by Vortex and floating point instructions. In particular, the `funct2` field in R4 will be delegated to the last two bits of `funct7`, with the upper 5 bits set to 0. It has this format:
