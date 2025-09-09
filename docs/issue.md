@@ -266,3 +266,33 @@ Operand Collector
 -----------------
 
 ![Collector stage](fig/collector.svg)
+
+Operand collector consists of two main storages:
+
+* **Physical register file banks.**  PRF is banked by the register number.
+  We use a simple, static round-robin banking scheme of `Bank[reg] = reg mod n_banks`.
+* **Collector banks** stage the operand data that are read so far, either from
+  the PRF or from the forwarding fabric.
+  Collectors are banked by the FU pipe so that the connectivity to FUs are direct and low-cost.
+  Each collector row contains all operand fields, PC/rs1/rs2/rs3, which makes
+  single-cycle issue straightforward.
+* **Collector allocator** serves two purposes:
+  * **Arbitrates PRF banks** to choose conflict-free bank accesses.  This
+    requires reading *all* entriy's preg# fields from the RS and
+    solving an M-to-N matching problem.
+  * **Allocates a collector entry** for each RS entry as possible.  This
+    happens when (1) new entry is admitted to RF, and (2) there is available
+    space in the collector bank that matches the instruction's FU type
+
+### Decoupling collector capacity vs RS
+
+The **crossbar** that connects PRF bank output ports to collector input ports
+have high wiring cost; for a `B=8` banks and `C=4` collectors,
+the cost scales with `B*C*NT*XLEN = 8*4*16*32b`.
+
+Therefore, we need to keep `C` manageable, by potentially storing fewer
+collector entries than there are RS entries.  This does not add complexity
+with dynamic allocation, because allocation is already required in cases where
+instruction mix is skewed and a per-FU collector bank runs out of space.
+
+## Operand Forwarding
