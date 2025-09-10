@@ -1,6 +1,12 @@
 Issue Logic
 ===========
 
+## Contents
+
+* **Scoreboard**: [link](#scoreboard)
+* **Reservation Station**: [link](#reservation-station)
+* **Operand collector**: [link](#operand-collector)
+
 ## Module Interface
 
 Inputs: TODO
@@ -219,10 +225,18 @@ A major difference with RS designs in CPU OoO is:
     linear allocation.
   WAR hazard is a non-issue since we don't support precise exceptions.
 
-* **TODO**: Decouple data fields from metadata fields to lower forwarding cost
-  * Option: Fewer collector buffers than RS entries; forwarding goes to
-    collector buffers only.  Position collector buffers closer to the FUs to
-    reduce wiring.
+### Splitting metadata/data fields across RS/collector
+
+The reservation station stores instruction metadata fields (e.g. op type,
+physical register #, valid/busy bits) separately from the operand data fields.
+This is because the metadata requires high-throughput CAM access for wake-up
+broadcast on writeback and operand collector allocation.  As such, the metadata
+fields are best stored in fast flip-flops.
+
+On the other hand, the operand data fields have modest memory access
+requirements: Single-row access per cycle for operand read and write-back. They
+also have high capacity demand due to their wide bit widths (`NT*XLEN`). SRAM
+arrays serve as the best storage of choice.
 
 * **TODO**: Store age for load/store instructions
   * Necessary for LSU to determine program order of load/stores within a thread
@@ -254,7 +268,68 @@ Forwarding fabric may be expensive, since operand bits are wide
 (`VLEN*WORDSIZE`=64 bytes) and it must be broadcasted to *all* RS entries.
 
 
-Operand Collector
------------------
+## Operand Collector
 
-TODO
+![Collector stage](fig/collector.svg)
+
+Operand collector consists of the following components:
+
+* **Physical register file banks.**  PRF is banked by the register number.
+  We use a simple, static round-robin banking scheme of `Bank[reg] = reg mod n_banks`.
+* **Collector banks** stage the operand data that are read so far, either from
+  the PRF or from the forwarding fabric.
+  Collectors are banked by the FU pipe so that the connectivity to FUs is
+  direct and low-cost. Each collector row contains all operand fields,
+  PC/rs1/rs2/rs3, which makes single-cycle issue straightforward.
+* **Collector allocator** serves two purposes:
+  * **Arbitrates PRF banks** to choose conflict-free bank accesses.  This
+    requires reading *all* entry's preg# fields from the RS and finding a
+    combination that maps to as many different banks as possible.
+  * **Allocates a collector entry** for each RS entry.  This happens when (1)
+    a new entry is admitted to the RS, and (2) there exist available space in
+    the collector bank that matches the instruction's FU type.
+    The (2) condition may not always hold when e.g. instruction mix is skewed
+    and a single FU-type collector bank runs out of space.
+
+### Decoupling collector capacity vs RS
+
+The **crossbar** that connects PRF bank output ports to collector input ports
+has a high wiring cost; for a `B=8` banks and `C=4` collectors,
+the cost scales with `B*C*(NT*XLEN) = 8*4*(16*32b)`.
+
+Therefore, we need to keep `C` manageable, by potentially storing fewer
+collector entries than there are RS entries.
+
+TODO: Elaborate.
+
+### Operand Forwarding
+
+Upon writeback, the result data may be forwarded to the collector banks
+directly without experiencing latency of PRF write -> PRF read re-arbitration
+into collectors.
+
+The forwarded data is pulled from the WB fabric, which is bank-local at the
+write port, and bypassed to the PRF read port, where a 2:1 MUX selects **WB
+data** vs. **PRF read data**.  The WB data is **prioritized** to allow fast
+forwarding and reduce RAW hazard stalls.
+
+When the forwarded WB data wins over PRF read data at the bank egress, this
+should also be notified to the **collector allocator**, so that it knows the
+lost read needs to be re-scheduled.  Therefore, the WB bus needs some
+connectivity to the allocator as well.
+
+#### Collecting rs1/rs2/rs3 in parallel for a single instruction
+
+Although rs1/rs2/rs3 sits in the same row of a collector bank, each collector
+can be sub-banked to allow parallel accesses to rs1/rs2/rs3.
+
+**TBD**: Now the crossbar needs to support multiple PRF banks routed to the
+single collector destination. This seems hard to do without further scaling up
+crossbar egress ports?
+
+#### Wiring cost
+Since the forwarding bus is pulled from the bank-local WB bus,
+there is no extra broadcasting fabric to all collector banks, and the
+bank-collector crossbar is reused with low overhead.  This design lowers wiring
+cost compared to an alternative where the WB bus is broadcasted to every
+collector bank with the 2:1 MUX selector positioned at the collector ingress.

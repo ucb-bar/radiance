@@ -12,6 +12,7 @@ power-efficient.
 * **Issue Stage**: [link](issue.md)
 * **Warp Scheduler**: [link](warp_sched.md)
 * **Register Renaming**: [link](rename.md)
+* **Load-Store Unit**: [link](lsu.md)
 
 ## Design Goals
 
