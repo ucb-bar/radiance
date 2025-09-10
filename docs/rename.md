@@ -37,7 +37,7 @@ To IBuffer:
 
 ## Operation
 
-![Block Diagram](fig/rename.png)
+![Block Diagram](fig/rename.svg)
 
 Upon reset, the block initializes the map to all point to phyiscal register 0,
 all warp usage counters to 0. Bitmaps set to false. The map needs to be 4R1W,

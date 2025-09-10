@@ -75,8 +75,8 @@
   <text class="cls-5" transform="translate(204.686 113.992)"><tspan class="cls-3" x="0" y="0">warp 3</tspan><tspan class="cls-10" x="30.015" y="0" xml:space="preserve">  PC=0x...  v=0</tspan></text>
   <text class="cls-1" transform="translate(194.116 190.902)"><tspan x="0" y="0">Stall</tspan><tspan class="cls-12" x="23.344" y="0"> </tspan><tspan class="cls-14" x="26.467" y="0">T</tspan><tspan x="33.357" y="0">racker</tspan></text>
   <text class="cls-2" transform="translate(24.614 278.099) rotate(-90)"><tspan x="0" y="0">From </tspan><tspan class="cls-12" x="31.33" y="0">W</tspan><tspan x="42.445" y="0">riteback</tspan></text>
-  <text class="cls-2" transform="translate(732.7 263.524) rotate(90)"><tspan class="cls-11" x="0" y="0">T</tspan><tspan x="6" y="0">o Issue</tspan></text>
-  <text class="cls-2" transform="translate(800.7 145.295) rotate(90)"><tspan class="cls-11" x="0" y="0">T</tspan><tspan x="6" y="0">o IBu</tspan><tspan class="cls-12" x="34.02" y="0">f</tspan><tspan x="37.143" y="0">fer</tspan></text>
+  <text class="cls-2" transform="translate(732.698 263.521) rotate(90)"><tspan class="cls-11" x="0" y="0">T</tspan><tspan x="6" y="0">o Issue</tspan></text>
+  <text class="cls-2" transform="translate(800.698 145.293) rotate(90)"><tspan class="cls-11" x="0" y="0">T</tspan><tspan x="6" y="0">o IBu</tspan><tspan class="cls-12" x="34.02" y="0">f</tspan><tspan x="37.143" y="0">fer</tspan></text>
   <text class="cls-2" transform="translate(188.001 531.136)"><tspan x="0" y="0">From Execute</tspan></text>
   <text class="cls-1" transform="translate(120.116 245.902)"><tspan x="0" y="0">=</tspan></text>
   <g>
