@@ -59,7 +59,7 @@ To Issue:
 
 ## Operation
 
-![Block Diagram](./fig/warp_sched.png)
+![Block Diagram](./fig/warp_sched.svg)
 
 ### Stages
 
