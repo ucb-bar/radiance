@@ -5,6 +5,8 @@
 There should be a tiny L0 I$ and tiny L0 D$ per core, a larger L1 per cluster,
 and L2 for the SoC. All caches are non-blocking.
 
+![memory.svg](Memory hierarchy)
+
 ### L0
 
 #### L0i
@@ -62,11 +64,40 @@ Each SRAM is 4B wide, 256 entries deep.
 
 Total aggregate bandwidth is read+write 256B/cycle.
 
-## Area Estimation
+### Shared Memory Map
+
+GPU Address |  Size     | Description
+----------------------------
+`0x7000_0000`  | `0x10000` | Shared memory cluster local
+`0x7001_0000`  |   `0x200` | Core 0 print and perf buffer
+`0x7001_0200`  |   `0x200` | Core 1 print and perf buffer
+`0x7001_3000`  |   `0x100` | Cluster local Gemmini MMIO
+`0x7001_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO
+
+## Global Memory Map
+
+CPU Address |  Size         | Description
+----------------------------
+  `0x4000_0000` | `0x20000`     | Cluster 0 SMEM (inc. Gemmini)
+  `0x4002_0000` | `0x20000`     | Cluster 1 SMEM (inc. Gemmini)
+  `0x6000_0000` | `0x10000`     | GPU device command processor
+  `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)
+`0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable
+
+GPU will live in the illusion that addresses start at 0; when its requests leave
+unified L1, it will be rewritten to append the 33rd bit before arriving at L2.
+
+The Command Processor will need to have its own BootROM to act as failsafe when
+the CPU fails to schedule work on the SIMT cores.
+
+### Area Estimation
+
+TODO
 
 ## Other Stuff
 
 * Fencing support: drain LSU, invalidate L0/L1, wait for L2 coherency traffic
 * Atomics: L2 only, bypassed in LSU
 * Sectoring, banking in depth dim implementation
+
 
