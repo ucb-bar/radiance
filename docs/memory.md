@@ -5,7 +5,7 @@
 There should be a tiny L0 I$ and tiny L0 D$ per core, a larger L1 per cluster,
 and L2 for the SoC. All caches are non-blocking.
 
-![memory.svg](Memory hierarchy)
+![Memory Hierarchy](./fig/memory.svg)
 
 ### L0
 
@@ -57,6 +57,8 @@ Coherent, 512KB, 128B lines, 8-way, single port unbanked.
 Bandwidth is 32B/cycle (SBus size = 256b).
 
 ## Shared Memory
+
+![SMEM Block Diagram](./fig/smem.svg)
 
 64KB/SM, 64B lines, single port per bank, banked 4x16.
 
@@ -117,6 +119,10 @@ unified L1, it will be rewritten to append the 33rd bit before arriving at L2.
 
 The Command Processor will need to have its own BootROM to act as failsafe when
 the CPU fails to schedule work on the SIMT cores.
+
+## Fabric
+
+![Fabric Block Diagram](./fig/fabric.svg)
 
 ### Area Estimation
 
