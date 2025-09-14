@@ -64,6 +64,34 @@ Each SRAM is 4B wide, 256 entries deep.
 
 Total aggregate bandwidth is read+write 256B/cycle.
 
+To support intra-thread program ordering, we must treat each batch of request as
+an atomized unit. That is, even in the case of serialization, there cannot be
+parallel serving of different banks across requests from different cycles.
+
+A major challenge with designing the shared memory interconnect is the existence
+of bank level parallelism from Gemmini & software pipelining through tiling
+across banks. This means that different banks (along the depth dimension) should
+have parallel access.
+
+Iterating upon Virgo's shared memory design, we no longer have the notion of
+core *unaligned accesses*; all accesses are uniform. The main changes:
+
+* Core serialization to create uniform requests
+  * Core 0 and 1 are RR arbitrated to present a single set to SMEM
+* Unaligned requests now only include off-chip slave requests
+* Lowest index first now prefers core requests
+  * Gemmini can experience starvation this way; however, this can be the job of
+    the programmer to tile things correctly when software pipelining.
+    Multi-cycle responses are already handled in the `DistributorNode`
+  * Core responses this way will be guaranteed lockstep, assuming full
+    pipelining
+
+
+### Core serialization
+* add serializing coreside crossbar to create uniform requests
+  * register to hold result, as well as a valid bit mask
+  * 
+
 ### Shared Memory Map
 
 GPU Address |  Size     | Description

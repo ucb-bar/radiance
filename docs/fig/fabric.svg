@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 545 437">
+  <defs>
+    <style>
+      .cls-1, .cls-2 {
+        font-family: Helvetica, Helvetica;
+        font-size: 12px;
+      }
+
+      .cls-2, .cls-3 {
+        fill: #666;
+      }
+
+      .cls-4 {
+        fill: none;
+        stroke: #000;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-5 {
+        letter-spacing: -.018em;
+      }
+
+      .cls-6 {
+        font-family: InputMonoNarrow-Regular, 'Input Mono Narrow';
+        font-size: 10px;
+      }
+    </style>
+  </defs>
+  <rect class="cls-4" x="33.5" y="46" width="74" height="72"/>
+  <rect class="cls-4" x="33.5" y="141.5" width="74" height="28"/>
+  <rect class="cls-4" x="131.5" y="141.5" width="74" height="28"/>
+  <text class="cls-1" transform="translate(50.54 82.126)"><tspan x="0" y="0">Muon 0</tspan></text>
+  <text class="cls-1" transform="translate(48.542 160.126)"><tspan x="0" y="0">CLSBus</tspan></text>
+  <text class="cls-1" transform="translate(40.876 313.126)"><tspan x="0" y="0">Addr Rewriter</tspan></text>
+  <rect class="cls-4" x="132.5" y="185.5" width="74" height="28"/>
+  <rect class="cls-4" x="132.5" y="229.5" width="74" height="28"/>
+  <text class="cls-1" transform="translate(147.542 204.126)"><tspan x="0" y="0">CLPBus</tspan></text>
+  <rect class="cls-4" x="33.5" y="185.5" width="74" height="72"/>
+  <text class="cls-1" transform="translate(60.542 225.126)"><tspan x="0" y="0">L1$</tspan></text>
+  <text class="cls-6" transform="translate(41.365 111.454)"><tspan x="0" y="0">GMEM</tspan></text>
+  <text class="cls-6" transform="translate(75.365 111.454)"><tspan x="0" y="0">SMEM</tspan></text>
+  <rect class="cls-4" x="131.5" y="46" width="74" height="72"/>
+  <rect class="cls-4" x="229.5" y="46" width="74" height="72"/>
+  <text class="cls-1" transform="translate(148.54 82.126)"><tspan x="0" y="0">Muon 1</tspan></text>
+  <text class="cls-1" transform="translate(242.55 85.126)"><tspan x="0" y="0">Gemmini</tspan></text>
+  <rect class="cls-4" x="340.5" y="46.5" width="48" height="72"/>
+  <text class="cls-1" transform="translate(357.759 85.626)"><tspan x="0" y="0">µ0</tspan></text>
+  <rect class="cls-4" x="402.5" y="46.5" width="48" height="72"/>
+  <text class="cls-1" transform="translate(419.759 85.626)"><tspan x="0" y="0">µ1</tspan></text>
+  <rect class="cls-4" x="463.5" y="46.5" width="48" height="72"/>
+  <text class="cls-1" transform="translate(482.886 85.626)"><tspan x="0" y="0">G</tspan></text>
+  <rect class="cls-4" x="229.5" y="141.5" width="74" height="116"/>
+  <text class="cls-1" transform="translate(248.553 204.126)"><tspan x="0" y="0">SMEM</tspan></text>
+  <text class="cls-6" transform="translate(139.365 111.454)"><tspan x="0" y="0">GMEM</tspan></text>
+  <text class="cls-6" transform="translate(173.365 111.454)"><tspan x="0" y="0">SMEM</tspan></text>
+  <text class="cls-6" transform="translate(237.401 180.454)"><tspan x="0" y="0">Wide</tspan></text>
+  <text class="cls-6" transform="translate(237.401 224.454)"><tspan x="0" y="0">Single</tspan></text>
+  <line class="cls-4" x1="139" y1="147.5" x2="198" y2="163.5"/>
+  <line class="cls-4" x1="198" y1="147.5" x2="139" y2="163.5"/>
+  <rect class="cls-4" x="21.5" y="294.5" width="109" height="28"/>
+  <text class="cls-1" transform="translate(227.212 313.126)"><tspan x="0" y="0">SBus</tspan></text>
+  <rect class="cls-4" x="156.5" y="294.5" width="171" height="28"/>
+  <text class="cls-1" transform="translate(107.529 357.126)"><tspan x="0" y="0">Coherent L2</tspan></text>
+  <rect class="cls-4" x="21.5" y="338.5" width="238" height="28"/>
+  <text class="cls-1" transform="translate(124.216 401.126)"><tspan x="0" y="0">MBus</tspan></text>
+  <rect class="cls-4" x="21.5" y="382.5" width="238" height="28"/>
+  <text class="cls-1" transform="translate(410.879 313.126)"><tspan x="0" y="0">SMemBus</tspan></text>
+  <rect class="cls-4" x="353.5" y="294.5" width="171" height="28"/>
+  <text class="cls-1" transform="translate(386.879 379.126)"><tspan x="0" y="0">Rocket</tspan></text>
+  <rect class="cls-4" x="286.5" y="338.5" width="238" height="72"/>
+  <line class="cls-4" x1="139" y1="235.5" x2="198" y2="251.5"/>
+  <line class="cls-4" x1="198" y1="235.5" x2="139" y2="251.5"/>
+  <g>
+    <line class="cls-4" x1="53.5" y1="118" x2="53.5" y2="137.412"/>
+    <polygon points="51.007 136.682 53.5 141 55.993 136.682 51.007 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="185.5" y1="118" x2="185.5" y2="137.412"/>
+    <polygon points="183.007 136.682 185.5 141 187.993 136.682 183.007 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="273.992" y1="118" x2="273.992" y2="137.412"/>
+    <polygon points="271.499 136.682 273.992 141 276.485 136.682 271.499 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="288.5" y1="118" x2="288.5" y2="137.412"/>
+    <polygon points="286.007 136.682 288.5 141 290.993 136.682 286.007 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="244.5" y1="118" x2="244.5" y2="137.412"/>
+    <polygon points="242.007 136.682 244.5 141 246.993 136.682 242.007 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="259.008" y1="118" x2="259.008" y2="137.412"/>
+    <polygon points="256.515 136.682 259.008 141 261.501 136.682 256.515 136.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="151.5" y1="170" x2="151.5" y2="181.412"/>
+    <polygon points="149.007 180.682 151.5 185 153.993 180.682 149.007 180.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="140.5" y1="367" x2="140.5" y2="378.412"/>
+    <polygon points="138.007 377.682 140.5 382 142.993 377.682 138.007 377.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="140.5" y1="411" x2="140.5" y2="422.412"/>
+    <polygon points="138.007 421.682 140.5 426 142.993 421.682 138.007 421.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="185.5" y1="323" x2="185.5" y2="334.412"/>
+    <polygon points="183.007 333.682 185.5 338 187.993 333.682 183.007 333.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="298.5" y1="338" x2="298.5" y2="326.588"/>
+    <polygon points="300.993 327.318 298.5 323 296.007 327.318 300.993 327.318"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="439" y1="338" x2="439" y2="326.588"/>
+    <polygon points="441.493 327.318 439 323 436.507 327.318 441.493 327.318"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="487.49" y1="261.588" x2="487.49" y2="294"/>
+    <polygon points="484.996 262.318 487.49 258 489.983 262.318 484.996 262.318"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="131 308.5 143.5 308.5 143.5 282.5 185.5 282.5 185.5 290.393"/>
+    <polygon points="183.007 289.664 185.5 293.981 187.993 289.664 183.007 289.664"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="70.5" y1="170" x2="70.5" y2="181.412"/>
+    <polygon points="68.007 180.682 70.5 185 72.993 180.682 68.007 180.682"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="70.5" y1="258" x2="70.5" y2="290.412"/>
+    <polygon points="68.007 289.682 70.5 294 72.993 289.682 68.007 289.682"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="87.5 118 87.5 125.5 115.5 125.5 123.5 133.5 151.5 133.5 151.5 137.412"/>
+    <polygon points="149.006 136.682 151.5 141 153.993 136.682 149.006 136.682"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="151.5 118 151.5 125.5 123.5 125.5 115.5 133.5 87.5 133.5 87.5 137.412"/>
+    <polygon points="85.007 136.682 87.5 141 89.993 136.682 85.007 136.682"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="206.5 199.5 218 199.5 218 82 225.912 82"/>
+    <polygon points="225.182 84.493 229.5 82 225.182 79.507 225.182 84.493"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="185.497 169.5 185.497 171.638 185.497 177.5 225.408 177.5"/>
+    <polygon points="224.679 179.993 228.997 177.5 224.679 175.006 224.679 179.993"/>
+  </g>
+  <g>
+    <line class="cls-4" x1="151.5" y1="229" x2="151.5" y2="217.588"/>
+    <polygon points="153.993 218.317 151.5 214 149.007 218.317 153.993 218.317"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="185.497 229.5 185.497 227.362 185.497 221.5 225.408 221.5"/>
+    <polygon points="224.679 223.993 228.997 221.5 224.679 219.007 224.679 223.993"/>
+  </g>
+  <text class="cls-2" transform="translate(31.16 37.221)"><tspan x="0" y="0">Cluster 0</tspan></text>
+  <path class="cls-3" d="M316,18h-2v1h2v-1h0ZM312,18h-2v1h2v-1h0ZM308,18h-2v1h2v-1h0ZM304,18h-2v1h2v-1h0ZM300,18h-2v1h2v-1h0ZM296,18h-2v1h2v-1h0ZM292,18h-2v1h2v-1h0ZM288,18h-2v1h2v-1h0ZM284,18h-2v1h2v-1h0ZM280,18h-2v1h2v-1h0ZM276,18h-2v1h2v-1h0ZM272,18h-2v1h2v-1h0ZM268,18h-2v1h2v-1h0ZM264,18h-2v1h2v-1h0ZM260,18h-2v1h2v-1h0ZM256,18h-2v1h2v-1h0ZM252,18h-2v1h2v-1h0ZM248,18h-2v1h2v-1h0ZM244,18h-2v1h2v-1h0ZM240,18h-2v1h2v-1h0ZM236,18h-2v1h2v-1h0ZM232,18h-2v1h2v-1h0ZM228,18h-2v1h2v-1h0ZM224,18h-2v1h2v-1h0ZM220,18h-2v1h2v-1h0ZM216,18h-2v1h2v-1h0ZM212,18h-2v1h2v-1h0ZM208,18h-2v1h2v-1h0ZM204,18h-2v1h2v-1h0ZM200,18h-2v1h2v-1h0ZM196,18h-2v1h2v-1h0ZM192,18h-2v1h2v-1h0ZM188,18h-2v1h2v-1h0ZM184,18h-2v1h2v-1h0ZM180,18h-2v1h2v-1h0ZM176,18h-2v1h2v-1h0ZM172,18h-2v1h2v-1h0ZM168,18h-2v1h2v-1h0ZM164,18h-2v1h2v-1h0ZM160,18h-2v1h2v-1h0ZM156,18h-2v1h2v-1h0ZM152,18h-2v1h2v-1h0ZM148,18h-2v1h2v-1h0ZM144,18h-2v1h2v-1h0ZM140,18h-2v1h2v-1h0ZM136,18h-2v1h2v-1h0ZM132,18h-2v1h2v-1h0ZM128,18h-2v1h2v-1h0ZM124,18h-2v1h2v-1h0ZM120,18h-2v1h2v-1h0ZM116,18h-2v1h2v-1h0ZM112,18h-2v1h2v-1h0ZM108,18h-2v1h2v-1h0ZM104,18h-2v1h2v-1h0ZM100,18h-2v1h2v-1h0ZM96,18h-2v1h2v-1h0ZM92,18h-2v1h2v-1h0ZM88,18h-2v1h2v-1h0ZM84,18h-2v1h2v-1h0ZM80,18h-2v1h2v-1h0ZM76,18h-2v1h2v-1h0ZM72,18h-2v1h2v-1h0ZM68,18h-2v1h2v-1h0ZM64,18h-2v1h2v-1h0ZM60,18h-2v1h2v-1h0ZM56,18h-2v1h2v-1h0ZM52,18h-2v1h2v-1h0ZM48,18h-2v1h2v-1h0ZM44,18h-2v1h2v-1h0ZM40,18h-2v1h2v-1h0ZM36,18h-2v1h2v-1h0ZM32,18h-2v1h2v-1h0ZM28,18h-2v1h2v-1h0ZM24,18h-2v1h-1v2h1v-2h2v-1h0ZM22,23h-1v2h1v-2h0ZM22,27h-1v2h1v-2h0ZM22,31h-1v2h1v-2h0ZM22,35h-1v2h1v-2h0ZM22,39h-1v2h1v-2h0ZM22,43h-1v2h1v-2h0ZM22,47h-1v2h1v-2h0ZM22,51h-1v2h1v-2h0ZM22,55h-1v2h1v-2h0ZM22,59h-1v2h1v-2h0ZM22,63h-1v2h1v-2h0ZM22,67h-1v2h1v-2h0ZM22,71h-1v2h1v-2h0ZM22,75h-1v2h1v-2h0ZM22,79h-1v2h1v-2h0ZM22,83h-1v2h1v-2h0ZM22,87h-1v2h1v-2h0ZM22,91h-1v2h1v-2h0ZM22,95h-1v2h1v-2h0ZM22,99h-1v2h1v-2h0ZM22,103h-1v2h1v-2h0ZM22,107h-1v2h1v-2h0ZM22,111h-1v2h1v-2h0ZM22,115h-1v2h1v-2h0ZM22,119h-1v2h1v-2h0ZM22,123h-1v2h1v-2h0ZM22,127h-1v2h1v-2h0ZM22,131h-1v2h1v-2h0ZM22,135h-1v2h1v-2h0ZM22,139h-1v2h1v-2h0ZM22,143h-1v2h1v-2h0ZM22,147h-1v2h1v-2h0ZM22,151h-1v2h1v-2h0ZM22,155h-1v2h1v-2h0ZM22,159h-1v2h1v-2h0ZM22,163h-1v2h1v-2h0ZM22,167h-1v2h1v-2h0ZM22,171h-1v2h1v-2h0ZM22,175h-1v2h1v-2h0ZM22,179h-1v2h1v-2h0ZM22,183h-1v2h1v-2h0ZM22,187h-1v2h1v-2h0ZM22,191h-1v2h1v-2h0ZM22,195h-1v2h1v-2h0ZM22,199h-1v2h1v-2h0ZM22,203h-1v2h1v-2h0ZM22,207h-1v2h1v-2h0ZM22,211h-1v2h1v-2h0ZM22,215h-1v2h1v-2h0ZM22,219h-1v2h1v-2h0ZM22,223h-1v2h1v-2h0ZM22,227h-1v2h1v-2h0ZM22,231h-1v2h1v-2h0ZM22,235h-1v2h1v-2h0ZM22,239h-1v2h1v-2h0ZM22,243h-1v2h1v-2h0ZM22,247h-1v2h1v-2h0ZM22,251h-1v2h1v-2h0ZM22,255h-1v2h1v-2h0ZM22,259h-1v2h1v-2h0ZM22,263h-1v2h1v-2h0ZM22,267h-1v2h1v-2h0ZM23,270h-2v1h2v-1h0ZM27,270h-2v1h2v-1h0ZM31,270h-2v1h2v-1h0ZM35,270h-2v1h2v-1h0ZM39,270h-2v1h2v-1h0ZM43,270h-2v1h2v-1h0ZM47,270h-2v1h2v-1h0ZM51,270h-2v1h2v-1h0ZM55,270h-2v1h2v-1h0ZM59,270h-2v1h2v-1h0ZM63,270h-2v1h2v-1h0ZM67,270h-2v1h2v-1h0ZM71,270h-2v1h2v-1h0ZM75,270h-2v1h2v-1h0ZM79,270h-2v1h2v-1h0ZM83,270h-2v1h2v-1h0ZM87,270h-2v1h2v-1h0ZM91,270h-2v1h2v-1h0ZM95,270h-2v1h2v-1h0ZM99,270h-2v1h2v-1h0ZM103,270h-2v1h2v-1h0ZM107,270h-2v1h2v-1h0ZM111,270h-2v1h2v-1h0ZM115,270h-2v1h2v-1h0ZM119,270h-2v1h2v-1h0ZM123,270h-2v1h2v-1h0ZM127,270h-2v1h2v-1h0ZM131,270h-2v1h2v-1h0ZM135,270h-2v1h2v-1h0ZM139,270h-2v1h2v-1h0ZM143,270h-2v1h2v-1h0ZM147,270h-2v1h2v-1h0ZM151,270h-2v1h2v-1h0ZM155,270h-2v1h2v-1h0ZM159,270h-2v1h2v-1h0ZM163,270h-2v1h2v-1h0ZM167,270h-2v1h2v-1h0ZM171,270h-2v1h2v-1h0ZM175,270h-2v1h2v-1h0ZM179,270h-2v1h2v-1h0ZM183,270h-2v1h2v-1h0ZM187,270h-2v1h2v-1h0ZM191,270h-2v1h2v-1h0ZM195,270h-2v1h2v-1h0ZM199,270h-2v1h2v-1h0ZM203,270h-2v1h2v-1h0ZM207,270h-2v1h2v-1h0ZM211,270h-2v1h2v-1h0ZM215,270h-2v1h2v-1h0ZM219,270h-2v1h2v-1h0ZM223,270h-2v1h2v-1h0ZM227,270h-2v1h2v-1h0ZM231,270h-2v1h2v-1h0ZM235,270h-2v1h2v-1h0ZM239,270h-2v1h2v-1h0ZM243,270h-2v1h2v-1h0ZM247,270h-2v1h2v-1h0ZM251,270h-2v1h2v-1h0ZM255,270h-2v1h2v-1h0ZM259,270h-2v1h2v-1h0ZM263,270h-2v1h2v-1h0ZM267,270h-2v1h2v-1h0ZM271,270h-2v1h2v-1h0ZM275,270h-2v1h2v-1h0ZM279,270h-2v1h2v-1h0ZM283,270h-2v1h2v-1h0ZM287,270h-2v1h2v-1h0ZM291,270h-2v1h2v-1h0ZM295,270h-2v1h2v-1h0ZM299,270h-2v1h2v-1h0ZM303,270h-2v1h2v-1h0ZM307,270h-2v1h2v-1h0ZM311,270h-2v1h2v-1h0ZM315,270h-2v1h2v-1h0ZM316,268h-1v2h1v-2h0ZM316,264h-1v2h1v-2h0ZM316,260h-1v2h1v-2h0ZM316,256h-1v2h1v-2h0ZM316,252h-1v2h1v-2h0ZM316,248h-1v2h1v-2h0ZM316,244h-1v2h1v-2h0ZM316,240h-1v2h1v-2h0ZM316,236h-1v2h1v-2h0ZM316,232h-1v2h1v-2h0ZM316,228h-1v2h1v-2h0ZM316,224h-1v2h1v-2h0ZM316,220h-1v2h1v-2h0ZM316,216h-1v2h1v-2h0ZM316,212h-1v2h1v-2h0ZM316,208h-1v2h1v-2h0ZM316,204h-1v2h1v-2h0ZM316,200h-1v2h1v-2h0ZM316,196h-1v2h1v-2h0ZM316,192h-1v2h1v-2h0ZM316,188h-1v2h1v-2h0ZM316,184h-1v2h1v-2h0ZM316,180h-1v2h1v-2h0ZM316,176h-1v2h1v-2h0ZM316,172h-1v2h1v-2h0ZM316,168h-1v2h1v-2h0ZM316,164h-1v2h1v-2h0ZM316,160h-1v2h1v-2h0ZM316,156h-1v2h1v-2h0ZM316,152h-1v2h1v-2h0ZM316,148h-1v2h1v-2h0ZM316,144h-1v2h1v-2h0ZM316,140h-1v2h1v-2h0ZM316,136h-1v2h1v-2h0ZM316,132h-1v2h1v-2h0ZM316,128h-1v2h1v-2h0ZM316,124h-1v2h1v-2h0ZM316,120h-1v2h1v-2h0ZM316,116h-1v2h1v-2h0ZM316,112h-1v2h1v-2h0ZM316,108h-1v2h1v-2h0ZM316,104h-1v2h1v-2h0ZM316,100h-1v2h1v-2h0ZM316,96h-1v2h1v-2h0ZM316,92h-1v2h1v-2h0ZM316,88h-1v2h1v-2h0ZM316,84h-1v2h1v-2h0ZM316,80h-1v2h1v-2h0ZM316,76h-1v2h1v-2h0ZM316,72h-1v2h1v-2h0ZM316,68h-1v2h1v-2h0ZM316,64h-1v2h1v-2h0ZM316,60h-1v2h1v-2h0ZM316,56h-1v2h1v-2h0ZM316,52h-1v2h1v-2h0ZM316,48h-1v2h1v-2h0ZM316,44h-1v2h1v-2h0ZM316,40h-1v2h1v-2h0ZM316,36h-1v2h1v-2h0ZM316,32h-1v2h1v-2h0ZM316,28h-1v2h1v-2h0ZM316,24h-1v2h1v-2h0ZM316,20h-1v2h1v-2h0Z"/>
+  <rect class="cls-4" x="340.5" y="141.5" width="48" height="28"/>
+  <rect class="cls-4" x="402.5" y="141.5" width="48" height="28"/>
+  <text class="cls-1" transform="translate(352.881 160.126)"><tspan x="0" y="0">CLS</tspan></text>
+  <rect class="cls-4" x="402.5" y="185.5" width="48" height="28"/>
+  <text class="cls-1" transform="translate(414.881 204.126)"><tspan x="0" y="0">CL</tspan><tspan class="cls-5" x="15.34" y="0">P</tspan></text>
+  <rect class="cls-4" x="340.5" y="185.5" width="48" height="72"/>
+  <text class="cls-1" transform="translate(354.542 225.126)"><tspan x="0" y="0">L1$</tspan></text>
+  <rect class="cls-4" x="463.5" y="141.5" width="48" height="116"/>
+  <text class="cls-1" transform="translate(469.553 204.126)"><tspan x="0" y="0">SMEM</tspan></text>
+  <line class="cls-4" x1="410.554" y1="147.5" x2="442.446" y2="163.5"/>
+  <line class="cls-4" x1="442.446" y1="147.5" x2="410.554" y2="163.5"/>
+  <rect class="cls-4" x="402.5" y="229.5" width="48" height="28"/>
+  <line class="cls-4" x1="410.554" y1="235.5" x2="442.446" y2="251.5"/>
+  <line class="cls-4" x1="442.446" y1="235.5" x2="410.554" y2="251.5"/>
+  <text class="cls-2" transform="translate(338.16 37.221)"><tspan x="0" y="0">Cluster 1</tspan></text>
+  <path class="cls-3" d="M525,18h-2v1h2v-1h0ZM521,18h-2v1h2v-1h0ZM517,18h-2v1h2v-1h0ZM513,18h-2v1h2v-1h0ZM509,18h-2v1h2v-1h0ZM505,18h-2v1h2v-1h0ZM501,18h-2v1h2v-1h0ZM497,18h-2v1h2v-1h0ZM493,18h-2v1h2v-1h0ZM489,18h-2v1h2v-1h0ZM485,18h-2v1h2v-1h0ZM481,18h-2v1h2v-1h0ZM477,18h-2v1h2v-1h0ZM473,18h-2v1h2v-1h0ZM469,18h-2v1h2v-1h0ZM465,18h-2v1h2v-1h0ZM461,18h-2v1h2v-1h0ZM457,18h-2v1h2v-1h0ZM453,18h-2v1h2v-1h0ZM449,18h-2v1h2v-1h0ZM445,18h-2v1h2v-1h0ZM441,18h-2v1h2v-1h0ZM437,18h-2v1h2v-1h0ZM433,18h-2v1h2v-1h0ZM429,18h-2v1h2v-1h0ZM425,18h-2v1h2v-1h0ZM421,18h-2v1h2v-1h0ZM417,18h-2v1h2v-1h0ZM413,18h-2v1h2v-1h0ZM409,18h-2v1h2v-1h0ZM405,18h-2v1h2v-1h0ZM401,18h-2v1h2v-1h0ZM397,18h-2v1h2v-1h0ZM393,18h-2v1h2v-1h0ZM389,18h-2v1h2v-1h0ZM385,18h-2v1h2v-1h0ZM381,18h-2v1h2v-1h0ZM377,18h-2v1h2v-1h0ZM373,18h-2v1h2v-1h0ZM369,18h-2v1h2v-1h0ZM365,18h-2v1h2v-1h0ZM361,18h-2v1h2v-1h0ZM357,18h-2v1h2v-1h0ZM353,18h-2v1h2v-1h0ZM349,18h-2v1h2v-1h0ZM345,18h-2v1h2v-1h0ZM341,18h-2v1h2v-1h0ZM337,18h-2v1h2v-1h0ZM333,18h-2v1h2v-1h0ZM329,18h-1v1h1v-1h0ZM329,21h-1v2h1v-2h0ZM329,25h-1v2h1v-2h0ZM329,29h-1v2h1v-2h0ZM329,33h-1v2h1v-2h0ZM329,37h-1v2h1v-2h0ZM329,41h-1v2h1v-2h0ZM329,45h-1v2h1v-2h0ZM329,49h-1v2h1v-2h0ZM329,53h-1v2h1v-2h0ZM329,57h-1v2h1v-2h0ZM329,61h-1v2h1v-2h0ZM329,65h-1v2h1v-2h0ZM329,69h-1v2h1v-2h0ZM329,73h-1v2h1v-2h0ZM329,77h-1v2h1v-2h0ZM329,81h-1v2h1v-2h0ZM329,85h-1v2h1v-2h0ZM329,89h-1v2h1v-2h0ZM329,93h-1v2h1v-2h0ZM329,97h-1v2h1v-2h0ZM329,101h-1v2h1v-2h0ZM329,105h-1v2h1v-2h0ZM329,109h-1v2h1v-2h0ZM329,113h-1v2h1v-2h0ZM329,117h-1v2h1v-2h0ZM329,121h-1v2h1v-2h0ZM329,125h-1v2h1v-2h0ZM329,129h-1v2h1v-2h0ZM329,133h-1v2h1v-2h0ZM329,137h-1v2h1v-2h0ZM329,141h-1v2h1v-2h0ZM329,145h-1v2h1v-2h0ZM329,149h-1v2h1v-2h0ZM329,153h-1v2h1v-2h0ZM329,157h-1v2h1v-2h0ZM329,161h-1v2h1v-2h0ZM329,165h-1v2h1v-2h0ZM329,169h-1v2h1v-2h0ZM329,173h-1v2h1v-2h0ZM329,177h-1v2h1v-2h0ZM329,181h-1v2h1v-2h0ZM329,185h-1v2h1v-2h0ZM329,189h-1v2h1v-2h0ZM329,193h-1v2h1v-2h0ZM329,197h-1v2h1v-2h0ZM329,201h-1v2h1v-2h0ZM329,205h-1v2h1v-2h0ZM329,209h-1v2h1v-2h0ZM329,213h-1v2h1v-2h0ZM329,217h-1v2h1v-2h0ZM329,221h-1v2h1v-2h0ZM329,225h-1v2h1v-2h0ZM329,229h-1v2h1v-2h0ZM329,233h-1v2h1v-2h0ZM329,237h-1v2h1v-2h0ZM329,241h-1v2h1v-2h0ZM329,245h-1v2h1v-2h0ZM329,249h-1v2h1v-2h0ZM329,253h-1v2h1v-2h0ZM329,257h-1v2h1v-2h0ZM329,261h-1v2h1v-2h0ZM329,265h-1v2h1v-2h0ZM329,269h-1v2h1v-2h0ZM332,270h-2v1h2v-1h0ZM336,270h-2v1h2v-1h0ZM340,270h-2v1h2v-1h0ZM344,270h-2v1h2v-1h0ZM348,270h-2v1h2v-1h0ZM352,270h-2v1h2v-1h0ZM356,270h-2v1h2v-1h0ZM360,270h-2v1h2v-1h0ZM364,270h-2v1h2v-1h0ZM368,270h-2v1h2v-1h0ZM372,270h-2v1h2v-1h0ZM376,270h-2v1h2v-1h0ZM380,270h-2v1h2v-1h0ZM384,270h-2v1h2v-1h0ZM388,270h-2v1h2v-1h0ZM392,270h-2v1h2v-1h0ZM396,270h-2v1h2v-1h0ZM400,270h-2v1h2v-1h0ZM404,270h-2v1h2v-1h0ZM408,270h-2v1h2v-1h0ZM412,270h-2v1h2v-1h0ZM416,270h-2v1h2v-1h0ZM420,270h-2v1h2v-1h0ZM424,270h-2v1h2v-1h0ZM428,270h-2v1h2v-1h0ZM432,270h-2v1h2v-1h0ZM436,270h-2v1h2v-1h0ZM440,270h-2v1h2v-1h0ZM444,270h-2v1h2v-1h0ZM448,270h-2v1h2v-1h0ZM452,270h-2v1h2v-1h0ZM456,270h-2v1h2v-1h0ZM460,270h-2v1h2v-1h0ZM464,270h-2v1h2v-1h0ZM468,270h-2v1h2v-1h0ZM472,270h-2v1h2v-1h0ZM476,270h-2v1h2v-1h0ZM480,270h-2v1h2v-1h0ZM484,270h-2v1h2v-1h0ZM488,270h-2v1h2v-1h0ZM492,270h-2v1h2v-1h0ZM496,270h-2v1h2v-1h0ZM500,270h-2v1h2v-1h0ZM504,270h-2v1h2v-1h0ZM508,270h-2v1h2v-1h0ZM512,270h-2v1h2v-1h0ZM516,270h-2v1h2v-1h0ZM520,270h-2v1h2v-1h0ZM524,270h-2v1h2v-1h0ZM525,268h-1v2h1v-2h0ZM525,264h-1v2h1v-2h0ZM525,260h-1v2h1v-2h0ZM525,256h-1v2h1v-2h0ZM525,252h-1v2h1v-2h0ZM525,248h-1v2h1v-2h0ZM525,244h-1v2h1v-2h0ZM525,240h-1v2h1v-2h0ZM525,236h-1v2h1v-2h0ZM525,232h-1v2h1v-2h0ZM525,228h-1v2h1v-2h0ZM525,224h-1v2h1v-2h0ZM525,220h-1v2h1v-2h0ZM525,216h-1v2h1v-2h0ZM525,212h-1v2h1v-2h0ZM525,208h-1v2h1v-2h0ZM525,204h-1v2h1v-2h0ZM525,200h-1v2h1v-2h0ZM525,196h-1v2h1v-2h0ZM525,192h-1v2h1v-2h0ZM525,188h-1v2h1v-2h0ZM525,184h-1v2h1v-2h0ZM525,180h-1v2h1v-2h0ZM525,176h-1v2h1v-2h0ZM525,172h-1v2h1v-2h0ZM525,168h-1v2h1v-2h0ZM525,164h-1v2h1v-2h0ZM525,160h-1v2h1v-2h0ZM525,156h-1v2h1v-2h0ZM525,152h-1v2h1v-2h0ZM525,148h-1v2h1v-2h0ZM525,144h-1v2h1v-2h0ZM525,140h-1v2h1v-2h0ZM525,136h-1v2h1v-2h0ZM525,132h-1v2h1v-2h0ZM525,128h-1v2h1v-2h0ZM525,124h-1v2h1v-2h0ZM525,120h-1v2h1v-2h0ZM525,116h-1v2h1v-2h0ZM525,112h-1v2h1v-2h0ZM525,108h-1v2h1v-2h0ZM525,104h-1v2h1v-2h0ZM525,100h-1v2h1v-2h0ZM525,96h-1v2h1v-2h0ZM525,92h-1v2h1v-2h0ZM525,88h-1v2h1v-2h0ZM525,84h-1v2h1v-2h0ZM525,80h-1v2h1v-2h0ZM525,76h-1v2h1v-2h0ZM525,72h-1v2h1v-2h0ZM525,68h-1v2h1v-2h0ZM525,64h-1v2h1v-2h0ZM525,60h-1v2h1v-2h0ZM525,56h-1v2h1v-2h0ZM525,52h-1v2h1v-2h0ZM525,48h-1v2h1v-2h0ZM525,44h-1v2h1v-2h0ZM525,40h-1v2h1v-2h0ZM525,36h-1v2h1v-2h0ZM525,32h-1v2h1v-2h0ZM525,28h-1v2h1v-2h0ZM525,24h-1v2h1v-2h0ZM525,20h-1v2h1v-2h0Z"/>
+  <g>
+    <polyline class="cls-4" points="382.5 294 382.5 286.5 266.5 286.5 266.5 261.588"/>
+    <polygon points="268.993 262.318 266.5 258 264.007 262.318 268.993 262.318"/>
+  </g>
+  <g>
+    <polyline class="cls-4" points="364.501 258 364.501 278.5 298.501 278.5 298.501 290.412"/>
+    <polygon points="296.008 289.683 298.501 294 300.994 289.683 296.008 289.683"/>
+  </g>
+</svg>
