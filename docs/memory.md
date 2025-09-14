@@ -96,23 +96,23 @@ core *unaligned accesses*; all accesses are uniform. The main changes:
 
 ### Shared Memory Map
 
-GPU Address |  Size     | Description
-----------------------------
-`0x7000_0000`  | `0x10000` | Shared memory cluster local
-`0x7001_0000`  |   `0x200` | Core 0 print and perf buffer
-`0x7001_0200`  |   `0x200` | Core 1 print and perf buffer
-`0x7001_3000`  |   `0x100` | Cluster local Gemmini MMIO
-`0x7001_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO
+| GPU Address |  Size     | Description |
+|----------------|-----------|-------------------------------- |
+| `0x7000_0000`  | `0x10000` | Shared memory cluster local     |
+| `0x7001_0000`  |   `0x200` | Core 0 print and perf buffer    |
+| `0x7001_0200`  |   `0x200` | Core 1 print and perf buffer    |
+| `0x7001_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
+| `0x7001_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
 
 ## Global Memory Map
 
-CPU Address |  Size         | Description
-----------------------------
-  `0x4000_0000` | `0x20000`     | Cluster 0 SMEM (inc. Gemmini)
-  `0x4002_0000` | `0x20000`     | Cluster 1 SMEM (inc. Gemmini)
-  `0x6000_0000` | `0x10000`     | GPU device command processor
-  `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)
-`0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable
+|  CPU Address |  Size         | Description |
+|-----------------|---------------|---------------------------------|
+|   `0x4000_0000` | `0x20000`     | Cluster 0 SMEM (inc. Gemmini)   |
+|   `0x4002_0000` | `0x20000`     | Cluster 1 SMEM (inc. Gemmini)   |
+|   `0x6000_0000` | `0x10000`     | GPU device command processor    |
+|   `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)             |
+| `0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable |
 
 GPU will live in the illusion that addresses start at 0; when its requests leave
 unified L1, it will be rewritten to append the 33rd bit before arriving at L2.

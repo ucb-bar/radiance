@@ -25,13 +25,13 @@ DIV and SQRT are iterative and not fully pipelined.
 From fpnew paper, in Global Foundries 22nm, the cost of each component (assuming
 2 fp16 fits in 1 fp32 lane):
 
-component | unit area | count | total area
----------------------------------------------
-muladd    | 10.4k     | 8     |  83.2k
-comp      |  0.4k     | 8     |   3.2k
-conv      |  2.6k     | 8     |  20.8k
-sqrt/ div |  3.8k     | 8     |  30.4k
-total     |           |       | 137.6k
+| component | unit area | count | total area  |
+| ----------|-----------|-------|-------------|
+| muladd    | 10.4k     | 8     |  83.2k      |
+| comp      |  0.4k     | 8     |   3.2k      |
+| conv      |  2.6k     | 8     |  20.8k      |
+| sqrt/ div |  3.8k     | 8     |  30.4k      |
+| total     |           |       | 137.6k      |
 
 In this case the full chip with 4 cores will have ~550.4k um2 post-par dedicated
 to FPUs. Assuming 22nm had 1.6x area overhead, better estimate is ~350k area at
