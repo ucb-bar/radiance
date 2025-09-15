@@ -60,10 +60,9 @@ Bandwidth is 32B/cycle (SBus size = 256b).
 
 ![SMEM Block Diagram](./fig/smem.svg)
 
-64KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
-
+In order to fulfill the [workload requirement](#flashattention-3-requirements),
+Shared memory should be sized 64KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
 Each SRAM is 4B wide, 256 entries deep.
-
 Total aggregate bandwidth is read+write 256B/cycle.
 
 To support intra-thread program ordering, we must treat each batch of request as
@@ -121,7 +120,33 @@ tiles of a given symbol `X`, respectively.
 
 Note that `O` is not double-buffered due to an intra-iteration dependency
 between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
+
 in-place in the single tile.
+
+We can solve these conflicts in a mapping that requires 4 banks:
+
+| Bank   |  Tiles                   |
+|--------|--------------------------|
+| Bank 0 | `Qp, Kp, Vp, Qc, Kc, Vc` |
+| Bank 1 | `QKc, QKp`               |
+| Bank 2 | `O`                      |
+| Bank 3 | `Pc, Pp`                 |
+
+#### Capacity Requirement
+
+With the above bank mapping, the total capacity requirement for SMEM becomes:
+
+| `Brow=Bcol` | Head dim `d` | `Q, K, V` Precision | `QK, P, O` Precision | Minimum SMEM Capacity (KiB) | Notes                          |
+|-------------|--------------|---------------------|----------------------|-----------------------------|--------------------------------|
+| 64          | 64           | 32                  | 32                   | 192                         | Virgo; Over-provisioned 256KiB |
+| 64          | 64           | 8                   | 16                   | 64                          | **Muon** baseline              |
+| 128         | 64           | 8                   | 16                   | 192                         |                                |
+| 64          | 128          | 8                   | 16                   | 192                         |                                |
+| 128         | 128          | 8                   | 16                   | 384                         |                                |
+
+Since we need some extra margin above the minimum numbers for storing row-wise
+max/sum factors, etc., the current recommended size for Muon is **128KiB** with
+`Brow=Bcol` 64 and head dimension 64.
 
 
 ### Core serialization
