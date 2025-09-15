@@ -60,7 +60,7 @@ Bandwidth is 32B/cycle (SBus size = 256b).
 
 ![SMEM Block Diagram](./fig/smem.svg)
 
-64KB/SM, 64B lines, single port per bank, banked 4x16.
+64KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
 
 Each SRAM is 4B wide, 256 entries deep.
 
@@ -87,6 +87,41 @@ core *unaligned accesses*; all accesses are uniform. The main changes:
     Multi-cycle responses are already handled in the `DistributorNode`
   * Core responses this way will be guaranteed lockstep, assuming full
     pipelining
+
+### FlashAttention-3 Requirements
+
+![FlashAttention Pipeline Stages](./fig/flashattention.svg)
+
+FA-3's deep software pipelining chain (shown as the bold line in the diagram)
+requires extensive double-buffering and concurrent producer-write-consumer-read
+access.  Rather than expanding banks to achieve high memory-level parallelism,
+we use 1R1W dual-ported SRAM banks.
+
+#### Bank Mapping
+
+Given separate read and write ports, we need to map intermediate tensor tiles
+to different banks that avoid read/write conflicts.
+
+In the above pipelining scheme, we give the list of read/write conflicts we
+need to avoid.  `Xc` and `Xp` indicates the double-buffered consumer/producer
+tiles of a given symbol `X`, respectively.
+
+| Access  |  Tiles    | Conflict with |
+|---------|-----------|-------|
+| `READ`  | `Qc, Kc`  | `O`   |
+| `READ`  | `Qc, Kc`  | `QKc` |
+| `READ`  | `Vc, Pc`  | `QKc` |
+| `READ`  | `QKc`     | `O`   |
+| `WRITE` | `Qp, Kp, Vp` | `O`   |
+| `WRITE` | `Qp, Kp, Vp` | `QKp` |
+| `WRITE` | `Qp, Kp, Vp` | `Pp`  |
+| `WRITE` | `Op`         | `Pp`  |
+| `WRITE` | `QKp`        | `Pp`  |
+| `WRITE` | `QKp`        | `O`   |
+
+Note that `O` is not double-buffered due to an intra-iteration dependency
+between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
+in-place in the single tile.
 
 
 ### Core serialization
