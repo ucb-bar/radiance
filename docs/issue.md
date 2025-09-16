@@ -318,11 +318,33 @@ Operand collector consists of the following components:
     * This comes with the potential cost of **underutilizing per-FU collectors**
       if the instruction mix is skewed.
 * **Cons**:
+  * **Higher area overhead in banking**: Each bank is very wide (3*512b), and
+    requires multiple wide-and-shallow SRAMs.  Also, since the minimum depth
+    supported by SRAM macros is 8, it fixes the minimum entries we can provision
+    to 8 * banks (32 at four banks).
   * **Disallows conflict avoidance within an instruction**: Rs1/rs2/rs3 of the
     same instruction are stored to the same bank and needs to be serially
     written.  Therefore each instruction experiences (# of RS) cycles at
     minimum.  This doesn't necessarily bottleneck IPC, because full-throughput
     accesses can still be found across instructions.
+
+
+#### Minimally-banked collectors
+
+![Collector, minimal](fig/collector-minimal.svg)
+
+Instead of relying on cross-collector coalescing, increase # of PRF banks (`N`)
+from 4 to 8 to reduce conflicts.
+
+* **Pros**:
+  * **Cheaper area**: Implementing the three entries in flip-flops may be
+    cheaper than using awkward-shaped SRAMs.
+* **Cons**:
+  * **Serialization of each instruction**: Since there is only 1 entry, operand
+    collection can happen for 1 instruction at a time.
+    In order to avoid pipeline bubbles, PRF bank arbitration should be
+    overlapped with FU dispatch in the next cycle.
+
 
 ### Decoupling collector capacity vs RS
 
