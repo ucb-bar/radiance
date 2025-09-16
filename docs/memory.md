@@ -98,12 +98,14 @@ we use 1R1W dual-ported SRAM banks.
 
 #### Bank Mapping
 
-Given separate read and write ports, we need to map intermediate tensor tiles
-to different banks that avoid read/write conflicts.
+In order to achieve full-throughput pipelining, we need to solve the following
+list of read/write conflicts that exist in the above pipelining scheme. Because
+the SRAM banks have separate read and write ports, we only need to solve
+conflicts within each of read accesses and write accesses, instead of globally
+across the two.
 
-In the above pipelining scheme, we give the list of read/write conflicts we
-need to avoid.  `Xc` and `Xp` indicates the double-buffered consumer/producer
-tiles of a given symbol `X`, respectively.
+Note that `Xc` and `Xp` indicates the double-buffered consumer/producer tiles
+of a given symbol `X`, respectively:
 
 | Access  |  Tiles    | Conflict with |
 |---------|-----------|-------|
@@ -120,8 +122,7 @@ tiles of a given symbol `X`, respectively.
 
 Note that `O` is not double-buffered due to an intra-iteration dependency
 between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
-
-in-place in the single tile.
+in-place within the single tile.
 
 We can solve these conflicts in a mapping that requires 4 banks:
 
@@ -139,7 +140,8 @@ With the above bank mapping, the total capacity requirement for SMEM becomes:
 | `Brow=Bcol` | Head dim `d` | `Q, K, V` Precision | `QK, P, O` Precision | Minimum SMEM Capacity (KiB) | Notes                          |
 |-------------|--------------|---------------------|----------------------|-----------------------------|--------------------------------|
 | 64          | 64           | 32                  | 32                   | 192                         | Virgo; Over-provisioned 256KiB |
-| 64          | 64           | 8                   | 16                   | 64                          | **Muon** baseline              |
+| 64          | 64           | 8                   | 16                   | 64                          |                                |
+| 64          | 64           | 16                  | 16                   | 96                          | **Muon** baseline              |
 | 128         | 64           | 8                   | 16                   | 192                         |                                |
 | 64          | 128          | 8                   | 16                   | 192                         |                                |
 | 128         | 128          | 8                   | 16                   | 384                         |                                |
@@ -147,6 +149,26 @@ With the above bank mapping, the total capacity requirement for SMEM becomes:
 Since we need some extra margin above the minimum numbers for storing row-wise
 max/sum factors, etc., the current recommended size for Muon is **128KiB** with
 `Brow=Bcol` 64 and head dimension 64.
+
+**Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
+need to be down-converted to FP8 for consumption in the matrix PEs.
+
+If we handle down-conversion in SIMT, it creates additional SMEM capacity
+demand, since the converted FP8 values cannot be overwritten into the original
+FP16 tile in-place, unless enforcing a strict ordering between the warps.
+Therefore, for `Q`, `K` and `V`, down-conversion must be handled by the DMA
+either in accumulator move-out, or GMEM to SMEM move-in.
+
+However, `P` down-conversion cannot be handled by the DMA since its value is
+produced in the SMEM as a result of SIMT online softmax operation. Therefore we
+need to allocate separate `P8` and `P16` to handle the conversion without
+mangling the data.  This is reflected in the above mapping scheme.
+
+
+#### Bandwidth Requirement
+
+SMEM bandwidth is provisioned so that it can fully saturate the SIMT compute
+throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 
 
 ### Core serialization

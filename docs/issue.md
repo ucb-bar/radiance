@@ -270,8 +270,6 @@ Forwarding fabric may be expensive, since operand bits are wide
 
 ## Operand Collector
 
-![Collector stage](fig/collector.svg)
-
 Operand collector consists of the following components:
 
 * **Physical register file banks.**  PRF is banked by the register number.
@@ -290,6 +288,41 @@ Operand collector consists of the following components:
     the collector bank that matches the instruction's FU type.
     The (2) condition may not always hold when e.g. instruction mix is skewed
     and a single FU-type collector bank runs out of space.
+
+### Collector banking strategies
+
+#### RS-banked collectors
+
+![Collector, RS-banked](fig/collector-rsbanked.svg)
+
+* **Pros**:
+  * **Less area overhead in banking**: Each bank has the width of 512b (`NT *
+    XLEN`), which is shorter than instruction-banked (3*512b).
+  * **Allows within-instruction coalescing**:  Rs1/rs2/rs3 of a single instruction
+    can be fetched in the same cycle as they arrive at different banks.
+* **Cons**:
+  * **Necessitates another crossbar before the FUs**, because the rs1/rs2/rs3
+    of a single operation is scattered across different collector banks.
+    The Xbar cost can be managed by merging some FU ports together (e.g. FPU
+    with seldomly-used SFU.)
+
+
+#### Instruction-banked collectors
+
+![Collector, instruction-banked](fig/collector-instbanked.svg)
+
+* **Pros**:
+  * **Cheaper wiring cost to FUs**: All of rs1/rs2/rs3 are guaranteed to be
+    stored within a single bank, and that allows direct connection to a single
+    FU pipe.
+    * This comes with the potential cost of **underutilizing per-FU collectors**
+      if the instruction mix is skewed.
+* **Cons**:
+  * **Disallows conflict avoidance within an instruction**: Rs1/rs2/rs3 of the
+    same instruction are stored to the same bank and needs to be serially
+    written.  Therefore each instruction experiences (# of RS) cycles at
+    minimum.  This doesn't necessarily bottleneck IPC, because full-throughput
+    accesses can still be found across instructions.
 
 ### Decoupling collector capacity vs RS
 
