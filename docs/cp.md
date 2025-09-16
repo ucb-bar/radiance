@@ -122,14 +122,19 @@ Top‑level ingestion, routing, and completion.
 
 - S0: Obtain TB_ID, N_TBs, TB_SHAPE, REGS (regs per thread), and PC
 - S1: 
-  - Calculate `total_warps: N_TBs * TB_SHAPE / LANE_WIDTH`
+  - Calculate `warps_per_tb =  TB_SHAPE / LANE_WIDTH`, `total_warps = N_TBs * warps_per_tb`
   - Calculate `warps_per_core = ceil(total_warps / num_cores)`
   <!-- - Calculate `warps_per_core: min(floor(REGS_PER_CORE / (REGS * LANE_WIDTH)), warp_slots_per_core, minimum_warps_per_core)` -->
   - If any of the above numbers are zero, do not scheduler warp and immediately report error upstream.
-  - For each warp scheduler i, drive num_warps=warps_per_core, PC, thread_offset=TB_ID * block_dims + i * warps_per_core * LANE_WIDTH (thread_offset to set thread id csr)
-  - Initialize barrier unit
+  - For each warp scheduler i, drive tb_id=i*warps_per_core/warps_per_tb, num_warps=warps_per_core, PC, thread_offset=TB_ID * block_dims + i * warps_per_core * LANE_WIDTH (thread_offset to set thread id csr)
+  - Initialize barrier unit with N_TBs, warps_per_tb
 - S2: Wait for warps to complete. If any warp return error, save and drive "kill_all_warps"
 - S3: Return ERR
+
+## Barrier Unit
+- Maintain per threadblock counter
+- Upon arrival of a barrier, either zero the corresponding counter and set it to valid, or increment it
+- When all warps have arrived, drive tb_id and release
 
 # Command Model
 
