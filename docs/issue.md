@@ -336,14 +336,18 @@ Operand collector consists of the following components:
 Instead of relying on cross-collector coalescing, increase # of PRF banks (`N`)
 from 4 to 8 to reduce conflicts.
 
+This is the design that Vortex takes as of its current version.
+
 * **Pros**:
   * **Cheaper area**: Implementing the three entries in flip-flops may be
     cheaper than using awkward-shaped SRAMs.
 * **Cons**:
-  * **Serialization of each instruction**: Since there is only 1 entry, operand
-    collection can happen for 1 instruction at a time.
-    In order to avoid pipeline bubbles, PRF bank arbitration should be
-    overlapped with FU dispatch in the next cycle.
+  * **Serialization at every instruction** unless the rs1/rs2/rs3 of the
+    instruction is completely conflict-free.
+  * **No multi-FU dispatch**: Since dispatch is serialized at the single-entry
+    collector, this design disallows dispatching instructions to multiple FUs
+    at the same cycle.  This may not be a problem since fetch/decode throughput
+    is 1 IPC.
 
 
 ### Decoupling collector capacity vs RS
