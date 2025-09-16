@@ -172,6 +172,22 @@ Command retrieved in one cycle. 16 byte command, 1 byte command id, 1 byte comma
 `bool lock, uint32_t head, uint32_t tail, uint32_t limit_offset` = 129 bits
 Grab lock, if tail + bytes > limit_offset, cannot write and wait for drain. If not, write to tail, increment tail by bytes written.
 
+# Software
+
+## Usermode runtime
+- API for malloc, memcpy, memset, launch_kernel, read/set csrs
+- ioctl to kernel driver
+
+## Kernel Driver
+- Kernel mode linux driver/baremetal runtime
+- Turn ioctls to command stream handling
+- Manage free memory list, alloc memory
+- Assign context to cmd, create cmd lists, handle stream dependencies
+- Get phys address of usermode process, encode phys addr into CP cmd
+- Dispatch cmds to CP, insert FENCES
+- Handle response, parse errors, free contexts
+- Pipe printf ring DMAs to stdout
+
 # Future Work
 
 - GPU virtual memory + multi‑tenant execution
