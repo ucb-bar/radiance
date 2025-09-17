@@ -109,31 +109,34 @@ of a given symbol `X`, respectively:
 
 | Access  |  Tiles       | Conflict with | Reason                        |
 |---------|--------------|---------------|-------------------------------|
-| `READ`  | `Qc`         | `Kc`          | Gemmini A/B input             |
+| `READ`  | `Q`          | `Kc`          | Gemmini A/B input             |
 | `READ`  | `Pc`         | `Vc`          | Gemmini A/B input             |
-| `READ`  | `Qc, Kc`     | `O`           | Gemmini-SIMT double-buffering |
-| `READ`  | `Qc, Kc`     | `QKc`         | Gemmini-SIMT double-buffering |
+| `READ`  | `Q, Kc`      | `O`           | Gemmini-SIMT double-buffering |
+| `READ`  | `Q, Kc`      | `QKc`         | Gemmini-SIMT double-buffering |
 | `READ`  | `Vc, Pc`     | `QKc`         | Gemmini-SIMT double-buffering |
 | `READ`  | `QKc`        | `O`           | Gemmini-SIMT double-buffering |
-| `WRITE` | `Qp, Kp, Vp` | `O`           | DMA-Gemmini double-buffering  |
-| `WRITE` | `Qp, Kp, Vp` | `QKp`         | DMA-Gemmini double-buffering  |
-| `WRITE` | `Qp, Kp, Vp` | `Pp`          | DMA-SIMT double-buffering     |
-| `WRITE` | `Op`         | `Pp`          | Gemmini-SIMT double-buffering |
+| `WRITE` | `Kp, Vp`     | `O`           | DMA-Gemmini double-buffering  |
+| `WRITE` | `Kp, Vp`     | `QKp`         | DMA-Gemmini double-buffering  |
+| `WRITE` | `Kp, Vp`     | `Pp`          | DMA-SIMT double-buffering     |
+| `WRITE` | `O`          | `Pp`          | Gemmini-SIMT double-buffering |
 | `WRITE` | `QKp`        | `Pp`          | Gemmini-SIMT double-buffering |
 | `WRITE` | `QKp`        | `O`           | Gemmini-SIMT double-buffering |
 
 Note that `O` is not double-buffered due to an intra-iteration dependency
 between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
 in-place within the single tile.
+`Q` is also not double-buffered, because the same `Q` tile is used throughout
+the loop iteration along the entire sequence dimension of `K^T`.
+
 
 We can solve these conflicts in a mapping that requires 4 banks:
 
-| Bank   |  Tiles             |
-|--------|--------------------|
-| Bank 0 | `Kp, Vp, Kc, Vc`   |
-| Bank 1 | `QKc, QKp`         |
-| Bank 2 | `O, Qc, Qp`        |
-| Bank 3 | `Pc, Pp`           |
+| Bank   |  Tiles           |
+|--------|------------------|
+| Bank 0 | `Kp, Vp, Kc, Vc` |
+| Bank 1 | `QKc, QKp`       |
+| Bank 2 | `O`              |
+| Bank 3 | `Q, Pc, Pp`      |
 
 #### Capacity Requirement
 
@@ -142,9 +145,9 @@ With the above bank mapping, the total capacity requirement for SMEM becomes:
 | `Brow=Bcol` | Head dim `d` | `Q, K, V` Precision | `QK, P, O` Precision | Minimum SMEM Capacity (KiB) | Notes                          |
 |-------------|--------------|---------------------|----------------------|-----------------------------|--------------------------------|
 | 64          | 64           | 32                  | 32                   | 256                         | Virgo                          |
-| 64          | 64           | 8                   | 16                   | 64                          | **Muon** baseline              |
+| 64          | 64           | 8                   | 16                   | 80                          | **Muon** baseline              |
 | 64          | 64           | 16                  | 16                   | 128                         |                                |
-| 128         | 128          | 8                   | 16                   | 256                         |                                |
+| 128         | 128          | 8                   | 16                   | 320                         |                                |
 
 Since we need some extra margin above the minimum numbers for storing row-wise
 max/sum factors, etc., the current recommended size for Muon is **128KiB** with
