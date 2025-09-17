@@ -322,10 +322,10 @@ Operand collector consists of the following components:
 ![Collector, instruction-banked](fig/collector-instbanked.svg)
 
 * **Pros**:
-  * **Cheaper wiring cost to FUs**: All of rs1/rs2/rs3 are guaranteed to be
-    stored within a single bank, and that allows direct connection to a single
-    FU pipe.
-    * This comes with the potential cost of **underutilizing per-FU collectors**
+  * **Cheaper wiring to FUs without 2nd crossbar**: All of rs1/rs2/rs3 are
+    guaranteed to be stored within a single bank, and that allows direct
+    connection to a single FU pipe.
+    * However, this comes with the potential cost of **underutilizing per-FU collectors**
       if the instruction mix is skewed.
 * **Cons**:
   * **Higher area overhead in banking**: Each bank is very wide (3*512b), and
@@ -363,6 +363,8 @@ This is the design that Vortex takes as of its current version.
 * **Pros**:
   * **Cheaper area**: Implementing the three entries in flip-flops may be
     cheaper than using awkward-shaped SRAMs.
+  * **No 2nd crossbar** since single-entry rs1/rs2/rs3 are simply concatenated
+    and broadcasted to the FU pipes.
 * **Cons**:
   * **Serialization at every instruction** unless the rs1/rs2/rs3 of the
     instruction is completely conflict-free.
