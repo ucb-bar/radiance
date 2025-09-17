@@ -413,17 +413,6 @@ for reference.
       cache operands that come in one of the rs1/rs2/rs3 positions of the
       instruction.
 
-### Decoupling collector capacity vs RS
-
-The **crossbar** that connects PRF bank output ports to collector input ports
-has a high wiring cost; for a `B=8` banks and `C=4` collectors,
-the cost scales with `B*C*(NT*XLEN) = 8*4*(16*32b)`.
-
-Therefore, we need to keep `C` manageable, by potentially storing fewer
-collector entries than there are RS entries.
-
-TODO: Elaborate.
-
 ### Operand Forwarding
 
 Upon writeback, the result data may be forwarded to the collector banks
@@ -440,18 +429,49 @@ should also be notified to the **collector allocator**, so that it knows the
 lost read needs to be re-scheduled.  Therefore, the WB bus needs some
 connectivity to the allocator as well.
 
-#### Collecting rs1/rs2/rs3 in parallel for a single instruction
-
-Although rs1/rs2/rs3 sits in the same row of a collector bank, each collector
-can be sub-banked to allow parallel accesses to rs1/rs2/rs3.
-
-**TBD**: Now the crossbar needs to support multiple PRF banks routed to the
-single collector destination. This seems hard to do without further scaling up
-crossbar egress ports?
-
 #### Wiring cost
+
 Since the forwarding bus is pulled from the bank-local WB bus,
 there is no extra broadcasting fabric to all collector banks, and the
 bank-collector crossbar is reused with low overhead.  This design lowers wiring
 cost compared to an alternative where the WB bus is broadcasted to every
 collector bank with the 2:1 MUX selector positioned at the collector ingress.
+
+### Crossbar cost
+
+The designs need to be cognizant of wiring cost of the **crossbar** that
+couples PRF bank output ports to collector input ports: For a `B=8` banks and
+`C=4` collectors, the cost scales with `B*C*(NT*XLEN) = 8*4*(16*32b)`.
+
+### Decoupling collector capacity vs RS
+
+The collector entries don't need to exactly match the number of RS entries.
+We only need enough entries that can uncover enough PRF bank-parallelism and
+sustain high IPC, which will prevent build-up in the collector.
+Let's use an analytical model to find how many entries will suffice for this
+condition.
+
+#### Analytical model
+
+If we assume that the collector banks can collectively store `C` instructions,
+each with 3 operands, than the probability of finding triplets out of `3C`
+operands that land in the 3 different banks among `N` PRF banks are:
+
+```
+P(≥3 distinct banks among 3C draws)
+= 1 − P(use ≤2 banks)
+= 1 − [ C(N,1)·1^(3C) + C(N,2)·(2^(3C) − 2 ) ] / N^(3C)
+= 1 − [ N + (N·(N−1)/2)·(2^(3C) − 2) ] / N^(3C)
+```
+
+Some values are:
+```
+N=4, C=1: 37.5%
+N=4, C=2: 90.8%
+N=4, C=3: 98.8%
+N=4, C=4: 99.9%
+N=8, C=1: 65.6%
+N=8, C=2: 99.3%
+N=8, C=3: 100.0%
+N=8, C=4: 100.0%
+```
