@@ -291,7 +291,7 @@ Operand collector consists of the following components:
 
 ### Collector banking strategies
 
-#### RS-banked collectors
+#### Source-register-banked collectors
 
 ![Collector, RS-banked](fig/collector-rsbanked.svg)
 
@@ -305,6 +305,16 @@ Operand collector consists of the following components:
     of a single operation is scattered across different collector banks.
     The Xbar cost can be managed by merging some FU ports together (e.g. FPU
     with seldomly-used SFU.)
+
+##### Hardware cost
+
+* PRF banks: `4 banks * 64-deep * 512b = 131072b = 16KiB`, `39.7k um^2`
+  * 1 bank: 2 * 64-deep, 256-wide uhd 2-port RF: `2 * 4966.073 um^2 = 9932.146 um^2`
+  * 4 banks
+* Collector banks: `4 banks * 8-deep * 512b = 16384b`, `27.5k um^2`
+  * 8-deep, 256-wide uhd 2-port RF: `3446.816 um^2`
+  * 4 banks
+* Sum: `67.2k um^2`, collector/PRF overhead: `69%`
 
 
 #### Instruction-banked collectors
@@ -328,6 +338,18 @@ Operand collector consists of the following components:
     minimum.  This doesn't necessarily bottleneck IPC, because full-throughput
     accesses can still be found across instructions.
 
+##### Hardware cost
+
+* PRF banks: `4 banks * 64-deep * 512b = 131072b = 16KiB`, `39.7k um^2`
+  * 1 bank: 2 * 64-deep, 256-wide uhd 2-port RF: `2 * 4966.073 um^2 = 9932.146 um^2`
+  * 4 banks
+* Collector banks: `4 banks * 3 RS * 8-deep * 512b = 49152b`, `310k um^2`
+  * 1 bank: 3 * 8-deep, 256-wide uhd 2-port RF: `3 * 3446.816 = 10340 um^2`
+    * **Note**: Minimal SRAM depth is 8, which causes overprovisioning;
+      flip-flops may work better for fewer entries
+  * 4 banks
+* Sum: `350k um^2`, collector/PRF overhead: `780%`
+
 
 #### Minimally-banked collectors
 
@@ -348,6 +370,15 @@ This is the design that Vortex takes as of its current version.
     collector, this design disallows dispatching instructions to multiple FUs
     at the same cycle.  This may not be a problem since fetch/decode throughput
     is 1 IPC.
+
+##### Hardware cost
+
+* PRF banks: `8 banks * 32-deep * 512b = 131072b = 16KiB`, `65.6k um^2`
+  * 1 bank: 2 * 32-deep, 256-wide uhd 2-port RF: `2 * 4097.926 um^2 = 8195.852 um^2`
+  * **8 banks** instead of 4 to take more advantage of bank-level parallelism.
+* Collector banks: `512b*3 = 1536b`; *ChatGPT estimates `9~12k um^2` in flip flops*
+  * 1-entry is too shallow for SRAM, need to be flip-flops
+* Sum: ~`78k um^2`, collector/PRF overhead: `18%`
 
 
 ### Decoupling collector capacity vs RS
