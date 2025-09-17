@@ -3,7 +3,8 @@
 	- CUDA has same limitation
 - Memory ordering will be very relaxed - loads and stores in one thread can appear in any order to another thread
 - Coherence is also relaxed
-- see [Coherency / Consistency](#Coherency / Consistency)
+- see Coherency / Consistency section
+- ISA modification: we introduce address space qualifier for loads and stores to distinguish global from shared memory; this requires some compiler changes but LLVM certainly supports it (worst case, use intrinsics for shared memory)
 ## Load / Store Queue
 - other designs in handwritten PDF
 ### Design 2.5: Keep stores in program order, allow reordering consecutive loads
@@ -14,14 +15,16 @@
 	   - Loads not only issued from head of queue (allows reordering consecutive loads)
    - Stores not allowed to begin until head of LDQ reaches stored pointer, and it is at the head of STQ (all older loads and stores retired)
    - Design forces program order, allows sizing the two queues differently
-
-## Address Switch
-![Address Spaces](fig/addressing.png)
-- Comparators to check if address is in Shared Memory or Global address space
-- Note: ISA limitations mean you can technically make loads to shared / global addresses at the same time
-	- This is very undefined - should we fault?
-	- Ideal - some extra bits in instruction encoding (e.g. ld.global, ld.shared)
-- Probably want separate LDQ/STQ for Shared / Global to eliminate false orderings between the two
+   - Separate load/store queues for shared memory accesses and global mem accesses. 
+   - Maintain 1 LDQ/STQ per warp to prevent false ordering between warps - lower utilization, but should be ok
+   - Load/Store queues statically map into large address SRAMs, read/write port shared across warps and global/shared queues. 
+	   - Limits to issuing 1 memory xaction per cycle, should be ok
+   - Store queues can also have a single big data SRAM
+   - Load queue data - two options: 
+	   1. 1 data SRAM per lane - allows for more parallelism
+		   e.g. response from coalescer includes different requests in the same cycle
+		   e.g. non-conflicting responses from shared memory, global memory in the same cycle
+	   2. 1 fat data SRAM for all lanes - more serialization, but cheaper. 
 
 ## Shared Memory
 ![Shared Memory Organization](fig/shared_memory.png)
