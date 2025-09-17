@@ -125,8 +125,9 @@ of a given symbol `X`, respectively:
 Note that `O` is not double-buffered due to an intra-iteration dependency
 between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
 in-place within the single tile.
-`Q` is also not double-buffered, because the same `Q` tile is used throughout
-the loop iteration along the entire sequence dimension of `K^T`.
+`Q` is also not double-buffered, because the same `Q` tile is read multiple
+times throughout the loop iteration along the entire sequence dimension of
+`K^T`.
 
 
 We can solve these conflicts in a mapping that requires 4 banks:
@@ -153,7 +154,7 @@ Since we need some extra margin above the minimum numbers for storing row-wise
 max/sum factors, etc., the current recommended size for Muon is **128KiB** with
 `Brow=Bcol` 64 and head dimension 64.
 
-**Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
+**FP8 Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
 need to be down-converted to FP8 for consumption in the matrix PEs.
 
 If we handle down-conversion in SIMT, it creates additional SMEM capacity

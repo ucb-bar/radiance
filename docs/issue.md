@@ -383,6 +383,31 @@ This is the design that Vortex takes as of its current version.
 * Sum: ~`78k um^2`, collector/PRF overhead: `18%`
 
 
+### Caching collectors
+
+This design enhances the collector banks to re-serve register operands that are
+re-used in subsequent instructions, in order to reduce bandwidth demand on the
+PRF.
+
+See
+[patent](https://patentimages.storage.googleapis.com/a8/70/94/16936cf6b77e43/US8639882.pdf)
+for reference.
+
+* **Pros**:
+  * **Reduced PRF pressure and bank conflicts**, since operand accesses that
+    *hit* the collectors don't need to duplicatedly read from the PRF.
+  * **Better BW and capacity utilization from data re-use**.
+* **Cons**:
+  * **Complex control logic for cache coherency**.  When a new value is written
+    back to the PRF, the collectors must be scanned and be invalidated of its
+    dirty values.  Or, they must act as a write-back cache, where the WB path
+    only writes to the collectors and not the PRFs on a hit.  This essentially
+    boils down to implementing a hardware-managed cache.
+  * **May still incur collector bank conflict**, if the cache-hit operand
+    resides in the same bank as the other register operand of the instruction.
+    In this case, the hit-operand must be duplicated into a different collector
+    bank.
+
 ### Decoupling collector capacity vs RS
 
 The **crossbar** that connects PRF bank output ports to collector input ports
