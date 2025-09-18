@@ -270,8 +270,6 @@ Forwarding fabric may be expensive, since operand bits are wide
 
 ## Operand Collector
 
-![Collector stage](fig/collector.svg)
-
 Operand collector consists of the following components:
 
 * **Physical register file banks.**  PRF is banked by the register number.
@@ -291,16 +289,129 @@ Operand collector consists of the following components:
     The (2) condition may not always hold when e.g. instruction mix is skewed
     and a single FU-type collector bank runs out of space.
 
-### Decoupling collector capacity vs RS
+### Collector banking strategies
 
-The **crossbar** that connects PRF bank output ports to collector input ports
-has a high wiring cost; for a `B=8` banks and `C=4` collectors,
-the cost scales with `B*C*(NT*XLEN) = 8*4*(16*32b)`.
+#### Source-register-banked collectors
 
-Therefore, we need to keep `C` manageable, by potentially storing fewer
-collector entries than there are RS entries.
+![Collector, RS-banked](fig/collector-rsbanked.svg)
 
-TODO: Elaborate.
+* **Pros**:
+  * **Less area overhead in banking**: Each bank has the width of 512b (`NT *
+    XLEN`), which is shorter than instruction-banked (3*512b).
+  * **Allows within-instruction coalescing**:  Rs1/rs2/rs3 of a single instruction
+    can be fetched in the same cycle as they arrive at different banks.
+* **Cons**:
+  * **Necessitates another crossbar before the FUs**, because the rs1/rs2/rs3
+    of a single operation is scattered across different collector banks.
+    The Xbar cost can be managed by merging some FU ports together (e.g. FPU
+    with seldomly-used SFU.)
+
+##### Hardware cost
+
+* PRF banks: `4 banks * 64-deep * 512b = 131072b = 16KiB`, `39.7k um^2`
+  * 1 bank: 2 * 64-deep, 256-wide uhd 2-port RF: `2 * 4966.073 um^2 = 9932.146 um^2`
+  * 4 banks
+* Collector banks: `4 banks * 8-deep * 512b = 16384b`, `27.5k um^2`
+  * 8-deep, 256-wide uhd 2-port RF: `3446.816 um^2`
+  * 4 banks
+* Sum: `67.2k um^2`, collector/PRF overhead: `69%`
+
+
+#### Instruction-banked collectors
+
+![Collector, instruction-banked](fig/collector-instbanked.svg)
+
+* **Pros**:
+  * **Cheaper wiring to FUs without 2nd crossbar**: All of rs1/rs2/rs3 are
+    guaranteed to be stored within a single bank, and that allows direct
+    connection to a single FU pipe.
+    * However, this comes with the potential cost of **underutilizing per-FU collectors**
+      if the instruction mix is skewed.
+* **Cons**:
+  * **Higher area overhead in banking**: Each bank is very wide (3*512b), and
+    requires multiple wide-and-shallow SRAMs.  Also, since the minimum depth
+    supported by SRAM macros is 8, it fixes the minimum entries we can provision
+    to 8 * banks (32 at four banks).
+  * **Disallows conflict avoidance within an instruction**: Rs1/rs2/rs3 of the
+    same instruction are stored to the same bank and needs to be serially
+    written.  Therefore each instruction experiences (# of RS) cycles at
+    minimum.  This doesn't necessarily bottleneck IPC, because full-throughput
+    accesses can still be found across instructions.
+
+##### Hardware cost
+
+* PRF banks: `4 banks * 64-deep * 512b = 131072b = 16KiB`, `39.7k um^2`
+  * 1 bank: 2 * 64-deep, 256-wide uhd 2-port RF: `2 * 4966.073 um^2 = 9932.146 um^2`
+  * 4 banks
+* Collector banks: `4 banks * 3 RS * 8-deep * 512b = 49152b`, `310k um^2`
+  * 1 bank: 3 * 8-deep, 256-wide uhd 2-port RF: `3 * 3446.816 = 10340 um^2`
+    * **Note**: Minimal SRAM depth is 8, which causes overprovisioning;
+      flip-flops may work better for fewer entries
+  * 4 banks
+* Sum: `350k um^2`, collector/PRF overhead: `780%`
+
+
+#### Minimally-banked collectors
+
+![Collector, minimal](fig/collector-minimal.svg)
+
+Instead of relying on cross-collector coalescing, increase # of PRF banks (`N`)
+from 4 to 8 to reduce conflicts.
+
+This is the design that Vortex takes as of its current version.
+
+* **Pros**:
+  * **Cheaper area**: Implementing the three entries in flip-flops may be
+    cheaper than using awkward-shaped SRAMs.
+  * **No 2nd crossbar** since single-entry rs1/rs2/rs3 are simply concatenated
+    and broadcasted to the FU pipes.
+* **Cons**:
+  * **Serialization at every instruction** unless the rs1/rs2/rs3 of the
+    instruction is completely conflict-free.
+  * **No multi-FU dispatch**: Since dispatch is serialized at the single-entry
+    collector, this design disallows dispatching instructions to multiple FUs
+    at the same cycle.  This may not be a problem since fetch/decode throughput
+    is 1 IPC.
+
+##### Hardware cost
+
+* PRF banks: `8 banks * 32-deep * 512b = 131072b = 16KiB`, `65.6k um^2`
+  * 1 bank: 2 * 32-deep, 256-wide uhd 2-port RF: `2 * 4097.926 um^2 = 8195.852 um^2`
+  * **8 banks** instead of 4 to take more advantage of bank-level parallelism.
+* Collector banks: `512b*3 = 1536b`; *ChatGPT estimates `9~12k um^2` in flip flops*
+  * 1-entry is too shallow for SRAM, need to be flip-flops
+* Sum: ~`78k um^2`, collector/PRF overhead: `18%`
+
+
+### Caching collectors
+
+![Collector, caching](fig/collector-caching.svg)
+
+This design enhances the collector banks to re-serve register operands that are
+re-used in subsequent instructions, in order to reduce bandwidth demand on the
+PRF.
+
+See
+[patent](https://patentimages.storage.googleapis.com/a8/70/94/16936cf6b77e43/US8639882.pdf)
+for reference.
+
+* **Pros**:
+  * **Reduced PRF pressure and bank conflicts**, since operand accesses that
+    *hit* the collectors don't need to be redundantly read from the PRF again.
+  * **Better BW and capacity utilization from data re-use**.
+* **Cons**:
+  * **Complex control logic for cache coherency**.  When a new value is written
+    back to the PRF, the collectors must be scanned and be invalidated of its
+    dirty values.  Or, they must act as a write-through cache, where the WB path
+    writes to both the collectors and the PRFs.  In either case, this
+    essentially boils down to implementing a hardware-managed cache.
+  * **May still incur collector bank conflict**, if the cache-hit operand
+    resides in the same bank as the other register operand of the instruction.
+    In this case, the hit-operand must be duplicated into a different collector
+    bank.
+    * This can be worked around by allowing each collector bank to separately
+      cache operands that come in one of the rs1/rs2/rs3 positions of the
+      instruction.
 
 ### Operand Forwarding
 
@@ -318,18 +429,49 @@ should also be notified to the **collector allocator**, so that it knows the
 lost read needs to be re-scheduled.  Therefore, the WB bus needs some
 connectivity to the allocator as well.
 
-#### Collecting rs1/rs2/rs3 in parallel for a single instruction
-
-Although rs1/rs2/rs3 sits in the same row of a collector bank, each collector
-can be sub-banked to allow parallel accesses to rs1/rs2/rs3.
-
-**TBD**: Now the crossbar needs to support multiple PRF banks routed to the
-single collector destination. This seems hard to do without further scaling up
-crossbar egress ports?
-
 #### Wiring cost
+
 Since the forwarding bus is pulled from the bank-local WB bus,
 there is no extra broadcasting fabric to all collector banks, and the
 bank-collector crossbar is reused with low overhead.  This design lowers wiring
 cost compared to an alternative where the WB bus is broadcasted to every
 collector bank with the 2:1 MUX selector positioned at the collector ingress.
+
+### Crossbar cost
+
+The designs need to be cognizant of wiring cost of the **crossbar** that
+couples PRF bank output ports to collector input ports: For a `B=8` banks and
+`C=4` collectors, the cost scales with `B*C*(NT*XLEN) = 8*4*(16*32b)`.
+
+### Decoupling collector capacity vs RS
+
+The collector entries don't need to exactly match the number of RS entries.
+We only need enough entries that can uncover enough PRF bank-parallelism and
+sustain high IPC, which will prevent build-up in the collector.
+Let's use an analytical model to find how many entries will suffice for this
+condition.
+
+#### Analytical model
+
+If we assume that the collector banks can collectively store `C` instructions,
+each with 3 operands, than the probability of finding triplets out of `3C`
+operands that land in the 3 different banks among `N` PRF banks are:
+
+```
+P(≥3 distinct banks among 3C draws)
+= 1 − P(use ≤2 banks)
+= 1 − [ C(N,1)·1^(3C) + C(N,2)·(2^(3C) − 2 ) ] / N^(3C)
+= 1 − [ N + (N·(N−1)/2)·(2^(3C) − 2) ] / N^(3C)
+```
+
+Some values are:
+```
+N=4, C=1: 37.5%
+N=4, C=2: 90.8%
+N=4, C=3: 98.8%
+N=4, C=4: 99.9%
+N=8, C=1: 65.6%
+N=8, C=2: 99.3%
+N=8, C=3: 100.0%
+N=8, C=4: 100.0%
+```

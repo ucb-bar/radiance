@@ -65,7 +65,6 @@ VCS_NONCC_OPTS += +vcs+initreg+random
 cyclotron:
 	cd $(CYCLOTRON_SRC_DIR) && cargo build # --release
 
-EXTRA_SIM_REQS += vortex_vsrc.$(CONFIG)
 # below manipulation of RADIANCE_EXTERNAL_SRCS doesn't work if we try to reuse
 # $(call lookup_srcs) from common.mk, the variable doesn't expand somehow
 ifeq ($(shell which fdfd 2> /dev/null),)
@@ -82,12 +81,17 @@ endif
 # $(info RADIANCE_EXTERNAL_SRCS: $(RADIANCE_EXTERNAL_SRCS))
 
 # For every Vortex verilog source file, if there's a matching file in
-# gen-collateral/, copy them over.  This is a hacky way to ensure the changes
-# in the verilog sources are reflected before Verilator/VCS kicks in. This is
-# necessary when common.mk does not trigger chipyard jar rebuild upon verilog
-# source updates, in which case we need to manually ensure the up-to-date-ness
-# of gen-collateral/.
-vortex_vsrc.$(CONFIG): $(RADIANCE_EXTERNAL_SRCS)
+# gen-collateral/, copy them over to keep up-to-dateness.
+#
+# This is used when you intentionally skip searching for `vortex` directory in
+# `CHIPYARD_VLOG_SOURCES` in common.mk (via --exclude vortex).  This is useful
+# to prevent vortex file changes from triggering full Chisel re-build, but it
+# needs to be used in conjunction with this gen-collateral diff trick by
+# un-commenting the following line:
+# EXTRA_SIM_REQS += vortex_vsrc
+
+.PHONY: vortex_vsrc
+vortex_vsrc: $(RADIANCE_EXTERNAL_SRCS)
 	@for file in $(RADIANCE_EXTERNAL_SRCS); do \
 		filename=$$(basename "$$file"); \
 		if [ -f $(GEN_COLLATERAL_DIR)/$$filename ]; then \
@@ -96,5 +100,3 @@ vortex_vsrc.$(CONFIG): $(RADIANCE_EXTERNAL_SRCS)
 			fi; \
 		fi; \
 	done
-	touch $@
-
