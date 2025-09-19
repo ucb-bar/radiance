@@ -1,5 +1,6 @@
 package chipyard
 
+import radiance.subsystem._
 import org.chipsalliance.cde.config.Config
 
 class MemtraceCoreConfig extends Config(
