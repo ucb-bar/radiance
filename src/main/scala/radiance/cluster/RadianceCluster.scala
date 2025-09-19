@@ -14,6 +14,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
 import radiance.subsystem._
+import radiance.muon._
 import radiance.virgo._
 
 case class RadianceClusterParams(
@@ -38,19 +39,19 @@ class RadianceCluster (
 
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
-  // FIXME: handle both muon and vortex
-  val radianceTiles = leafTiles.values.filter(_.isInstanceOf[VortexTile]).toSeq.asInstanceOf[Seq[VortexTile]]
+  val vortexTiles = leafTiles.values.filter(_.isInstanceOf[VortexTile]).toSeq.asInstanceOf[Seq[VortexTile]]
+  val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
 
-  def virgoSharedMemComponentsGen() = new VirgoSharedMemComponents(thisClusterParams, gemminiTiles, radianceTiles)
+  def virgoSharedMemComponentsGen() = new VirgoSharedMemComponents(thisClusterParams, gemminiTiles, vortexTiles)
   def virgoSharedMemComponentsImpGen(outer: VirgoSharedMemComponents) = new VirgoSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
     virgoSharedMemComponentsGen, Some(virgoSharedMemComponentsImpGen(_)), clbus)).suggestName("shared_mem")
 
   // direct core-accelerator connections
   val smemKey = p(RadianceSharedMemKey).get
-  val numCoresInCluster = radianceTiles.length
-  val radianceAccSlaveNodes = Seq.fill(numCoresInCluster)(AccSlaveNode())
-  (radianceAccSlaveNodes zip radianceTiles).foreach { case (a, r) => a := r.accMasterNode }
+  val numCoresInCluster = vortexTiles.length
+  val vortexAccSlaveNodes = Seq.fill(numCoresInCluster)(AccSlaveNode())
+  (vortexAccSlaveNodes zip vortexTiles).foreach { case (a, v) => a := v.accMasterNode }
   val gemminiAccMasterNodes = gemminiTiles.map { tile =>
     val masterNode = AccMasterNode()
     tile.accSlaveNode := masterNode
@@ -71,7 +72,10 @@ class RadianceCluster (
 
   // barrier connections
   val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
-  radianceTiles.foreach { tile =>
+  vortexTiles.foreach { tile =>
+    barrierSlaveNode := tile.barrierMasterNode
+  }
+  muonTiles.foreach { tile =>
     barrierSlaveNode := tile.barrierMasterNode
   }
 
@@ -92,7 +96,7 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
     b.resp <> synchronizer.io.resp // broadcast
   }
 
-  val coreAccs = outer.radianceAccSlaveNodes.map(_.in.head._1)
+  val coreAccs = outer.vortexAccSlaveNodes.map(_.in.head._1)
   val gemminiAccs = outer.gemminiAccMasterNodes.map(_.out.head._1)
 
   gemminiAccs.zipWithIndex.foreach { case (g, gi) =>

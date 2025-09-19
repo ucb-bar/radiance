@@ -50,9 +50,9 @@ case class MuonCoreParams(
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
+  numWarps: Int = 8,
   numLanes: Int = 16,
   // schedule, dispatch, rename
-  numWarps: Int = 8,
   numPhysRegs: Int = 256,
   numArchRegs: Int = 128,
   numIPDOMEntries: Int = 8,
