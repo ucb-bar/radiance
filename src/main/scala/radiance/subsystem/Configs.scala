@@ -49,12 +49,12 @@ case class RadianceFrameBufferKey(baseAddress: BigInt,
 case object RadianceFrameBufferKey extends Field[Seq[RadianceFrameBufferKey]](Seq())
 
 case class SIMTCoreParams(
-  numWarps: Int = 4,    // # of warps in the core
-  numLanes: Int = 4,    // # of SIMT threads per warp
-  numLsuLanes: Int = 4, // # of memory lanes in the memory interface to the
-                        // cache; relates to the LSU lanes
-  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests in the LSU
+  numWarps: Int = 4,        // # of warp slots in the core
+  numLanes: Int = 4,        // # of SIMT lanes per warp
+  numLsuLanes: Int = 4,     // # of LSU lanes in the core
+  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests handled in the LSU
 )
+case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None)
 
 class WithMuonCores(
   n: Int,

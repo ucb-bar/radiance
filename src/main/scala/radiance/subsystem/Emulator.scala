@@ -12,8 +12,6 @@ case class MemtraceCoreParams(
     tracefilename: String = "undefined",
     traceHasSource: Boolean = false
 )
-
-case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None /*default*/ )
 case object MemtraceCoreKey
     extends Field[Option[MemtraceCoreParams]](None /*default*/ )
 

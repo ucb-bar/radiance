@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.MulDivParams
 import freechips.rocketchip.tile.{CoreParams, FPUParams}
+import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.Parameters
 
 case class MuonCoreParams(
@@ -66,8 +67,58 @@ case class MuonCoreParams(
   numLsuLanes: Int = 16,
   logSMEMInFlights: Int = 2,
 ) extends CoreParams {
-
 }
 
-class Muon(tile: MuonTile)(implicit p: Parameters) extends Module {
+class MemRequest (
+  tagBits: Int,
+  sizeBits: Int,
+  addressBits: Int,
+  dataBits: Int
+) extends Bundle {
+  val store = Bool()
+  val address = UInt(addressBits.W)
+  val size = UInt(sizeBits.W) // log size
+  val tag = UInt(tagBits.W)
+  val data = UInt(dataBits.W)
+}
+
+class MemResponse (
+  tagBits: Int,
+  dataBits: Int
+) extends Bundle {
+  val tag = UInt(tagBits.W)
+  val data = UInt(dataBits.W)
+}
+
+trait HasMuonCoreParameters extends freechips.rocketchip.tile.HasCoreParameters {
+  val muonParams: MuonCoreParams = tileParams.core.asInstanceOf[MuonCoreParams]
+}
+
+abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasMuonCoreParameters
+
+abstract class CoreModule(implicit val p: Parameters) extends Module
+  with HasMuonCoreParameters
+
+class MemIO (
+  tagBits: Int,
+  dataBits: Int
+)(implicit p: Parameters) extends CoreBundle()(p) {
+  val addressBits = muonParams.xLen
+  val sizeBits = log2Ceil(dataBits / 8)
+
+  val req = Decoupled(new MemRequest(tagBits, sizeBits, addressBits, dataBits))
+  val resp = Flipped(Decoupled(new MemResponse(tagBits, dataBits)))
+}
+
+class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
+  val imemTagBits = 4 // FIXME
+  val dmemTagBits = 4 // FIXME
+  val imemDataBits = muonParams.instBits
+  val dmemDataBits = muonParams.xLen * muonParams.numLsuLanes // TODO: get from dcache
+
+  val io = IO(new Bundle {
+    val imem = new MemIO(imemTagBits, imemDataBits)
+    val dmem = new MemIO(dmemTagBits, dmemDataBits)
+    // TODO: LCP (threadblock start/done, warp slot, synchronization)
+  })
 }
