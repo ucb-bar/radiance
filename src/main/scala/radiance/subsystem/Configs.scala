@@ -85,18 +85,16 @@ class WithMuonCores(
   ))
 }
 
-class WithEmulatorCores(
-  n: Int,
-  useVxCache: Boolean
+class WithCyclotronCores(
+  n: Int
 ) extends Config((site, _, up) => {
   case TilesLocated(InSubsystem) => {
     val prev = up(TilesLocated(InSubsystem))
     val idOffset = up(NumTiles)
-    val emulator = EmulatorTileParams(
-      core = VortexCoreParams(),
-      useVxCache = useVxCache)
-    List.tabulate(n)(i => EmulatorTileAttachParams(
-      emulator.copy(tileId = i + idOffset),
+    val cyclotron = CyclotronTileParams(
+      core = MuonCoreParams())
+    List.tabulate(n)(i => CyclotronTileAttachParams(
+      cyclotron.copy(tileId = i + idOffset),
       RocketCrossingParams()
     )) ++ prev
   }

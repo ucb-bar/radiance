@@ -22,8 +22,6 @@ class VirgoFP16SynConfig extends RadianceFP16ClusterSynConfig
 class VirgoHopperSynConfig extends Radiance4CFP16ClusterSynConfig
 
 class RadianceBaseConfig extends Config(
-  // NOTE: when changing these, remember to change NUM_CORES/THREADS/WARPS in
-  // the verilog source as well!
   new WithSimtConfig(nWarps = 8, nCoreLanes = 8, nMemLanes = 8, nSrcIds = 32) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(BigInt("80000000", 16)) ++
@@ -44,6 +42,14 @@ class RadianceBaseConfig extends Config(
 
 class RadianceMuonConfig extends Config(
   new WithMuonCores(1, location = InCluster(0)) ++
+  new WithRadianceSharedMem(address = x"ff000000", size = 128 << 10, numBanks = 4, numWords = 16) ++
+  new WithCoalescer(nNewSrcIds = 16) ++
+  new WithVortexL1Banks(nBanks = 8) ++
+  new WithRadianceCluster(0) ++
+  new RadianceBaseConfig)
+
+class RadianceCyclotronConfig extends Config(
+  new WithCyclotronCores(1) ++
   new WithRadianceSharedMem(address = x"ff000000", size = 128 << 10, numBanks = 4, numWords = 16) ++
   new WithCoalescer(nNewSrcIds = 16) ++
   new WithVortexL1Banks(nBanks = 8) ++
@@ -151,11 +157,6 @@ class RadianceNoCoalConfig extends Config(
   new WithVortexCores(1, useVxCache = false) ++
   new WithVortexL1Banks(nBanks = 1)++
   new RadianceBaseConfig)
-
-class RadianceEmulatorConfig extends Config(
-  new WithEmulatorCores(1, useVxCache = false) ++
-  new WithSimtConfig(nMemLanes = 4, nSrcIds = 4) ++
-  new chipyard.config.AbstractConfig)
 
 class RadianceFuzzerConfig extends Config(
   new WithFuzzerCores(1, useVxCache = false) ++
