@@ -10,7 +10,7 @@ class MemtraceCoreConfig extends Config(
   // new radiance.subsystem.WithMemtraceCore("nvbit.vecadd.n100000.filter_sm0.lane32.trace",
   //   traceHasSource = false) ++
   new WithCoalescer(nNewSrcIds = 2) ++
-  new WithSimtConfig(nMemLanes = 4, nSrcIds = 8) ++
+  new WithSIMTConfig(numLsuLanes = 4, numSMEMInFlights = 8) ++
   // L2
   new freechips.rocketchip.subsystem.WithInclusiveCache(nWays=8, capacityKB=512) ++
   new freechips.rocketchip.subsystem.WithNBanks(4) ++

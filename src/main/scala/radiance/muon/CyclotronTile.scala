@@ -64,7 +64,7 @@ class CyclotronTile private (
   val masterNode = visibilityNode
 
   val (numLanes, numSrcIds) = p(SIMTCoreKey) match {
-      case Some(param) => (param.nMemLanes, param.nSrcIds)
+      case Some(param) => (param.numLsuLanes, param.numSMEMInFlights)
       case None => {
         require(false, "Muon requires SIMTCoreKey to be defined")
         (0, 0)

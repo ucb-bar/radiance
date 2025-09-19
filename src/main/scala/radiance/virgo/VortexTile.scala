@@ -159,15 +159,15 @@ class VortexTile private(
   // NOTE: when changing these, remember to change +define+NUM_CORES/THREADS/WARPS in
   // radiance.mk as well!
   val numWarps = p(SIMTCoreKey) match {
-    case Some(simtParam) => simtParam.nWarps
+    case Some(simtParam) => simtParam.numWarps
     case None            => 4
   }
   val numCoreLanes = p(SIMTCoreKey) match {
-    case Some(simtParam) => simtParam.nCoreLanes
+    case Some(simtParam) => simtParam.numLanes
     case None            => 4
   }
   val numLsuLanes = p(SIMTCoreKey) match {
-    case Some(simtParam) => simtParam.nMemLanes
+    case Some(simtParam) => simtParam.numLsuLanes
     case None            => 4
   }
 
@@ -181,7 +181,7 @@ class VortexTile private(
   val imemSourceWidth = 4 // 1 << imemSourceWidth == IBUF_SIZE
 
   val smemSourceWidth = p(SIMTCoreKey) match {
-    case Some(simtParam) => log2Ceil(simtParam.nSrcIds)
+    case Some(simtParam) => log2Ceil(simtParam.numSMEMInFlights)
     case None => 4
   }
 
@@ -211,7 +211,7 @@ class VortexTile private(
 
   require(numWarps >= numLsuLanes,
         s"Vortex core requires numWarps (${numWarps}) >= numLsuLanes (${numLsuLanes})")
-  val LSUQ_SIZE = p(SIMTCoreKey).get.nSrcIds
+  val LSUQ_SIZE = p(SIMTCoreKey).get.numSMEMInFlights
   val LSUQ_TAG_BITS = log2Ceil(LSUQ_SIZE) + 1 /*DCACHE_BATCH_SEL_BITS*/
   val dmemTagWidth = UUID_WIDTH + LSUQ_TAG_BITS
   // dmem and smem shares the same tag width, DCACHE_NOSM_TAG_WIDTH

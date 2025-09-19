@@ -2318,7 +2318,7 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // A dummy harness around the coalescer for use in VLSI flow.
 // Should not instantiate any memtrace modules.
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLsuLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new DummyDriver(config))
@@ -2355,7 +2355,7 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     extends LazyModule {
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLsuLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new MemTraceDriver(config, filename))
@@ -2447,7 +2447,7 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
 
 // tracedriver --> coalescer --> tlram
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLsuLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val filename = "vecadd.core1.thread4.trace"

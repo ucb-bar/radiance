@@ -18,10 +18,10 @@ case object MemtraceInjector extends SubsystemInjector((p, baseSubsystem) => {
     // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
     val simtParam = p(SIMTCoreKey).get
     val config = DefaultCoalescerConfig.copy(
-      numLanes = simtParam.nMemLanes, 
-      numOldSrcIds = simtParam.nSrcIds
+      numLanes = simtParam.numLsuLanes,
+      numOldSrcIds = simtParam.numSMEMInFlights
       )
-    val numLanes = simtParam.nMemLanes
+    val numLanes = simtParam.numLsuLanes
     val filename = param.tracefilename
 
     val sbus = baseSubsystem.locateTLBusWrapper(SBUS)

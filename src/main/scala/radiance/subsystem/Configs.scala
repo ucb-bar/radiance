@@ -48,6 +48,14 @@ case class RadianceFrameBufferKey(baseAddress: BigInt,
                                   fbName: String = "fb")
 case object RadianceFrameBufferKey extends Field[Seq[RadianceFrameBufferKey]](Seq())
 
+case class SIMTCoreParams(
+  numWarps: Int = 4,    // # of warps in the core
+  numLanes: Int = 4,    // # of SIMT threads per warp
+  numLsuLanes: Int = 4, // # of memory lanes in the memory interface to the
+                        // cache; relates to the LSU lanes
+  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests in the LSU
+)
+
 class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
@@ -57,8 +65,14 @@ class WithMuonCores(
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
     val coreIdOffset = up(NumMuonCores)
+    require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
     val muon = MuonTileParams(
-      core = MuonCoreParams(),
+      core = MuonCoreParams(
+        numWarps = up(SIMTCoreKey).get.numWarps,
+        numLanes = up(SIMTCoreKey).get.numLanes,
+        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes,
+        logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+      ),
       icache = None,
       dcache = None,
     )
@@ -278,16 +292,15 @@ class WithRadianceCluster(
   case PossibleTileLocations => up(PossibleTileLocations) :+ InCluster(clusterId)
 })
 
-// `nSrcIds`: number of source IDs for each mem lane.  This is for all warps
-class WithSimtConfig(nWarps: Int = 4, nCoreLanes: Int = 4, nMemLanes: Int = 4, nSrcIds: Int = 8)
+class WithSIMTConfig(numWarps: Int = 4, numLanes: Int = 4, numLsuLanes: Int = 4, numSMEMInFlights: Int = 8)
 extends Config((site, _, up) => {
   case SIMTCoreKey => {
     Some(up(SIMTCoreKey).getOrElse(SIMTCoreParams()).copy(
-      nWarps = nWarps,
-      nCoreLanes = nCoreLanes,
-      nMemLanes = nMemLanes,
-      nSrcIds = nSrcIds
-      ))
+      numWarps = numWarps,
+      numLanes = numLanes,
+      numLsuLanes = numLsuLanes,
+      numSMEMInFlights = numSMEMInFlights
+    ))
   }
 })
 
@@ -318,7 +331,7 @@ class WithPriorityCoalXbar extends Config((site, _, up) => {
 class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config((site, _, up) => {
   case CoalescerKey => {
     val (nLanes, numOldSrcIds) = up(SIMTCoreKey) match {
-      case Some(param) => (param.nMemLanes, param.nSrcIds)
+      case Some(param) => (param.numLsuLanes, param.numSMEMInFlights)
       case None => (1,1)
     }
 

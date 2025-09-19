@@ -10,7 +10,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import radiance.memory._
 import freechips.rocketchip.unittest._
-import radiance.subsystem.WithSimtConfig
+import radiance.subsystem.WithSIMTConfig
 import radiance.virgo.TensorCoreDecoupledTest
 //import rocket.VortexFatBankTest
 
@@ -60,7 +60,7 @@ class WithCoalescingUnitSynthesisDummy(nLanes: Int) extends Config((site, _, _) 
     implicit val p = q
     val timeout = 50000 * site(TestDurationMultiplier)
     Seq(
-      Module(new DummyCoalescerTest(timeout=timeout)(new WithSimtConfig(nMemLanes=4))),
+      Module(new DummyCoalescerTest(timeout=timeout)(new WithSIMTConfig(numLsuLanes=4))),
     ) }
 })
 
@@ -72,7 +72,7 @@ class TensorUnitTestConfig extends Config(
 class CoalescingUnitTestConfig extends Config(
   new WithCoalescingUnitTests ++
   new WithTestDuration(10) ++
-  new WithSimtConfig(nMemLanes=4) ++
+  new WithSIMTConfig(numLsuLanes=4) ++
   new BaseSubsystemConfig)
 
 //class VortexFatBankUnitTestConfig extends Config(new WithVortexFatBankUnitTests ++ new WithTestDuration(10) ++ new WithSimtConfig(nLanes=4) ++ new BaseSubsystemConfig)

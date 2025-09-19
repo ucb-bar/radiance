@@ -79,8 +79,8 @@ class WithVortexL1Banks(nBanks: Int = 4) extends Config((site, here, up) => {
   case VortexL1Key => {
     Some(defaultVortexL1Config.copy(
       numBanks = nBanks,
-      inputSize = up(SIMTCoreKey).get.nMemLanes * 4 /*32b word*/ ,
-      cacheLineSize = up(SIMTCoreKey).get.nMemLanes * 4 /*32b word*/ ,
+      inputSize = up(SIMTCoreKey).get.numLsuLanes * 4 /*32b word*/ ,
+      cacheLineSize = up(SIMTCoreKey).get.numLsuLanes * 4 /*32b word*/ ,
       memSideSourceIds = 16,
       mshrSize = 16,
     ))

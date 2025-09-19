@@ -22,7 +22,7 @@ class VirgoFP16SynConfig extends RadianceFP16ClusterSynConfig
 class VirgoHopperSynConfig extends Radiance4CFP16ClusterSynConfig
 
 class RadianceBaseConfig extends Config(
-  new WithSimtConfig(nWarps = 8, nCoreLanes = 8, nMemLanes = 8, nSrcIds = 32) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 8, numLsuLanes = 8, numSMEMInFlights = 32) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(BigInt("80000000", 16)) ++
   new chipyard.config.WithRadBootROM() ++
@@ -42,6 +42,7 @@ class RadianceBaseConfig extends Config(
 
 class RadianceMuonConfig extends Config(
   new WithMuonCores(1, location = InCluster(0)) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new WithRadianceSharedMem(address = x"ff000000", size = 128 << 10, numBanks = 4, numWords = 16) ++
   new WithCoalescer(nNewSrcIds = 16) ++
   new WithVortexL1Banks(nBanks = 8) ++
@@ -161,6 +162,6 @@ class RadianceNoCoalConfig extends Config(
 class RadianceFuzzerConfig extends Config(
   new WithFuzzerCores(1, useVxCache = false) ++
   new WithCoalescer(nNewSrcIds = 2) ++
-  new WithSimtConfig(nMemLanes = 4, nSrcIds = 2) ++
+  new WithSIMTConfig(numLsuLanes = 4, numSMEMInFlights = 2) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new chipyard.config.AbstractConfig)

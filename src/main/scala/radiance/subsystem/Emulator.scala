@@ -8,13 +8,6 @@ import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.memory.{SourceGenerator, TLPrintf, TraceLine}
 
-case class SIMTCoreParams(
-    nWarps: Int = 4,     // # of warps in the core
-    nCoreLanes: Int = 4, // # of SIMT threads in the core
-    nMemLanes: Int = 4,  // # of memory lanes in the memory interface to the
-                         // cache; relates to the LSU lanes
-    nSrcIds: Int = 8     // # of source IDs allocated to each of the nMemLanes
-)
 case class MemtraceCoreParams(
     tracefilename: String = "undefined",
     traceHasSource: Boolean = false
