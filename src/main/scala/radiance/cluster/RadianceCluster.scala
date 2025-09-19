@@ -33,7 +33,7 @@ class RadianceCluster (
   crossing: ClockCrossingType,
   lookup: LookupByClusterIdImpl
 )(implicit p: Parameters) extends Cluster(thisClusterParams, crossing, lookup) {
-  val clbus = tlBusWrapperLocationMap(CLPBUS(clusterId)) // like the sbus in the base subsystem
+  val clbus = tlBusWrapperLocationMap(CLSBUS(clusterId)) // like the sbus in the base subsystem
   clbus.clockGroupNode := allClockGroupsNode
 
   // make the shared memory srams and interconnects
