@@ -1,7 +1,7 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package radiance.core
+package radiance.virgo
 
 import chisel3._
 import chisel3.util._
@@ -81,7 +81,6 @@ class StallingPipe[T <: Data](val gen: T, val latency: Int = 1) extends Module {
 }
 
 object StallingPipe {
-  import chisel3.experimental.prefix
 
   def apply[T <: Data](stall: Bool, enqValid: Bool, enqBits: T, latency: Int): Valid[T] = {
     val p = Module(new StallingPipe(chiselTypeOf(enqBits), latency))

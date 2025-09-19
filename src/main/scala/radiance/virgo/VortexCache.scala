@@ -1,12 +1,13 @@
-package radiance.memory
+package radiance.virgo
 
 import chisel3._
-import chisel3.util._
 import chisel3.experimental._
+import chisel3.util._
 import freechips.rocketchip.diplomacy._
-import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
-import org.chipsalliance.cde.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Field, Parameters}
+import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import radiance.memory.SourceGenerator
 
 case object VortexL1Key extends Field[Option[VortexL1Config]](None /*default*/ )
 

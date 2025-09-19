@@ -1,15 +1,13 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package radiance.tile
+package radiance.cluster
 
 import chisel3._
 import chisel3.experimental.SourceInfo
 import chisel3.util._
-
-import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
+import org.chipsalliance.cde.config.Parameters
 
 case class EmptyParams()
 

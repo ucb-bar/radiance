@@ -10,7 +10,7 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.util.{Code, MultiPortQueue, OnePortLanePositionedQueue}
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.tilelink._
-import radiance.core.{SIMTCoreParams, SIMTCoreKey}
+import radiance.subsystem.{SIMTCoreKey, SIMTCoreParams}
 
 case class CoalXbarParam()
 

@@ -1,14 +1,14 @@
-package radiance.tile
+package radiance.cluster
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.diplomacy.lazymodule._
-import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
+import freechips.rocketchip.tilelink._
 import gemmini.Pipeline
-import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
+import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
+import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 
 import scala.collection.mutable.ArrayBuffer
 

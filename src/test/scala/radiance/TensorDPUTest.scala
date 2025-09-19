@@ -7,6 +7,7 @@ import chiseltest.simulator.VerilatorFlags
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile
 import org.scalatest.flatspec.AnyFlatSpec
+import radiance.virgo.{MulAddRecFNPipe, TensorDotProductUnit}
 
 class MulAddTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "MulAddRecFNPipe"

@@ -1,14 +1,13 @@
 // See LICENSE.Berkeley for license details.
 // See LICENSE.SiFive for license details.
 
-package radiance.tile
+package radiance.virgo
 
 import chisel3._
-import chisel3.util._
 import chisel3.experimental._
-import org.chipsalliance.cde.config.Parameters
+import chisel3.util._
 import freechips.rocketchip.tile._
-import radiance.subsystem.RadianceGemminiDataType
+import org.chipsalliance.cde.config.Parameters
 
 class VortexBundleA(
   tagWidth: Int,
@@ -34,7 +33,7 @@ class VortexBundleD(
   val data = UInt(dataWidth.W) // FIXME: hardcoded
 }
 
-class VortexBundle(tile: RadianceTile)(implicit p: Parameters) extends CoreBundle {
+class VortexBundle(tile: VortexTile)(implicit p: Parameters) extends CoreBundle {
   val clock = Input(Clock())
   val reset = Input(Reset())
   // val hartid = Input(UInt(tileIdLen.W))
@@ -43,11 +42,11 @@ class VortexBundle(tile: RadianceTile)(implicit p: Parameters) extends CoreBundl
 
   // conditionally instantiate ports depending on whether we want to use VX_cache or not
   // TODO: flatten this like dmem and smem
-  val imem = if (!tile.radianceParams.useVxCache) Some(Vec(1, new Bundle {
+  val imem = if (!tile.vortexParams.useVxCache) Some(Vec(1, new Bundle {
     val a = Decoupled(new VortexBundleA(tagWidth = tile.imemTagWidth, dataWidth = 32))
     val d = Flipped(Decoupled(new VortexBundleD(tagWidth = tile.imemTagWidth, dataWidth = 32)))
   })) else None
-  val mem = if (tile.radianceParams.useVxCache) Some(new Bundle {
+  val mem = if (tile.vortexParams.useVxCache) Some(new Bundle {
     val a = Decoupled(new VortexBundleA(tagWidth = 15, dataWidth = 128))
     val d = Flipped(Decoupled(new VortexBundleD(tagWidth = 15, dataWidth = 128)))
     // val a = tile.memNode.out.head._1.a.cloneType
@@ -125,13 +124,13 @@ class VortexBundle(tile: RadianceTile)(implicit p: Parameters) extends CoreBundl
   val traceStall = Input(Bool())
 }
 
-class Vortex(tile: RadianceTile)(implicit p: Parameters)
+class Vortex(tile: VortexTile)(implicit p: Parameters)
     extends BlackBox(
       // Each Vortex core gets tied-off core id of 0, 1, 2, 3, which is global
       // across multiple clusters.
       Map(
-        "CORE_ID" -> tile.radianceParams.coreId,
-        "TENSOR_FP16" -> (if (tile.radianceParams.core.tensorCoreFP16) 1 else 0),
+        "CORE_ID" -> tile.vortexParams.coreId,
+        "TENSOR_FP16" -> (if (tile.vortexParams.core.tensorCoreFP16) 1 else 0),
         // TODO: can we get this as a parameter?
         "BOOTROM_HANG100" -> 0x10100,
         "NUM_THREADS" -> tile.numLsuLanes
@@ -411,7 +410,7 @@ class Vortex(tile: RadianceTile)(implicit p: Parameters)
   addResource("/vsrc/vortex/hw/rtl/mem/VX_tc_rf_if.sv")
 
   // hopper-style SMEM operand decoupling
-  if (tile.radianceParams.core.tensorCoreDecoupled) {
+  if (tile.vortexParams.core.tensorCoreDecoupled) {
     addResource("/vsrc/vortex/hw/rtl/core/VX_tensor_hopper_core.sv")
   //  addResource("/vsrc/vortex/hw/rtl/core/VX_tensor_ucode.vh")
     def addHopperTensorCore = {
@@ -448,7 +447,7 @@ class Vortex(tile: RadianceTile)(implicit p: Parameters)
   addResource("/vsrc/vortex/hw/rtl/core/VX_reduce_unit.sv")
   addResource("/vsrc/vortex/hw/rtl/fpu/VX_tensor_dpu.sv")
 
-  if (tile.radianceParams.useVxCache) {
+  if (tile.vortexParams.useVxCache) {
     addResource("/vsrc/vortex/hw/rtl/libs/VX_pending_size.sv")
     addResource("/vsrc/vortex/hw/rtl/cache/VX_shared_mem.sv")
     addResource("/vsrc/vortex/hw/rtl/cache/VX_core_rsp_merge.sv")

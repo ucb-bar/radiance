@@ -1,16 +1,14 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package radiance.tile
+package radiance.virgo
 
 import chisel3._
 import chisel3.experimental.AffectsChiselPrefix
 import chisel3.util._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy._
-import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters, RationalCrossing}
-import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem.HierarchicalElementCrossingParamsLike
@@ -19,29 +17,29 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import midas.targetutils.SynthesizePrintf
 import org.chipsalliance.cde.config._
-import radiance.core._
+import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.cluster.{AccMasterNode, BarrierMasterNode}
 import radiance.memory._
-import radiance.subsystem.{GPUMemParams, GPUMemory, RadianceSimArgs}
+import radiance.subsystem._
 
 /** For determining radiance core id.  This may be different from
- *  RadianceTileParams.tileId, when a cluster contains non-core tiles */
-case object NumRadianceCores extends Field[Int](0)
+ *  VortexTileParams.tileId, when a cluster contains non-core tiles */
+case object NumVortexCores extends Field[Int](0)
 
-case class RadianceTileParams(
-    core: VortexCoreParams = VortexCoreParams(),
-    useVxCache: Boolean = false,
+case class VortexTileParams(
+    core: VortexCoreParams = VortexCoreParams(), useVxCache: Boolean = false,
     icache: Option[ICacheParams] = None /* Some(ICacheParams()) */,
     dcache: Option[DCacheParams] = None /* Some(DCacheParams()) */,
     btb: Option[BTBParams] = None, // Some(BTBParams()),
     dataScratchpadBytes: Int = 0,
-    name: Option[String] = Some("radiance_tile"),
+    name: Option[String] = Some("vortex_tile"),
     tileId: Int = 0,
     coreId: Int = 0,
     beuAddr: Option[BigInt] = None,
     blockerCtrlAddr: Option[BigInt] = None,
     clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
     boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
-) extends InstantiableTileParams[RadianceTile] {
+) extends InstantiableTileParams[VortexTile] {
   // TODO: want to use ICache/DCacheParams as well
   // require(icache.isDefined)
   // require(dcache.isDefined)
@@ -51,10 +49,10 @@ case class RadianceTileParams(
       lookup: LookupByHartIdImpl
   )(implicit
       p: Parameters
-  ): RadianceTile = {
-    new RadianceTile(this, crossing, lookup)
+  ): VortexTile = {
+    new VortexTile(this, crossing, lookup)
   }
-  val baseName = name.getOrElse("radiance_tile")
+  val baseName = name.getOrElse("vortex_tile")
   val uniqueName = s"${baseName}_$tileId"
 }
 
@@ -120,19 +118,19 @@ case class VortexCoreParams(
   val traceHasWdata: Boolean = false // ooo wb, so no wdata in trace
 }
 
-class RadianceTile private (
-    val radianceParams: RadianceTileParams,
-    crossing: ClockCrossingType,
-    lookup: LookupByHartIdImpl,
-    q: Parameters
-) extends BaseTile(radianceParams, crossing, lookup, q)
+class VortexTile private(
+                          val vortexParams: VortexTileParams,
+                          crossing: ClockCrossingType,
+                          lookup: LookupByHartIdImpl,
+                          q: Parameters
+) extends BaseTile(vortexParams, crossing, lookup, q)
     with SinksExternalInterrupts
     with SourcesExternalNotifications {
   // Private constructor ensures altered LazyModule.p is used implicitly
   def this(
-      params: RadianceTileParams,
-      crossing: HierarchicalElementCrossingParamsLike,
-      lookup: LookupByHartIdImpl
+            params: VortexTileParams,
+            crossing: HierarchicalElementCrossingParamsLike,
+            lookup: LookupByHartIdImpl
   )(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
@@ -226,7 +224,7 @@ class RadianceTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << imemSourceWidth),
-              name = s"Vortex Core ${radianceParams.coreId} I-Mem $i",
+              name = s"Vortex Core ${vortexParams.coreId} I-Mem $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -245,7 +243,7 @@ class RadianceTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << dmemSourceWidth),
-              name = s"Vortex Core ${radianceParams.coreId} D-Mem Lane $i",
+              name = s"Vortex Core ${vortexParams.coreId} D-Mem Lane $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -268,7 +266,7 @@ class RadianceTile private (
           clients = Seq(
             TLMasterParameters.v1(
               sourceId = IdRange(0, 1 << smemSourceWidth),
-              name = s"Vortex Core ${radianceParams.coreId} SharedMem Lane $i",
+              name = s"Vortex Core ${vortexParams.coreId} SharedMem Lane $i",
               requestFifo = true,
               supportsProbe =
                 TransferSizes(1, lazyCoreParamsView.coreDataBytes),
@@ -285,10 +283,10 @@ class RadianceTile private (
   }
 
   val tcSmemSize = 32
-  val tcSmemNodes = Seq.tabulate(if (radianceParams.core.tensorCoreDecoupled) 2 else 0) { i =>
+  val tcSmemNodes = Seq.tabulate(if (vortexParams.core.tensorCoreDecoupled) 2 else 0) { i =>
     TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v2(
-        name = s"rad_tc_${radianceParams.coreId}_$i",
+        name = s"rad_tc_${vortexParams.coreId}_$i",
         sourceId = IdRange(0, 1 << smemSourceWidth),
         supports = TLSlaveToMasterTransferSizes(
           probe = TransferSizes(1, tcSmemSize),
@@ -316,7 +314,7 @@ class RadianceTile private (
           TLMasterParameters.v1(
             // FIXME: need to also respect imemSourceWidth
             sourceId = IdRange(0, 1 << dmemSourceWidth),
-            name = s"Vortex Core ${radianceParams.coreId} Mem Interface",
+            name = s"Vortex Core ${vortexParams.coreId} Mem Interface",
             requestFifo = true,
             supportsProbe = TransferSizes(16, 16), // FIXME: hardcoded
             supportsGet = TransferSizes(16, 16),
@@ -381,7 +379,7 @@ class RadianceTile private (
     case _ => BigInt(0)
   }
 
-  if (radianceParams.useVxCache) {
+  if (vortexParams.useVxCache) {
     tlMasterXbar.node := AddressOrNode(base) := TLWidthWidget(16) := memNode
   } else {
     // imemNodes.foreach { tlMasterXbar.node := TLWidthWidget(4) := _ }
@@ -417,7 +415,7 @@ class RadianceTile private (
 
   val cpuDevice: SimpleDevice = new SimpleDevice(
     "cpu",
-    Seq(s"sifive,radiance${tileParams.tileId}", "riscv")
+    Seq(s"sifive,vortex${tileParams.tileId}", "riscv")
   ) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
@@ -434,11 +432,11 @@ class RadianceTile private (
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
-  override lazy val module = new RadianceTileModuleImp(this)
+  override lazy val module = new VortexTileModuleImp(this)
 
   override def makeMasterBoundaryBuffers(
       crossing: ClockCrossingType
-  )(implicit p: Parameters) = (radianceParams.boundaryBuffers, crossing) match {
+  )(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
     case (Some(RocketTileBoundaryBufferParams(true)), _) => TLBuffer()
     case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) =>
       TLBuffer(
@@ -453,7 +451,7 @@ class RadianceTile private (
 
   override def makeSlaveBoundaryBuffers(
       crossing: ClockCrossingType
-  )(implicit p: Parameters) = (radianceParams.boundaryBuffers, crossing) match {
+  )(implicit p: Parameters) = (vortexParams.boundaryBuffers, crossing) match {
     case (Some(RocketTileBoundaryBufferParams(true)), _) => TLBuffer()
     case (Some(RocketTileBoundaryBufferParams(false)), _: RationalCrossing) =>
       TLBuffer(
@@ -467,7 +465,7 @@ class RadianceTile private (
   }
 }
 
-class RadianceTileModuleImp(outer: RadianceTile)
+class VortexTileModuleImp(outer: VortexTile)
     extends BaseTileModuleImp(outer) {
   auto.elements.foreach({case (name, _) => 
       println(s"======= RadianceTile.elements.name: ${name}")
@@ -528,7 +526,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
   // Translate Vortex memory interface to TileLink
   // ---------------------------------------------
 
-  if (outer.radianceParams.useVxCache) {
+  if (outer.vortexParams.useVxCache) {
     println(s"width of a channel data ${core.io.mem.get.a.bits.data.getWidth}")
     println(s"width of d channel data ${core.io.mem.get.d.bits.data.getWidth}")
 
@@ -561,7 +559,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
       core.io.imem.get(0).d <> imemTLAdapter.io.inResp
 
       performanceCounters(Seq(imemTLAdapter.io.inReq), Seq(imemTLAdapter.io.inResp),
-        desc = s"core${outer.radianceParams.coreId}-imem")
+        desc = s"core${outer.vortexParams.coreId}-imem")
 
       // now connect TL adapter output ports to outer.imemNode, which can
       // either be L1 cache or tile egress
@@ -671,7 +669,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
       }
 
       performanceCounters(dmemTLAdapters.map(_.io.inReq), dmemTLAdapters.map(_.io.inResp),
-        desc = s"core${outer.radianceParams.coreId}-dmem")
+        desc = s"core${outer.vortexParams.coreId}-dmem")
 
       // now connect TL adapter output ports to outer.dmemNodes, which can
       // either be L1 cache or tile egress
@@ -733,7 +731,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
       }
 
       performanceCounters(smemTLAdapters.map(_.io.inReq), smemTLAdapters.map(_.io.inResp),
-        desc = s"core${outer.radianceParams.coreId}-smem")
+        desc = s"core${outer.vortexParams.coreId}-smem")
 
       (smemTLAdapters zip smemTLBundles) foreach { case (tlAdapter, tlOut) =>
         tlOut.a <> tlAdapter.io.outReq
@@ -742,7 +740,7 @@ class RadianceTileModuleImp(outer: RadianceTile)
     }
 
     def connectTensor = {
-      if (outer.radianceParams.core.tensorCoreDecoupled) {
+      if (outer.vortexParams.core.tensorCoreDecoupled) {
         val tcb0 = new {
           val addr = core.io.tc_a_bits_address(31, 0)
           val tag = core.io.tc_a_bits_tag(outer.tensorTagWidth - 1, 0)
@@ -856,16 +854,16 @@ class RadianceTileModuleImp(outer: RadianceTile)
   }
 
   // TODO: generalize for useVxCache
-  if (!outer.radianceParams.useVxCache) {}
+  if (!outer.vortexParams.useVxCache) {}
 
   // Instantiate a fake tensor core module to force unique-ification of module
   // names in the Chisel-generated Verilog.  These should be left out for
   // synthesis runs, although it's likely they will be optimized-out with all
   // inputs tied to low.
 
-  if (outer.radianceParams.core.tensorCoreDecoupled) {
+  if (outer.vortexParams.core.tensorCoreDecoupled) {
     val tensorNumSourceIds = (1 << outer.tensorTagWidth)
-    val tensor = Module(new radiance.core.TensorCoreDecoupled(
+    val tensor = Module(new TensorCoreDecoupled(
       8, 8, half = true, tensorNumSourceIds))
     tensor.io.initiate.valid := false.B
     tensor.io.initiate.bits := DontCare
@@ -878,15 +876,15 @@ class RadianceTileModuleImp(outer: RadianceTile)
     tensor.io.reqB.ready := false.B
     tensor.io.writeback.ready := false.B
   } else {
-    if (outer.radianceParams.core.tensorCoreFP16) {
-      val dpu = Module(new radiance.core.TensorDotProductUnit(4, half = true))
+    if (outer.vortexParams.core.tensorCoreFP16) {
+      val dpu = Module(new TensorDotProductUnit(4, half = true))
       dpu.io.in.valid := false.B
       dpu.io.in.bits.a := DontCare
       dpu.io.in.bits.b := DontCare
       dpu.io.in.bits.c := DontCare
       dpu.io.stall := false.B
     } else {
-      val dpu = Module(new radiance.core.TensorDotProductUnit(2, half = false))
+      val dpu = Module(new TensorDotProductUnit(2, half = false))
       dpu.io.in.valid := false.B
       dpu.io.in.bits.a := DontCare
       dpu.io.in.bits.b := DontCare

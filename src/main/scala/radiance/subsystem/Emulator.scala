@@ -1,12 +1,12 @@
-package radiance.core
+package radiance.subsystem
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.IdRange
+import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.diplomacy.{IdRange, AddressSet, BufferParams}
-import radiance.memory.{SourceGenerator, TraceLine, TLPrintf}
+import radiance.memory.{SourceGenerator, TLPrintf, TraceLine}
 
 case class SIMTCoreParams(
     nWarps: Int = 4,     // # of warps in the core

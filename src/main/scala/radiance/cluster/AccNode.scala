@@ -1,4 +1,5 @@
-package radiance.tile;
+package radiance.cluster
+
 import chisel3._
 import chisel3.experimental.SourceInfo
 import chisel3.util._

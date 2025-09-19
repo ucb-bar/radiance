@@ -1,23 +1,23 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package radiance.tile
+package radiance.cluster
 
 import chisel3._
-import chisel3.util._
 import chisel3.experimental.BundleLiterals._
-import org.chipsalliance.diplomacy.DisableMonitors
-import org.chipsalliance.diplomacy.lazymodule._
+import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, SimpleDevice}
-import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.regmapper.RegField
+import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossingParamsLike, RocketCrossingParams}
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.diplomacy.DisableMonitors
+import org.chipsalliance.diplomacy.lazymodule._
 import radiance.subsystem.{GPUMemParams, GPUMemory}
 
 case class GemminiCoreParams(

@@ -4,14 +4,14 @@ package radiance.unittest
 
 import chisel3._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.subsystem.{BaseSubsystemConfig}
+import freechips.rocketchip.subsystem.BaseSubsystemConfig
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import radiance.core.TensorCoreDecoupledTest
 import radiance.memory._
-import radiance.subsystem.WithSimtConfig
 import freechips.rocketchip.unittest._
+import radiance.subsystem.WithSimtConfig
+import radiance.virgo.TensorCoreDecoupledTest
 //import rocket.VortexFatBankTest
 
 case object TestDurationMultiplier extends Field[Int]

@@ -1,24 +1,26 @@
-package radiance.tile
+package radiance.virgo
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.diplomacy.lazymodule._
-import org.chipsalliance.diplomacy.{DisableMonitors, ValName}
-import org.chipsalliance.cde.config.Parameters
-import radiance.memory._
-import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams}
 import freechips.rocketchip.subsystem.BaseClusterParams
-import radiance.subsystem.{CoreSerialized, FullySerialized, NotSerialized, RadianceSharedMemKey}
+import freechips.rocketchip.tilelink._
 import gemmini._
+import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.diplomacy.lazymodule._
+import org.chipsalliance.diplomacy.{DisableMonitors, ValName}
+import radiance.cluster.{GemminiTile, RadianceSmemNodeProvider, RadianceSmemNodeProviderImp}
+import radiance.memory._
+import radiance.subsystem._
+
 import scala.collection.mutable.ArrayBuffer
 
 // virgo-specific tilelink nodes
 // generic smem implementation is in RadianceSharedMem.scala
 class VirgoSharedMemComponents(
-  clusterParams: BaseClusterParams,
-  gemminiTiles: Seq[GemminiTile],
-  radianceTiles: Seq[RadianceTile],
+                                clusterParams: BaseClusterParams,
+                                gemminiTiles: Seq[GemminiTile],
+                                radianceTiles: Seq[VortexTile],
 )(implicit p: Parameters) extends RadianceSmemNodeProvider  {
   val smemKey = p(RadianceSharedMemKey).get
   val wordSize = smemKey.wordSize

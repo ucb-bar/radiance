@@ -4,8 +4,8 @@ import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
-import radiance.core.{SIMTCoreKey, MemtraceCoreKey}
-import testchipip.soc.{SubsystemInjector}
+import radiance.subsystem.{MemtraceCoreKey, SIMTCoreKey}
+import testchipip.soc.SubsystemInjector
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore

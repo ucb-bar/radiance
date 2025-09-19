@@ -1,16 +1,16 @@
 // See LICENSE.SiFive for license details.
 // See LICENSE.Berkeley for license details.
 
-package radiance.core
+package radiance.virgo
 
 import chisel3._
-import chisel3.util._
 import chisel3.experimental.requireIsChiselType
+import chisel3.util._
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange}
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.diplomacy.{IdRange, AddressSet}
-import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import radiance.memory.SourceGenerator
 
 case class TensorTilingParams(
