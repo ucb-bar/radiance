@@ -38,6 +38,7 @@ class RadianceCluster (
 
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
+  // FIXME: handle both muon and vortex
   val radianceTiles = leafTiles.values.filter(_.isInstanceOf[VortexTile]).toSeq.asInstanceOf[Seq[VortexTile]]
 
   def virgoSharedMemComponentsGen() = new VirgoSharedMemComponents(thisClusterParams, gemminiTiles, radianceTiles)
@@ -47,7 +48,7 @@ class RadianceCluster (
 
   // direct core-accelerator connections
   val smemKey = p(RadianceSharedMemKey).get
-  val numCoresInCluster = leafTiles.size - gemminiTiles.size
+  val numCoresInCluster = radianceTiles.length
   val radianceAccSlaveNodes = Seq.fill(numCoresInCluster)(AccSlaveNode())
   (radianceAccSlaveNodes zip radianceTiles).foreach { case (a, r) => a := r.accMasterNode }
   val gemminiAccMasterNodes = gemminiTiles.map { tile =>

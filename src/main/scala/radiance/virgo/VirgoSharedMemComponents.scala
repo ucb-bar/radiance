@@ -32,7 +32,7 @@ class VirgoSharedMemComponents(
   val smemSize = smemWidth * smemDepth * smemBanks
 
   val numCores = radianceTiles.length
-  val numLanes = radianceTiles.head.numLsuLanes
+  val numLanes = p(SIMTCoreKey).get.nMemLanes
 
   val gemminis = gemminiTiles.map(_.gemmini)
   val gemminiConfigs = gemminis.map(_.config)
