@@ -114,8 +114,8 @@ class MuonTile(
   val itimProperty = Nil
 
   val cpuDevice: SimpleDevice = new SimpleDevice(
-    "cpu",
-    Seq(s"sifive,vortex${tileParams.tileId}", "riscv")
+    "gpu",
+    Seq(s"sifive,muon${tileParams.tileId}", "riscv")
   ) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {

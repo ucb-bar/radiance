@@ -13,7 +13,6 @@ import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossingParamsLike}
 import freechips.rocketchip.prci.ClockSinkParameters
-import radiance.core._
 import radiance.memory.{CoalescerKey, CoalescingUnit}
 import radiance.virgo.VortexCoreParams
 

@@ -86,5 +86,3 @@ class WithVortexL1Banks(nBanks: Int = 4) extends Config((site, here, up) => {
     ))
   }
 })
-
-case class CLSBUS(clusterId: Int) extends TLBusWrapperLocation(s"clbus$clusterId")

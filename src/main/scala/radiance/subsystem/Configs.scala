@@ -14,10 +14,10 @@ import gemmini.Arithmetic.FloatArithmetic._
 import gemmini._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.nodes._
+import testchipip.soc.SubsystemInjectorKey
 import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams, RadianceCluster, RadianceClusterParams}
 import radiance.memory._
 import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuons}
-import radiance.subsystem.RadianceGemminiDataType._
 import radiance.virgo.{NumVortexCores, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
 
 sealed trait RadianceSmemSerialization
@@ -138,8 +138,8 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
         implicit val arithmetic: Arithmetic[Float] =
           Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
         dataType match {
-        case FP32 => GemminiFPConfigs.FP32DefaultConfig
-        case FP16 => GemminiFPConfigs.FP16DefaultConfig.copy(
+        case RadianceGemminiDataType.FP32 => GemminiFPConfigs.FP32DefaultConfig
+        case RadianceGemminiDataType.FP16 => GemminiFPConfigs.FP16DefaultConfig.copy(
           acc_scale_args = Some(ScaleArguments(
             (t: Float, u: Float) => {t},
             1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
@@ -163,7 +163,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
           // clock_gate = true,
           num_counter = 0
         )
-        case BF16 => GemminiFPConfigs.BF16DefaultConfig
+        case RadianceGemminiDataType.BF16 => GemminiFPConfigs.BF16DefaultConfig
         // TODO: Int8
       }}.copy(
         dataflow = Dataflow.WS,

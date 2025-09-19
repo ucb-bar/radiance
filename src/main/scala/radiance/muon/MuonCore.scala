@@ -1,5 +1,7 @@
 package radiance.muon
 
+import chisel3._
+import chisel3.util._
 import freechips.rocketchip.rocket.MulDivParams
 import freechips.rocketchip.tile.{CoreParams, FPUParams}
 import org.chipsalliance.cde.config.Parameters
@@ -67,6 +69,5 @@ case class MuonCoreParams(
 
 }
 
-class Muon(tile: MuonTile)(implicit p: Parameters) {
-
+class Muon(tile: MuonTile)(implicit p: Parameters) extends Module {
 }
