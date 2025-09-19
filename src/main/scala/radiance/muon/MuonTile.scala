@@ -16,7 +16,7 @@ import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.memory._
 import radiance.subsystem._
 
-case object NumMuons extends Field[Int](0)
+case object NumMuonCores extends Field[Int](0)
 
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),

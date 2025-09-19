@@ -42,6 +42,14 @@ class RadianceBaseConfig extends Config(
   new chipyard.harness.WithHarnessBinderClockFreqMHz(400.0) ++
   new chipyard.config.AbstractConfig)
 
+class RadianceMuonConfig extends Config(
+  new WithMuonCores(1, location = InCluster(0)) ++
+  new WithRadianceSharedMem(address = x"ff000000", size = 128 << 10, numBanks = 4, numWords = 16) ++
+  new WithCoalescer(nNewSrcIds = 16) ++
+  new WithVortexL1Banks(nBanks = 8) ++
+  new WithRadianceCluster(0) ++
+  new RadianceBaseConfig)
+
 class RadianceFP16ClusterConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 4, 8), dataType = RadianceGemminiDataType.FP16) ++
   new WithVortexCores(8, location = InCluster(0), tensorCoreFP16 = true, tensorCoreDecoupled = false, useVxCache = false) ++

@@ -17,7 +17,7 @@ import org.chipsalliance.diplomacy.nodes._
 import testchipip.soc.SubsystemInjectorKey
 import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams, RadianceCluster, RadianceClusterParams}
 import radiance.memory._
-import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuons}
+import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuonCores}
 import radiance.virgo.{NumVortexCores, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
 
 sealed trait RadianceSmemSerialization
@@ -48,7 +48,7 @@ case class RadianceFrameBufferKey(baseAddress: BigInt,
                                   fbName: String = "fb")
 case object RadianceFrameBufferKey extends Field[Seq[RadianceFrameBufferKey]](Seq())
 
-class WithMuons(
+class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
@@ -56,7 +56,7 @@ class WithMuons(
   case TilesLocated(`location`) => {
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
-    val coreIdOffset = up(NumMuons)
+    val coreIdOffset = up(NumMuonCores)
     val muon = MuonTileParams(
       core = MuonCoreParams(),
       icache = None,
@@ -71,8 +71,19 @@ class WithMuons(
     )) ++ prev
   }
   case NumTiles => up(NumTiles) + n
-  case NumMuons => up(NumMuons) + n
-})
+  case NumMuonCores => up(NumMuonCores) + n
+}) {
+  // constructor override that omits `crossing`
+  def this(n: Int, location: HierarchicalLocation = InSubsystem)
+  = this(n, location, RocketCrossingParams(
+    master = HierarchicalElementMasterPortParams.locationDefault(location),
+    slave = HierarchicalElementSlavePortParams.locationDefault(location),
+    mmioBaseAddressPrefixWhere = location match {
+      case InSubsystem => CBUS
+      case InCluster(clusterId) => CCBUS(clusterId)
+    }
+  ))
+}
 
 class WithEmulatorCores(
   n: Int,
