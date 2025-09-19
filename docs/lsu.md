@@ -88,3 +88,7 @@ TODO: investigate how atomics work with TL
 
 ### L1
 - Use Simplified HellaCache interface like saturn does - no need for kill signals, [link](https://github.com/ucb-bar/saturn-vectors/blob/master/src/main/scala/rocket/HellaInterface.scala)
+
+## Area Estimation
+
+TODO

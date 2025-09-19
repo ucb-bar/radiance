@@ -59,7 +59,7 @@ R-type instructions will include current RISC-V R-type instructions, as well as 
 	* R4Frm used for floating points, with `frm` as `funct3`
 	* Assembly: `opcode.variant rd, rs1, rs2, rs3 @ pred`
 * R3 has `rs1` and `rs2`, as well as `rd` (this is what base RISC-V R-type is)
-	* R3Atomic for atomic, with `aq`, `rl`, `funct5` as `funct7`
+	* R3Atomic for atomic, with `aq`, `rl`, `funct5` as `funct7` and `.global`, `.shared` address space qualifier encoded in opext.
 	* R3Frm for floating point
 	* Assembly: `opcode.variant rd, rs1, rs2 @ pred`
 
@@ -89,6 +89,9 @@ S/SB-type instructions has 2 source registers. The upper 8 bits of the 32-bit im
 	* SB Assembly: `opcode.variant rs1, rs2, label @ pred`
 
 **Special case for SB instructions.** Base RISC-V branch PC offset has implicit bit 0. For Muon, bits 0 to 2 are explicitly encoded as 0s in the machine code (bit 36 to 38), leaving 29 remaining effective bits. The assembly behavior remains the same (immediate is specified in number of bytes), but the specified value gets rounded down to a multiple of 8.
+
+**Address Space Qualifier for Stores** We extend RISC-V `sb/sh/sw` with address space qualifiers `.global`, `.shared`, encoded using opext field as 00 and 01. 
+
 ### I2-type
 I1-type instructions will have 1 source register and 1 destination register. This leaves the full 32bits for immediate. This instruction will replace the `I` and `UJ` type instructions in the original RISC-V specification, and will render `U` type instructions unnecessary.
 ```
@@ -109,6 +112,7 @@ I1-type instructions will have 1 source register and 1 destination register. Thi
 **Special case for J instruction.** Similar to branches, implicit bit 0 is now explicit zeros for bits 0 to 2.
 **Special case for shift-immediate instructions.** Shift amount remains `imm[6:0]`. Shift opcode will still occupy the same bits in the immediate (`[11:7]`); however it will no longer overlap with where `funct7` is in R-types. 
 **Special case for CSR instructions.** The CSR source/dest used to be encoded in the imm12 field; it's now 32-bits (nice and wide, as it should be). The CSR immediate used to be encoded in the 5-bit rs1 address; it will still occupy rs1 in Muon but will expand to use 8 bits.
+**Address Space Qualifier for Loads** We extend RISC-V `lb/lh/lw` with address space qualifiers `.global`, `.shared`, encoded using opext field as 00 and 01. 
 
 ### Neutrino Instructions
 ```
