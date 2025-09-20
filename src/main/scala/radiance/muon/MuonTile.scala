@@ -62,7 +62,7 @@ class MuonTile(
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
-  val smemNodes = Seq.tabulate(muonParams.core.numLsuLanes) { i =>
+  val smemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(

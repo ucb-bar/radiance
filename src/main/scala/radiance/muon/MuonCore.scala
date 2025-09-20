@@ -64,9 +64,14 @@ case class MuonCoreParams(
   numFp32Lanes: Int = 8,
   numFDivLanes: Int = 8,
   // memory
-  numLsuLanes: Int = 16,
+  lsu: LoadStoreUnitParams = LoadStoreUnitParams(
+    numLsuLanes = 16,
+    numLdqEntries = 4,
+    numStqEntries = 4
+  ),
   logSMEMInFlights: Int = 2,
 ) extends CoreParams {
+  val warpIdWidth = log2Up(numWarps)
 }
 
 class MemRequest (
@@ -114,7 +119,7 @@ class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
   val imemTagBits = 4 // FIXME
   val dmemTagBits = 4 // FIXME
   val imemDataBits = muonParams.instBits
-  val dmemDataBits = muonParams.xLen * muonParams.numLsuLanes // TODO: get from dcache
+  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // TODO: get from dcache
 
   val io = IO(new Bundle {
     val imem = new MemIO(imemTagBits, imemDataBits)
