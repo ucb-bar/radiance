@@ -55,10 +55,10 @@ class RadianceCluster (
   // connect barriers
   val numCoresInCluster = muonTiles.length
   // TODO: replace accNodes with MMIO registers
-  val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
-  muonTiles.foreach { tile =>
-    barrierSlaveNode := tile.barrierMasterNode
-  }
+  // val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
+  // muonTiles.foreach { tile =>
+  //   barrierSlaveNode := tile.barrierMasterNode
+  // }
 
   override lazy val module = new RadianceClusterModuleImp(this)
 }
@@ -70,10 +70,10 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   // @cleanup: This assumes barrier params on all edges are the same, i.e. all
   // cores are configured to have the same barrier id range.  While true, might
   // be better to actually assert this
-  val barrierParam = outer.barrierSlaveNode.in.head._2
-  val synchronizer = Module(new BarrierSynchronizer(barrierParam))
-  (synchronizer.io.reqs zip outer.barrierSlaveNode.in).foreach { case (req, (b, _)) =>
-    req <> b.req
-    b.resp <> synchronizer.io.resp // broadcast
-  }
+  // val barrierParam = outer.barrierSlaveNode.in.head._2
+  // val synchronizer = Module(new BarrierSynchronizer(barrierParam))
+  // (synchronizer.io.reqs zip outer.barrierSlaveNode.in).foreach { case (req, (b, _)) =>
+  //   req <> b.req
+  //   b.resp <> synchronizer.io.resp // broadcast
+  // }
 }

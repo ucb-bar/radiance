@@ -77,9 +77,6 @@ class VirgoCluster (
   vortexTiles.foreach { tile =>
     barrierSlaveNode := tile.barrierMasterNode
   }
-  muonTiles.foreach { tile =>
-    barrierSlaveNode := tile.barrierMasterNode
-  }
 
   override lazy val module = new VirgoClusterModuleImp(this)
 }
