@@ -74,6 +74,13 @@ case class MuonCoreParams(
   val warpIdWidth = log2Up(numWarps)
 }
 
+// move to decode?
+object Isa {
+  def regBits = 8
+  def immBits = 8
+  def predBits = 4
+}
+
 class MemRequest (
   tagBits: Int,
   sizeBits: Int,
@@ -129,4 +136,10 @@ class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
     val dmem = new DataMemIO
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
+
+  val fe = Module(new Frontend)
+  fe.io.imem <> io.imem
+
+  val be = Module(new Backend)
+  be.io.dmem <> io.dmem
 }
