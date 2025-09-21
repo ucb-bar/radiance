@@ -104,30 +104,31 @@ class MemResponse (
 
 trait HasMuonCoreParameters extends freechips.rocketchip.tile.HasCoreParameters {
   val muonParams: MuonCoreParams = tileParams.core.asInstanceOf[MuonCoreParams]
+
+  val addressBits = muonParams.xLen
+  val numLsqEntries = muonParams.lsu.numLdqEntries + muonParams.lsu.numStqEntries
+  val dmemTagBits  = log2Ceil(numLsqEntries)
+  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
+  val imemTagBits  = 4 // FIXME
+  val imemDataBits = muonParams.instBits
 }
 
-abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasMuonCoreParameters
+abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
+  with HasMuonCoreParameters
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasMuonCoreParameters
 
-trait MemIO extends CoreBundle {
-  val tagBits: Int
-  val dataBits: Int
-  val addressBits = muonParams.xLen
-  def sizeBits = log2Ceil(dataBits / 8)
-  def req = Decoupled(new MemRequest(tagBits, sizeBits, addressBits, dataBits))
-  def resp = Flipped(Decoupled(new MemResponse(tagBits, dataBits)))
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  def dmemSizeBits = log2Ceil(dmemDataBits / 8)
+  val req = Decoupled(new MemRequest(dmemTagBits, dmemSizeBits, addressBits, dmemDataBits))
+  val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
 }
 
-class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemIO {
-  val tagBits  = 4 // FIXME
-  val dataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // TODO: get from dcache
-}
-
-class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemIO {
-  val tagBits  = 4 // FIXME
-  val dataBits = muonParams.instBits
+class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  def imemSizeBits = log2Ceil(imemDataBits / 8)
+  val req = Decoupled(new MemRequest(imemTagBits, imemSizeBits, addressBits, imemDataBits))
+  val resp = Flipped(Decoupled(new MemResponse(imemTagBits, imemDataBits)))
 }
 
 class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {

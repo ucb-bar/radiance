@@ -34,8 +34,10 @@ class RadianceCluster (
   crossing: ClockCrossingType,
   lookup: LookupByClusterIdImpl
 )(implicit p: Parameters) extends Cluster(thisClusterParams, crossing, lookup) {
-  val clbus = tlBusWrapperLocationMap(CLSBUS(clusterId)) // like the sbus in the base subsystem
+  val clbus = tlBusWrapperLocationMap(CLSBUS(clusterId))
+  val clcbus = tlBusWrapperLocationMap(CLCBUS(clusterId))
   clbus.clockGroupNode := allClockGroupsNode
+  clcbus.clockGroupNode := allClockGroupsNode
 
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
