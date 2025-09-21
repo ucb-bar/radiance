@@ -104,26 +104,29 @@ abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundl
 abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasMuonCoreParameters
 
-class MemIO (
-  tagBits: Int,
-  dataBits: Int
-)(implicit p: Parameters) extends CoreBundle()(p) {
+trait MemIO extends CoreBundle {
+  val tagBits: Int
+  val dataBits: Int
   val addressBits = muonParams.xLen
   val sizeBits = log2Ceil(dataBits / 8)
-
   val req = Decoupled(new MemRequest(tagBits, sizeBits, addressBits, dataBits))
   val resp = Flipped(Decoupled(new MemResponse(tagBits, dataBits)))
 }
 
-class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
-  val imemTagBits = 4 // FIXME
-  val dmemTagBits = 4 // FIXME
-  val imemDataBits = muonParams.instBits
-  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // TODO: get from dcache
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemIO {
+  val tagBits  = 4 // FIXME
+  val dataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // TODO: get from dcache
+}
 
+class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemIO {
+  val tagBits  = 4 // FIXME
+  val dataBits = muonParams.instBits
+}
+
+class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
-    val imem = new MemIO(imemTagBits, imemDataBits)
-    val dmem = new MemIO(dmemTagBits, dmemDataBits)
+    val imem = new InstMemIO
+    val dmem = new DataMemIO
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 }
