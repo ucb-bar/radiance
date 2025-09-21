@@ -19,6 +19,7 @@ import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams, RadianceClu
 import radiance.memory._
 import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuonCores}
 import radiance.virgo.{NumVortexCores, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
+import radiance.muon.LoadStoreUnitParams
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -70,8 +71,11 @@ class WithMuonCores(
       core = MuonCoreParams(
         numWarps = up(SIMTCoreKey).get.numWarps,
         numLanes = up(SIMTCoreKey).get.numLanes,
-        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes,
         logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+
+        lsu = LoadStoreUnitParams(
+          numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
+        )
       ),
       icache = None,
       dcache = None,

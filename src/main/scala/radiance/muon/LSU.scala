@@ -11,9 +11,11 @@ case class LoadStoreUnitParams (
     val numLdqEntries: Int = 4,
     val numStqEntries: Int = 4
 ) {
-    // extra bit for circular wraparound
-    val ldqIndexBits = log2Up(numLdqEntries) + 1
-    val stqIndexBits = log2Up(numStqEntries) + 1
+    val ldqIndexBits = log2Up(numLdqEntries)
+    val stqIndexBits = log2Up(numStqEntries)
+    val ldqCircIndexBits = ldqIndexBits + 1
+    val stqCircIndexBits = stqIndexBits + 1
+    
     val queueIndexBits = math.max(ldqIndexBits, stqIndexBits)
 }
 
@@ -48,46 +50,129 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
         val lsuRequest = Input(new LsuRequest)
     })
 
-    class PerWarpLoadQueue extends Module {
-        val io = IO(new Bundle {
-            val ldqHead = Output(UInt(p.lsu.ldqIndexBits.W))
-            val ldqTail = Output(UInt(p.lsu.ldqIndexBits.W))
+    class PerWarpQueue(
+        loadQueue: Boolean
+    ) extends Module {
+        // helper functions for circular fifo indices
+        val wrapBit = (x: UInt) => x(x.getWidth - 1)
+        val msb = wrapBit
+        val idxBits = (x: UInt) => x(x.getWidth - 2, 0)
 
-            val stqHead = Input(UInt(p.lsu.stqIndexBits.W))
-            val stqTail = Input(UInt(p.lsu.stqIndexBits.W))
+        val entries            = if (loadQueue) { p.lsu.numLdqEntries    } else { p.lsu.numStqEntries    }
+        val circIndexBits      = if (loadQueue) { p.lsu.ldqCircIndexBits } else { p.lsu.stqCircIndexBits }
+        val otherCircIndexBits = if (loadQueue) { p.lsu.stqCircIndexBits } else { p.lsu.ldqCircIndexBits }
+        val indexBits          = if (loadQueue) { p.lsu.ldqIndexBits     } else { p.lsu.stqIndexBits     }
+
+        val io = IO(new Bundle {
+            val myHead = Output(UInt(circIndexBits.W))
+            val myTail = Output(UInt(circIndexBits.W))
+
+            val otherHead = Input(UInt(otherCircIndexBits.W))
+            val otherTail = Input(UInt(otherCircIndexBits.W))
 
             val full = Output(Bool())
             val enqueue = Input(Bool())
 
-            val receivedOperands = Input(Valid(UInt(p.lsu.ldqIndexBits.W)))
-            val receivedMemResponse = Input(Valid(UInt(p.lsu.ldqIndexBits.W)))
+            val receivedOperands = Flipped(Valid(UInt(indexBits.W)))
+            val receivedMemResponse = Flipped(Valid(UInt(indexBits.W)))
+            val requestIndex = Decoupled(UInt(indexBits.W))
         })
 
-        val head = RegInit(0.U(p.lsu.ldqIndexBits.W))
-        val tail = RegInit(0.U(p.lsu.ldqIndexBits.W))
+        val head = RegInit(0.U(circIndexBits.W))
+        val tail = RegInit(0.U(circIndexBits.W))
+
+        val full = (wrapBit(head) =/= wrapBit(tail)) && (idxBits(head) === idxBits(tail))
+        val empty = (head === tail)
+
+        io.myHead := head
+        io.myTail := tail
+        io.full := full
 
         // entries need to contain pointer to tail of other queue at allocation time, 
         // and whether operands were received from reservation station
-        val valid = RegInit(VecInit.fill(p.lsu.numLdqEntries)(false.B))
-        val stqIndex = RegInit(VecInit.fill(p.lsu.numLdqEntries)(0.U(p.lsu.stqIndexBits.W)))
-        val operandsReady = RegInit(VecInit.fill(p.lsu.numLdqEntries)(false.B))
+        val valid = RegInit(VecInit.fill(entries)(false.B))
+        val otherQueueTailInit = VecInit.fill(entries)(0.U(otherCircIndexBits.W))
+        val otherQueueTail = RegInit(otherQueueTailInit)
+        val operandsReady = RegInit(VecInit.fill(entries)(false.B))
+        val issued = RegInit(VecInit.fill(entries)(false.B))
 
-        val readyLoads = Wire(Vec(p.lsu.numLdqEntries, Bool()))
-        for (i <- readyLoads) {
-            val olderStoresRetired = (io.stqHead - stqIndex(i)).apply(p.lsu.stqIndexBits-1) 
-            readyLoads(i) := valid(i) && operandsReady(i) && olderStoresRetired
+        // allocation logic
+        when (io.enqueue) {
+            assert(!full, "overflow of per-warp queue")
+            
+            valid(idxBits(tail)) := true.B
+            otherQueueTail(idxBits(tail)) := io.otherTail
+            operandsReady(idxBits(tail)) := false.B
+            issued(idxBits(tail)) := false.B
+            
+            tail := tail + 1.U
+        }
+
+        // mark when operands received from reservation station
+        when (io.receivedOperands.valid) {
+            assert(valid(io.receivedOperands.bits), "invalid index from reservation station")
+
+            operandsReady(io.receivedOperands.bits) := true.B
+        }
+
+        // find entries ready to issue a mem request
+        if (loadQueue) {
+            val readyLoads = Wire(Vec(entries, Bool()))
+            for (i <- 0 until entries) {
+                val olderStoresRetired = msb(io.otherHead - otherQueueTail(i)) 
+                readyLoads(i) := valid(i) && operandsReady(i) && olderStoresRetired && !issued(i)
+            }
+
+            // issue request
+            val anyLoadReady = readyLoads.asUInt.orR
+            val readyLoadIndex = PriorityEncoder(readyLoads)
+
+            io.requestIndex.valid := anyLoadReady
+            io.requestIndex.bits := readyLoadIndex
+
+            when (io.requestIndex.fire) {
+                issued(readyLoadIndex) := true.B
+            }
+        }
+        else {
+            val olderLoadsRetired = msb(io.otherHead - otherQueueTail(idxBits(head)))
+
+            val readyStore = {
+                valid(idxBits(head)) &&
+                operandsReady(idxBits(head)) &&
+                olderLoadsRetired &&
+                !issued(idxBits(head))
+            }
+            val readyStoreIndex = idxBits(head)
+
+            io.requestIndex.valid := readyStore
+            io.requestIndex.bits := readyStoreIndex
+
+            when (io.requestIndex.fire) {
+                issued(readyStoreIndex) := true.B
+            }
+        }
+
+        // deallocate once response received
+        when (io.receivedMemResponse.valid) {
+            valid(io.receivedMemResponse.bits) := false.B
         }
 
         // update head
-        // TODO: should this be faster
-        when (!valid(head)) {
+        // TODO: should this be faster?
+        when (!empty && !valid(idxBits(head))) {
             head := head + 1.U
         }
-        
     }
 
     for (warp <- 0 until p.numWarps) {
+        val warpLoadQueue = Module(new PerWarpQueue(true))
+        val warpStoreQueue = Module(new PerWarpQueue(false))
 
+        warpLoadQueue.io.otherHead := warpStoreQueue.io.myHead
+        warpLoadQueue.io.otherTail := warpStoreQueue.io.myTail
+        warpStoreQueue.io.otherHead := warpLoadQueue.io.myHead
+        warpStoreQueue.io.otherTail := warpLoadQueue.io.myTail
     }
 }
 
@@ -112,11 +197,11 @@ class LsuResponse(implicit p: MuonCoreParams) extends Bundle {
 }
 
 // Downstream memory interface
-class MemRequest(implicit p: MuonCoreParams) extends Bundle {
+class LsuMemRequest(implicit p: MuonCoreParams) extends Bundle {
     
 }
 
-class MemResponse(implicit p: MuonCoreParams) extends Bundle {
+class LsuMemResponse(implicit p: MuonCoreParams) extends Bundle {
 
 }
 
