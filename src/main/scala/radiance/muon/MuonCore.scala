@@ -115,9 +115,9 @@ trait MemIO extends CoreBundle {
   val tagBits: Int
   val dataBits: Int
   val addressBits = muonParams.xLen
-  val sizeBits = log2Ceil(dataBits / 8)
-  val req = Decoupled(new MemRequest(tagBits, sizeBits, addressBits, dataBits))
-  val resp = Flipped(Decoupled(new MemResponse(tagBits, dataBits)))
+  def sizeBits = log2Ceil(dataBits / 8)
+  def req = Decoupled(new MemRequest(tagBits, sizeBits, addressBits, dataBits))
+  def resp = Flipped(Decoupled(new MemResponse(tagBits, dataBits)))
 }
 
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemIO {
