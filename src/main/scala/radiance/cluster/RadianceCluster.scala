@@ -75,9 +75,6 @@ class RadianceCluster (
   vortexTiles.foreach { tile =>
     barrierSlaveNode := tile.barrierMasterNode
   }
-  muonTiles.foreach { tile =>
-    barrierSlaveNode := tile.barrierMasterNode
-  }
 
   override lazy val module = new RadianceClusterModuleImp(this)
 }
