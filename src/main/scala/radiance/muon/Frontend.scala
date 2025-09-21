@@ -19,5 +19,8 @@ class Frontend(implicit p: Parameters) extends CoreModule()(p) {
   // IBuffer
   val ibuffer = Module(new InstBuffer)
   // TODO: enq
-  (io.ibuf zip ibuffer.io.deq).foreach { case (i, ib) => i <> ib }
+  ibuffer.io.enq.foreach(_.valid := false.B)
+  ibuffer.io.enq.foreach(_.bits := DontCare)
+
+  io.ibuf <> ibuffer.io.deq
 }

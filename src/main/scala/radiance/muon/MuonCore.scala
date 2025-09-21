@@ -142,4 +142,6 @@ class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem
+
+  be.io.ibuf <> fe.io.ibuf
 }

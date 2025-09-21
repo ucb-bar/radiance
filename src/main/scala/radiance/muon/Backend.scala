@@ -10,6 +10,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     val ibuf = Vec(muonParams.numWarps, Flipped(Decoupled(new InstBufferEntry)))
   })
 
+  io.ibuf.foreach(_.ready := true.B)
+
   // TODO: Scoreboard
   // TODO: Issue queue
   // TODO: Collector
