@@ -15,10 +15,10 @@ import gemmini._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.nodes._
 import testchipip.soc.SubsystemInjectorKey
-import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams, RadianceCluster, RadianceClusterParams}
+import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams}
 import radiance.memory._
 import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuonCores}
-import radiance.virgo.{NumVortexCores, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
+import radiance.virgo.{NumVortexCores, VirgoCluster, VirgoClusterParams, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -34,11 +34,12 @@ case class RadianceSharedMemKey(address: BigInt,
                                 numBanks: Int,
                                 numWords: Int,
                                 wordSize: Int = 4,
+                                prealignBufDepth: Int = 2,
                                 memType: MemType = TwoPort,
                                 strideByWord: Boolean = true,
                                 filterAligned: Boolean = true,
                                 disableMonitors: Boolean = true,
-                                serializeUnaligned: RadianceSmemSerialization = FullySerialized)
+                                serialization: RadianceSmemSerialization = FullySerialized)
 case object RadianceSharedMemKey extends Field[Option[RadianceSharedMemKey]](None)
 
 case class RadianceFrameBufferKey(baseAddress: BigInt,
@@ -142,7 +143,8 @@ object RadianceGemminiDataType extends Enumeration {
 
 class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossingParams,
                           dim: Int, accSizeInKB: Int, tileSize: Either[(Int, Int, Int), Int],
-                          dataType: RadianceGemminiDataType.Type, dmaBytes: Int) extends Config((site, _, up) => {
+                          dataType: RadianceGemminiDataType.Type, dmaBytes: Int,
+                          hasAccSlave: Boolean) extends Config((site, _, up) => {
   case TilesLocated(`location`) => {
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
@@ -214,7 +216,8 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis
+      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
+      hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -224,7 +227,8 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
   case NumTiles => up(NumTiles) + 1
 }) {
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: Either[(Int, Int, Int), Int],
-           dataType: RadianceGemminiDataType.Type = RadianceGemminiDataType.FP32, dmaBytes: Int = 256) =
+           dataType: RadianceGemminiDataType.Type = RadianceGemminiDataType.FP32,
+           dmaBytes: Int = 256, hasAccSlave: Boolean = true) =
     this(location, RocketCrossingParams(
       master = HierarchicalElementMasterPortParams.locationDefault(location),
       slave = HierarchicalElementSlavePortParams.locationDefault(location),
@@ -232,7 +236,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
         case InSubsystem => CBUS
         case InCluster(clusterId) => CCBUS(clusterId)
       }
-    ), dim, accSizeInKB, tileSize, dataType, dmaBytes)
+    ), dim, accSizeInKB, tileSize, dataType, dmaBytes, hasAccSlave)
 
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: Int) =
     this(location, dim, accSizeInKB, Right(tileSize))
@@ -250,13 +254,13 @@ class WithRadianceSharedMem(address: BigInt,
                             strideByWord: Boolean = true,
                             filterAligned: Boolean = true,
                             disableMonitors: Boolean = true,
-                            serializeUnaligned: RadianceSmemSerialization = FullySerialized
+                            serialization: RadianceSmemSerialization = FullySerialized
                            ) extends Config((_, _, _) => {
   case RadianceSharedMemKey => {
     require(isPow2(size) && size >= 1024)
     Some(RadianceSharedMemKey(
-      address, size, numBanks, numWords, 4, memType,
-      strideByWord, filterAligned, disableMonitors, serializeUnaligned
+      address, size, numBanks, numWords, 4, 2, memType,
+      strideByWord, filterAligned, disableMonitors, serialization
     ))
   }
 })
@@ -279,7 +283,7 @@ class WithRadianceCluster(
   crossing: RocketCrossingParams = RocketCrossingParams()
 ) extends Config((site, here, up) => {
   case ClustersLocated(`location`) => up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
-    RadianceClusterParams(clusterId = clusterId),
+    VirgoClusterParams(clusterId = clusterId),
     crossing)
   case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
     RadianceClusterBusTopologyParams(
@@ -386,10 +390,10 @@ case class MuonTileAttachParams(
 }
 
 case class RadianceClusterAttachParams(
-  clusterParams: RadianceClusterParams,
+  clusterParams: VirgoClusterParams,
   crossingParams: HierarchicalElementCrossingParamsLike
 ) extends CanAttachCluster {
-  type ClusterType = RadianceCluster
+  type ClusterType = VirgoCluster
 }
 
 // cluster local sbus: between muons and l1 (csbus is l1->l2)

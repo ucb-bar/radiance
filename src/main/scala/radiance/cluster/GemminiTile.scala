@@ -70,7 +70,8 @@ case class GemminiTileParams(
     tileId: Int = 0,
     gemminiConfig: GemminiArrayConfig[Float, Float, Float],
     tileSize: Either[(Int, Int, Int), Int] = Right(4),
-    slaveAddress: BigInt
+    slaveAddress: BigInt,
+    hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
       implicit p: Parameters
@@ -116,7 +117,7 @@ class GemminiTile private (
   val masterNode = visibilityNode
   // val statusNode = BundleBridgeSource(() => new GroundTestStatus)
 
-  val accSlaveNode = AccSlaveNode()
+  val accSlaveNode = Option.when(gemminiParams.hasAccSlave)(AccSlaveNode())
 
   tlOtherMastersNode := tlMasterXbar.node
   masterNode :=* tlOtherMastersNode
@@ -162,7 +163,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   tieOffGemminiRocc
 
-  val accSlave = outer.accSlaveNode.in.head._1
+  val accSlave = outer.accSlaveNode.map(_.in.head._1)
 
   val instCounter = Counter(4)
   val ciscValid = RegInit(false.B)
@@ -178,23 +179,30 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val mmioStartsLoop = WireInit(false.B)
   val runningLoops = RegInit(0.U(4.W))
 
-  val accCommandQueue = Module(new Queue(UInt(32.W), 4, false, true))
-  accCommandQueue.io.enq.bits := accSlave.cmd.bits
-  accCommandQueue.io.enq.valid := accSlave.cmd.valid
-  accCommandQueue.io.deq.ready := !ciscValid
-  assert(!accSlave.cmd.valid || accCommandQueue.io.enq.ready, "cisc command queue full")
+  accSlave match {
+    case Some(as) => {
+      val accCommandQueue = Module(new Queue(UInt(32.W), 4, false, true))
+      accCommandQueue.io.enq.bits := as.cmd.bits
+      accCommandQueue.io.enq.valid := as.cmd.valid
+      accCommandQueue.io.deq.ready := !ciscValid
+      assert(!as.cmd.valid || accCommandQueue.io.enq.ready, "cisc command queue full")
 
-  when (accCommandQueue.io.enq.fire) {
-    val enqId = accSlave.cmd.bits(6, 0)
-    startsLoop := VecInit(Seq(0, 1, 2, 9, 10, 12).map { x => enqId === x.U }).asUInt.orR
+      when (accCommandQueue.io.enq.fire) {
+        val enqId = as.cmd.bits(6, 0)
+        startsLoop := VecInit(Seq(0, 1, 2, 9, 10, 12).map { x => enqId === x.U }).asUInt.orR
+      }
+
+      when (accCommandQueue.io.deq.fire) {
+        ciscValid := true.B
+        ciscId := accCommandQueue.io.deq.bits(7, 0)
+        ciscArgs := accCommandQueue.io.deq.bits(31, 8)
+        instCounter.reset()
+      }
+
+      as.status := RegNext(outer.gemmini.module.io.busy).asUInt
+    }
   }
 
-  when (accCommandQueue.io.deq.fire) {
-    ciscValid := true.B
-    ciscId := accCommandQueue.io.deq.bits(7, 0)
-    ciscArgs := accCommandQueue.io.deq.bits(31, 8)
-    instCounter.reset()
-  }
 
   def microcodeEntry[T <: Data](insts: Seq[T]): T = {
     when (instCounter.value === (insts.size - 1).U) {
@@ -352,8 +360,6 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   assert(gemminiIO.ready || !gemminiIO.valid)
 
   mmioStartsLoop := regValid && (regCommand.funct === GemminiISA.LOOP_WS)
-
-  accSlave.status := RegNext(outer.gemmini.module.io.busy).asUInt
 
   outer.traceSourceNode.bundle := DontCare
   outer.traceSourceNode.bundle.insns foreach (_.valid := false.B)

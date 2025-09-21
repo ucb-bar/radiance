@@ -17,16 +17,16 @@ abstract class RadianceSmemNodeProvider {
   val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]]
   val nonuniformRNodes: Seq[TLNode]
   val nonuniformWNodes: Seq[TLNode]
-  val clBusClients: Seq[TLNode]
+  val clcbusClients: Seq[TLNode] = Seq()
 }
 
 abstract class RadianceSmemNodeProviderImp[T <: RadianceSmemNodeProvider](val outer: T) {}
 
 class RadianceSharedMem[T <: RadianceSmemNodeProvider](
-    provider: () => T,
-    val providerImp: Option[(T) => RadianceSmemNodeProviderImp[T]],
-    clbus: TLBusWrapper
-  )(implicit p: Parameters) extends LazyModule {
+  provider: () => T,
+  val providerImp: Option[(T) => RadianceSmemNodeProviderImp[T]],
+  clcbus: TLBusWrapper
+)(implicit p: Parameters) extends LazyModule {
   val smemKey = p(RadianceSharedMemKey).get
   val wordSize = smemKey.wordSize
   val smemBase = smemKey.address
@@ -201,7 +201,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } // stride by word
 
-  guardMonitors { implicit p => smNodes.clBusClients.foreach(clbus.inwardNode := _) }
+  guardMonitors { implicit p => smNodes.clcbusClients.foreach(clcbus.inwardNode := _) }
 
   lazy val module = new RadianceSharedMemImp(this)
 }

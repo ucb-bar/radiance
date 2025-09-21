@@ -18,9 +18,9 @@ import scala.collection.mutable.ArrayBuffer
 // virgo-specific tilelink nodes
 // generic smem implementation is in RadianceSharedMem.scala
 class VirgoSharedMemComponents(
-                                clusterParams: BaseClusterParams,
-                                gemminiTiles: Seq[GemminiTile],
-                                radianceTiles: Seq[VortexTile],
+  clusterParams: BaseClusterParams,
+  gemminiTiles: Seq[GemminiTile],
+  vortexTiles: Seq[VortexTile],
 )(implicit p: Parameters) extends RadianceSmemNodeProvider  {
   val smemKey = p(RadianceSharedMemKey).get
   val wordSize = smemKey.wordSize
@@ -31,7 +31,7 @@ class VirgoSharedMemComponents(
   val smemSubbanks = smemWidth / wordSize
   val smemSize = smemWidth * smemDepth * smemBanks
 
-  val numCores = radianceTiles.length
+  val numCores = vortexTiles.length
   val numLanes = p(SIMTCoreKey).get.numLsuLanes
 
   val gemminis = gemminiTiles.map(_.gemmini)
@@ -49,10 +49,10 @@ class VirgoSharedMemComponents(
 
   val strideByWord = smemKey.strideByWord
   val filterAligned = smemKey.filterAligned
-  val serializeUnaligned = smemKey.serializeUnaligned
+  val serializeUnaligned = smemKey.serialization
   implicit val disableMonitors: Boolean = smemKey.disableMonitors // otherwise it generate 1k+ different tl monitors
 
-  val radianceSmemFanout = radianceTiles.zipWithIndex.flatMap { case (tile, cid) =>
+  val radianceSmemFanout = vortexTiles.zipWithIndex.flatMap { case (tile, cid) =>
     tile.smemNodes.zipWithIndex.map { case (m, lid) =>
       val smemFanoutXbar = LazyModule(new TLXbar())
       smemFanoutXbar.suggestName(f"rad_smem_fanout_cl${clusterParams.clusterId}_c${cid}_l${lid}_xbar")
@@ -60,11 +60,11 @@ class VirgoSharedMemComponents(
       smemFanoutXbar.node
     }
   }
-  val tcNodeFanouts = radianceTiles.flatMap(_.tcSmemNodes)
+  val tcNodeFanouts = vortexTiles.flatMap(_.tcSmemNodes)
     // .map(connectOne(_, () => TLBuffer(BufferParams(2, false, false), BufferParams(0))))
     .map(connectOne(_, () => TLFIFOFixer()))
     .map(connectXbarName(_, Some("tc_fanout")))
-  val clBusClients: Seq[TLNode] = radianceSmemFanout
+  override val clcbusClients: Seq[TLNode] = radianceSmemFanout
 
   // convert to monad (very fancy)
   val coreSerialOpt: Option[Unit] = serializeUnaligned match {

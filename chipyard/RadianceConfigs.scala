@@ -96,7 +96,7 @@ class RadianceClusterConfig extends Config(
   // new radiance.subsystem.WithRadianceFrameBuffer(x"ff018000", 16, 0x8000, x"ff011000", "fb0") ++
   new WithRadianceSharedMem(address = x"ff000000", size = 256 << 10/*KBytes*/, numBanks = 8, numWords = 8,
                                                // memType = radiance.subsystem.TwoReadOneWrite,
-                                               serializeUnaligned = CoreSerialized) ++
+                                               serialization = CoreSerialized) ++
   new WithCoalescer(nNewSrcIds = 16) ++
   new WithVortexL1Banks(nBanks = 8) ++
   new WithRadianceCluster(0) ++
