@@ -17,7 +17,7 @@ import org.chipsalliance.diplomacy.nodes._
 import testchipip.soc.SubsystemInjectorKey
 import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams}
 import radiance.memory._
-import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuonCores}
+import radiance.muon._
 import radiance.virgo.{NumVortexCores, VirgoCluster, VirgoClusterParams, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
 import radiance.muon.LoadStoreUnitParams
 
@@ -62,22 +62,26 @@ class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
-) extends Config((_, _, up) => {
+) extends Config((_, here, up) => {
+  // for use in tile-less standalone instantiation
+  case MuonKey => {
+    MuonCoreParams(
+      numWarps = up(SIMTCoreKey).get.numWarps,
+      numLanes = up(SIMTCoreKey).get.numLanes,
+      logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+
+      lsu = LoadStoreUnitParams(
+        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
+      )
+    )
+  }
   case TilesLocated(`location`) => {
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
     val coreIdOffset = up(NumMuonCores)
     require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
     val muon = MuonTileParams(
-      core = MuonCoreParams(
-        numWarps = up(SIMTCoreKey).get.numWarps,
-        numLanes = up(SIMTCoreKey).get.numLanes,
-        logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
-
-        lsu = LoadStoreUnitParams(
-          numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
-        )
-      ),
+      core = here(MuonKey),
       icache = None,
       dcache = None,
     )

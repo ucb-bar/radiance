@@ -3,9 +3,11 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.MulDivParams
-import freechips.rocketchip.tile.{CoreParams, FPUParams}
+import freechips.rocketchip.tile.{HasTileParameters, CoreParams, FPUParams}
 import freechips.rocketchip.util.ParameterizedBundle
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Parameters, Field}
+
+case object MuonKey extends Field[MuonCoreParams]
 
 case class MuonCoreParams(
   bootFreqHz: BigInt = 0,
@@ -102,8 +104,9 @@ class MemResponse (
   val data = UInt(dataBits.W)
 }
 
-trait HasMuonCoreParameters extends freechips.rocketchip.tile.HasCoreParameters {
-  val muonParams: MuonCoreParams = tileParams.core.asInstanceOf[MuonCoreParams]
+trait HasMuonCoreParameters {
+  implicit val p: Parameters
+  val muonParams: MuonCoreParams = p(MuonKey)
 
   val addressBits = muonParams.xLen
   val numLsqEntries = muonParams.lsu.numLdqEntries + muonParams.lsu.numStqEntries
@@ -113,10 +116,10 @@ trait HasMuonCoreParameters extends freechips.rocketchip.tile.HasCoreParameters 
   val imemDataBits = muonParams.instBits
 }
 
-abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
+abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasMuonCoreParameters
 
-abstract class CoreModule(implicit val p: Parameters) extends Module
+abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasMuonCoreParameters
 
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
@@ -131,7 +134,26 @@ class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val resp = Flipped(Decoupled(new MemResponse(imemTagBits, imemDataBits)))
 }
 
-class Muon(tile: MuonTile)(implicit p: Parameters) extends CoreModule {
+/** Muon core and core-private L0/L1 caches */
+class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
+  val io = IO(new Bundle {
+    val imem = new InstMemIO
+    val dmem = new DataMemIO
+    // TODO: LCP (threadblock start/done, warp slot, synchronization)
+  })
+
+  // TODO: L0/L1
+
+  val core = Module(new MuonCore)
+  io.imem <> core.io.imem
+  io.dmem <> core.io.dmem
+}
+
+/** Muon core without the caches.
+ *  Keeps HasTileParameters out so that it can be instantiated
+ *  standalone without the rocket subsystem.
+ */
+class MuonCore(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO

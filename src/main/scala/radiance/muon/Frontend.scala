@@ -13,6 +13,9 @@ class Frontend(implicit p: Parameters) extends CoreModule()(p) {
 
   // TODO: Scheduler
   // TODO: Fetch/I$
+  io.imem.req.valid := false.B
+  io.imem.req.bits := DontCare
+  io.imem.resp.ready := true.B
   // TODO: Decode
   // TODO: Rename
 

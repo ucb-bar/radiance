@@ -17,5 +17,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   // TODO: Collector
   // TODO: FPU/INT/SFU
   // TODO: LSU
+  io.dmem.req.valid := false.B
+  io.dmem.req.bits := DontCare
+  io.dmem.resp.ready := false.B
   // TODO: Writeback
 }
