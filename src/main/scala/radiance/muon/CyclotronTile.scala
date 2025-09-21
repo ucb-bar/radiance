@@ -73,23 +73,23 @@ class CyclotronTile private (
   // FIXME: parameterize
   val wordSizeInBytes = 4
 
-  val emulator = LazyModule(new Emulator(numLanes, numSrcIds, wordSizeInBytes))
+  val cyclotron = LazyModule(new Emulator(numLanes, numSrcIds, wordSizeInBytes))
 
   // Conditionally instantiate memory coalescer
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalParam) => {
       val coal = LazyModule(new CoalescingUnit(coalParam))
-      coal.cpuNode :=* TLWidthWidget(4) :=* emulator.node
+      coal.cpuNode :=* TLWidthWidget(4) :=* cyclotron.node
       coal.aggregateNode
     }
-    case None => emulator.node
+    case None => cyclotron.node
   }
 
   masterNode :=* coalescerNode
 
-  override lazy val module = new EmulatorTileModuleImp(this)
+  override lazy val module = new CyclotronTileModuleImp(this)
 }
 
-class EmulatorTileModuleImp(outer: CyclotronTile) extends BaseTileModuleImp(outer) {
-  outer.reportCease(Some(outer.emulator.module.io.finished))
+class CyclotronTileModuleImp(outer: CyclotronTile) extends BaseTileModuleImp(outer) {
+  outer.reportCease(Some(outer.cyclotron.module.io.finished))
 }

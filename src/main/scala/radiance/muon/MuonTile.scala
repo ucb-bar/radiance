@@ -15,7 +15,6 @@ import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.memory._
 import radiance.subsystem._
-import radiance.cluster.BarrierMasterNode
 
 case object NumMuonCores extends Field[Int](0)
 
@@ -62,7 +61,7 @@ class MuonTile(
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
 
-  val smemNodes = Seq.tabulate(muonParams.core.numLsuLanes) { i =>
+  val smemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -105,12 +104,6 @@ class MuonTile(
   val dcacheNode = muonParams.dcache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(Seq(TLMasterParameters.v1("d")))))
   }
-
-  // Barrier synchronization node
-  // TODO
-  val numBarriers = muonParams.core.numWarps
-  def barrierIdBits = log2Ceil(numBarriers)
-  val barrierMasterNode = BarrierMasterNode(barrierIdBits)
 
   tlMasterXbar.node :=* icacheNode
   tlMasterXbar.node :=* dcacheNode

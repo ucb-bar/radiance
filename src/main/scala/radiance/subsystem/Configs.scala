@@ -19,6 +19,7 @@ import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams}
 import radiance.memory._
 import radiance.muon.{MuonCoreParams, MuonTile, MuonTileParams, NumMuonCores}
 import radiance.virgo.{NumVortexCores, VirgoCluster, VirgoClusterParams, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
+import radiance.muon.LoadStoreUnitParams
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -50,12 +51,12 @@ case class RadianceFrameBufferKey(baseAddress: BigInt,
 case object RadianceFrameBufferKey extends Field[Seq[RadianceFrameBufferKey]](Seq())
 
 case class SIMTCoreParams(
-  numWarps: Int = 4,    // # of warps in the core
-  numLanes: Int = 4,    // # of SIMT threads per warp
-  numLsuLanes: Int = 4, // # of memory lanes in the memory interface to the
-                        // cache; relates to the LSU lanes
-  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests in the LSU
+  numWarps: Int = 4,        // # of warp slots in the core
+  numLanes: Int = 4,        // # of SIMT lanes per warp
+  numLsuLanes: Int = 4,     // # of LSU lanes in the core
+  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests handled in the LSU
 )
+case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None)
 
 class WithMuonCores(
   n: Int,
@@ -71,8 +72,11 @@ class WithMuonCores(
       core = MuonCoreParams(
         numWarps = up(SIMTCoreKey).get.numWarps,
         numLanes = up(SIMTCoreKey).get.numLanes,
-        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes,
         logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+
+        lsu = LoadStoreUnitParams(
+          numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
+        )
       ),
       icache = None,
       dcache = None,

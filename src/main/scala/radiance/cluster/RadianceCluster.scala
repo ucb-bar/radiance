@@ -39,7 +39,6 @@ class RadianceCluster (
   clcbus.clockGroupNode := allClockGroupsNode
   val clsbus = tlBusWrapperLocationMap(CLSBUS(clusterId))
   clsbus.clockGroupNode := allClockGroupsNode
-
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
   val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]

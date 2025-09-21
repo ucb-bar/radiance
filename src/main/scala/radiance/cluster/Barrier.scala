@@ -54,8 +54,7 @@ case class BarrierMasterNode(val barrierIdBits: Int)(implicit valName: ValName)
     })
 case class BarrierSlaveNode(val numCores: Int)(implicit valName: ValName)
     extends SinkNode(BarrierNodeImp)({
-      require(numCores > 0)
-      val numCoreBits = log2Ceil(numCores)
+      val numCoreBits = (if (numCores > 0) log2Ceil(numCores) else 0)
       Seq.fill(numCores)(
         BarrierParams(barrierIdBits = -1 /* unset */, numCoreBits = numCoreBits)
       )
