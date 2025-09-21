@@ -10,11 +10,31 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import radiance.memory._
 import freechips.rocketchip.unittest._
-import radiance.subsystem.WithSIMTConfig
+import radiance.subsystem.{WithMuonCores, WithSIMTConfig}
+import radiance.muon.Muon
 import radiance.virgo.TensorCoreDecoupledTest
-//import rocket.VortexFatBankTest
 
 case object TestDurationMultiplier extends Field[Int]
+
+// -----------------------------------------------------------------------------
+// Muon tests
+// -----------------------------------------------------------------------------
+
+class WithMuonTests extends Config((site, _, _) => {
+  case UnitTests => (q: Parameters) => {
+    Seq(Module(new MuonTest()(q)))
+  }
+})
+
+class MuonTestConfig extends Config(
+  new WithMuonTests ++
+  new WithMuonCores(1) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new BaseSubsystemConfig)
+
+// -----------------------------------------------------------------------------
+// Tensor core tests
+// -----------------------------------------------------------------------------
 
 class WithTestDuration(x: Int) extends Config((site, here, up) => {
   case TestDurationMultiplier => x
@@ -24,17 +44,24 @@ class WithTensorUnitTests extends Config((site, _, _) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = q
     val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new TensorCoreDecoupledTest(timeout=timeout)),
-    ) }
+    Seq(Module(new TensorCoreDecoupledTest(timeout=timeout)))
+  }
 })
+
+class TensorUnitTestConfig extends Config(
+  new WithTensorUnitTests ++
+  new WithTestDuration(10) ++
+  new BaseSubsystemConfig)
+
+// -----------------------------------------------------------------------------
+// Coalescer tests
+// -----------------------------------------------------------------------------
 
 class WithCoalescingUnitTests extends Config((site, _, _) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = q
     val timeout = 50000 * site(TestDurationMultiplier)
     Seq(
-      // Module(new TLRAMCoalescerTest(timeout=timeout)),
       Module(new TLRAMCoalescerLoggerTest(filename="vecadd.core1.thread4.trace", timeout=timeout)),
       // Module(new TLRAMCoalescerLoggerTest(filename="sfilter.core1.thread4.trace", timeout=timeout)),
       // Module(new TLRAMCoalescerLoggerTest(filename="nearn.core1.thread4.trace", timeout=50000000 * site(TestDurationMultiplier))),
@@ -44,38 +71,19 @@ class WithCoalescingUnitTests extends Config((site, _, _) => {
     ) }
 })
 
-/*
-class WithVortexFatBankUnitTests extends Config((site, _, _) => {
-  case UnitTests => (q: Parameters) => {
-    implicit val p = q
-    val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new VortexFatBankTest(filename="oclprintf.core1.thread4.trace", timeout=timeout)),
-    )}
-})
-*/
-
 class WithCoalescingUnitSynthesisDummy(nLanes: Int) extends Config((site, _, _) => {
   case UnitTests => (q: Parameters) => {
     implicit val p = q
     val timeout = 50000 * site(TestDurationMultiplier)
-    Seq(
-      Module(new DummyCoalescerTest(timeout=timeout)(new WithSIMTConfig(numLsuLanes=4))),
-    ) }
+    Seq(Module(new DummyCoalescerTest(timeout=timeout)(new WithSIMTConfig(numLsuLanes=4))))
+  }
 })
-
-class TensorUnitTestConfig extends Config(
-  new WithTensorUnitTests ++
-  new WithTestDuration(10) ++
-  new BaseSubsystemConfig)
 
 class CoalescingUnitTestConfig extends Config(
   new WithCoalescingUnitTests ++
   new WithTestDuration(10) ++
   new WithSIMTConfig(numLsuLanes=4) ++
   new BaseSubsystemConfig)
-
-//class VortexFatBankUnitTestConfig extends Config(new WithVortexFatBankUnitTests ++ new WithTestDuration(10) ++ new WithSimtConfig(nLanes=4) ++ new BaseSubsystemConfig)
 
 // Dummy configs of various sizes for synthesis
 class CoalescingSynthesisDummyLane4Config extends Config(
