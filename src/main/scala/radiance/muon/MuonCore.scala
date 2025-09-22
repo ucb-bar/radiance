@@ -74,6 +74,8 @@ case class MuonCoreParams(
   logSMEMInFlights: Int = 2,
 ) extends CoreParams {
   val warpIdWidth = log2Up(numWarps)
+
+  require(numLanes % lsu.numLsuLanes == 0, "numLsuLanes must divide numLanes")
 }
 
 // move to decode?
