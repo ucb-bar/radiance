@@ -6,19 +6,18 @@ package radiance.subsystem
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.prci._
-import freechips.rocketchip.rocket._
+import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink.{TLBusWrapperConnection, TLBusWrapperTopology}
 import gemmini.Arithmetic.FloatArithmetic._
 import gemmini._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.nodes._
 import testchipip.soc.SubsystemInjectorKey
-import radiance.cluster.{GemminiTileAttachParams, GemminiTileParams}
+import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
-import radiance.virgo.{NumVortexCores, VirgoCluster, VirgoClusterParams, VortexCoreParams, VortexL1Key, VortexTile, VortexTileAttachParams, VortexTileParams}
+import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
 import radiance.muon.LoadStoreUnitParams
 
 sealed trait RadianceSmemSerialization
@@ -164,7 +163,20 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       case _: GemminiTileParams => 1
       case _ => 0
     }.sum
-    val smKey = site(RadianceSharedMemKey).get
+
+    val clusterParams = (location match {
+      case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
+      case _ => None
+    }).get.clusterParams
+
+    val smKey = (clusterParams match {
+      case params: RadianceClusterParams => Some(params.smemConfig)
+      case _: VirgoClusterParams => site(RadianceSharedMemKey)
+      case _ =>
+        assert(false, "this config requires either a radiance cluster or a virgo cluster")
+        None
+    }).get
+
     val skipRecoding = false
     val tileParams = GemminiTileParams(
       gemminiConfig = {
@@ -288,10 +300,14 @@ class WithRadianceFrameBuffer(baseAddress: BigInt,
 class WithRadianceCluster(
   clusterId: Int,
   location: HierarchicalLocation = InSubsystem,
-  crossing: RocketCrossingParams = RocketCrossingParams()
+  crossing: RocketCrossingParams = RocketCrossingParams(),
+  smemConfig: RadianceSharedMemKey,
 ) extends Config((site, here, up) => {
   case ClustersLocated(`location`) => up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
-    VirgoClusterParams(clusterId = clusterId),
+    RadianceClusterParams(
+      clusterId = clusterId,
+      smemConfig = smemConfig,
+    ),
     crossing)
   case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
     RadianceClusterBusTopologyParams(
@@ -373,8 +389,8 @@ class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config
   }
 })
 
-class WithExtGPUMem(address: BigInt = BigInt("0x100000000", 16),
-                    size: BigInt = 0x80000000) extends Config((site, here, up) => {
+class WithExtGPUMem(address: BigInt = x"1_0000_0000",
+                    size: BigInt = x"8000_0000") extends Config((site, here, up) => {
   case GPUMemory() => Some(GPUMemParams(address, size))
   case ExtMem => up(ExtMem).map(x => {
     val gap = address - x.master.base - x.master.size
@@ -398,10 +414,10 @@ case class MuonTileAttachParams(
 }
 
 case class RadianceClusterAttachParams(
-  clusterParams: VirgoClusterParams,
+  clusterParams: RadianceClusterParams,
   crossingParams: HierarchicalElementCrossingParamsLike
 ) extends CanAttachCluster {
-  type ClusterType = VirgoCluster
+  type ClusterType = RadianceCluster
 }
 
 // cluster local sbus: between muons and l1 (csbus is l1->l2)

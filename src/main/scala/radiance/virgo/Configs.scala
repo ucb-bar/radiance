@@ -1,8 +1,11 @@
 package radiance.virgo
 
+import freechips.rocketchip.prci._
 import freechips.rocketchip.rocket.{DCacheParams, ICacheParams}
 import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tilelink.{TLBusWrapperConnection, TLBusWrapperTopology}
 import org.chipsalliance.cde.config.Config
+import org.chipsalliance.diplomacy.nodes.{BIND_QUERY, BIND_STAR}
 import radiance.subsystem.SIMTCoreKey
 
 case class VortexTileAttachParams(
@@ -85,4 +88,53 @@ class WithVortexL1Banks(nBanks: Int = 4) extends Config((site, here, up) => {
       mshrSize = 16,
     ))
   }
+})
+
+case class VirgoClusterAttachParams(
+  clusterParams: VirgoClusterParams,
+  crossingParams: HierarchicalElementCrossingParamsLike
+) extends CanAttachCluster {
+  type ClusterType = VirgoCluster
+}
+
+case class CLBUS(clusterId: Int) extends TLBusWrapperLocation(s"clbus$clusterId")
+
+case class VirgoClusterBusTopologyParams(
+  clusterId: Int,
+  csbus: SystemBusParams,
+  ccbus: PeripheryBusParams,
+  coherence: BankedCoherenceParams
+) extends TLBusWrapperTopology(
+  instantiations = List(
+    (CSBUS(clusterId), csbus),
+    (CLBUS(clusterId), csbus),
+    (CCBUS(clusterId), ccbus)) ++ (if (coherence.nBanks == 0) Nil else List(
+    (CMBUS(clusterId), csbus),
+    (CCOH (clusterId), CoherenceManagerWrapperParams(csbus.blockBytes, csbus.beatBytes, coherence.nBanks, CCOH(clusterId).name)(coherence.coherenceManager)))),
+  connections = if (coherence.nBanks == 0) Nil else List(
+    (CSBUS(clusterId), CCOH (clusterId), TLBusWrapperConnection(driveClockFromMaster = Some(true), nodeBinding = BIND_STAR)()),
+    (CCOH (clusterId), CMBUS(clusterId), TLBusWrapperConnection.crossTo(
+      xType = NoCrossing,
+      driveClockFromMaster = Some(true),
+      nodeBinding = BIND_QUERY))
+  )
+)
+
+class WithVirgoCluster(
+  clusterId: Int,
+  location: HierarchicalLocation = InSubsystem,
+  crossing: RocketCrossingParams = RocketCrossingParams()
+) extends Config((site, here, up) => {
+  case ClustersLocated(`location`) => up(ClustersLocated(location)) :+ VirgoClusterAttachParams(
+    VirgoClusterParams(clusterId = clusterId),
+    crossing)
+  case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
+    VirgoClusterBusTopologyParams(
+      clusterId = clusterId,
+      csbus = site(SystemBusKey),
+      ccbus = site(ControlBusKey).copy(errorDevice = None),
+      coherence = site(ClusterBankedCoherenceKey(clusterId))
+    )
+  )
+  case PossibleTileLocations => up(PossibleTileLocations) :+ InCluster(clusterId)
 })

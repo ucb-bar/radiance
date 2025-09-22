@@ -23,19 +23,19 @@ abstract class RadianceSmemNodeProvider {
 abstract class RadianceSmemNodeProviderImp[T <: RadianceSmemNodeProvider](val outer: T) {}
 
 class RadianceSharedMem[T <: RadianceSmemNodeProvider](
+  val config: RadianceSharedMemKey,
   provider: () => T,
-  val providerImp: Option[(T) => RadianceSmemNodeProviderImp[T]],
+  val providerImp: Option[T => RadianceSmemNodeProviderImp[T]],
   clcbus: TLBusWrapper
 )(implicit p: Parameters) extends LazyModule {
-  val smemKey = p(RadianceSharedMemKey).get
-  val wordSize = smemKey.wordSize
-  val smemBase = smemKey.address
-  val smemBanks = smemKey.numBanks
-  val smemWidth = smemKey.numWords * smemKey.wordSize
-  val smemDepth = smemKey.size / smemWidth / smemBanks
+  val wordSize = config.wordSize
+  val smemBase = config.address
+  val smemBanks = config.numBanks
+  val smemWidth = config.numWords * config.wordSize
+  val smemDepth = config.size / smemWidth / smemBanks
   val smemSubbanks = smemWidth / wordSize
   val smemSize = smemWidth * smemDepth * smemBanks
-  val strideByWord = smemKey.strideByWord
+  val strideByWord = config.strideByWord
 
   require(isPow2(smemBanks))
 
@@ -43,14 +43,14 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val (uniformRNodes, uniformWNodes, nonuniformRNodes, nonuniformWNodes) =
     (smNodes.uniformRNodes, smNodes.uniformWNodes, smNodes.nonuniformRNodes, smNodes.nonuniformWNodes)
 
-  implicit val disableMonitors = smemKey.disableMonitors // otherwise it generate 1k+ different tl monitors
+  implicit val disableMonitors = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
   // collection of read and write managers for each sram (sub)bank
   val smemBankMgrs : Seq[Seq[TLManagerNode]] = if (strideByWord) {
     require(isPow2(smemSubbanks))
     (0 until smemBanks).flatMap { bid =>
       (0 until smemSubbanks).map { wid =>
-        Seq.fill(smemKey.memType match {
+        Seq.fill(config.memType match {
           case TwoPort => 1
           case TwoReadOneWrite => 2
         })(
@@ -87,7 +87,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } else {
     (0 until smemBanks).map { bank =>
-      Seq.fill(smemKey.memType match {
+      Seq.fill(config.memType match {
         case TwoPort => 1
         case TwoReadOneWrite => 2
       })(
@@ -159,7 +159,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
           uniformNodesOut.last(bid)(wid) = connectOne(uwXbar.node, TLIdentityNode.apply)
 
           // connect memory
-          smemKey.memType match {
+          config.memType match {
             case TwoPort => {
               val subbankRXbar = TLXbar(TLArbiter.lowestIndexFirst, Some(s"smem_b${bid}_w${wid}_r_xbar"))
               subbankRXbar := uniformNodesOut.head(bid)(wid)
@@ -180,7 +180,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
       }
     }
   } else { // not stride by word
-    require(smemKey.memType == TwoPort, "double read ports not implemented")
+    require(config.memType == TwoPort, "double read ports not implemented")
 
     val smemRXbar = TLXbar()
     val smemWXbar = TLXbar()
@@ -297,7 +297,7 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
         val memWidth = outer.smemWidth
         val wordWidth = outer.wordSize
 
-        outer.smemKey.memType match {
+        outer.config.memType match {
           case TwoPort =>
             val mem = TwoPortSyncMem(
               n = memDepth,

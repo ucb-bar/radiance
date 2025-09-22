@@ -47,7 +47,10 @@ class RadianceCluster (
   def radianceSharedMemComponentsGen() = new RadianceSharedMemComponents(thisClusterParams, gemminiTiles, muonTiles)
   def radianceSharedMemComponentsImpGen(outer: RadianceSharedMemComponents) = new RadianceSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
-    radianceSharedMemComponentsGen, Some(radianceSharedMemComponentsImpGen(_)), clcbus)).suggestName("shared_mem")
+    thisClusterParams.smemConfig,
+    radianceSharedMemComponentsGen,
+    Some(radianceSharedMemComponentsImpGen(_)),
+    clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
   gemminiTiles.foreach { _.slaveNode :=* TLWidthWidget(4) :=* clcbus.outwardNode }

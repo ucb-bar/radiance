@@ -34,10 +34,8 @@ class VirgoCluster (
   crossing: ClockCrossingType,
   lookup: LookupByClusterIdImpl
 )(implicit p: Parameters) extends Cluster(thisClusterParams, crossing, lookup) {
-  val clbus = tlBusWrapperLocationMap(CLCBUS(clusterId))
+  val clbus = tlBusWrapperLocationMap(CLBUS(clusterId))
   clbus.clockGroupNode := allClockGroupsNode
-  val clsbus = tlBusWrapperLocationMap(CLSBUS(clusterId))
-  clsbus.clockGroupNode := allClockGroupsNode
 
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
@@ -47,6 +45,7 @@ class VirgoCluster (
   def virgoSharedMemComponentsGen() = new VirgoSharedMemComponents(thisClusterParams, gemminiTiles, vortexTiles)
   def virgoSharedMemComponentsImpGen(outer: VirgoSharedMemComponents) = new VirgoSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
+    p(RadianceSharedMemKey).get,
     virgoSharedMemComponentsGen, Some(virgoSharedMemComponentsImpGen(_)), clbus)).suggestName("shared_mem")
 
   // direct core-accelerator connections
