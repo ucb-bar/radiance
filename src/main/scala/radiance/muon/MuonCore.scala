@@ -114,7 +114,9 @@ trait HasMuonCoreParameters {
   val numLsqEntries = muonParams.lsu.numLdqEntries + muonParams.lsu.numStqEntries
   val dmemTagBits  = log2Ceil(numLsqEntries)
   val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
-  val imemTagBits  = 4 // FIXME
+  val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
+  val smemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes
+  val imemTagBits  = 4 // FIXME: ibuffer depth
   val imemDataBits = muonParams.instBits
 }
 
@@ -130,6 +132,12 @@ class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
 }
 
+class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  def smemSizeBits = log2Ceil(smemDataBits / 8)
+  val req = Decoupled(new MemRequest(smemTagBits, smemSizeBits, addressBits, smemDataBits))
+  val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
+}
+
 class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   def imemSizeBits = log2Ceil(imemDataBits / 8)
   val req = Decoupled(new MemRequest(imemTagBits, imemSizeBits, addressBits, imemDataBits))
@@ -141,6 +149,7 @@ class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
+    val smem = new SharedMemIO
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
@@ -149,6 +158,7 @@ class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
   val core = Module(new MuonCore)
   io.imem <> core.io.imem
   io.dmem <> core.io.dmem
+  io.smem <> core.io.smem
 }
 
 /** Muon core without the caches.
@@ -159,14 +169,17 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
+    val smem = new SharedMemIO
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
+  dontTouch(io)
 
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem
+  be.io.smem <> io.smem
 
   be.io.ibuf <> fe.io.ibuf
 }
