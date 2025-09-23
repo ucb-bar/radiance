@@ -68,8 +68,12 @@ class RadianceSharedMemComponents(
   // (lane, core) = rw node
   val fanoutTransposed = radianceSmemFanout.transpose
 
-  // TODO: connect radiance smem fanout to clcbus
-  val smemBusClients: Seq[TLNode] = Seq() // TODO: smem bus goes here
+  val muonClcBusXbar = LazyModule(new TLXbar()).suggestName("muon_clc_xbar").node
+  val muonClcBusClient = TLEphemeralNode()
+  radianceSmemFanout.flatten.foreach(muonClcBusXbar := _)
+  muonClcBusClient := muonClcBusXbar
+
+  val unalignedClients: Seq[TLNode] = Seq() // TODO add cbus client
 
   // uniform mux select for selecting lanes from a single core in unison
   val prealignBufComponents = fanoutTransposed.zipWithIndex.map { case (coresRW, lid) =>
@@ -129,7 +133,7 @@ class RadianceSharedMemComponents(
     connectOne(alignmentXbar, () => RWSplitterNode(f"muon_aligned_splitter_$wid")))
   val muonAligned = Seq.tabulate(2)(_ => muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
 
-  val smemBusSplitterNodes = smemBusClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
+  val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
   // these nodes access an entire line simultaneously
   override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes.map(grb => {
@@ -143,6 +147,7 @@ class RadianceSharedMemComponents(
   // these nodes are random access
   override val nonuniformRNodes: Seq[TLNode] = smemBusSplitterNodes.map(connectXbarName(_, Some("rad_unaligned_r")))
   override val nonuniformWNodes: Seq[TLNode] = smemBusSplitterNodes.map(connectXbarName(_, Some("rad_unaligned_w")))
+  override val clcbusClients: Seq[TLNode] = Seq(muonClcBusClient)
 }
 
 class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]

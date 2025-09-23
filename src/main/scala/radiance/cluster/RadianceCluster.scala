@@ -7,6 +7,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
+import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
 import midas.targetutils.SynthesizePrintf
@@ -28,6 +29,8 @@ case class RadianceClusterParams(
                  (implicit p: Parameters): RadianceCluster = {
     new RadianceCluster(this, crossing.crossingType, lookup)
   }
+  def baseAddress = x"4000_0000" + x"4_0000" * clusterId
+  def addrMask = 0x3ffff
 }
 
 class RadianceCluster (
@@ -39,6 +42,10 @@ class RadianceCluster (
   clcbus.clockGroupNode := allClockGroupsNode
   val clsbus = tlBusWrapperLocationMap(CLSBUS(clusterId))
   clsbus.clockGroupNode := allClockGroupsNode
+
+  println(f"clcbus width in bytes ${clcbus.beatBytes}")
+  println(f"clsbus width in bytes ${clsbus.beatBytes}")
+
   // make the shared memory srams and interconnects
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
   val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
@@ -53,11 +60,11 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach { _.slaveNode :=* TLWidthWidget(4) :=* clcbus.outwardNode }
+  gemminiTiles.foreach(_.slaveNode := TLWidthWidget(4) := clcbus.outwardNode)
 
   // connect barriers
   val numCoresInCluster = muonTiles.length
-  // TODO: replace accNodes with MMIO registers
+
   // val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
   // muonTiles.foreach { tile =>
   //   barrierSlaveNode := tile.barrierMasterNode
@@ -69,6 +76,8 @@ class RadianceCluster (
 class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(outer) {
   println(s"======= RadianceCluster: clcbus inward edges = ${outer.clcbus.inwardNode.inward.inputs.length}")
   println(s"======= RadianceCluster: clcbus name = ${outer.clcbus.busName}")
+  println(s"======= RadianceCluster: csbus outward edges = ${outer.csbus.outwardNode.outward.outputs.length}")
+  println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
 
   // @cleanup: This assumes barrier params on all edges are the same, i.e. all
   // cores are configured to have the same barrier id range.  While true, might

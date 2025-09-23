@@ -177,6 +177,12 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
         None
     }).get
 
+    val baseAddr = (clusterParams match {
+      case params: RadianceClusterParams => Some(params.baseAddress)
+      case _: VirgoClusterParams => Some(smKey.address)
+      case _ => None
+    }).get
+
     val skipRecoding = false
     val tileParams = GemminiTileParams(
       gemminiConfig = {
@@ -236,7 +242,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
+      slaveAddress = baseAddr + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
       hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(

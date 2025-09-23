@@ -20,7 +20,8 @@ class RadianceBaseConfig extends Config(
   new WithRadianceSimParams(true) ++
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
-  new freechips.rocketchip.subsystem.WithEdgeDataBits(32) ++
+  new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
+  new WithNBitControlBus(64) ++
 
   new chipyard.config.WithPeripheryBusFrequency(500.0) ++
   new chipyard.config.WithMemoryBusFrequency(500.0) ++
@@ -35,6 +36,10 @@ object tapeoutSmemConfig extends RadianceSharedMemKey(
   address = 0, size = 128 << 10, numBanks = 4, numWords = 16, wordSize = 4,
   prealignBufDepth = 2, filterAligned = false, serialization = CoreSerialized
 )
+
+class WithNBitControlBus(nBits: Int) extends Config ((site, here, up) => {
+  case ControlBusKey => up(ControlBusKey, site).copy(beatBytes = nBits/8)
+})
 
 class RadianceMuonConfig extends Config(
   new WithMuonCores(1, location = InCluster(0)) ++
@@ -53,6 +58,13 @@ class RadianceTapeoutConfig extends Config(
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(1)) ++
   new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig) ++
+  new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
+  new WithMuonCores(2, location = InCluster(0)) ++
+  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig) ++
+  new WithExtGPUMem() ++
+  new RadianceBaseConfig)
+
+class RadianceClusterConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(0)) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig) ++

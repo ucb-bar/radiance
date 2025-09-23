@@ -6,10 +6,10 @@ package radiance.cluster
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, SimpleDevice}
+import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.regmapper.RegField
-import freechips.rocketchip.resources.BigIntHexContext
+import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossingParamsLike, RocketCrossingParams}
 import freechips.rocketchip.tile._
@@ -79,7 +79,7 @@ case class GemminiTileParams(
     new GemminiTile(this, crossing, lookup)
   }
   val core = GemminiCoreParams()
-  val name = Some("radiance_gemmini_tile")
+  val name = Some(f"radiance_gemmini_tile_$tileId")
   val clockSinkParams = ClockSinkParameters()
   val blockerCtrlAddr = None
   val icache = None
@@ -89,7 +89,7 @@ case class GemminiTileParams(
   ))
   val btb = None
   val baseName = name.get
-  val uniqueName = s"${baseName}_$tileId"
+  val uniqueName = s"${baseName}_tileId"
 }
 
 case class GemminiTileAttachParams(
@@ -110,7 +110,17 @@ class GemminiTile private (
       lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
-  val cpuDevice: SimpleDevice = new SimpleDevice(s"gemmini${tileId}", Nil)
+  val cpuDevice: SimpleDevice = new SimpleDevice(s"gemmini${tileId}", Nil) {
+    override def parent = Some(ResourceAnchors.cpus)
+    override def describe(resources: ResourceBindings): Description = {
+      val Description(name, mapping) = super.describe(resources)
+      Description(
+        name,
+        mapping ++ cpuProperties ++ nextLevelCacheProperty ++ tileProperties
+      )
+    }
+  }
+
 
   val intOutwardNode = None
   val slaveNode = TLIdentityNode()
@@ -121,9 +131,11 @@ class GemminiTile private (
 
   tlOtherMastersNode := tlMasterXbar.node
   masterNode :=* tlOtherMastersNode
-  DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
+  // DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
 
   // TODO: evaluate if gemmini write node is required at all
+
+  println("i am instantiating gemminitile")
   val gemmini = LazyModule(new Gemmini(gemminiParams.gemminiConfig))
   val base = p(GPUMemory()) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr
@@ -137,13 +149,15 @@ class GemminiTile private (
 
   require(!gemmini.config.sp_singleported, "external scratchpad must be dual ported")
 
-  val regDevice = new SimpleDevice("gemmini-cmd-reg", Seq(s"gemmini-cmd-reg"))
+  val regDevice = new SimpleDevice(f"gemmini-cmd-reg-$tileId", Seq(s"gemmini-cmd-reg-$tileId"))
   val regNode = TLRegisterNode(
     address = Seq(AddressSet(gemminiParams.slaveAddress, 0xff)),
     device = regDevice,
     beatBytes = 8,
     concurrency = 1)
-  regNode := TLFragmenter(8, 64) := tlSlaveXbar.node
+  regNode := TLFragmenter(8, 128) := slaveNode
+
+  // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 
   override lazy val module = new GemminiTileModuleImp(this)
 }
@@ -201,6 +215,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
       as.status := RegNext(outer.gemmini.module.io.busy).asUInt
     }
+    case None =>
   }
 
 
