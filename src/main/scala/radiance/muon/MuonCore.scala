@@ -49,10 +49,11 @@ case class MuonCoreParams(
   mtvecInit: Option[BigInt] = Some(BigInt(0)),
   mtvecWritable: Boolean = false,
   traceHasWdata: Boolean = false,
-  xLen: Int = 64,
+  xLen: Int = 64, // for 33-bit phys address
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
+  archLen: Int = 32, // "real" xLen visible to Muon
   numWarps: Int = 8,
   numLanes: Int = 16,
   // schedule, dispatch, rename
@@ -110,12 +111,12 @@ trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
 
-  val addressBits = muonParams.xLen
+  val addressBits = muonParams.archLen
   val numLsqEntries = muonParams.lsu.numLdqEntries + muonParams.lsu.numStqEntries
   val dmemTagBits  = log2Ceil(numLsqEntries)
-  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
+  val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
-  val smemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes
+  val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
   val imemTagBits  = 4 // FIXME: ibuffer depth
   val imemDataBits = muonParams.instBits
 }
