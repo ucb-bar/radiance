@@ -69,8 +69,8 @@ Top-level ingestion, routing, and completion.
 - S3: 
   1. Init printf unit with ring header info. 
   2. Zero `tb_ctr`. Calculate `total_threadblocks = grid.x * grid.y * grid.z`, `regs_per_tb = regs_per_thread * LANE_WIDTH * block_dims.x * block_dims.y * block_dims.z`, `min_tb_per_cluster = ceil(total_threadblocks/clusters)` 
-  3. For each GLU-L, calculate number of threadblocks to schedule now based on `min(total_threadblocks - tb_ctr, min_tb_per_cluster, floor(regs/regs_per_tb), floor(shmem/shmem_per_tb), floor(block.x * block.y * block.z/(cores * warps_per_core * threads_per_warp)))`. Record `TB_ID` and `N_TBs` for each GLU-L. Dispatch threadblocks to the GLU-L, increment `tb_ctr`. 
-  4. If `tb_ctr < tot_tbs`, dispatch more threadblocks when an GLU-L signals completion, otherwise record `ERR_OK`. If any GLU-L signals `ERR`, record `ERR_CODE, ERR_PC, ERR_THREAD`,  issue `KILL_ALL` to all GLU-LS. Occasionally drain printf ring (pick policy).
+  3. Pick a free GLU-L, calculate number of threadblocks to schedule now based on `min(total_threadblocks - tb_ctr, min_tb_per_cluster, floor(regs/regs_per_tb), floor(shmem/shmem_per_tb), floor(block.x * block.y * block.z/(cores * warps_per_core * threads_per_warp)))`. Record `TB_ID` and `N_TBs` for GLU-L. Dispatch threadblocks to the GLU-L, increment `tb_ctr`. Retry step 3 if threadblock failed to schedule (competition). 
+  4. If `tb_ctr < tot_tbs`, dispatch more threadblocks when a GLU-L signals completion, otherwise record `ERR_OK`. If any GLU-L signals `ERR`, record `ERR_CODE, ERR_PC, ERR_THREAD`,  issue `KILL_ALL` to all GLU-LS. Occasionally drain printf ring (pick policy).
 - S4: Drain printf ring, wait for drain.
 - S5: Forward error to event queue.
 
