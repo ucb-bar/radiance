@@ -277,8 +277,8 @@ class LsuRequest(implicit p: MuonCoreParams) extends Bundle {
     val op = MemOp()
 
     val tmask = Vec(p.numLanes, Bool())
-    val address = Vec(p.numLanes, UInt(p.xLen.W))
-    val data = Vec(p.numLanes, UInt(p.xLen.W))
+    val address = Vec(p.numLanes, UInt(p.archLen.W))
+    val data = Vec(p.numLanes, UInt(p.archLen.W))
 }
 
 // Writeback interface
@@ -287,7 +287,7 @@ class LsuResponse(implicit p: MuonCoreParams) extends Bundle {
     val op = MemOp()
 
     val tmask = Vec(p.numLanes, Bool())
-    val data = Vec(p.numLanes, UInt(p.xLen.W))
+    val data = Vec(p.numLanes, UInt(p.archLen.W))
 }
 
 // Downstream memory interface
@@ -311,7 +311,7 @@ class LoadStoreUnit extends Module {
     val addressTmaskIndex = (warp: UInt, addressSpace: AddressSpace.Type, index: UInt) => {
         ???
     }
-    val addressTmaskMem = SyncReadMem(addressTmaskMemSize, new Bundle { val addr = UInt(p.xLen.W); val tmask = UInt(p.numLanes.W) })
+    val addressTmaskMem = SyncReadMem(addressTmaskMemSize, new Bundle { val addr = UInt(p.archLen.W); val tmask = UInt(p.numLanes.W) })
     
     // data for all warps' store queues share a single SRAM
     // data for all warps' load queues share a single SRAM
@@ -319,8 +319,8 @@ class LoadStoreUnit extends Module {
     // and (load data to writeback / store data to memory requests), which are both reads from SRAM
 
     val storeDataMemSize = ???
-    val storeDataMem = SyncReadMem(storeDataMemSize, Vec(p.numLanes, UInt(p.xLen.W)))
+    val storeDataMem = SyncReadMem(storeDataMemSize, Vec(p.numLanes, UInt(p.archLen.W)))
 
     val loadDataMemSize = ???
-    val loadDataMem = SyncReadMem(loadDataMemSize, Vec(p.numLanes, UInt(p.xLen.W)))
+    val loadDataMem = SyncReadMem(loadDataMemSize, Vec(p.numLanes, UInt(p.archLen.W)))
 }

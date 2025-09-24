@@ -148,6 +148,7 @@ class MuonTileModuleImp(outer: MuonTile)
   val muon = Module(new Muon()(outer.p))
   muon.io.imem <> DontCare
   muon.io.dmem <> DontCare
+  muon.io.smem <> DontCare
   outer.reportCease(None)
   outer.reportWFI(None)
 }
