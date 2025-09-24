@@ -37,26 +37,36 @@ object MemOp extends ChiselEnum {
 
 // Load and Store Queues must allocate slots in program order and produce an index for the allocated slot.
 // This index must be held in reservation station and given to LSU when a memory instruction issues from RS
-// (possibly out-of-order!) in order to handle hazards through memory. 
+// (possibly out-of-order!) in order to handle hazards through memory.
+// We expose a separate interface per warp to simplify dispatch from per-warp IBUF
 class LsuQueueReservationInterface(implicit p: MuonCoreParams) extends Bundle {
-    val requestValid = Input(Bool())
     val addressSpace = Input(AddressSpace())
     val op = Input(MemOp())
-    val warpId = Input(UInt(p.warpIdWidth.W))
-    
-    val outputValid = Output(Bool())
+
+    // combinationally coupled to addressSpace / op
+    val queueFull = Output(Bool())
     val queueIndex = Output(UInt(p.lsu.queueIndexBits.W))
+
+    val reqValid = Input(Bool())
 }
 
-// 
+// Each load and store queue attempts to issue requests back to LSU in a correct order
+// Global memory, shared memory requests are separately arbitrated, creating two request
+// pipes back to LSU
 class LsuQueueRequest(implicit p: MuonCoreParams) extends Bundle {
-
+    val op = MemOp()
+    val warpId = UInt(p.warpIdWidth.W)
+    val queueIndex = UInt(p.lsu.queueIndexBits.W)
 }
 
 class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
     val io = IO(new Bundle {
-        val lsuQueueReservationInterface = new LsuQueueReservationInterface
+        val lsuQueueReservationInterface = Vec(p.numWarps, new LsuQueueReservationInterface)
         
+        val globalReq = Decoupled(new LsuQueueRequest)
+        val shmemReq = Decoupled(new LsuQueueRequest)
+
+        // used to flush LSU
         val queuesEmpty = Output(Bool())
     })
 
@@ -67,6 +77,7 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
 
     // per-warp Circular FIFO parameterized to be a load queue or store queue
     class PerWarpQueue(
+        warpId: Int,
         loadQueue: Boolean
     ) extends Module {
         // parameterization as load queue or store queue
@@ -94,7 +105,7 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
             val receivedMemResponse = Flipped(Valid(UInt(indexBits.W)))
 
             // interface to issue request from this queue
-            val requestIndex = Decoupled(UInt(indexBits.W))
+            val req = Decoupled(new LsuQueueRequest)
         })
 
         val head = RegInit(0.U(circIndexBits.W))
@@ -154,10 +165,12 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
             val anyLoadReady = readyLoads.asUInt.orR
             val readyLoadIndex = PriorityEncoder(readyLoads)
 
-            io.requestIndex.valid := anyLoadReady
-            io.requestIndex.bits := readyLoadIndex
+            io.req.valid := anyLoadReady
+            io.req.bits.op := op(readyLoadIndex)
+            io.req.bits.queueIndex := readyLoadIndex
+            io.req.bits.warpId := warpId.U
 
-            when (io.requestIndex.fire) {
+            when (io.req.fire) {
                 issued(readyLoadIndex) := true.B
             }
         }
@@ -174,10 +187,12 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
             }
             val readyStoreIndex = idxBits(head)
 
-            io.requestIndex.valid := readyStore
-            io.requestIndex.bits := readyStoreIndex
+            io.req.valid := readyStore
+            io.req.bits.op := op(readyStoreIndex)
+            io.req.bits.queueIndex := readyStoreIndex
+            io.req.bits.warpId := warpId.U
 
-            when (io.requestIndex.fire) {
+            when (io.req.fire) {
                 issued(readyStoreIndex) := true.B
             }
         }
@@ -194,25 +209,26 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
         }
     }
 
-    class PerWarpLoadQueue extends PerWarpQueue(loadQueue = true)
-    class PerWarpStoreQueue extends PerWarpQueue(loadQueue = false)
+    class PerWarpLoadQueue(warpId: Int) extends PerWarpQueue(warpId, loadQueue = true)
+    class PerWarpStoreQueue(warpId: Int) extends PerWarpQueue(warpId, loadQueue = false)
     
     val warpEmptys = Wire(Vec(p.numWarps, Bool()))
     val allEmpty = warpEmptys.andR
     io.queuesEmpty := allEmpty
 
-    val outputValids = Wire(Vec(p.numWarps, Bool()))
-    val queueIndexes = Wire(Vec(p.numWarps, UInt(p.lsu.queueIndexBits.W)))
-    io.lsuQueueReservationInterface.outputValid := outputValids(io.lsuQueueReservationInterface.warpId)
-    io.lsuQueueReservationInterface.queueIndex := queueIndexes(io.lsuQueueReservationInterface.warpId)
+    // instantiate queues
+    val globalLoadQueues = Seq.tabulate(p.numWarps)(w => Module(new PerWarpLoadQueue(w)))
+    val globalStoreQueues = Seq.tabulate(p.numWarps)(w => Module(new PerWarpStoreQueue(w)))
+    val shmemLoadQueues = Seq.tabulate(p.numWarps)(w => Module(new PerWarpLoadQueue(w)))
+    val shmemStoreQueues = Seq.tabulate(p.numWarps)(w => Module(new PerWarpStoreQueue(w)))
 
     for (warp <- 0 until p.numWarps) {
-        // instantiate queues, connect heads/tails
-        val globalLoadQueue = Module(new PerWarpLoadQueue)
-        val globalStoreQueue = Module(new PerWarpStoreQueue)
+        // connect heads/tails
+        val globalLoadQueue = globalLoadQueues(warp)
+        val globalStoreQueue = globalLoadQueues(warp)
 
-        val shmemLoadQueue = Module(new PerWarpLoadQueue)
-        val shmemStoreQueue = Module(new PerWarpStoreQueue)
+        val shmemLoadQueue = shmemLoadQueues(warp)
+        val shmemStoreQueue = shmemStoreQueues(warp)
 
         globalLoadQueue.io.otherHead := globalStoreQueue.io.myHead
         globalLoadQueue.io.otherTail := globalStoreQueue.io.myTail
@@ -225,42 +241,41 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
         shmemStoreQueue.io.otherTail := shmemLoadQueue.io.myTail
 
         // route reservation request / response
-        def lsuQueueReservation = io.lsuQueueReservationInterface
-        val queueFull = Wire(Bool())
+        val lsuQueueReservation = io.lsuQueueReservationInterface(warp)
         val queueIndex = Wire(UInt(p.lsu.queueIndexBits.W))
 
-        val thisWarp = lsuQueueReservation.warpId === warp.U
         val globalMemory = lsuQueueReservation.addressSpace === AddressSpace.globalMemory
         val sharedMemory = lsuQueueReservation.addressSpace === AddressSpace.sharedMemory
         val isLoad = MemOp.isLoad(lsuQueueReservation.op)
         val isStore = MemOp.isStore(lsuQueueReservation.op)
         val isAtomic = MemOp.isAtomic(lsuQueueReservation.op)
         val isFence = MemOp.isFence(lsuQueueReservation.op)
-        val reqValid = lsuQueueReservation.requestValid
+        val reqValid = lsuQueueReservation.reqValid
 
         // atomics and fences both treated like stores, 
         // since current LDQ/STQ design already ensures that stores have aq and rl semantics
         val isSAF = isStore || isAtomic || isFence
         
-        outputValids(warp) := MuxCase(false.B, Seq(
-            (globalMemory && isLoad) -> !globalLoadQueue.io.full,
-            (globalMemory && isSAF) -> !globalStoreQueue.io.full,
-            (sharedMemory && isLoad) -> !shmemLoadQueue.io.full,
-            (sharedMemory && isSAF) -> !shmemStoreQueue.io.full
+        lsuQueueReservation.queueFull := MuxCase(false.B, Seq(
+            (globalMemory && isLoad) -> globalLoadQueue.io.full,
+            (globalMemory && isSAF) -> globalStoreQueue.io.full,
+            (sharedMemory && isLoad) -> shmemLoadQueue.io.full,
+            (sharedMemory && isSAF) -> shmemStoreQueue.io.full
         ))
 
-        queueIndexes(warp) := MuxCase(DontCare, Seq(
+        lsuQueueReservation.queueIndex := MuxCase(DontCare, Seq(
             (globalMemory && isLoad) -> idxBits(globalLoadQueue.io.myTail),
             (globalMemory && isSAF) -> idxBits(globalStoreQueue.io.myTail),
             (sharedMemory && isLoad) -> idxBits(shmemLoadQueue.io.myTail),
             (sharedMemory && isSAF) -> idxBits(shmemStoreQueue.io.myTail)
         ))
 
-        globalLoadQueue.io.enqueue := reqValid && thisWarp && globalMemory && isLoad && !globalLoadQueue.io.full
-        globalStoreQueue.io.enqueue := reqValid && thisWarp && globalMemory && isSAF && !globalStoreQueue.io.full
-        shmemLoadQueue.io.enqueue := reqValid && thisWarp && sharedMemory && isLoad && !shmemLoadQueue.io.full
-        shmemStoreQueue.io.enqueue := reqValid && thisWarp && sharedMemory && isSAF && !shmemStoreQueue.io.full
+        globalLoadQueue.io.enqueue := reqValid && globalMemory && isLoad && !globalLoadQueue.io.full
+        globalStoreQueue.io.enqueue := reqValid && globalMemory && isSAF && !globalStoreQueue.io.full
+        shmemLoadQueue.io.enqueue := reqValid && sharedMemory && isLoad && !shmemLoadQueue.io.full
+        shmemStoreQueue.io.enqueue := reqValid && sharedMemory && isSAF && !shmemStoreQueue.io.full
 
+        // set flag if all queues for this warp are empty
         warpEmptys(warp) := {
             globalLoadQueue.io.empty &&
             globalStoreQueue.io.empty &&
@@ -268,6 +283,31 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
             shmemStoreQueue.io.empty
         }
     }
+
+    // arbitrate between queues. note that load queue / store queue of a given warp can never
+    // both be trying to issue a request on same cycle
+    
+    // current arbitration: loads > stores, then lower warpId > higher warpId
+    // TODO: better arbitration scheme?
+    val nGlobalReqs = p.numWarps * 2 // 1 global load queue, 1 global store queue per warp 
+    val globalReqArbiter = Module(new Arbiter(new LsuQueueRequest, nGlobalReqs))
+
+    val nShmemReqs = p.numWarps * 2
+    val shmemReqArbiter = Module(new Arbiter(new LsuQueueRequest, nShmemReqs))
+
+    io.globalReq :<>= globalReqArbiter.io.out
+    io.shmemReq :<>= shmemReqArbiter.io.out
+
+    (globalReqArbiter.io.in zip (globalLoadQueues ++ globalStoreQueues)).foreach(x => {
+        val (arbPort, queue) = x
+        arbPort :<>= queue.io.req
+    })
+
+    (shmemReqArbiter.io.in zip (shmemLoadQueues ++ shmemStoreQueues)).foreach(x => {
+        val (arbPort, queue) = x
+        arbPort :<>= queue.io.req
+    })
+    
 }
 
 // Execute interface
@@ -303,7 +343,7 @@ class LoadStoreUnit extends Module {
     implicit val p = MuonCoreParams()
 
     val io = IO(new Bundle {
-        
+        val coreReq = Flipped(Decoupled(new LsuRequest))
     })
 
     // address / tmask of all warps, all queues share a single big SRAM
@@ -311,16 +351,24 @@ class LoadStoreUnit extends Module {
     val addressTmaskIndex = (warp: UInt, addressSpace: AddressSpace.Type, index: UInt) => {
         ???
     }
-    val addressTmaskMem = SyncReadMem(addressTmaskMemSize, new Bundle { val addr = UInt(p.archLen.W); val tmask = UInt(p.numLanes.W) })
+    val addressTmaskMem = SyncReadMem(addressTmaskMemSize, 
+        new Bundle { val addr = Vec(p.numLanes, UInt(p.archLen.W)); val tmask = UInt(p.numLanes.W) }
+    )
     
     // data for all warps' store queues share a single SRAM
     // data for all warps' load queues share a single SRAM
     // separation breaks contention between (responses to loads / store data from RS), which are both writes to SRAM
     // and (load data to writeback / store data to memory requests), which are both reads from SRAM
 
-    val storeDataMemSize = ???
+    val storeDataMemSize = p.numWarps * (p.lsu.numStqEntries + p.lsu.numStqEntries)
+    val storeDataIndex = (warp: UInt, addressSpace: AddressSpace.Type, index: UInt) => {
+        ???
+    }
     val storeDataMem = SyncReadMem(storeDataMemSize, Vec(p.numLanes, UInt(p.archLen.W)))
 
-    val loadDataMemSize = ???
+    val loadDataMemSize = p.numWarps * (p.lsu.numLdqEntries + p.lsu.numLdqEntries)
+    val loadDataIndex = (warp: UInt, addressSpace: AddressSpace.Type, index: UInt) => {
+        ???
+    }
     val loadDataMem = SyncReadMem(loadDataMemSize, Vec(p.numLanes, UInt(p.archLen.W)))
 }
