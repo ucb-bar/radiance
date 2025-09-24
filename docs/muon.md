@@ -86,10 +86,9 @@ TODO.
 TODO.
 
 
-## Performance Target
+## Target Design Parameters
 
-We first discuss a number of *hyperparameters* for Muon from which we derive
-other microarchitectural design parameters.
+We list Muon's main design parameters and the target value for each of them.
 
 ### Capacity
 
@@ -102,6 +101,11 @@ other microarchitectural design parameters.
 | Arch. register file size (max)   | 128          | regs/thread/warp | ISA supports 256; compiler currently limits to 128 |
 | Arch. register file size (min)   | 32           | regs/thread/warp | Determines # of warp slots in the hardware  |
 | Physical register file size	     | 16384        | bytes            |       |
+| SMEM Size                        | 128          | KiBytes/cluster  |       |
+| L0 Instruction Cache Size        | 4            | KiBytes/core		 |       |
+| L0 Data Cache Size               | 16           | KiBytes/core     |       |
+| L1 Cache Size                    | 64           | KiBytes/cluster  |       |
+| L2 Cache Size                    | 512          | KiBytes          |       |
 
 ### Bandwidth
 
@@ -111,10 +115,13 @@ other microarchitectural design parameters.
 | INT32 SIMT FLOPS                 | 1            | FLOP/thread/cycle | 16 INT PEs for 16-wide warps. |
 | FP32 SIMT FLOPS                  | 0.5          | FLOP/thread/cycle | 8 FP32 PEs for 16-wide warps. |
 | FP16 SIMT FLOPS                  | 1            | FLOP/thread/cycle | Assumes 2x bit-scaling from FP32 |
-| Register operands                | 4            | regs/inst         | rs1/rs2/rs3/rs4 |
-| RF Read Bandwidth Requirement    | 256          | bytes/cycle       | Minimum RF BW needed for no conflict, 4 operands |
-| L1 Bandwidth                     | 64           | bytes/cycle       | Provisioned for single-word access per thread |
-| L2 Bandwidth                     | 32           | bytes/cycle       | Requires 2x reuse at L1 |
+| Register operands                | 3            | regs/inst         | rs1/rs2/rs3 |
+| RF Read Bandwidth Requirement    | 192          | bytes/cycle       | Minimum RF BW needed for no conflict, 4 operands |
+| SMEM Bandwidth                   | 64           | bytes/cycle       | Provisioned for single-word access per thread |
+| L0I Bandwidth                    | 8            | bytes/cycle       | Provisioned for single instruction word per core |
+| L0D Bandwidth                    | 64           | bytes/cycle       | Provisioned for single-word access per thread |
+| L1 Bandwidth                     | 64           | bytes/cycle       | Provisioned for single-core access; Core accesses are serialized |
+| L2 Bandwidth                     | 32           | bytes/cycle       | Assumes 2x reuse at L1 |
 
 ### Latency
 

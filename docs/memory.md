@@ -33,10 +33,7 @@ Tag array size is 256x18b.
 
 ### L1
 
-L1 should be unified L1i and L1d.
-
-L1 should be 64KB. Hopper has 256KB. We have half the amount of cores and half
-lanes (and half warps for instruction).
+L1 is a 64KiB unified cache that serves both instructions and data.
 
 4-way set associative, write through, 64B line.
 
