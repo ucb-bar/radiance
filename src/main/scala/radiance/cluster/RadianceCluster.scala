@@ -21,6 +21,7 @@ import radiance.subsystem._
 case class RadianceClusterParams(
   clusterId: Int,
   clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
+  baseAddr: BigInt,
   smemConfig: RadianceSharedMemKey,
 ) extends InstantiableClusterParams[RadianceCluster] {
   val baseName = "radiance_cluster"
@@ -29,8 +30,6 @@ case class RadianceClusterParams(
                  (implicit p: Parameters): RadianceCluster = {
     new RadianceCluster(this, crossing.crossingType, lookup)
   }
-  def baseAddress = x"4000_0000" + x"4_0000" * clusterId
-  def addrMask = 0x3ffff
 }
 
 class RadianceCluster (
@@ -50,8 +49,16 @@ class RadianceCluster (
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
   val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
 
+  val extReqXbar = TLXbar()
+  val disableMonitors = true
+
   // TODO: new shared mem components gen
-  def radianceSharedMemComponentsGen() = new RadianceSharedMemComponents(thisClusterParams, gemminiTiles, muonTiles)
+  def radianceSharedMemComponentsGen() = new RadianceSharedMemComponents(
+    thisClusterParams,
+    gemminiTiles,
+    muonTiles,
+    extClients = Seq(extReqXbar))
+
   def radianceSharedMemComponentsImpGen(outer: RadianceSharedMemComponents) = new RadianceSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
     thisClusterParams.smemConfig,
@@ -60,7 +67,12 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach(_.slaveNode := TLWidthWidget(4) := clcbus.outwardNode)
+  gemminiTiles.foreach(_.gemminiSlaveNode := TLWidthWidget(4) := TLFragmenter(4, 8) := clcbus.outwardNode)
+
+  // cbus -> clcbus/smem
+  clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar
+  extReqXbar := ccbus.outwardNode
+  // ccbus is connected to cbus automatically
 
   // connect barriers
   val numCoresInCluster = muonTiles.length

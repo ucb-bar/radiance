@@ -17,6 +17,10 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
   // there will be N incoming edges, two outgoing edges, with two N:1 muxes;
   // it keeps the read and write channels fully separate to allow parallel processing.
   suggestName(name)
+  def shrink(size: TransferSizes): TransferSizes = {
+    TransferSizes(1, size.max)
+  }
+
   val node = TLNexusNode(
     clientFn = { seq =>
       val in_mapping = TLXbar.mapInputIds(seq)
@@ -28,6 +32,7 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
         else AddressSet.unify(visibilities)
       // println(s"$name has input visibilities $visibilities, unified to $unified_vis")
 
+
       seq.head.v1copy(
         echoFields = BundleField.union(seq.flatMap(_.echoFields)),
         requestFields = BundleField.union(seq.flatMap(_.requestFields)),
@@ -38,8 +43,8 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
             name = s"${name}_read_client",
             sourceId = read_src_range,
             visibility = visibility.map(Seq(_)).getOrElse(unified_vis),
-            supportsProbe = TransferSizes.mincover(seq.map(_.anyEmitClaims.get)),
-            supportsGet = TransferSizes.mincover(seq.map(_.anyEmitClaims.get)),
+            supportsProbe = shrink(TransferSizes.mincover(seq.map(_.anyEmitClaims.get))),
+            supportsGet = shrink(TransferSizes.mincover(seq.map(_.anyEmitClaims.get))),
             supportsPutFull = TransferSizes.none,
             supportsPutPartial = TransferSizes.none
           ),
@@ -50,16 +55,25 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
             supportsProbe = TransferSizes.mincover(
               seq.map(_.anyEmitClaims.putFull) ++seq.map(_.anyEmitClaims.putPartial)),
             supportsGet = TransferSizes.none,
-            supportsPutFull = TransferSizes.mincover(seq.map(_.anyEmitClaims.putFull)),
-            supportsPutPartial = TransferSizes.mincover(seq.map(_.anyEmitClaims.putPartial))
+            supportsPutFull = shrink(TransferSizes.mincover(seq.map(_.anyEmitClaims.putFull))),
+            supportsPutPartial = shrink(TransferSizes.mincover(seq.map(_.anyEmitClaims.putPartial)))
           )
         )
       )
     },
     managerFn = { seq =>
+      def shrinkAll(size: TLMasterToSlaveTransferSizes): TLMasterToSlaveTransferSizes = {
+        size.copy(
+          get = shrink(size.get),
+          putFull = shrink(size.putFull),
+          putPartial = shrink(size.putPartial)
+        )
+      }
+
+      val supports = shrinkAll(seq.map(_.anySupportClaims).reduce(_ mincover _))
       println(f"combined address range of $name managers: " +
         f"${AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address)))}, supports:" +
-        f"${seq.map(_.anySupportClaims).reduce(_ mincover _)}")
+        f"$supports, ${supports.get}, ${supports.putFull}, ${seq.map(_.anySupportClaims)}")
 
       seq.head.v1copy(
         responseFields = BundleField.union(seq.flatMap(_.responseFields)),
@@ -69,7 +83,7 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
         managers = Seq(TLSlaveParameters.v2(
           name = Some(s"${name}_manager"),
           address = AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address))),
-          supports = seq.map(_.anySupportClaims).reduce(_ mincover _),
+          supports = supports,
           fifoId = Some(0),
         ))
       )

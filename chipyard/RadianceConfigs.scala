@@ -21,7 +21,7 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
-  new WithNBitControlBus(64) ++
+  new WithRadianceControlBus ++
 
   new chipyard.config.WithPeripheryBusFrequency(500.0) ++
   new chipyard.config.WithMemoryBusFrequency(500.0) ++
@@ -37,8 +37,12 @@ object tapeoutSmemConfig extends RadianceSharedMemKey(
   prealignBufDepth = 2, filterAligned = false, serialization = CoreSerialized
 )
 
-class WithNBitControlBus(nBits: Int) extends Config ((site, here, up) => {
-  case ControlBusKey => up(ControlBusKey, site).copy(beatBytes = nBits/8)
+class WithRadianceControlBus extends Config ((site, here, up) => {
+  case ControlBusKey => up(ControlBusKey).copy(
+    beatBytes = 8,
+    atomics = None,
+  )
+  // this bus key propagates to ccbus and clcbus, might need to split off
 })
 
 class RadianceMuonConfig extends Config(

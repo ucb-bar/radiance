@@ -201,7 +201,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } // stride by word
 
-  guardMonitors { implicit p => smNodes.clcbusClients.foreach(clcbus.inwardNode := _) }
+  guardMonitors { implicit p => smNodes.clcbusClients.foreach(clcbus.inwardNode :=* _) }
 
   lazy val module = new RadianceSharedMemImp(this)
 }

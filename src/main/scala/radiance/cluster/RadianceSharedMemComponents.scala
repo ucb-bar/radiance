@@ -21,6 +21,7 @@ class RadianceSharedMemComponents(
   clusterParams: RadianceClusterParams,
   gemminiTiles: Seq[GemminiTile],
   muonTiles: Seq[MuonTile],
+  extClients: Seq[TLNode] = Seq(),
 )(implicit p: Parameters) extends RadianceSmemNodeProvider  {
   val smemKey = clusterParams.smemConfig
 
@@ -61,7 +62,7 @@ class RadianceSharedMemComponents(
     tile.smemNodes.zipWithIndex.map { case (m, lid) =>
       val smemFanoutXbar = LazyModule(new TLXbar())
       smemFanoutXbar.suggestName(f"rad_smem_fanout_cl${clusterParams.clusterId}_c${cid}_l${lid}_xbar")
-      smemFanoutXbar.node :=* m
+      smemFanoutXbar.node :=* AddressOrNode(clusterParams.baseAddr) :=* m
       smemFanoutXbar.node
     }.toList
   }.toList
@@ -73,7 +74,7 @@ class RadianceSharedMemComponents(
   radianceSmemFanout.flatten.foreach(muonClcBusXbar := _)
   muonClcBusClient := muonClcBusXbar
 
-  val unalignedClients: Seq[TLNode] = Seq() // TODO add cbus client
+  val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
 
   // uniform mux select for selecting lanes from a single core in unison
   val prealignBufComponents = fanoutTransposed.zipWithIndex.map { case (coresRW, lid) =>

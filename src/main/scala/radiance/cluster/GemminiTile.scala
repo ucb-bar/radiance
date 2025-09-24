@@ -124,6 +124,7 @@ class GemminiTile private (
 
   val intOutwardNode = None
   val slaveNode = TLIdentityNode()
+  val gemminiSlaveNode = TLIdentityNode() //FIXME
   val masterNode = visibilityNode
   // val statusNode = BundleBridgeSource(() => new GroundTestStatus)
 
@@ -135,7 +136,6 @@ class GemminiTile private (
 
   // TODO: evaluate if gemmini write node is required at all
 
-  println("i am instantiating gemminitile")
   val gemmini = LazyModule(new Gemmini(gemminiParams.gemminiConfig))
   val base = p(GPUMemory()) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr
@@ -153,9 +153,9 @@ class GemminiTile private (
   val regNode = TLRegisterNode(
     address = Seq(AddressSet(gemminiParams.slaveAddress, 0xff)),
     device = regDevice,
-    beatBytes = 8,
+    beatBytes = 4,
     concurrency = 1)
-  regNode := TLFragmenter(8, 128) := slaveNode
+  regNode := gemminiSlaveNode
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 

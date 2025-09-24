@@ -177,12 +177,6 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
         None
     }).get
 
-    val baseAddr = (clusterParams match {
-      case params: RadianceClusterParams => Some(params.baseAddress)
-      case _: VirgoClusterParams => Some(smKey.address)
-      case _ => None
-    }).get
-
     val skipRecoding = false
     val tileParams = GemminiTileParams(
       gemminiConfig = {
@@ -242,7 +236,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = baseAddr + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
+      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
       hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(
@@ -309,12 +303,16 @@ class WithRadianceCluster(
   crossing: RocketCrossingParams = RocketCrossingParams(),
   smemConfig: RadianceSharedMemKey,
 ) extends Config((site, here, up) => {
-  case ClustersLocated(`location`) => up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
-    RadianceClusterParams(
-      clusterId = clusterId,
-      smemConfig = smemConfig,
-    ),
-    crossing)
+  case ClustersLocated(`location`) => {
+    val baseAddress = x"4000_0000" + x"4_0000" * clusterId
+    up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
+      RadianceClusterParams(
+        clusterId = clusterId,
+        baseAddr = baseAddress,
+        smemConfig = smemConfig.copy(address = baseAddress + smemConfig.address),
+      ),
+      crossing)
+  }
   case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
     RadianceClusterBusTopologyParams(
       clusterId = clusterId,
@@ -440,8 +438,13 @@ case class RadianceClusterBusTopologyParams(
   instantiations = List(
     (CSBUS(clusterId), csbus),
     (CLSBUS(clusterId), csbus),
-    (CLCBUS(clusterId), ccbus),
-    (CCBUS(clusterId), ccbus)) ++ (if (coherence.nBanks == 0) Nil else List(
+    (CLCBUS(clusterId), ccbus.copy(
+      atomics = None,
+      blockBytes = ccbus.beatBytes
+    )),
+    (CCBUS(clusterId), ccbus.copy(
+      atomics = None,
+    ))) ++ (if (coherence.nBanks == 0) Nil else List(
     (CMBUS(clusterId), csbus),
     (CCOH (clusterId), CoherenceManagerWrapperParams(csbus.blockBytes, csbus.beatBytes, coherence.nBanks, CCOH(clusterId).name)(coherence.coherenceManager)))),
   connections = if (coherence.nBanks == 0) Nil else List(
