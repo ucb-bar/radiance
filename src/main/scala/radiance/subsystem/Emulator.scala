@@ -4,20 +4,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.tilelink._
-import org.chipsalliance.cde.config.{Field, Parameters}
+import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.memory.{SourceGenerator, TLPrintf, TraceLine}
-
-case class MemtraceCoreParams(
-    tracefilename: String = "undefined",
-    traceHasSource: Boolean = false
-)
-case object MemtraceCoreKey
-    extends Field[Option[MemtraceCoreParams]](None /*default*/ )
-
-// #############################################################################
-// FIXME: copy-paste from MemFuzzer
-// #############################################################################
 
 class Emulator(
     numLanes: Int,

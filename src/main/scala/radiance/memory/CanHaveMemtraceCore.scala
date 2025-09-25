@@ -1,11 +1,18 @@
 package radiance.memory
 
-import freechips.rocketchip.diplomacy.LazyModule
+import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import freechips.rocketchip.subsystem._
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.tilelink._
-import radiance.subsystem.{MemtraceCoreKey, SIMTCoreKey}
+import radiance.subsystem.SIMTCoreKey
 import testchipip.soc.SubsystemInjector
+
+case class MemtraceCoreParams(
+    tracefilename: String = "undefined",
+    traceHasSource: Boolean = false
+)
+case object MemtraceCoreKey
+    extends Field[Option[MemtraceCoreParams]](None /*default*/ )
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore
