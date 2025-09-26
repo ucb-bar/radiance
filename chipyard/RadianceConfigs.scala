@@ -40,7 +40,7 @@ object tapeoutSmemConfig extends RadianceSharedMemKey(
 class WithRadianceControlBus extends Config ((site, here, up) => {
   case ControlBusKey => up(ControlBusKey).copy(
     beatBytes = 8,
-    atomics = None, // TODO pending rocket chip PR
+//    atomics = None, // TODO pending rocket chip PR
   )
   // this bus key propagates to ccbus and clcbus, might need to split off
 })

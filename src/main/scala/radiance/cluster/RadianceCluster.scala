@@ -5,15 +5,11 @@ package radiance.cluster
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
-import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
-import midas.targetutils.SynthesizePrintf
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
-import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
 import radiance.subsystem._
@@ -67,7 +63,7 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach(_.slaveNode := TLWidthWidget(4) := TLFragmenter(4, 8) := clcbus.outwardNode)
+  gemminiTiles.foreach(_.slaveNode := clcbus.outwardNode)
 
   // cbus -> clcbus/smem
   clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar
