@@ -464,7 +464,7 @@ P(≥3 distinct banks among 3C draws)
 = 1 − [ N + (N·(N−1)/2)·(2^(3C) − 2) ] / N^(3C)
 ```
 
-Some values are:
+Some values of `P` are:
 ```
 N=4, C=1: 37.5%
 N=4, C=2: 90.8%

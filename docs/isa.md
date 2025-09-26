@@ -1,9 +1,8 @@
 Muon ISA
 ========
 
-Muon ISA is an extended RISC-V ISA that enables writing kernels that
-reflect performance characteristics of a modern GPU hardware with minimal
-ISA-level overhead.
+Muon ISA is an extended RISC-V ISA that enables maximizing kernel performance
+on a modern GPU hardware with minimal ISA-level overhead.
 
 Its key features are:
 
@@ -22,15 +21,15 @@ incompatibilities to GPU programming.  Some of its limitations include:
 
 * **Small register space** of 32 integer and 32 floating-points prevent
   allocating a high number of registers per-thread.  This creates two problems:
-  * Limited support for **dynamic warp occupancy** that allows the programmer
+  * Limited support for **dynamic warp occupancy**.  Modern GPU ISAs
+    have large architectural registers that allows the programmer
     to trade thread-level parallelism for increased instruction-level
-    parallelism.  This mechanism is extensively used in modern GEMM kernels to
-    allow better intra-warp data reuse and increase Tensor Core utilization.
+    parallelism.  This mechanism is extensively used in modern fused GEMM
+    kernels.
   * **Increased register spills to the stack.**  GPU kernels heavily rely on
     loop unrolling and code inlining to increase ILP and reduce
     branching/function call overheads.  RISC-V's small register space induces
-    frequent spills to the stack memory, which has high overhead in the GPU
-    memory system.
+    frequent spills to the stack memory, incurring slowdown.
 * **No support for predicated execution** limits the ISA to always rely on
   explicit branch divergence/reconvergence instructions, which incurs high
   instruction slot overhead for small branches.
