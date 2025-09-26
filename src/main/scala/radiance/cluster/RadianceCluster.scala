@@ -63,7 +63,7 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach(_.slaveNode := clcbus.outwardNode)
+  gemminiTiles.foreach(_.slaveNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode)
 
   // cbus -> clcbus/smem
   clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar

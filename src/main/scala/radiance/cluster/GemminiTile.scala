@@ -156,11 +156,11 @@ class GemminiTile private (
     beatBytes = 4,
     concurrency = 1)
 
-  // this tells the atomic automata to fuck off for this register node
+  // this tells the atomic automata to back off for this register node
   // bad things will happen however if we actually do amo on this region.
   // also: fragmenter does not expand arithmetic/logical ops, so the hack node
   // must be upwards of the fragmenter to hack in beat bytes = 8
-  regNode := TLFragmenter(4, 8) := HackAtomicNode(8) := slaveNode
+  regNode := slaveNode
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 
