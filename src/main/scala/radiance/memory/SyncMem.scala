@@ -4,7 +4,11 @@ import chisel3.util._
 import midas.targetutils.SynthesizePrintf
 
 // modified from gemmini's two port sync mem
-class TwoPortSyncMem[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8) extends Module {
+class TwoPortSyncMem[T <: Data](
+  n: Int, t: T,
+  maskedUnitWidth: Int = 8,
+  name: String
+) extends Module {
   val maskWidth = t.getWidth / maskedUnitWidth
   val io = IO(new Bundle {
     val waddr = Input(UInt((log2Ceil(n) max 1).W))
@@ -22,7 +26,7 @@ class TwoPortSyncMem[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8) extends 
 
   val maskElem = UInt(maskedUnitWidth.W)
   val memT = Vec(maskWidth, maskElem)
-  val mem = SyncReadMem(n, memT, SyncReadMem.WriteFirst)
+  val mem = SyncReadMem(n, memT, SyncReadMem.WriteFirst).suggestName(name)
 
   io.rdata := mem.read(io.raddr, io.ren).asTypeOf(t)
 
@@ -69,8 +73,13 @@ class TwoReadOneWriteSyncMem[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8) 
 
 
 object TwoPortSyncMem {
-  def apply[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8): TwoPortSyncMem[T] = {
-    Module(new TwoPortSyncMem[T](n, t, maskedUnitWidth))
+  def apply[T <: Data](
+    n: Int,
+    t: T,
+    maskedUnitWidth: Int = 8,
+    name: String = "mem"
+  ): TwoPortSyncMem[T] = {
+    Module(new TwoPortSyncMem[T](n, t, maskedUnitWidth, name))
   }
 }
 

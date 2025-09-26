@@ -67,12 +67,18 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach(_.gemminiSlaveNode := TLWidthWidget(4) := TLFragmenter(4, 8) := clcbus.outwardNode)
+  gemminiTiles.foreach(_.slaveNode := TLWidthWidget(4) := TLFragmenter(4, 8) := clcbus.outwardNode)
 
   // cbus -> clcbus/smem
   clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar
   extReqXbar := ccbus.outwardNode
   // ccbus is connected to cbus automatically
+
+  // clsbus -> csbus -> sbus
+  p(GPUMemory).get match {
+    case GPUMemParams(address, _) =>
+      csbus.inwardNode :=* AddressOrNode(address) :=* clsbus.outwardNode
+  } // TODO: the l1 cache has to live between the rewriter and the clsbus
 
   // connect barriers
   val numCoresInCluster = muonTiles.length

@@ -3,6 +3,7 @@ package radiance.cluster
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
+import freechips.rocketchip.resources.{Resource, SimpleDevice}
 import freechips.rocketchip.tilelink._
 import gemmini.Pipeline
 import org.chipsalliance.cde.config.Parameters
@@ -45,6 +46,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
 
   implicit val disableMonitors = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
+  val smemDevice = new SimpleDevice(f"rad-smem", Seq(s"rad-smem"))
   // collection of read and write managers for each sram (sub)bank
   val smemBankMgrs : Seq[Seq[TLManagerNode]] = if (strideByWord) {
     require(isPow2(smemSubbanks))
@@ -61,6 +63,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
                 smemBase + (smemDepth * smemWidth * bid) + wordSize * wid,
                 smemDepth * smemWidth - smemWidth + wordSize - 1
               )),
+              resources = Seq(Resource(smemDevice, "smem")),
               supports = TLMasterToSlaveTransferSizes(
                 get = TransferSizes(wordSize, wordSize)),
               fifoId = Some(0)
@@ -75,6 +78,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
                 smemBase + (smemDepth * smemWidth * bid) + wordSize * wid,
                 smemDepth * smemWidth - smemWidth + wordSize - 1
               )),
+              resources = Seq(Resource(smemDevice, "smem")),
               supports = TLMasterToSlaveTransferSizes(
                 putFull = TransferSizes(wordSize, wordSize),
                 putPartial = TransferSizes(wordSize, wordSize)),
@@ -302,6 +306,7 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
             val mem = TwoPortSyncMem(
               n = memDepth,
               t = UInt((wordWidth * 8).W),
+              name = "radiance_smem_bank",
             )
             // TODO: bring in cluster id
             // mem.suggestName(s"rad_smem_cl${outer.thisClusterParams.clusterId}_b${bid}_w${wid}")

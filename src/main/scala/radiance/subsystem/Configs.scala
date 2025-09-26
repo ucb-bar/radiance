@@ -395,14 +395,14 @@ class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config
 
 class WithExtGPUMem(address: BigInt = x"1_0000_0000",
                     size: BigInt = x"8000_0000") extends Config((site, here, up) => {
-  case GPUMemory() => Some(GPUMemParams(address, size))
+  case GPUMemory => Some(GPUMemParams(address, size))
   case ExtMem => up(ExtMem).map(x => {
     val gap = address - x.master.base - x.master.size
     x.copy(master = x.master.copy(size = x.master.size + gap + size))
   })
 })
 case class GPUMemParams(address: BigInt = BigInt("0x100000000", 16), size: BigInt = 0x80000000)
-case class GPUMemory() extends Field[Option[GPUMemParams]](None)
+case object GPUMemory extends Field[Option[GPUMemParams]](None)
 
 object RadianceSimArgs extends Field[Option[Boolean]](None)
 
@@ -438,12 +438,13 @@ case class RadianceClusterBusTopologyParams(
   instantiations = List(
     (CSBUS(clusterId), csbus),
     (CLSBUS(clusterId), csbus),
-    (CLCBUS(clusterId), ccbus.copy(
-      atomics = None,
-      blockBytes = ccbus.beatBytes
+    (CLCBUS(clusterId), RadianceCBusParams(
+      beatBytes = ccbus.beatBytes,
+      blockBytes = ccbus.beatBytes,
     )),
-    (CCBUS(clusterId), ccbus.copy(
-      atomics = None,
+    (CCBUS(clusterId), RadianceCBusParams(
+      beatBytes = ccbus.beatBytes,
+      blockBytes = ccbus.blockBytes,
     ))) ++ (if (coherence.nBanks == 0) Nil else List(
     (CMBUS(clusterId), csbus),
     (CCOH (clusterId), CoherenceManagerWrapperParams(csbus.blockBytes, csbus.beatBytes, coherence.nBanks, CCOH(clusterId).name)(coherence.coherenceManager)))),
