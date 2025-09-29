@@ -9,7 +9,6 @@ import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink._
-import midas.targetutils.SynthesizePrintf
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.cluster._
@@ -115,7 +114,7 @@ class VirgoClusterModuleImp(outer: VirgoCluster) extends ClusterModuleImp(outer)
 
     when (i.a.fire) {
       when (i.a.bits.opcode === TLMessages.PutFullData || i.a.bits.opcode === TLMessages.PutPartialData) {
-        SynthesizePrintf(printf(s"TRACEWR ${outer.traceTLNode.name}: %x %x %x\n", i.a.bits.address, i.a.bits.data, i.a.bits.mask))
+        printf(s"TRACEWR ${outer.traceTLNode.name}: %x %x %x\n", i.a.bits.address, i.a.bits.data, i.a.bits.mask)
       }
     }
   }

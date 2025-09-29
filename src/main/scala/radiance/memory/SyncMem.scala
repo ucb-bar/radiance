@@ -1,7 +1,6 @@
 package radiance.memory
 import chisel3._
 import chisel3.util._
-import midas.targetutils.SynthesizePrintf
 
 // modified from gemmini's two port sync mem
 class TwoPortSyncMem[T <: Data](
@@ -21,7 +20,7 @@ class TwoPortSyncMem[T <: Data](
   })
 
   when (io.wen && io.ren && io.raddr === io.waddr) {
-    SynthesizePrintf(printf("WARNING: read and write collided at address 0x%x\n", io.raddr))
+    printf("WARNING: read and write collided at address 0x%x\n", io.raddr)
   }
 
   val maskElem = UInt(maskedUnitWidth.W)
@@ -51,10 +50,10 @@ class TwoReadOneWriteSyncMem[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8) 
   })
 
   when (io.wen && io.ren0 && io.raddr0 === io.waddr) {
-    SynthesizePrintf(printf("WARNING: read0 and write collided at address 0x%x\n", io.raddr0))
+    printf("WARNING: read0 and write collided at address 0x%x\n", io.raddr0)
   }
   when (io.wen && io.ren1 && io.raddr1 === io.waddr) {
-    SynthesizePrintf(printf("WARNING: read1 and write collided at address 0x%x\n", io.raddr1))
+    printf("WARNING: read1 and write collided at address 0x%x\n", io.raddr1)
   }
 
   val maskElem = UInt(maskedUnitWidth.W)
