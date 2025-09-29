@@ -67,16 +67,14 @@ case class MuonCoreParams(
   numFp32Lanes: Int = 8,
   numFDivLanes: Int = 8,
   // memory
-  lsu: LoadStoreUnitParams = LoadStoreUnitParams(
-    numLsuLanes = 16,
-    numLdqEntries = 4,
-    numStqEntries = 4
-  ),
+  lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
 ) extends CoreParams {
-  val warpIdWidth = log2Up(numWarps)
+  val warpIdBits = log2Up(numWarps)
+  val pRegBits = log2Up(numPhysRegs)
 
-  require(numLanes % lsu.numLsuLanes == 0, "numLsuLanes must divide numLanes")
+  // compute "derived" LSU parameters
+  val lsuDerived = new LoadStoreUnitDerivedParams(this)
 }
 
 // move to decode?
@@ -112,7 +110,9 @@ trait HasMuonCoreParameters {
   val muonParams: MuonCoreParams = p(MuonKey)
 
   val addressBits = muonParams.archLen
-  val numLsqEntries = muonParams.lsu.numLdqEntries + muonParams.lsu.numStqEntries
+  val numLsqEntries = {
+    muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
+  }
   val dmemTagBits  = log2Ceil(numLsqEntries)
   val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
