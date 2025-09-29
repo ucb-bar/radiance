@@ -4,14 +4,17 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.subsystem.RadianceSimArgs
+import radiance.muon.CoreModule
 
-class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
+class WarpScheduler(implicit p: Parameters) extends CoreModule {
+  implicit val m: MuonCoreParams = muonParams
+
   val pcT = UInt(32.W)
-  val widT = UInt(log2Ceil(p.numWarps).W)
-  val tmaskT = UInt(p.numLanes.W)
-  val wmaskT = UInt(p.numWarps.W)
+  val widT = UInt(log2Ceil(m.numWarps).W)
+  val tmaskT = UInt(m.numLanes.W)
+  val wmaskT = UInt(m.numWarps.W)
   val instT = UInt(64.W)
-  val ibufIdxT = UInt(log2Ceil(p.ibufDepth + 1).W)
+  val ibufIdxT = UInt(log2Ceil(m.ibufDepth + 1).W)
 
   val ipdomStackEntryT = new Bundle {
     val restoredMask = tmaskT
@@ -24,7 +27,7 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
     val pc = pcT
   }
 
-  require(isPow2(p.numIPDOMEntries))
+  require(isPow2(m.numIPDOMEntries))
 
   val ipdomIO = new Bundle {
     val pop = Input(Bool())
@@ -58,8 +61,8 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
   }
 
   val csrIO = new Bundle {
-    val read = Flipped(ValidIO(UInt(p.csrAddrBits.W))) // reads only
-    val resp = Output(UInt(p.xLen.W)) // next cycle
+    val read = Flipped(ValidIO(UInt(m.csrAddrBits.W))) // reads only
+    val resp = Output(UInt(m.xLen.W)) // next cycle
   }
 
   val cmdProcIO = Flipped(ValidIO(new Bundle {
@@ -73,7 +76,7 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
   })
 
   val ibufIO = new Bundle {
-    val count = Input(Vec(p.numWarps, ibufIdxT))
+    val count = Input(Vec(m.numWarps, ibufIdxT))
   }
 
   val io = IO(new Bundle {
@@ -86,26 +89,25 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
     val ibuf = ibufIO
   })
 
-  val threadMask = RegInit(VecInit.fill(p.numWarps)(0.U.asTypeOf(tmaskT)))
-  val pcTracker = RegInit(VecInit.fill(p.numWarps)(0.U.asTypeOf(Valid(pcT))))
-  val ipdomStackMem = SRAM(p.numIPDOMEntries, ipdomStackEntryT, 1, 1, 0)
-  val branchTaken = RegInit(0.U(p.numIPDOMEntries.W))
-  val icacheInFlights = WireInit(VecInit.fill(p.numWarps)(0.U.asTypeOf(ibufIdxT)))
+  val threadMasks = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(tmaskT)))
+  val pcTracker = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
+  val icacheInFlights = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(ibufIdxT)))
   val icacheInFlightsReg = RegNext(icacheInFlights, 0.U.asTypeOf(icacheInFlights.cloneType))
-  val discardTillPC = RegInit(VecInit.fill(p.numWarps)(0.U.asTypeOf(Valid(pcT))))
+  val discardTillPC = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
 
   val stallTracker = new StallTracker(this)
+  val ipdomStack = new IPDOMStack(this)
 
   val fetchWid = WireInit(0.U)
 
   // handle new warps
-  val numActiveWarps = RegInit(0.U(log2Ceil(p.numWarps + 1)))
+  val numActiveWarps = RegInit(0.U(log2Ceil(m.numWarps + 1).W))
   when (io.cmdProc.valid) {
-    assert(numActiveWarps =/= p.numWarps.U, "cannot spawn more warps")
+    assert(numActiveWarps =/= m.numWarps.U, "cannot spawn more warps")
     val wid = numActiveWarps
 
     // initialize thread mask, pc, stall
-    threadMask(wid) := ((1 << p.numLanes) - 1).U.asTypeOf(tmaskT)
+    threadMasks(wid) := ((1 << m.numLanes) - 1).U.asTypeOf(tmaskT)
     pcTracker(wid).bits := io.cmdProc.bits.schedule
     pcTracker(wid).valid := true.B
     stallTracker.unstall(wid)
@@ -122,14 +124,44 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
       io.icache.in.valid := true.B
       io.icache.in.bits := pcTracker(wid).bits
       pcTracker(wid).bits := pcTracker(wid).bits + 8.U
+      discardTillPC(wid).bits := pcTracker(wid).bits // the latest issued pc
     }
   }
 
-  // handle i$ response, predecode
-  when (io.icache.out.valid) {
+  // assign decode outputs
+  val iresp = io.icache.out.bits
+  io.decode.bits.inst := iresp.inst
+  io.decode.bits.wid := iresp.wid
+  io.decode.bits.tmask := threadMasks(iresp.wid)
 
-    //
-    io.icache.out.bits.inst
+  // handle i$ response, predecode
+  io.decode.valid := false.B
+  when (io.icache.out.fire) {
+    val discardEntry = discardTillPC(iresp.wid)
+
+    when (discardEntry.valid) {
+      // we are currently in discard mode, check if we can exit
+      when (iresp.pc === discardEntry.bits) {
+        // exit discard mode
+        discardEntry.valid := false.B
+      }
+    }.otherwise {
+      val (stalls, joins) = Predecoder.decode(iresp.inst)
+      // if the current instruction stalls, enter discard mode
+      when (stalls || joins) {
+        // stall the warp and enable discard mode
+        stallTracker.stall(iresp.wid, iresp.pc)
+        discardEntry.valid := true.B
+        // discardEntry.bits is being set to the latest issued pc when we fetch
+      }
+
+      // reset fetch PC to post-stall
+      pcTracker(iresp.wid) := iresp.pc + 8.U // for branches: setPC overrides this
+
+      // TODO: handle joins
+
+      io.decode.valid := !joins // joins are dealt with internally
+    }
   }
 
   // update icache in flight count
@@ -137,9 +169,8 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
   icacheInFlights := icacheInFlightsReg
   when (!((fetchWid === icacheRespWid) && io.icache.in.fire && io.icache.out.fire)) {
     // make sure we take care of simultaneous in & out fire for the same warp
-
     when (io.icache.in.fire) {
-      assert(icacheInFlightsReg(icacheRespWid) <= p.ibufDepth.U)
+      assert(icacheInFlightsReg(icacheRespWid) <= m.ibufDepth.U)
       icacheInFlights(fetchWid) := icacheInFlightsReg(fetchWid) + 1.U
     }
     when (io.icache.out.fire) {
@@ -148,15 +179,45 @@ class WarpScheduler(implicit p: MuonCoreParams, q: Parameters) extends Module {
     }
   }
 
+  // update warp scheduler upon commit
+  when (io.commit.fire) {
+    val commit = io.commit.bits
 
-  // update thread masks & update pc valid
+    // update stalls
+    val stallEntry = stallTracker.stalls(commit.wid)
+    val warpStalled = stallEntry.stallReason(stallTracker.HAZARD)
+    val canUnstall = warpStalled && (stallEntry.pc === commit.pc)
+    when (canUnstall) {
+      stallTracker.unstall(commit.wid)
+    }
+
+    // update thread masks, pc, ipdom
+    when (commit.setPC.valid) {
+      assert(canUnstall)
+      pcTracker(commit.wid).bits := commit.setPC.bits
+    }
+
+    when (commit.setTmask.valid) {
+      assert(canUnstall)
+      threadMasks(commit.wid) := commit.setTmask.bits
+    }
+
+    when (commit.ipdomPush.valid) {
+      assert(canUnstall)
+//      ipdomStack.
+    }
+  }
+
+//  when (io.split)
 
   // select warp for fetch
 
   // select warp for issue
+
+  // handle csr reads
 }
 
-class StallTracker(outer: WarpScheduler)(implicit p: MuonCoreParams, q: Parameters) {
+class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val pcT = outer.pcT
 
   val HAZARD = 0
@@ -166,19 +227,21 @@ class StallTracker(outer: WarpScheduler)(implicit p: MuonCoreParams, q: Paramete
     val pc = pcT
     val stallReason = UInt(2.W) // hazard, ibuf backpressure
   }
-  val stalls = RegInit(VecInit.fill(p.numWarps)(0.U.asTypeOf(stallEntryT)))
+  val stalls = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(stallEntryT)))
 
   stalls.zipWithIndex.foreach { case (entry, wid) =>
-    val ibufReady = (outer.io.ibuf.count(wid) +& outer.icacheInFlights(wid)) < p.ibufDepth.U
+    val ibufReady = (outer.io.ibuf.count(wid) +& outer.icacheInFlights(wid)) < m.ibufDepth.U
     entry.stallReason(IBUF) := !ibufReady
   }
 
   def stall(wid: UInt, pc: UInt) = {
+    assert(!stalls(wid).stallReason(HAZARD))
     stalls(wid).pc := pc
     stalls(wid).stallReason(HAZARD) := true.B
   }
 
   def unstall(wid: UInt) = {
+    assert(stalls(wid).stallReason(HAZARD))
     stalls(wid).stallReason(HAZARD) := false.B
   }
 
@@ -188,7 +251,7 @@ class StallTracker(outer: WarpScheduler)(implicit p: MuonCoreParams, q: Paramete
   }
 }
 
-class Predecoder(implicit p: MuonCoreParams) extends Module {
+object Predecoder {
 
   def decode(inst: UInt) = {
     val d = Decoded(inst)
@@ -200,7 +263,20 @@ class Predecoder(implicit p: MuonCoreParams) extends Module {
   }
 }
 
-class IPDOMStack(implicit p: MuonCoreParams) extends Module {
+class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
+  val ipdomStackMem = SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 1, 1, 0)
+  val branchTaken = RegInit(0.U(m.numIPDOMEntries.W))
+
+  val r = ipdomStackMem.readPorts(0)
+  val w = ipdomStackMem.writePorts(0)
+  r.enable := false.B
+  w.enable := false.B
+
+  def push(wid: UInt, ent: outer.ipdomStackEntryT.type): Unit = {
+    ipdomStackMem.writePorts(0).enable := true.B
+
+    // TODO
+  }
 }
 
 class WarpArbiter(policy: Int)(implicit p: MuonCoreParams) extends Module {
