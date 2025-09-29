@@ -60,12 +60,14 @@ case class MuonCoreParams(
   numPhysRegs: Int = 256,
   numArchRegs: Int = 128,
   numIPDOMEntries: Int = 8,
+  ibufDepth: Int = 8,
   // issue
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
   // execute
   numFp32Lanes: Int = 8,
   numFDivLanes: Int = 8,
+  csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,

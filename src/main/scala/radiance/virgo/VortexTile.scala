@@ -374,7 +374,7 @@ class VortexTile private(
 
   val accMasterNode = AccMasterNode()
 
-  val base = p(GPUMemory()) match {
+  val base = p(GPUMemory) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr
     case _ => BigInt(0)
   }

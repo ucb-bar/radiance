@@ -18,6 +18,7 @@ import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
+import radiance.memory.HackAtomicNode
 import radiance.subsystem.{GPUMemParams, GPUMemory}
 
 case class GemminiCoreParams(
@@ -124,7 +125,6 @@ class GemminiTile private (
 
   val intOutwardNode = None
   val slaveNode = TLIdentityNode()
-  val gemminiSlaveNode = TLIdentityNode() //FIXME
   val masterNode = visibilityNode
   // val statusNode = BundleBridgeSource(() => new GroundTestStatus)
 
@@ -137,7 +137,7 @@ class GemminiTile private (
   // TODO: evaluate if gemmini write node is required at all
 
   val gemmini = LazyModule(new Gemmini(gemminiParams.gemminiConfig))
-  val base = p(GPUMemory()) match {
+  val base = p(GPUMemory) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr
     case _ => BigInt(0)
   }
@@ -155,7 +155,12 @@ class GemminiTile private (
     device = regDevice,
     beatBytes = 4,
     concurrency = 1)
-  regNode := gemminiSlaveNode
+
+  // this tells the atomic automata to back off for this register node
+  // bad things will happen however if we actually do amo on this region.
+  // also: fragmenter does not expand arithmetic/logical ops, so the hack node
+  // must be upwards of the fragmenter to hack in beat bytes = 8
+  regNode := slaveNode
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 

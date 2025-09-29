@@ -58,7 +58,7 @@ Bandwidth is 32B/cycle (SBus size = 256b).
 ![SMEM Block Diagram](./fig/smem.svg)
 
 In order to fulfill the [workload requirement](#flashattention-3-requirements),
-Shared memory should be sized 64KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
+Shared memory should be sized 128KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
 Each SRAM is 4B wide, 256 entries deep.
 Total aggregate bandwidth is read+write 256B/cycle.
 
@@ -181,18 +181,18 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 
 | GPU Address |  Size     | Description |
 |----------------|-----------|-------------------------------- |
-| `0x7000_0000`  | `0x10000` | Shared memory cluster local     |
-| `0x7001_0000`  |   `0x200` | Core 0 print and perf buffer    |
-| `0x7001_0200`  |   `0x200` | Core 1 print and perf buffer    |
-| `0x7001_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
-| `0x7001_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
+| `0x0000_0000`  | `0x10000` | Shared memory cluster local     |
+| `0x0002_0000`  |   `0x200` | Core 0 print and perf buffer    |
+| `0x0002_0200`  |   `0x200` | Core 1 print and perf buffer    |
+| `0x0002_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
+| `0x0002_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
 
 ## Global Memory Map
 
 |  CPU Address |  Size         | Description |
 |-----------------|---------------|---------------------------------|
-|   `0x4000_0000` | `0x20000`     | Cluster 0 SMEM (inc. Gemmini)   |
-|   `0x4002_0000` | `0x20000`     | Cluster 1 SMEM (inc. Gemmini)   |
+|   `0x4000_0000` | `0x40000`     | Cluster 0 SMEM (inc. Gemmini)   |
+|   `0x4004_0000` | `0x40000`     | Cluster 1 SMEM (inc. Gemmini)   |
 |   `0x6000_0000` | `0x10000`     | GPU device command processor    |
 |   `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)             |
 | `0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable |

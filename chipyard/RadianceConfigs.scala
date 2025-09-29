@@ -18,7 +18,7 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithExtMemSize(BigInt("80000000", 16)) ++
   new chipyard.config.WithRadBootROM() ++
   new WithRadianceSimParams(true) ++
-  new freechips.rocketchip.subsystem.WithCacheBlockBytes(128) ++
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(64) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
   new WithRadianceControlBus ++
@@ -40,7 +40,7 @@ object tapeoutSmemConfig extends RadianceSharedMemKey(
 class WithRadianceControlBus extends Config ((site, here, up) => {
   case ControlBusKey => up(ControlBusKey).copy(
     beatBytes = 8,
-    atomics = None,
+//    atomics = None, // TODO pending rocket chip PR
   )
   // this bus key propagates to ccbus and clcbus, might need to split off
 })
@@ -59,6 +59,7 @@ class RadianceCyclotronConfig extends Config(
   new RadianceBaseConfig)
 
 class RadianceTapeoutConfig extends Config(
+  new freechips.rocketchip.rocket.WithNMedCores(1) ++
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(1)) ++
   new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig) ++
