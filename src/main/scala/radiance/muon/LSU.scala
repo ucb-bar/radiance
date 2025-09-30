@@ -153,13 +153,14 @@ class LsuQueueWritebackRequest(implicit p: MuonCoreParams) extends LsuQueueToken
     val loadDataIdx = UInt(p.lsu.loadDataIdxBits.W)
 }
 
+// perf: memReq goes through numWarps * 4 radix arbiter
+// similarly, receivedOperands / receivedMemUpdate / receivedMemResponse all fanout to numWarps * 4
 class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
     val io = IO(new Bundle {
         val queueReservations = Vec(p.numWarps, Flipped(Decoupled(new LsuQueueReservation)))
         
-        val globalReq = Decoupled(new LsuQueueRequest)
-        val shmemReq = Decoupled(new LsuQueueRequest)
-
+        val memReq = Decoupled(new LsuQueueRequest)
+        
         val receivedOperands = Flipped(Valid(new LsuQueueOperandUpdate))
         val receivedMemUpdate = Flipped(Valid(new LsuQueueMemUpdate))
         val receivedMemResponse = Flipped(Valid(new LsuQueueMemResponse))
@@ -500,26 +501,19 @@ class LoadStoreQueue(implicit p: MuonCoreParams) extends Module {
     // arbitrate memory requests between queues. note that load queue / store queue of a given warp can never
     // both be trying to issue a request on same cycle
     
-    // current arbitration: loads > stores, then lower warpId > higher warpId
+    // current arbitration: shared > global, then loads > stores, then lower warpId > higher warpId
     // TODO: better arbitration scheme?
     val nGlobalReqs = p.numWarps * 2 // 1 global load queue, 1 global store queue per warp 
-    val globalReqArbiter = Module(new Arbiter(new LsuQueueRequest, nGlobalReqs))
-
     val nShmemReqs = p.numWarps * 2
-    val shmemReqArbiter = Module(new Arbiter(new LsuQueueRequest, nShmemReqs))
+    val memReqArbiter = Module(new Arbiter(new LsuQueueRequest, nGlobalReqs + nShmemReqs))
 
-    io.globalReq :<>= globalReqArbiter.io.out
-    io.shmemReq :<>= shmemReqArbiter.io.out
+    io.memReq :<>= memReqArbiter.io.out
 
-    (globalReqArbiter.io.in zip (globalLoadQueues ++ globalStoreQueues)).foreach(x => {
+    (memReqArbiter.io.in zip (shmemLoadQueues ++ shmemStoreQueues ++ globalLoadQueues ++ globalStoreQueues)).foreach(x => {
         val (arbPort, queue) = x
         arbPort :<>= queue.io.req
     })
 
-    (shmemReqArbiter.io.in zip (shmemLoadQueues ++ shmemStoreQueues)).foreach(x => {
-        val (arbPort, queue) = x
-        arbPort :<>= queue.io.req
-    })
     
     // Route signals to per-warp queues and handle reverse direction
     for (warp <- 0 until p.numWarps) {
@@ -829,21 +823,20 @@ class LoadStoreUnit(muonParams: MuonCoreParams) extends Module {
 
     // -- Generate downstream memory requests -- 
 
-    // arbitrate addressTmask / storeData read ports between global and shared mem requests
-    val (addressTmaskReadIdxArbIn, addressTmaskReadIdxArbChosen, addressTmaskReadIdxArbOut, addressTmaskReadIdxArbValid) = Utils.validArb(UInt(p.lsu.addressIdxBits.W), 2)
-    val (storeDataReadIdxArbIn, storeDataReadIdxArbChosen, storeDataReadIdxArbOut, storeDataReadIdxArbValid) = Utils.validArb(UInt(p.lsu.storeDataIdxBits.W), 2)
-    val addressTmask = storeDataMem.read(storeDataReadIdxArbOut, addressTmaskReadIdxArbValid)
-    val storeData = storeDataMem.read(storeDataReadIdxArbOut, storeDataReadIdxArbValid)
-
+    val addressTmaskReadIdx = Wire(UInt(p.lsu.addressIdxBits.W))
+    val storeDataReadIdx = Wire(UInt(p.lsu.storeDataIdxBits.W))
+    val addressTmask = storeDataMem.read(addressTmaskReadIdx)
+    val storeData = storeDataMem.read(storeDataReadIdx)
+     
     class MemRequestGen(bufferFlop: Boolean) extends Module {
         val io = IO(new Bundle {
             val queueRequest = Flipped(Decoupled(new LsuQueueRequest))
             val memRequest = Decoupled(new LsuMemRequest)
 
-            val addressTmaskRead = Decoupled(UInt(p.lsu.addressIdxBits.W))
+            val addressTmaskRead = Valid(UInt(p.lsu.addressIdxBits.W))
             val addressTmask = Input(new AddressTmask)
 
-            val storeDataRead = Decoupled(UInt(p.lsu.storeDataIdxBits.W))
+            val storeDataRead = Valid(UInt(p.lsu.storeDataIdxBits.W))
             val storeData = Input(Vec(p.numLanes, UInt(p.archLen.W)))
         })
 
@@ -902,52 +895,32 @@ class LoadStoreUnit(muonParams: MuonCoreParams) extends Module {
     }
 
     // TODO: continually read from SRAM, or store to intermediate flop?
-    val globalReqGen = Module(new MemRequestGen(bufferFlop = true))
-    val shmemReqGen = Module(new MemRequestGen(bufferFlop = true))
+    val reqGen = Module(new MemRequestGen(bufferFlop = true))
     
-    globalReqGen.io.queueRequest :<>= loadStoreQueues.io.globalReq
-    shmemReqGen.io.queueRequest :<>= loadStoreQueues.io.shmemReq
-    io.globalMemReq :<>= globalReqGen.io.memRequest
-    io.shmemReq :<>= shmemReqGen.io.memRequest
-
-    addressTmaskReadIdxArbIn(0).valid := globalReqGen.io.addressTmaskRead.valid
-    addressTmaskReadIdxArbIn(0).bits := globalReqGen.io.addressTmaskRead.bits
-    globalReqGen.io.addressTmaskRead.ready := addressTmaskReadIdxArbChosen(0)
+    reqGen.io.queueRequest :<>= loadStoreQueues.io.memReq
     
-    storeDataReadIdxArbIn(0).valid := globalReqGen.io.storeDataRead.valid
-    storeDataReadIdxArbIn(0).bits := globalReqGen.io.storeDataRead.bits
-    globalReqGen.io.storeDataRead.ready := storeDataReadIdxArbChosen(0)
-
-    addressTmaskReadIdxArbIn(1).valid := shmemReqGen.io.addressTmaskRead.valid
-    addressTmaskReadIdxArbIn(1).bits := shmemReqGen.io.addressTmaskRead.bits
-    shmemReqGen.io.addressTmaskRead.ready := addressTmaskReadIdxArbChosen(1)
+    // route to correct downstream interface
+    io.globalMemReq.bits := reqGen.io.memRequest.bits
+    io.shmemReq.bits := reqGen.io.memRequest.bits
     
-    storeDataReadIdxArbIn(1).valid := shmemReqGen.io.storeDataRead.valid
-    storeDataReadIdxArbIn(1).bits := shmemReqGen.io.storeDataRead.bits
-    shmemReqGen.io.storeDataRead.ready := storeDataReadIdxArbChosen(1)
-
-    globalReqGen.io.addressTmask := addressTmask
-    globalReqGen.io.storeData := storeData
-    shmemReqGen.io.addressTmask := addressTmask
-    shmemReqGen.io.storeData := storeData
-
-    // arbiter guarantees only one request succeeds, so inject the allocated load data entry into it (if needed)
-    loadStoreQueues.io.globalReq.bits.loadDataIdx := loadDataAllocator.io.allocatedIndex
-    loadStoreQueues.io.shmemReq.bits.loadDataIdx := loadDataAllocator.io.allocatedIndex
-    loadDataAllocator.io.allocate := false.B
-    val globalReqNeedsLoadEntry = MemOp.isLoad(loadStoreQueues.io.globalReq.bits.op) || MemOp.isAtomic(loadStoreQueues.io.globalReq.bits.op)
-    val shmemReqNeedsLoadEntry = MemOp.isLoad(loadStoreQueues.io.shmemReq.bits.op) || MemOp.isAtomic(loadStoreQueues.io.shmemReq.bits.op)
-    when (loadStoreQueues.io.globalReq.fire) {
-        when (globalReqNeedsLoadEntry) {
-            loadDataAllocator.io.allocate := true.B
-        }
-    }
-    when (loadStoreQueues.io.shmemReq.fire) {
-        when (shmemReqNeedsLoadEntry) {
-            loadDataAllocator.io.allocate := true.B
-        }
+    when (loadStoreQueues.io.memReq.bits.addressSpace === AddressSpace.globalMemory) {
+        io.globalMemReq.valid := true.B
+        io.shmemReq.valid := false.B
+        reqGen.io.memRequest.ready := io.globalMemReq.ready
+    }.otherwise {
+        io.globalMemReq.valid := false.B
+        io.shmemReq.valid := true.B
+        reqGen.io.memRequest.ready := io.shmemReq.ready
     }
 
+    reqGen.io.addressTmask := addressTmask
+    reqGen.io.storeData := storeData
+    
+    // allocate load data entry, if needed
+    loadStoreQueues.io.memReq.bits.loadDataIdx := loadDataAllocator.io.allocatedIndex
+    val memReqNeedsLoadEntry = MemOp.isLoad(loadStoreQueues.io.memReq.bits.op) || MemOp.isAtomic(loadStoreQueues.io.memReq.bits.op)
+    loadDataAllocator.io.allocate := loadStoreQueues.io.memReq.fire && memReqNeedsLoadEntry
+    
     // -- Receive memory responses --
     
     
