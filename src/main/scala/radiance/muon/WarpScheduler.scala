@@ -50,7 +50,10 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   }
 
   val csrIO = new Bundle {
-    val read = Flipped(ValidIO(UInt(m.csrAddrBits.W))) // reads only
+    val read = Flipped(ValidIO(new Bundle {
+      val addr = UInt(m.csrAddrBits.W)
+      val wid = widT
+    })) // reads only
     val resp = Output(UInt(m.xLen.W)) // next cycle
   }
 
@@ -109,7 +112,9 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   pcTracker.zipWithIndex.foreach { case (entry, wid) =>
     val joinPC = ipdomStack.newPC(wid)
     // only increment PC if it's 1. enabled 2. not stalled (no hazard, icache ready) 3. selected for fetch
-    when (wid.U === fetchWid && entry.valid && !stallTracker.isStalled(wid.U)._1) {
+    when (wid.U === fetchWid && fetchArbiter.io.out.valid &&
+      entry.valid && !stallTracker.isStalled(wid.U)._1) {
+
       // every PC increment is accompanied by fetch fire
       io.icache.in.valid := true.B
       val currPC = Mux(joinPC.valid, joinPC.bits, entry.bits)
@@ -166,11 +171,11 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   when (!((fetchWid === icacheRespWid) && io.icache.in.fire && io.icache.out.fire)) {
     // make sure we take care of simultaneous in & out fire for the same warp
     when (io.icache.in.fire) {
-      assert(icacheInFlightsReg(icacheRespWid) <= m.ibufDepth.U)
+      assert(icacheInFlightsReg(fetchWid) < m.ibufDepth.U)
       icacheInFlights(fetchWid) := icacheInFlightsReg(fetchWid) + 1.U
     }
     when (io.icache.out.fire) {
-      assert(icacheInFlightsReg(icacheRespWid) >= 0.U)
+      assert(icacheInFlightsReg(icacheRespWid) > 0.U)
       icacheInFlights(icacheRespWid) := icacheInFlightsReg(icacheRespWid) - 1.U
     }
   }
@@ -212,10 +217,40 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   }
 
   // select warp for fetch
+  val fetchArbiter = Module(new RRArbiter(UInt(), m.numWarps))
+
+  fetchArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>
+    arb.bits := wid.U
+    arb.valid := pcTracker(wid).valid && !stallTracker.isStalled(wid.U)._1
+  }
+  fetchArbiter.io.out.ready := true.B
+  fetchWid := fetchArbiter.io.out.bits
 
   // select warp for issue
+  val issueArbiter = Module(new RRArbiter(UInt(), m.numWarps))
+  issueArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>
+    arb.bits := wid.U
+    arb.valid := io.issue.eligible.bits(wid)
+  }
+  issueArbiter.io.out.ready := io.issue.eligible.valid
+  io.issue.issued := issueArbiter.io.out.bits
+  assert(!io.issue.eligible.valid || !(io.issue.eligible.bits.orR) || issueArbiter.io.out.valid,
+    "issue arbiter out not valid when inputs are valid")
 
   // handle csr reads
+  when (io.csr.read.fire) {
+    val req = io.csr.read.bits
+    val csrData = MuxCase(
+      DontCare,
+      Seq(
+        (req.addr === 0xcc3.U) -> VecInit(pcTracker.map(_.valid)).asUInt, // warp mask
+        (req.addr === 0xcc4.U) -> threadMasks(req.wid) // thread mask
+        // TODO: b00 mcycle, b80 mcycle_h
+        // TODO: b02 minstret, b82 minstret_h
+      )
+    )
+    io.csr.resp := RegNext(csrData)
+  }
 }
 
 class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
@@ -318,7 +353,4 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) extends Modul
       joiningEnd := true.B
     }
   }
-}
-
-class WarpArbiter(policy: Int)(implicit p: MuonCoreParams) extends Module {
 }
