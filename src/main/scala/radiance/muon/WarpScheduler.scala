@@ -22,23 +22,12 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
     val elsePC = pcT
   }
 
-  val poppedEntryT = new Bundle {
-    val mask = tmaskT
-    val pc = pcT
-  }
-
   require(isPow2(m.numIPDOMEntries))
-
-  val ipdomIO = new Bundle {
-    val pop = Input(Bool())
-    val popped = ValidIO(poppedEntryT)
-    val wid = Input(widT)
-  } // TODO
 
   val commitIO = ValidIO(new Bundle {
     val setPC = Flipped(ValidIO(pcT))
     val setTmask = Flipped(ValidIO(tmaskT))
-    val ipdomPush = Flipped(ValidIO(ipdomStackEntryT))
+    val ipdomPush = Flipped(ValidIO(ipdomStackEntryT)) // this should be split PC+8
     val pc = Input(pcT)
     val wid = Input(widT)
   })
@@ -118,13 +107,17 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   // increment/set PCs, fetch from i$
   io.icache.in.valid := false.B
   pcTracker.zipWithIndex.foreach { case (entry, wid) =>
+    val joinPC = ipdomStack.newPC(wid)
     // only increment PC if it's 1. enabled 2. not stalled (no hazard, icache ready) 3. selected for fetch
     when (wid.U === fetchWid && entry.valid && !stallTracker.isStalled(wid.U)._1) {
       // every PC increment is accompanied by fetch fire
       io.icache.in.valid := true.B
-      io.icache.in.bits := pcTracker(wid).bits
-      pcTracker(wid).bits := pcTracker(wid).bits + 8.U
-      discardTillPC(wid).bits := pcTracker(wid).bits // the latest issued pc
+      val currPC = Mux(joinPC.valid, joinPC.bits, entry.bits)
+      io.icache.in.bits := currPC
+      entry.bits := currPC + 8.U
+      discardTillPC(wid).bits := entry.bits // the latest issued pc
+    }.elsewhen(joinPC.valid) {
+      entry.bits := joinPC.bits
     }
   }
 
@@ -132,7 +125,8 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   val iresp = io.icache.out.bits
   io.decode.bits.inst := iresp.inst
   io.decode.bits.wid := iresp.wid
-  io.decode.bits.tmask := threadMasks(iresp.wid)
+  val fetchNewMask = ipdomStack.newMask(iresp.wid) // forward new mask to fetch port
+  io.decode.bits.tmask := Mux(fetchNewMask.valid, fetchNewMask.bits, threadMasks(iresp.wid))
 
   // handle i$ response, predecode
   io.decode.valid := false.B
@@ -147,18 +141,20 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
       }
     }.otherwise {
       val (stalls, joins) = Predecoder.decode(iresp.inst)
-      // if the current instruction stalls, enter discard mode
-      when (stalls || joins) {
-        // stall the warp and enable discard mode
+      when (stalls) {
+        // non join hazards stall
         stallTracker.stall(iresp.wid, iresp.pc)
-        discardEntry.valid := true.B
-        // discardEntry.bits is being set to the latest issued pc when we fetch
       }
+      // joins still enables discard, but does not stall
+      discardEntry.valid := stalls || joins
+      // discardEntry.bits is being set to the latest issued pc when we fetch
 
       // reset fetch PC to post-stall
       pcTracker(iresp.wid) := iresp.pc + 8.U // for branches: setPC overrides this
 
-      // TODO: handle joins
+      when (joins) {
+        ipdomStack.pop(iresp.wid) // this will set newPC/newMask, reflected elsewhere
+      }
 
       io.decode.valid := !joins // joins are dealt with internally
     }
@@ -196,19 +192,24 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
       assert(canUnstall)
       pcTracker(commit.wid).bits := commit.setPC.bits
     }
-
     when (commit.setTmask.valid) {
       assert(canUnstall)
       threadMasks(commit.wid) := commit.setTmask.bits
     }
-
     when (commit.ipdomPush.valid) {
       assert(canUnstall)
-//      ipdomStack.
+      ipdomStack.push(commit.wid, commit.ipdomPush.bits)
     }
   }
 
-//  when (io.split)
+  // join mask update
+  ipdomStack.newMask.zipWithIndex.foreach { case (mask, wid) =>
+    when (mask.valid) {
+      assert(!io.commit.valid || (io.commit.bits.wid =/= wid.U) || (!io.commit.bits.setTmask.valid),
+        "cannot set mask while there's a join")
+      threadMasks(wid) := mask.bits
+    }
+  }
 
   // select warp for fetch
 
@@ -252,7 +253,6 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 }
 
 object Predecoder {
-
   def decode(inst: UInt) = {
     val d = Decoded(inst)
     val isHazardInst = VecInit(Seq(MuOpcode.JALR, MuOpcode.JAL, MuOpcode.SYSTEM, MuOpcode.BRANCH)
@@ -263,19 +263,60 @@ object Predecoder {
   }
 }
 
-class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
-  val ipdomStackMem = SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 1, 1, 0)
-  val branchTaken = RegInit(0.U(m.numIPDOMEntries.W))
+class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) extends Module {
+  val ipdomStackMem = Seq.fill(m.numWarps)(SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 0, 0, 1))
+  val branchTaken = RegInit(VecInit.fill(m.numWarps)(0.U(m.numIPDOMEntries.W)))
 
-  val r = ipdomStackMem.readPorts(0)
-  val w = ipdomStackMem.writePorts(0)
-  r.enable := false.B
-  w.enable := false.B
+  val ptr = RegInit(VecInit.fill(m.numWarps)(0.U(log2Ceil(m.numIPDOMEntries).W)))
+  val pushing = WireInit(VecInit.fill(m.numWarps)(false.B))
+  val joiningElse = RegInit(VecInit.fill(m.numWarps)(false.B))
+  val joiningEnd = RegInit(VecInit.fill(m.numWarps)(false.B))
 
-  def push(wid: UInt, ent: outer.ipdomStackEntryT.type): Unit = {
-    ipdomStackMem.writePorts(0).enable := true.B
+  val ports = VecInit(ipdomStackMem.map(m => m.readwritePorts(0)))
 
-    // TODO
+  val newPC = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(UInt()))))
+  val newMask = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(UInt()))))
+
+  (joiningElse lazyZip joiningEnd lazyZip newPC lazyZip newMask).zipWithIndex
+    .foreach { case ((j0, j1, pc, mask), wid) =>
+      pc.valid := j0
+      pc.bits := ports(wid).readData.elsePC
+      mask.valid := j0 || j1
+      mask.bits := Mux(j0, ports(wid).readData.elseMask, ports(wid).readData.restoredMask)
+    }
+
+
+  (ports zip ptr).foreach { case (p, pa) =>
+    p.enable := false.B
+    p.address := pa
+    p.isWrite := false.B
+  }
+
+  def push(wid: UInt, ent: Bundle): Unit = {
+    ports(wid).enable := true.B
+    ports(wid).isWrite := true.B
+    ports(wid).writeData := ent.asTypeOf(outer.ipdomStackEntryT)
+    branchTaken(wid)(ptr(wid)) := false.B
+    pushing(wid) := true.B
+    assert(ptr(wid) < (m.numIPDOMEntries - 1).U, "ipdom stack is full")
+    ptr(wid) := ptr(wid) + 1.U
+  }
+
+  def pop(wid: UInt) = {
+    assert(!pushing(wid)) // there should never be a simultaneous push and pop
+
+    when (!branchTaken(wid)(ptr(wid))) {
+      // done with then, start with else: set pc, update taken
+      newMask := ports(wid).readData.elseMask
+      joiningElse := true.B
+    }.otherwise {
+      // done with else, pop but don't set pc
+      ports(wid).enable := true.B
+      ports(wid).isWrite := false.B
+      assert(ptr(wid) > 0.U, "ipdom stack is empty")
+      ptr(wid) := ptr(wid) - 1.U
+      joiningEnd := true.B
+    }
   }
 }
 
