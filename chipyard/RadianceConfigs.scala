@@ -16,7 +16,7 @@ class RadianceBaseConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(BigInt("80000000", 16)) ++
-  new chipyard.config.WithRadBootROM() ++
+//  new chipyard.config.WithRadBootROM() ++
   new WithRadianceSimParams(true) ++
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(64) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
@@ -59,7 +59,6 @@ class RadianceCyclotronConfig extends Config(
   new RadianceBaseConfig)
 
 class RadianceTapeoutConfig extends Config(
-  new freechips.rocketchip.rocket.WithNMedCores(1) ++
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(1)) ++
   new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig) ++
@@ -67,6 +66,7 @@ class RadianceTapeoutConfig extends Config(
   new WithMuonCores(2, location = InCluster(0)) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig) ++
   new WithExtGPUMem() ++
+  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
   new RadianceBaseConfig)
 
 class RadianceClusterConfig extends Config(
