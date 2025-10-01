@@ -56,6 +56,7 @@ case class MuonCoreParams(
   archLen: Int = 32, // "real" xLen visible to Muon
   numWarps: Int = 8,
   numLanes: Int = 16,
+  hartIdBits: Int = 3,
   // schedule, dispatch, rename
   numPhysRegs: Int = 256,
   numArchRegs: Int = 128,
@@ -153,6 +154,7 @@ class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
     val imem = new InstMemIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
+    val hartid = Input(UInt(muonParams.hartIdBits.W))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
