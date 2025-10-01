@@ -92,7 +92,7 @@ class LsuQueueToken(implicit p: MuonCoreParams) extends Bundle {
 object LsuQueueToken {
     // a little sus
     def width(implicit p: MuonCoreParams): Int = {
-        0.U.asTypeOf(new LsuQueueToken).getWidth
+      (new LsuQueueToken).getWidth
     }
 }
 

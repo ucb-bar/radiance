@@ -149,6 +149,7 @@ class MuonTileModuleImp(outer: MuonTile)
   muon.io.imem <> DontCare
   muon.io.dmem <> DontCare
   muon.io.smem <> DontCare
+  muon.io.hartid := outer.muonParams.coreId.U
   outer.reportCease(None)
   outer.reportWFI(None)
 }
