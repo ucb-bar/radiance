@@ -49,8 +49,7 @@ class LoadStoreUnitDerivedParams(
     val packetBits = log2Up(numPackets)
 
     // "request tag"
-    val sourceIdBits = LsuQueueToken.width(p) + packetBits
-    assert(sourceIdBits == (new LsuMemTag()(p)).getWidth)
+    val sourceIdBits = LsuQueueToken.width(muonParams) + packetBits
 }
 
 // Chisel type
@@ -96,8 +95,8 @@ class LsuQueueToken(implicit p: Parameters) extends CoreBundle()(p) {
 
 object LsuQueueToken {
     // a little sus
-    def width(implicit p: Parameters): Int = {
-        (new LsuQueueToken).getWidth
+    def width(muonParams: MuonCoreParams): Int = {
+        muonParams.warpIdBits + 1 + 1 + muonParams.lsu.queueIndexBits
     }
 }
 
