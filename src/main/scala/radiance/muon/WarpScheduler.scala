@@ -1,6 +1,7 @@
 package radiance.muon
 
 import chisel3._
+import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.subsystem.RadianceSimArgs
@@ -8,6 +9,8 @@ import radiance.muon.CoreModule
 
 class WarpScheduler(implicit p: Parameters) extends CoreModule {
   implicit val m: MuonCoreParams = muonParams
+
+  val cmdProcOpt = None
 
   val pcT = UInt(32.W)
   val widT = UInt(log2Ceil(m.numWarps).W)
@@ -22,6 +25,11 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
     val elsePC = pcT
   }
 
+  val wspawnT = new Bundle {
+    val count = UInt(log2Ceil(m.numWarps + 1).W)
+    val pc = pcT
+  }
+
   require(isPow2(m.numIPDOMEntries))
 
   val commitIO = Input(
@@ -29,6 +37,7 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
       val setPC = Valid(pcT)
       val setTmask = Valid(tmaskT)
       val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+      val wspawn = Valid(wspawnT)
       val pc = pcT
     })
   ))
@@ -77,13 +86,18 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
     val icache = icacheIO
     val issue = issueIO
     val csr = csrIO
-    val cmdProc = cmdProcIO
     val decode = decodeIO
     val ibuf = ibufIO
+    val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
   })
 
   val threadMasks = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(tmaskT)))
-  val pcTracker = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
+  val pcTracker = io.cmdProc match {
+    case Some(_) => RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
+    case None => RegInit(VecInit.tabulate(m.numWarps) { wid =>
+      (new Valid(pcT)).Lit(_.valid -> (wid == 0).B, _.bits -> m.startAddress.U.asTypeOf(pcT))
+    })
+  }
   val icacheInFlights = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(ibufIdxT)))
   val icacheInFlightsReg = RegNext(icacheInFlights, 0.U.asTypeOf(icacheInFlights.cloneType))
   val discardTillPC = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
@@ -93,19 +107,49 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
 
   val fetchWid = WireInit(0.U)
 
+  val fullThreadMask = (-1).S(m.numLanes.W).asUInt
   // handle new warps
-  val numActiveWarps = RegInit(0.U(log2Ceil(m.numWarps + 1).W))
-  when (io.cmdProc.valid) {
-    assert(numActiveWarps =/= m.numWarps.U, "cannot spawn more warps")
-    val wid = numActiveWarps
+  io.cmdProc match {
+    case Some(cmdProc) =>
+      val numActiveWarps = RegInit(0.U(log2Ceil(m.numWarps + 1).W))
+      when(cmdProc.valid) {
+        assert(numActiveWarps =/= m.numWarps.U, "cannot spawn more warps")
+        val wid = numActiveWarps
 
-    // initialize thread mask, pc, stall
-    threadMasks(wid) := ((1 << m.numLanes) - 1).U.asTypeOf(tmaskT)
-    pcTracker(wid).bits := io.cmdProc.bits.schedule
-    pcTracker(wid).valid := true.B
-    stallTracker.unstall(wid)
+        // initialize thread mask, pc, stall
+        threadMasks(wid) := fullThreadMask
+        pcTracker(wid).bits := cmdProc.bits.schedule
+        pcTracker(wid).valid := true.B
+        stallTracker.unstall(wid)
 
-    numActiveWarps := numActiveWarps + 1.U
+        numActiveWarps := numActiveWarps + 1.U
+      }
+    case None =>
+      // tree reduce the warp spawn bundle: smallest warp wins
+      val wspawn = VecInit(io.commit.map { c =>
+        new Bundle {
+          val valid = c.valid && c.bits.wspawn.valid
+          val bits = c.bits.wspawn.bits
+        }
+      }).reduceTree { case (c0, c1) =>
+        new Bundle {
+          val valid = c0.valid || c1.valid
+          val bits = Mux(c0.valid, c0.bits, c1.bits)
+        }
+      }
+
+      when (wspawn.valid) {
+        val wspawnMask = ((1.U << wspawn.bits.count).asUInt - 1.U).asTypeOf(wmaskT)
+
+        wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
+          when (en) {
+            threadMasks(wid) := fullThreadMask
+            pcTracker(wid).bits := wspawn.bits.pc
+            pcTracker(wid).valid := true.B
+            stallTracker.unstall(wid.U)
+          }
+        }
+      }
   }
 
   // increment/set PCs, fetch from i$

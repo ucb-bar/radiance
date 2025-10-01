@@ -2,10 +2,11 @@ package radiance.muon
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.MulDivParams
-import freechips.rocketchip.tile.{HasTileParameters, CoreParams, FPUParams}
+import freechips.rocketchip.tile.{CoreParams, FPUParams, HasTileParameters}
 import freechips.rocketchip.util.ParameterizedBundle
-import org.chipsalliance.cde.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Field, Parameters}
 
 case object MuonKey extends Field[MuonCoreParams]
 
@@ -62,6 +63,7 @@ case class MuonCoreParams(
   numArchRegs: Int = 128,
   numIPDOMEntries: Int = 8,
   ibufDepth: Int = 8,
+  startAddress: BigInt = x"8000_0000",
   // issue
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
