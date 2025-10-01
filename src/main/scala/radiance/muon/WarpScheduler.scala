@@ -24,13 +24,14 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
 
   require(isPow2(m.numIPDOMEntries))
 
-  val commitIO = ValidIO(new Bundle {
-    val setPC = Flipped(ValidIO(pcT))
-    val setTmask = Flipped(ValidIO(tmaskT))
-    val ipdomPush = Flipped(ValidIO(ipdomStackEntryT)) // this should be split PC+8
-    val pc = Input(pcT)
-    val wid = Input(widT)
-  })
+  val commitIO = Input(
+    Vec(m.numWarps, Valid(new Bundle {
+      val setPC = Valid(pcT)
+      val setTmask = Valid(tmaskT)
+      val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+      val pc = pcT
+    })
+  ))
 
   val icacheIO = new Bundle {
     val in = DecoupledIO(new Bundle {
@@ -181,36 +182,37 @@ class WarpScheduler(implicit p: Parameters) extends CoreModule {
   }
 
   // update warp scheduler upon commit
-  when (io.commit.fire) {
-    val commit = io.commit.bits
+  io.commit.zipWithIndex.foreach { case (commitBundle, wid) =>
+    val commit = commitBundle.bits
 
-    // update stalls
-    val stallEntry = stallTracker.stalls(commit.wid)
-    val warpStalled = stallEntry.stallReason(stallTracker.HAZARD)
-    val canUnstall = warpStalled && (stallEntry.pc === commit.pc)
-    when (canUnstall) {
-      stallTracker.unstall(commit.wid)
+    when (commitBundle.valid) {
+      // update stalls
+      val stallEntry = stallTracker.stalls(wid)
+      val warpStalled = stallEntry.stallReason(stallTracker.HAZARD)
+      val canUnstall = warpStalled && (stallEntry.pc === commit.pc)
+      when (canUnstall) {
+        stallTracker.unstall(wid.U)
+      }
+
+      // update thread masks, pc, ipdom
+      when (commit.setPC.valid) {
+        assert(canUnstall)
+        pcTracker(wid).bits := commit.setPC.bits
+      }
+      when (commit.setTmask.valid) {
+        assert(canUnstall)
+        threadMasks(wid) := commit.setTmask.bits
+      }
+      when (commit.ipdomPush.valid) {
+        assert(canUnstall)
+        ipdomStack.push(wid.U, commit.ipdomPush.bits)
+      }
     }
 
-    // update thread masks, pc, ipdom
-    when (commit.setPC.valid) {
-      assert(canUnstall)
-      pcTracker(commit.wid).bits := commit.setPC.bits
-    }
-    when (commit.setTmask.valid) {
-      assert(canUnstall)
-      threadMasks(commit.wid) := commit.setTmask.bits
-    }
-    when (commit.ipdomPush.valid) {
-      assert(canUnstall)
-      ipdomStack.push(commit.wid, commit.ipdomPush.bits)
-    }
-  }
-
-  // join mask update
-  ipdomStack.newMask.zipWithIndex.foreach { case (mask, wid) =>
+    // join mask update
+    val mask = ipdomStack.newMask(wid)
     when (mask.valid) {
-      assert(!io.commit.valid || (io.commit.bits.wid =/= wid.U) || (!io.commit.bits.setTmask.valid),
+      assert(!commitBundle.valid || !commit.setTmask.valid,
         "cannot set mask while there's a join")
       threadMasks(wid) := mask.bits
     }
