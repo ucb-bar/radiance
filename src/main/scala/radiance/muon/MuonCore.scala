@@ -77,9 +77,6 @@ case class MuonCoreParams(
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
   val pRegBits = log2Up(numPhysRegs)
-
-  // compute "derived" LSU parameters
-  val lsuDerived = new LoadStoreUnitDerivedParams(this)
 }
 
 // move to decode?
@@ -124,6 +121,9 @@ trait HasMuonCoreParameters {
   val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
   val imemTagBits  = 4 // FIXME: ibuffer depth
   val imemDataBits = muonParams.instBits
+
+  // compute "derived" LSU parameters
+  val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
