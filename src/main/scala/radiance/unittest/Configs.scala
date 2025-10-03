@@ -20,14 +20,20 @@ case object TestDurationMultiplier extends Field[Int]
 // Muon tests
 // -----------------------------------------------------------------------------
 
-class WithMuonTests extends Config((site, _, _) => {
+class WithMuonUnitTestHarness(harness: Parameters => UnitTest) extends Config((site, _, _) => {
   case UnitTests => (q: Parameters) => {
-    Seq(Module(new MuonTest()(q)))
+    Seq(Module(harness(q)))
   }
 })
 
 class MuonTestConfig extends Config(
-  new WithMuonTests ++
+  new WithMuonUnitTestHarness(new MuonTest()(_)) ++
+  new WithMuonCores(1) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new BaseSubsystemConfig)
+
+class MuonBackendTestConfig extends Config(
+  new WithMuonUnitTestHarness(new MuonBackendTest()(_)) ++
   new WithMuonCores(1) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)

@@ -5,8 +5,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) {
-  val pc = UInt(muonParams.archLen.W)
-  val op = UInt(7.W) // FIXME
+  val pc = UInt(addressBits.W)
+  val op = UInt(Isa.opcodeBits.W)
   val rd = UInt(Isa.regBits.W)
   val rs1 = UInt(Isa.regBits.W)
   val rs2 = UInt(Isa.regBits.W)

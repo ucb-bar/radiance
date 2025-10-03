@@ -81,6 +81,7 @@ case class MuonCoreParams(
 
 // move to decode?
 object Isa {
+  def opcodeBits = 7
   def regBits = 8
   def immBits = 8
   def predBits = 4
@@ -183,10 +184,12 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
 
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
+  dontTouch(fe.io)
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
+  dontTouch(be.io)
 
   be.io.ibuf <> fe.io.ibuf
 }
