@@ -5,14 +5,34 @@ package radiance.cluster
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
+import freechips.rocketchip.rocket.{BTBParams, DCacheParams, ICacheParams, NonBlockingDCache}
 import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tile.{CoreParams, TileKey, TileParams, TileVisibilityNodeKey}
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
 import radiance.muon._
 import radiance.subsystem._
+
+case class FakeRadianceClusterTileParams(
+  cache: Option[DCacheParams],
+  clusterId: Int,
+) extends TileParams {
+  val core: CoreParams = MuonCoreParams(
+    xLen = 32,
+  )
+  val icache: Option[ICacheParams] = None
+  val dcache: Option[DCacheParams] = cache
+  val btb: Option[BTBParams] = None
+  val tileId: Int = -1
+  val blockerCtrlAddr: Option[BigInt] = None
+  val baseName: String = "fake_radiance_cluster_tile"
+  val uniqueName: String = s"fake_radiance_cluster_tile_$clusterId"
+  val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
+}
 
 case class RadianceClusterParams(
   clusterId: Int,
@@ -71,10 +91,29 @@ class RadianceCluster (
   // ccbus is connected to cbus automatically
 
   // clsbus -> csbus -> sbus
-  p(GPUMemory).get match {
-    case GPUMemParams(address, _) =>
-      csbus.inwardNode :=* AddressOrNode(address) :=* clsbus.outwardNode
-  } // TODO: the l1 cache has to live between the rewriter and the clsbus
+  val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
+
+  val scopeNode = AddressScopeNode(0, gmemSize)
+  val orNode = AddressOrNode(gmemAddr)
+  csbus.inwardNode :=* orNode :=* scopeNode :=* clsbus.outwardNode
+
+  val visibilityNode = TLEphemeralNode()
+  val l1cache = LazyModule(new TLNBDCache(clusterId)(
+    p.alterMap(Map(
+      // a bit hacky, but required to instantiate dcache outside a tile
+      TileKey -> FakeRadianceClusterTileParams(
+        cache = Some(DCacheParams(
+          nSets = 4,
+          nWays = 4,
+          rowBits = csbus.beatBytes * 8,
+        )), // TODO
+        clusterId = clusterId
+      ),
+      TileVisibilityNodeKey -> visibilityNode
+    ))
+  ))
+
+  clsbus.inwardNode := visibilityNode := l1cache.outNode
 
   // connect barriers
   val numCoresInCluster = muonTiles.length
@@ -84,6 +123,11 @@ class RadianceCluster (
   //   barrierSlaveNode := tile.barrierMasterNode
   // }
 
+  val l1InNodes = muonTiles.map(_.dcacheNode)
+  val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
+  l1cache.inNode := l1InXbar
+  l1InNodes.foreach(l1InXbar := _)
+
   override lazy val module = new RadianceClusterModuleImp(this)
 }
 
@@ -92,6 +136,8 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   println(s"======= RadianceCluster: clcbus name = ${outer.clcbus.busName}")
   println(s"======= RadianceCluster: csbus outward edges = ${outer.csbus.outwardNode.outward.outputs.length}")
   println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
+
+  dontTouch(outer.l1cache.module.cacheIO)
 
   // @cleanup: This assumes barrier params on all edges are the same, i.e. all
   // cores are configured to have the same barrier id range.  While true, might

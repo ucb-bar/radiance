@@ -4,8 +4,6 @@ import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import radiance.subsystem.RadianceSimArgs
-import radiance.muon.CoreModule
 
 class WarpScheduler(implicit p: Parameters) extends CoreModule {
   implicit val m: MuonCoreParams = muonParams

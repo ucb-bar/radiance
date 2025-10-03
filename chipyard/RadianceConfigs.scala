@@ -15,7 +15,7 @@ import radiance.virgo._
 class RadianceBaseConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
-  new freechips.rocketchip.subsystem.WithExtMemSize(BigInt("80000000", 16)) ++
+  new freechips.rocketchip.subsystem.WithExtMemSize(x"180000000") ++
 //  new chipyard.config.WithRadBootROM() ++
   new WithRadianceSimParams(true) ++
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(64) ++
@@ -65,7 +65,7 @@ class RadianceTapeoutConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(0)) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig) ++
-  new WithExtGPUMem() ++
+  new WithExtGPUMem(size=x"1_0000_0000") ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
   new RadianceBaseConfig)
 
