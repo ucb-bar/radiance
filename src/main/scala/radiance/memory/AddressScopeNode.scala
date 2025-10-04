@@ -14,8 +14,6 @@ class AddressScopeNode(base: BigInt, size: BigInt)(implicit p: Parameters) exten
     managerFn = m => {
       val siBlock: BigInt = BigInt(1) << log2Floor(size / m.slaves.length)
       m.v2copy(slaves = m.slaves.zipWithIndex.map { case (s, si) =>
-        println(siBlock * BigInt(si))
-        println("scoped new address", AddressSet(base + siBlock * BigInt(si), siBlock - 1))
         s.v1copy(
           address = Seq(AddressSet(base + siBlock * BigInt(si), siBlock - 1))
         )

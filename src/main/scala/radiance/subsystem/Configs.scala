@@ -7,6 +7,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.prci._
 import freechips.rocketchip.resources.BigIntHexContext
+import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tilelink.{TLBusWrapperConnection, TLBusWrapperTopology}
 import gemmini.Arithmetic.FloatArithmetic._
@@ -302,6 +303,7 @@ class WithRadianceCluster(
   location: HierarchicalLocation = InSubsystem,
   crossing: RocketCrossingParams = RocketCrossingParams(),
   smemConfig: RadianceSharedMemKey,
+  l1Config: DCacheParams,
 ) extends Config((site, here, up) => {
   case ClustersLocated(`location`) => {
     val baseAddress = x"4000_0000" + x"4_0000" * clusterId
@@ -310,6 +312,7 @@ class WithRadianceCluster(
         clusterId = clusterId,
         baseAddr = baseAddress,
         smemConfig = smemConfig.copy(address = baseAddress + smemConfig.address),
+        l1Config = l1Config,
       ),
       crossing)
   }

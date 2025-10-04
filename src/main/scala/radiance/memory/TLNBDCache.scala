@@ -4,25 +4,16 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket.{HellaCacheIO, NonBlockingDCache, NonBlockingDCacheModule, PRV, SimpleHellaCacheIF}
-import freechips.rocketchip.subsystem.CacheBlockBytes
+import freechips.rocketchip.rocket.{NonBlockingDCache, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
-//class HellaIOToTLAdapter(val wordSize: Int)(implicit p: Parameters) extends LazyModule {
-//
-//  override lazy val module = new HellaIOToTLAdapterImp(this)
-//}
-//
-//class HellaIOToTLAdapterImp(outer: HellaIOToTLAdapter)
-//  extends LazyModuleImp(outer) {
-//
-//}
 
-class TLNBDCache(staticIdForMetadataUseOnly: Int)(implicit p: Parameters) extends LazyModule {
+class TLNBDCache(staticIdForMetadataUseOnly: Int, val maxInFlights: Int)
+                (implicit p: Parameters) extends LazyModule {
 
   val wordSize = p(TileKey).core.xLen / 8
   assert(wordSize == 4)
@@ -60,6 +51,7 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
   assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.wordSize).U))
 
   // tl <-> simple if
+  // ================
   {
     val req = inIF.io.requestor.req
     val resp = inIF.io.requestor.resp
@@ -101,12 +93,13 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
       (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,
       (resp.bits.cmd === M_XWR) -> TLMessages.AccessAck,
     ))
-    assert(resp.bits.cmd === M_XRD || resp.bits.cmd === M_XWR)
-    assert(resp.bits.has_data === (resp.bits.cmd === M_XRD))
+    assert(!resp.fire || resp.bits.cmd === M_XRD || resp.bits.cmd === M_XWR)
+    assert(!resp.fire || (resp.bits.has_data === (resp.bits.cmd === M_XRD)))
     // tlIn.d.bits.user := ???
   }
 
   // simple if <-> cache
+  // ================
   val cacheIO = outer.nbdCache.module.io
 
   cacheIO.cpu <> inIF.io.cache
@@ -129,6 +122,21 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
   cacheIO.tlb_port.req <> DontCare
   cacheIO.tlb_port.req.valid := false.B
   cacheIO.tlb_port.s2_kill := false.B
-//  cacheIO.ptw
+
+  // handle user data
+  // ================
+  val userQueueEnq = Wire(DecoupledIO(tlIn.a.bits.user.cloneType))
+  userQueueEnq.bits := tlIn.a.bits.user
+  userQueueEnq.valid := tlIn.a.fire
+  assert(!tlIn.a.fire || userQueueEnq.ready, "not enough user queue entries")
+
+  val userQueueDeq = Queue(
+    userQueueEnq,
+    entries = outer.maxInFlights,
+    useSyncReadMem = false)
+
+  userQueueDeq.ready := tlIn.d.fire
+  tlIn.d.bits.user := userQueueDeq.bits
+  assert(!tlIn.d.fire || userQueueDeq.valid, "user queue entries got dropped")
 }
 

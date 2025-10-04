@@ -102,7 +102,11 @@ class MuonTile(
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(Seq(TLMasterParameters.v1("i")))))
   }
   val dcacheNode = muonParams.dcache match {
-    case _ => TLClientNode(Seq(TLMasterPortParameters.v2(Seq(TLMasterParameters.v1("d")))))
+    case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
+        Seq(TLMasterParameters.v1(
+          name = s"muon_tile${muonParams.coreId}_l0d"
+        ))
+    )))
   }
 
   tlMasterXbar.node :=* icacheNode

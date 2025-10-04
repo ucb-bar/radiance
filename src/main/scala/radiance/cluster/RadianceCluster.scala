@@ -39,6 +39,7 @@ case class RadianceClusterParams(
   clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
   baseAddr: BigInt,
   smemConfig: RadianceSharedMemKey,
+  l1Config: DCacheParams,
 ) extends InstantiableClusterParams[RadianceCluster] {
   val baseName = "radiance_cluster"
   val uniqueName = s"${baseName}_$clusterId"
@@ -98,15 +99,12 @@ class RadianceCluster (
   csbus.inwardNode :=* orNode :=* scopeNode :=* clsbus.outwardNode
 
   val visibilityNode = TLEphemeralNode()
-  val l1cache = LazyModule(new TLNBDCache(clusterId)(
+  // TODO: inflights should be ibuf depth!
+  val l1cache = LazyModule(new TLNBDCache(clusterId, 8)(
     p.alterMap(Map(
       // a bit hacky, but required to instantiate dcache outside a tile
       TileKey -> FakeRadianceClusterTileParams(
-        cache = Some(DCacheParams(
-          nSets = 4,
-          nWays = 4,
-          rowBits = csbus.beatBytes * 8,
-        )), // TODO
+        cache = Some(thisClusterParams.l1Config),
         clusterId = clusterId
       ),
       TileVisibilityNodeKey -> visibilityNode
@@ -124,6 +122,7 @@ class RadianceCluster (
   // }
 
   val l1InNodes = muonTiles.map(_.dcacheNode)
+  // val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
   val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
   l1cache.inNode := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
