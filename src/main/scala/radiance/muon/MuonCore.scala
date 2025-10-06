@@ -4,9 +4,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.MulDivParams
-import freechips.rocketchip.tile.{CoreParams, FPUParams, HasTileParameters}
+import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTileParameters, HasTileParameters}
 import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.{Field, Parameters}
+import org.chipsalliance.diplomacy.lazymodule.LazyModule
 
 case object MuonKey extends Field[MuonCoreParams]
 
@@ -50,11 +51,10 @@ case class MuonCoreParams(
   mtvecInit: Option[BigInt] = Some(BigInt(0)),
   mtvecWritable: Boolean = false,
   traceHasWdata: Boolean = false,
-  xLen: Int = 64, // for 33-bit phys address
+  xLen: Int = 32,
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
-  archLen: Int = 32, // "real" xLen visible to Muon
   numWarps: Int = 8,
   numLanes: Int = 16,
   hartIdBits: Int = 3,
@@ -63,7 +63,7 @@ case class MuonCoreParams(
   numArchRegs: Int = 128,
   numIPDOMEntries: Int = 8,
   ibufDepth: Int = 8,
-  startAddress: BigInt = x"8000_0000",
+  startAddress: BigInt = x"0000_0000",
   // issue
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
@@ -87,40 +87,43 @@ object Isa {
   def predBits = 4
 }
 
-class MemRequest (
+class MemRequest[T <: Bundle] (
   tagBits: Int,
-  sizeBits: Int,
-  addressBits: Int,
-  dataBits: Int
+  addressBits: Int = 32,
+  dataBits: Int = 32,
+  metadataT: T = new Bundle{},
 ) extends Bundle {
   val store = Bool()
   val address = UInt(addressBits.W)
-  val size = UInt(sizeBits.W) // log size
+  val size = UInt(log2Ceil(log2Ceil(dataBits / 8) + 1).W) // log size
   val tag = UInt(tagBits.W)
   val data = UInt(dataBits.W)
+  val metadata = metadataT.cloneType
 }
 
-class MemResponse (
+class MemResponse[T <: Bundle] (
   tagBits: Int,
-  dataBits: Int
+  dataBits: Int,
+  metadataT: T = new Bundle{},
 ) extends Bundle {
   val tag = UInt(tagBits.W)
   val data = UInt(dataBits.W)
+  val metadata = metadataT.cloneType
 }
 
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
+  val addressBits = muonParams.xLen
 
-  val addressBits = muonParams.archLen
   val numLsqEntries = {
     muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
   }
   val dmemTagBits  = log2Ceil(numLsqEntries)
-  val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
+  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
-  val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
-  val imemTagBits  = 4 // FIXME: ibuffer depth
+  val smemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes
+  val imemTagBits  = log2Ceil(muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 
   // compute "derived" LSU parameters
@@ -134,21 +137,33 @@ abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundl
   with HasMuonCoreParameters
 
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
-  def dmemSizeBits = log2Ceil(dmemDataBits / 8)
-  val req = Decoupled(new MemRequest(dmemTagBits, dmemSizeBits, addressBits, dmemDataBits))
+  val req = Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
   val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
 }
 
 class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
-  def smemSizeBits = log2Ceil(smemDataBits / 8)
-  val req = Decoupled(new MemRequest(smemTagBits, smemSizeBits, addressBits, smemDataBits))
+  val req = Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
   val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
 }
 
-class InstMemIO(implicit p: Parameters) extends CoreBundle()(p) {
-  def imemSizeBits = log2Ceil(imemDataBits / 8)
-  val req = Decoupled(new MemRequest(imemTagBits, imemSizeBits, addressBits, imemDataBits))
-  val resp = Flipped(Decoupled(new MemResponse(imemTagBits, imemDataBits)))
+class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasFrontEndBundles {
+  val req = Decoupled(new MemRequest(
+    tagBits = imemTagBits,
+    addressBits = addressBits,
+    dataBits = imemDataBits,
+    metadataT = new Bundle {
+      val pc = pcT
+      val wid = widT
+    }
+  ).cloneType)
+  val resp = Flipped(Decoupled(new MemResponse(
+    tagBits = imemTagBits,
+    dataBits = imemDataBits,
+    metadataT = new Bundle {
+      val pc = pcT
+      val wid = widT
+    }
+  ).cloneType))
 }
 
 /** Muon core and core-private L0/L1 caches */
@@ -161,7 +176,7 @@ class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
-  // TODO: L0/L1
+  // TODO: L0
 
   val core = Module(new MuonCore)
   io.imem <> core.io.imem

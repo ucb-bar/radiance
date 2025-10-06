@@ -40,6 +40,16 @@ case class MuonTileParams(
   val uniqueName = s"${baseName}_$coreId"
 }
 
+object MuonMemToTL {
+  def apply[T <: Bundle](muonReq: MemRequest[T], tlA: TLBundleA) = {
+
+  }
+
+  def apply[T <: Bundle](muonResp: MemResponse[T], tlD: TLBundleD) = {
+
+  }
+}
+
 class MuonTile(
   val muonParams: MuonTileParams,
   crossing: ClockCrossingType,
@@ -136,6 +146,12 @@ class MuonTile(
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
+  val GPUMemParams(_, gmemSize) = p(GPUMemory).get
+  val newVisibilityNode = TLEphemeralNode()
+  visibilityNode :=* AddressScopeNode(0, gmemSize) :=* newVisibilityNode
+  val muon = Module(new Muon()(p.alterMap(Map(
+      TileVisibilityNodeKey -> newVisibilityNode
+  ))))
   override lazy val module = new MuonTileModuleImp(this)
 
   override def makeMasterBoundaryBuffers(
@@ -147,9 +163,9 @@ class MuonTile(
   )(implicit p: Parameters) = TLBuffer(BufferParams.none)
 }
 
-class MuonTileModuleImp(outer: MuonTile)
-  extends BaseTileModuleImp(outer) {
-  val muon = Module(new Muon()(outer.p))
+class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
+
+  val muon = Module(new Muon())
   muon.io.imem <> DontCare
   muon.io.dmem <> DontCare
   muon.io.smem <> DontCare

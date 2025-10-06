@@ -12,11 +12,11 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
 
-class TLNBDCache(staticIdForMetadataUseOnly: Int, val maxInFlights: Int)
+class TLNBDCache(staticIdForMetadataUseOnly: Int,
+                 val maxInFlights: Int)
                 (implicit p: Parameters) extends LazyModule {
 
-  val wordSize = p(TileKey).core.xLen / 8
-  assert(wordSize == 4)
+  val beatBytes = p(TileKey).dcache.get.rowBits
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -26,13 +26,13 @@ class TLNBDCache(staticIdForMetadataUseOnly: Int, val maxInFlights: Int)
           name = Some("radiance_l1"),
           fifoId = Some(0),
           supports = TLMasterToSlaveTransferSizes(
-            get = TransferSizes(1, wordSize),
-            putFull = TransferSizes(1, wordSize),
-            putPartial = TransferSizes(1, wordSize),
+            get = TransferSizes(1, beatBytes),
+            putFull = TransferSizes(1, beatBytes),
+            putPartial = TransferSizes(1, beatBytes),
           ),
         )
       ),
-      beatBytes = wordSize,
+      beatBytes = beatBytes,
     )
   ))
 
@@ -48,7 +48,8 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
   val (tlIn, _) = outer.inNode.in.head
   val inIF = Module(new SimpleHellaCacheIF())
 
-  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.wordSize).U))
+  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
+    "only cache line size accesses supported")
 
   // tl <-> simple if
   // ================

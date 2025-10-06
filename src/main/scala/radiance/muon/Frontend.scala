@@ -1,21 +1,132 @@
 package radiance.muon
 
 import chisel3._
+import chisel3.reflect.DataMirror
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class Frontend(implicit p: Parameters) extends CoreModule()(p) {
+trait HasFrontEndBundles extends HasMuonCoreParameters {
+  implicit val m = muonParams
+
+  def pcT = UInt(m.xLen.W)
+  def widT = UInt(log2Ceil(m.numWarps).W)
+  def tmaskT = UInt(m.numLanes.W)
+  def wmaskT = UInt(m.numWarps.W)
+  def instT = UInt(m.instBits.W)
+  def ibufIdxT = UInt(log2Ceil(m.ibufDepth + 1).W)
+
+  def ipdomStackEntryT = new Bundle {
+    val restoredMask = tmaskT
+    val elseMask = tmaskT
+    val elsePC = pcT
+  }
+
+  def wspawnT = new Bundle {
+    val count = UInt(log2Ceil(m.numWarps + 1).W)
+    val pc = pcT
+  }
+
+  require(isPow2(m.numIPDOMEntries))
+
+  def commitIO = Vec(m.numWarps, Flipped(ValidIO(new Bundle {
+      val setPC = ValidIO(pcT)
+      val setTmask = ValidIO(tmaskT)
+      val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
+      val wspawn = ValidIO(wspawnT)
+      val pc = pcT
+    }
+  )))
+
+  def icacheIO = new Bundle {
+    val in = DecoupledIO(new Bundle {
+      val pc = pcT
+      val wid = widT
+    }) // icache can stall scheduler
+    val out = Flipped(ValidIO(new Bundle {
+      val inst = instT
+      val pc = pcT
+      val wid = widT
+    }))
+  }
+
+  def issueIO = new Bundle {
+    val eligible = Flipped(ValidIO(wmaskT))
+    val issued = Output(wmaskT) // 1H, next cycle from input
+  }
+
+  def csrIO = new Bundle {
+    val read = Flipped(ValidIO(new Bundle {
+      val addr = UInt(m.csrAddrBits.W)
+      val wid = widT
+    })) // reads only
+    val resp = Output(UInt(m.xLen.W)) // next cycle
+  }
+
+  val cmdProcIO = Flipped(ValidIO(new Bundle {
+    val schedule = pcT
+  }))
+
+  def decodeIO = DecoupledIO(new Bundle {
+    val inst = instT
+    val tmask = tmaskT
+    val wid = widT
+  })
+
+  def ibufIO = new Bundle {
+    val count = Input(Vec(m.numWarps, ibufIdxT))
+  }
+}
+
+class Frontend(implicit p: Parameters)
+  extends CoreModule()(p)
+  with HasFrontEndBundles {
+
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
     // TODO: writeback
+    val commit = commitIO
+    val issue = issueIO
+    val csr = csrIO
+    val cmdProc: Option[cmdProcIO.type] = None
   })
 
-  // TODO: Scheduler
-  // TODO: Fetch/I$
-  io.imem.req.valid := false.B
-  io.imem.req.bits := DontCare
-  io.imem.resp.ready := true.B
+  val warpScheduler = Module(new WarpScheduler)
+
+  { // scheduler & fetch
+    val i$ = warpScheduler.io.icache
+    val (req, resp) = (io.imem.req, io.imem.resp)
+    val tagInc = WireInit(VecInit.fill(muonParams.numWarps)(false.B))
+    val tagCounters = VecInit(Seq.tabulate(muonParams.numWarps) { i =>
+      Counter(tagInc(i), muonParams.ibufDepth)._1
+    })
+    when (i$.in.fire) {
+      tagInc(i$.in.bits.wid) := true.B
+    }
+    req.valid := i$.in.valid
+    req.bits.size := log2Ceil(muonParams.instBits / 8).U
+    req.bits.store := false.B
+    req.bits.address := i$.in.bits.pc
+    req.bits.tag := Cat(i$.in.bits.wid, tagCounters(i$.in.bits.wid))
+    req.bits.data := DontCare // i$ is read only
+    req.bits.metadata.pc := i$.in.bits.pc
+    req.bits.metadata.wid := i$.in.bits.wid
+    i$.in.ready := req.ready
+
+    resp.ready := true.B
+    i$.out.valid := resp.valid
+    i$.out.bits.inst := resp.bits.data
+    i$.out.bits.wid := resp.bits.metadata.wid
+    i$.out.bits.pc := resp.bits.metadata.pc
+
+    io.commit <> warpScheduler.io.commit
+    io.issue <> warpScheduler.io.issue
+    io.csr <> warpScheduler.io.csr
+
+    io.cmdProc.foreach { c =>
+      c <> warpScheduler.io.cmdProc.get
+    }
+  }
   // TODO: Decode
   // TODO: Rename
 
