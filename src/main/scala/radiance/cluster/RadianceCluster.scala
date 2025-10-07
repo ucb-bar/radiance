@@ -86,17 +86,17 @@ class RadianceCluster (
   // clcbus -> gemmini mmio
   gemminiTiles.foreach(_.slaveNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode)
 
+  val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
+
   // cbus -> clcbus/smem
   clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar
-  extReqXbar := ccbus.outwardNode
+  extReqXbar :=  ccbus.outwardNode
   // ccbus is connected to cbus automatically
 
   // clsbus -> csbus -> sbus
-  val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
-
-  val scopeNode = AddressScopeNode(0, gmemSize)
+  val scopeNode = AddressScopeNode(AddressSet(0, gmemSize - 1))
   val orNode = AddressOrNode(gmemAddr)
-  csbus.inwardNode :=* orNode :=* scopeNode :=* clsbus.outwardNode
+  csbus.inwardNode :=* TLXbar() :=* orNode :=* scopeNode :=* TLXbar() :=* clsbus.outwardNode
 
   val visibilityNode = TLEphemeralNode()
   // TODO: inflights should be ibuf depth!
@@ -107,7 +107,7 @@ class RadianceCluster (
         cache = Some(thisClusterParams.l1Config),
         clusterId = clusterId
       ),
-      TileVisibilityNodeKey -> visibilityNode
+      TileVisibilityNodeKey -> visibilityNode,
     ))
   ))
 
@@ -122,7 +122,7 @@ class RadianceCluster (
   // }
 
   val l1InNodes = muonTiles.map(_.dcacheNode)
-  // val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
+//  val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
   val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
   l1cache.inNode := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
@@ -136,7 +136,10 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   println(s"======= RadianceCluster: csbus outward edges = ${outer.csbus.outwardNode.outward.outputs.length}")
   println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
 
-  dontTouch(outer.l1cache.module.cacheIO)
+  println(outer.gemminiTiles.head.resetVectorNode)
+  println(outer.muonTiles.head.resetVectorNode)
+
+//  dontTouch(outer.l1cache.module.cacheIO)
 
   // @cleanup: This assumes barrier params on all edges are the same, i.e. all
   // cores are configured to have the same barrier id range.  While true, might

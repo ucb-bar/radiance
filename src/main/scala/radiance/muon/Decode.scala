@@ -38,33 +38,33 @@ object MuOpcode {
 
 
 class Decoded(inst: UInt) {
-  val opcode = inst(8, 0)
+  def opcode = inst(8, 0)
 
-  val f3 = inst(19, 17)
-  val f7 = inst(58, 52)
+  def f3 = inst(19, 17)
+  def f7 = inst(58, 52)
 
-  val rd = inst(16, 9)
-  val rs1 = inst(27, 20)
-  val rs2 = inst(35, 28)
-  val rs3 = inst(43, 36)
+  def rd = inst(16, 9)
+  def rs1 = inst(27, 20)
+  def rs2 = inst(35, 28)
+  def rs3 = inst(43, 36)
 
-  val pred = inst(63, 60)
+  def pred = inst(63, 60)
 
   // TODO immediates
 
-  def isTMC: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b000".U}
-  def isWSpawn: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b001".U}
-  def isSplit: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b002".U}
-  def isJoin: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b003".U}
-  def isBar: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b004".U}
-  def isPred: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === "b005".U}
-  def isToHost: Bool = {opcode === MuOpcode.SYSTEM && f3 === "b000".U}
-  def isCSR: Bool = {opcode === MuOpcode.SYSTEM && f3 =/= "b000".U}
+  def isTMC: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 0.U}
+  def isWSpawn: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 1.U}
+  def isSplit: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 2.U}
+  def isJoin: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 3.U}
+  def isBar: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 4.U}
+  def isPred: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 5.U}
+  def isToHost: Bool = {opcode === MuOpcode.SYSTEM && f3 === 0.U}
+  def isCSR: Bool = {opcode === MuOpcode.SYSTEM && f3 =/= 0.U}
 }
 
 object Decoded {
   def apply(inst: UInt): Decoded = {
-    this(inst)
+    new Decoded(inst)
   }
 }
 

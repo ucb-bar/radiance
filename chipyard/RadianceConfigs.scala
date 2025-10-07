@@ -72,7 +72,7 @@ class RadianceTapeoutConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(0)) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
-  new WithExtGPUMem(size=x"1_0000_0000") ++
+  new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
   new RadianceBaseConfig)
 

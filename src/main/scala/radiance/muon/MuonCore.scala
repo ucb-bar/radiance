@@ -51,7 +51,8 @@ case class MuonCoreParams(
   mtvecInit: Option[BigInt] = Some(BigInt(0)),
   mtvecWritable: Boolean = false,
   traceHasWdata: Boolean = false,
-  xLen: Int = 32,
+  xLen: Int = 64,
+  archLen: Int = 32,
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
@@ -114,15 +115,15 @@ class MemResponse[T <: Bundle] (
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
-  val addressBits = muonParams.xLen
+  val addressBits = muonParams.archLen
 
   val numLsqEntries = {
     muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
   }
   val dmemTagBits  = log2Ceil(numLsqEntries)
-  val dmemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
+  val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
-  val smemDataBits = muonParams.xLen * muonParams.lsu.numLsuLanes
+  val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
   val imemTagBits  = log2Ceil(muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 
@@ -199,6 +200,9 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
 
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
+  fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
+  fe.io.issue.eligible := 0.U.asTypeOf(fe.io.issue.eligible)
+  fe.io.commit := 0.U.asTypeOf(fe.io.commit)
   dontTouch(fe.io)
 
   val be = Module(new Backend)

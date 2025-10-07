@@ -3,11 +3,11 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomacy.{BufferParams, IdRange, TransferSizes}
+import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, IdRange, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.HierarchicalElementCrossingParamsLike
+import freechips.rocketchip.subsystem.{HasTilesExternalResetVectorKey, HierarchicalElementCrossingParamsLike}
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -69,7 +69,7 @@ class MuonTile(
 
   val intOutwardNode = None
   val slaveNode = TLIdentityNode()
-  val masterNode = visibilityNode
+  val masterNode = TLIdentityNode()
 
   val smemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
     TLClientNode(
@@ -111,7 +111,7 @@ class MuonTile(
   val icacheNode = muonParams.icache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(Seq(TLMasterParameters.v1("i")))))
   }
-  val dcacheNode = muonParams.dcache match {
+  val dcacheNode_ = muonParams.dcache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
         Seq(TLMasterParameters.v1(
           name = s"muon_tile${muonParams.coreId}_l0d"
@@ -119,9 +119,13 @@ class MuonTile(
     )))
   }
 
-  tlMasterXbar.node :=* icacheNode
-  tlMasterXbar.node :=* dcacheNode
-  masterNode :=* tlMasterXbar.node
+  val dcacheNode = visibilityNode
+  dcacheNode := dcacheNode_
+
+  override protected def visibleManagers = Seq()
+  // this overrides the reset vector nexus node to be consistent with the other tiles (gemmini tile)
+  // otherwise it results in a really obscure diplomacy error
+  override protected def visiblePhysAddrBits = 33
 
   org.chipsalliance.diplomacy.DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
   val dtimProperty = Nil
@@ -146,12 +150,7 @@ class MuonTile(
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
-  val GPUMemParams(_, gmemSize) = p(GPUMemory).get
-  val newVisibilityNode = TLEphemeralNode()
-  visibilityNode :=* AddressScopeNode(0, gmemSize) :=* newVisibilityNode
-  val muon = Module(new Muon()(p.alterMap(Map(
-      TileVisibilityNodeKey -> newVisibilityNode
-  ))))
+//  val muon = Module(new Muon()(newP))
   override lazy val module = new MuonTileModuleImp(this)
 
   override def makeMasterBoundaryBuffers(

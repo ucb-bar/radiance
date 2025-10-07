@@ -92,6 +92,7 @@ class WarpScheduler(implicit p: Parameters)
 
   // increment/set PCs, fetch from i$
   io.icache.in.valid := false.B
+  io.icache.in.bits := 0.U.asTypeOf(io.icache.in.bits)
   pcTracker.zipWithIndex.foreach { case (entry, wid) =>
     val joinPC = ipdomStack.newPC(wid)
     // only increment PC if it's 1. enabled 2. not stalled (no hazard, icache ready) 3. selected for fetch
@@ -139,7 +140,7 @@ class WarpScheduler(implicit p: Parameters)
       // discardEntry.bits is being set to the latest issued pc when we fetch
 
       // reset fetch PC to post-stall
-      pcTracker(iresp.wid) := iresp.pc + 8.U // for branches: setPC overrides this
+      pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
 
       when (joins) {
         ipdomStack.pop(iresp.wid) // this will set newPC/newMask, reflected elsewhere
@@ -220,6 +221,7 @@ class WarpScheduler(implicit p: Parameters)
     "issue arbiter out not valid when inputs are valid")
 
   // handle csr reads
+  io.csr.resp := DontCare
   when (io.csr.read.fire) {
     val req = io.csr.read.bits
     val csrData = MuxCase(
@@ -236,15 +238,14 @@ class WarpScheduler(implicit p: Parameters)
 }
 
 class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
-  def pcT = outer.pcT
-
   val HAZARD = 0
   val IBUF = 1
 
-  val stalls = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(new Bundle {
-    val pc = pcT
+  val stallEntryT = new Bundle {
+    val pc = outer.pcT
     val stallReason = Vec(2, Bool()) // hazard, ibuf backpressure
-  })))
+  }
+  val stalls = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(stallEntryT)))
 
   stalls.zipWithIndex.foreach { case (entry, wid) =>
     val ibufReady = (outer.io.ibuf.count(wid) +& outer.icacheInFlights(wid)) < m.ibufDepth.U
@@ -265,6 +266,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   def isStalled(wid: UInt) = {
     val icacheReady = outer.io.icache.in.ready
     (stalls(wid).stallReason.asUInt.orR || !icacheReady, stalls(wid).stallReason)
+    (false.B, VecInit.fill(8)(false.B))
   }
 }
 
@@ -281,7 +283,7 @@ object Predecoder {
 
 class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val ipdomStackMem = Seq.fill(m.numWarps)(SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 0, 0, 1))
-  val branchTaken = RegInit(VecInit.fill(m.numWarps)(0.U(m.numIPDOMEntries.W)))
+  val branchTaken = RegInit(VecInit.fill(m.numWarps)(VecInit.fill(m.numIPDOMEntries)(false.B)))
 
   val ptr = RegInit(VecInit.fill(m.numWarps)(0.U(log2Ceil(m.numIPDOMEntries).W)))
   val pushing = WireInit(VecInit.fill(m.numWarps)(false.B))
@@ -306,6 +308,7 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
     p.enable := false.B
     p.address := pa
     p.isWrite := false.B
+    p.writeData := DontCare
   }
 
   def push(wid: UInt, ent: Bundle): Unit = {
@@ -321,17 +324,22 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   def pop(wid: UInt) = {
     assert(!pushing(wid)) // there should never be a simultaneous push and pop
 
+    joiningElse.foreach(_ := false.B)
+    joiningEnd.foreach(_ := false.B)
+
     when (!branchTaken(wid)(ptr(wid))) {
       // done with then, start with else: set pc, update taken
-      newMask := ports(wid).readData.elseMask
-      joiningElse := true.B
+//      newMask := ports(wid).readData.elseMask
+      // this is handled earlier
+      branchTaken(wid)(ptr(wid)) := true.B
+      joiningElse(wid) := true.B
     }.otherwise {
       // done with else, pop but don't set pc
       ports(wid).enable := true.B
       ports(wid).isWrite := false.B
       assert(ptr(wid) > 0.U, "ipdom stack is empty")
       ptr(wid) := ptr(wid) - 1.U
-      joiningEnd := true.B
+      joiningEnd(wid) := true.B
     }
   }
 }

@@ -79,7 +79,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 }
 
 class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"  -> p(MuonKey).xLen,
+      "ARCH_LEN"  -> p(MuonKey).archLen,
       "NUM_WARPS" -> p(MuonKey).numWarps,
       "NUM_LANES" -> p(MuonKey).numLanes,
       "OP_BITS"   -> Isa.opcodeBits,

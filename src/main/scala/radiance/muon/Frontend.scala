@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 trait HasFrontEndBundles extends HasMuonCoreParameters {
   implicit val m = muonParams
 
-  def pcT = UInt(m.xLen.W)
+  def pcT = UInt(m.archLen.W)
   def widT = UInt(log2Ceil(m.numWarps).W)
   def tmaskT = UInt(m.numLanes.W)
   def wmaskT = UInt(m.numWarps.W)
@@ -59,7 +59,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
       val addr = UInt(m.csrAddrBits.W)
       val wid = widT
     })) // reads only
-    val resp = Output(UInt(m.xLen.W)) // next cycle
+    val resp = Output(UInt(m.archLen.W)) // next cycle
   }
 
   val cmdProcIO = Flipped(ValidIO(new Bundle {
@@ -129,6 +129,9 @@ class Frontend(implicit p: Parameters)
   }
   // TODO: Decode
   // TODO: Rename
+
+  warpScheduler.io.decode.ready := true.B // TODO
+  warpScheduler.io.ibuf.count := DontCare // not used
 
   // IBuffer
   val ibuffer = Module(new InstBuffer)
