@@ -23,12 +23,12 @@ module CyclotronBlackBox #(
   // (2) C function declaration
   // (3) Verilog DPI calls inside initial/always blocks
   import "DPI-C" function void cyclotron_init();
-  import "DPI-C" function void cyclotron_tick(
-    input  bit ibuf_ready[NUM_WARPS],
-    output bit ibuf_valid[NUM_WARPS],
-    output int ibuf_pc[NUM_WARPS],
-    output int ibuf_op[NUM_WARPS],
-    output int ibuf_rd[NUM_WARPS],
+  import "DPI-C" function void cyclotron_get_trace(
+    input  bit ready[NUM_WARPS],
+    output bit valid[NUM_WARPS],
+    output int pc[NUM_WARPS],
+    output int op[NUM_WARPS],
+    output int rd[NUM_WARPS],
     output bit finished
   );
 
@@ -66,7 +66,7 @@ module CyclotronBlackBox #(
         __in_finished   = '0;
       end
     end else begin
-      cyclotron_tick(
+      cyclotron_get_trace(
         __out_ibuf_ready,
         __in_ibuf_valid,
         __in_ibuf_pc,
