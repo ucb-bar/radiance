@@ -8,6 +8,7 @@ import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.Config
 import radiance.subsystem._
 import radiance.virgo._
+import testchipip.serdes.TLSerdesser
 
 // ----------------
 // Radiance Configs
@@ -86,7 +87,10 @@ class RadianceTapeoutConfig extends Config(
       )
     ),
     client = Some(testchipip.serdes.SerialTLClientParams()),
-    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=1, flitWidth=16)
+    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=1, flitWidth=16),
+    bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
+      dataBits = 256
+    )
   )
   )) ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
