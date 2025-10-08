@@ -19,7 +19,7 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithExtMemSize(x"1_0000_0000") ++
 //  new chipyard.config.WithRadBootROM() ++
   new WithRadianceSimParams(true) ++
-  new freechips.rocketchip.subsystem.WithCacheBlockBytes(64) ++
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
   new WithRadianceControlBus ++
@@ -74,6 +74,23 @@ class RadianceTapeoutConfig extends Config(
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new testchipip.serdes.WithSerialTL(Seq(testchipip.serdes.SerialTLParams(
+    manager = Some(
+      testchipip.serdes.SerialTLManagerParams(
+        memParams = Seq(testchipip.serdes.ManagerRAMParams(
+          address = BigInt("80000000", 16),
+          size    = BigInt("100000000", 16)
+        )),
+        isMemoryDevice = true,
+        slaveWhere = MBUS
+      )
+    ),
+    client = Some(testchipip.serdes.SerialTLClientParams()),
+    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=1, flitWidth=16)
+  )
+  )) ++
+  new freechips.rocketchip.subsystem.WithNoMemPort ++
+
   new RadianceBaseConfig)
 
 class RadianceClusterConfig extends Config(
