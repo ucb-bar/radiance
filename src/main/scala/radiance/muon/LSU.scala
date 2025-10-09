@@ -212,6 +212,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
     val wrapBit = msb
     val idxBits = (x: UInt) => x(x.getWidth - 2, 0)
 
+    
+
     // per-warp Circular FIFO parameterized to be a load queue or store queue
     class PerWarpQueue(
         val warpId: Int,
@@ -419,29 +421,29 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
         // set done when receiving mem update or mem response, allow logical head to move forward
         when (io.receivedMemUpdate.valid) {
-            done(io.receivedMemUpdate.bits.token.index) := true.B    
+            done(localIndex(io.receivedMemUpdate.bits.token.index)) := true.B    
         }
 
         when (io.receivedMemResponse.req.valid) {
-            done(io.receivedMemResponse.req.bits.token.index) := true.B
+            done(localIndex(io.receivedMemResponse.req.bits.token.index)) := true.B
             
             if (loadQueue) {
                 // every load needs to write back
-                writeback(io.receivedMemResponse.req.bits.token.index) := true.B
+                writeback(localIndex(io.receivedMemResponse.req.bits.token.index)) := true.B
             }
             else {
                 // only atomics need to write back; others can retire immediately
-                val atomic = MemOp.isAtomic(op(io.receivedMemResponse.req.bits.token.index))
-                writeback(io.receivedMemResponse.req.bits.token.index) := atomic
+                val atomic = MemOp.isAtomic(op(localIndex(io.receivedMemResponse.req.bits.token.index)))
+                writeback(localIndex(io.receivedMemResponse.req.bits.token.index)) := atomic
 
                 when (!atomic) {
-                    valid(io.receivedMemResponse.req.bits.token.index) := false.B
+                    valid(localIndex(io.receivedMemResponse.req.bits.token.index)) := false.B
                 }
             }
         }
 
         io.receivedMemResponse.resp.valid := io.receivedMemResponse.req.valid
-        io.receivedMemResponse.resp.bits.loadDataIdx := loadDataIdx(io.receivedMemResponse.req.bits.token.index)
+        io.receivedMemResponse.resp.bits.loadDataIdx := loadDataIdx(localIndex(io.receivedMemResponse.req.bits.token.index))
 
         // drive writeback requests
         val writebackIdx = PriorityEncoder(writeback.asUInt)
