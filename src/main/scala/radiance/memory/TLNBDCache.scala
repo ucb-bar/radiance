@@ -12,11 +12,10 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
 
-class TLNBDCache(staticIdForMetadataUseOnly: Int,
-                 val maxInFlights: Int)
+class TLNBDCache(staticIdForMetadataUseOnly: Int)
                 (implicit p: Parameters) extends LazyModule {
 
-  val beatBytes = p(TileKey).dcache.get.rowBits
+  val beatBytes = p(TileKey).dcache.get.rowBits / 8
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -48,8 +47,8 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
   val (tlIn, _) = outer.inNode.in.head
   val inIF = Module(new SimpleHellaCacheIF())
 
-  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
-    "only cache line size accesses supported")
+//  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
+//    "only cache line size accesses supported")
 
   // tl <-> simple if
   // ================
@@ -65,6 +64,8 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     tlIn.a.ready := req.ready
     req.bits := 0.U.asTypeOf(req.bits.cloneType)
     req.bits.tag := tlIn.a.bits.source
+    assert(req.bits.tag.getWidth >= tlIn.a.bits.source.getWidth,
+      s"cache does not have enough tag bits: ${req.bits.tag.getWidth}<${tlIn.a.bits.source.getWidth}")
     req.bits.size := tlIn.a.bits.size
     req.bits.cmd := MuxCase(M_XRD, Seq(
       (tlIn.a.bits.opcode === TLMessages.Get) -> M_XRD,
@@ -124,20 +125,5 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
   cacheIO.tlb_port.req.valid := false.B
   cacheIO.tlb_port.s2_kill := false.B
 
-  // handle user data
-  // ================
-  val userQueueEnq = Wire(DecoupledIO(tlIn.a.bits.user.cloneType))
-  userQueueEnq.bits := tlIn.a.bits.user
-  userQueueEnq.valid := tlIn.a.fire
-  assert(!tlIn.a.fire || userQueueEnq.ready, "not enough user queue entries")
-
-  val userQueueDeq = Queue(
-    userQueueEnq,
-    entries = outer.maxInFlights,
-    useSyncReadMem = false)
-
-  userQueueDeq.ready := tlIn.d.fire
-  tlIn.d.bits.user := userQueueDeq.bits
-  assert(!tlIn.d.fire || userQueueDeq.valid, "user queue entries got dropped")
 }
 

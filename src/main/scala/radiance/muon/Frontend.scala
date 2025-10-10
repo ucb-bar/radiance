@@ -62,7 +62,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
     val resp = Output(UInt(m.archLen.W)) // next cycle
   }
 
-  val cmdProcIO = Flipped(ValidIO(new Bundle {
+  def cmdProcIO = Flipped(ValidIO(new Bundle {
     val schedule = pcT
   }))
 
@@ -88,7 +88,8 @@ class Frontend(implicit p: Parameters)
     val commit = commitIO
     val issue = issueIO
     val csr = csrIO
-    val cmdProc: Option[cmdProcIO.type] = None
+    val cmdProc: Option[Bundle] = None
+    val hartId = Input(UInt(muonParams.hartIdBits.W))
   })
 
   val warpScheduler = Module(new WarpScheduler)
@@ -109,15 +110,16 @@ class Frontend(implicit p: Parameters)
     req.bits.address := i$.in.bits.pc
     req.bits.tag := Cat(i$.in.bits.wid, tagCounters(i$.in.bits.wid))
     req.bits.data := DontCare // i$ is read only
-    req.bits.metadata.pc := i$.in.bits.pc
-    req.bits.metadata.wid := i$.in.bits.wid
+    req.bits.mask := ((1 << muonParams.instBytes) - 1).U
+//    req.bits.metadata.pc := i$.in.bits.pc
+//    req.bits.metadata.wid := i$.in.bits.wid
     i$.in.ready := req.ready
 
     resp.ready := true.B
     i$.out.valid := resp.valid
     i$.out.bits.inst := resp.bits.data
-    i$.out.bits.wid := resp.bits.metadata.wid
-    i$.out.bits.pc := resp.bits.metadata.pc
+//    i$.out.bits.wid := resp.bits.metadata.wid
+//    i$.out.bits.pc := resp.bits.metadata.pc
 
     io.commit <> warpScheduler.io.commit
     io.issue <> warpScheduler.io.issue
@@ -126,6 +128,23 @@ class Frontend(implicit p: Parameters)
     io.cmdProc.foreach { c =>
       c <> warpScheduler.io.cmdProc.get
     }
+
+    // handle user data
+    // ================
+    val userQueueEnq = Wire(Decoupled(i$.in.bits.cloneType))
+    userQueueEnq.bits := i$.in.bits
+    userQueueEnq.valid := req.fire
+    assert(!req.fire || userQueueEnq.ready, "not enough user queue entries")
+
+    val userQueueDeq = Queue(
+      userQueueEnq,
+      entries = muonParams.ibufDepth,
+      useSyncReadMem = false)
+
+    userQueueDeq.ready := resp.fire
+    i$.out.bits.pc := userQueueDeq.bits.pc
+    i$.out.bits.wid := userQueueDeq.bits.wid
+    assert(!resp.fire || userQueueDeq.valid, "user queue entries got dropped")
   }
   // TODO: Decode
   // TODO: Rename

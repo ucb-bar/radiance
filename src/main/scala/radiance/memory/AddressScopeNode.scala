@@ -1,8 +1,8 @@
 package radiance.memory
 
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet}
-import freechips.rocketchip.tilelink.TLNexusNode
+import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.tilelink.{TLNexusNode, TLSlaveToMasterTransferSizes}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 
@@ -11,7 +11,13 @@ class AddressScopeNode(addr: AddressSet)(implicit p: Parameters) extends LazyMod
   val node = TLNexusNode(
     clientFn  = c => {
       require(c.size == 1, s"there should only be one client port, found ${c.size}")
-      c.head
+      c.head.v1copy(
+        clients = c.head.clients.map(cc => cc.v2copy(
+          supports = cc.supports.mincover(TLSlaveToMasterTransferSizes(
+            probe = cc.supports.get // very sussy
+          ))
+        ))
+      )
     },
     managerFn = m => {
       println(m)
@@ -45,17 +51,11 @@ class AddressScopeNode(addr: AddressSet)(implicit p: Parameters) extends LazyMod
       a.address := b.address.asTypeOf(a.address.cloneType)
     }
 
-    {
-      in.d.valid := out.d.valid
-      out.d.ready := in.d.ready
-      val a = in.d.bits
-      val b = out.d.bits
-      (Seq(a.user, a.opcode, a.size, a.param, a.data, a.source, a.sink, a.denied, a.corrupt) zip
-        Seq(b.user, b.opcode, b.size, b.param, b.data, b.source, b.sink, b.denied, b.corrupt))
-        .foreach { case (x, y) =>
-        x := y
-      }
-    }
+//    out.a <> in.a
+    in.b <> out.b
+    out.c <> in.c
+    in.d <> out.d
+    out.e <> in.e
   }
 }
 

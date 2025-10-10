@@ -11,7 +11,7 @@ import freechips.rocketchip.util._
 import radiance.memory._
 import freechips.rocketchip.unittest._
 import radiance.subsystem.{WithMuonCores, WithSIMTConfig}
-import radiance.muon.Muon
+import radiance.muon.MuonCore
 import radiance.virgo.TensorCoreDecoupledTest
 
 case object TestDurationMultiplier extends Field[Int]

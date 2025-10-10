@@ -62,12 +62,13 @@ class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
-) extends Config((_, here, up) => {
+) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
     MuonCoreParams(
       numWarps = up(SIMTCoreKey).get.numWarps,
       numLanes = up(SIMTCoreKey).get.numLanes,
+      numCores = n,
       logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
 
       lsu = LoadStoreUnitParams(
@@ -80,10 +81,17 @@ class WithMuonCores(
     val idOffset = up(NumTiles)
     val coreIdOffset = up(NumMuonCores)
     require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
+
+    val clusterParams = (location match {
+      case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
+      case _ => None
+    }).get.clusterParams.asInstanceOf[RadianceClusterParams]
+
     val muon = MuonTileParams(
       core = here(MuonKey),
       icache = None,
       dcache = None,
+      cacheLineBytes = clusterParams.l1Config.rowBits / 8
     )
     List.tabulate(n)(i => MuonTileAttachParams(
       muon.copy(

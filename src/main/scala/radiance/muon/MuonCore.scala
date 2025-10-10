@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.MulDivParams
 import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTileParameters, HasTileParameters}
-import freechips.rocketchip.util.ParameterizedBundle
+import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 
@@ -56,9 +56,9 @@ case class MuonCoreParams(
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
+  numCores: Int = 2,
   numWarps: Int = 8,
   numLanes: Int = 16,
-  hartIdBits: Int = 3,
   // schedule, dispatch, rename
   numPhysRegs: Int = 256,
   numArchRegs: Int = 128,
@@ -77,7 +77,14 @@ case class MuonCoreParams(
   logSMEMInFlights: Int = 2,
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
+  val hartIdBits: Int = log2Ceil(numCores)
   val pRegBits = log2Up(numPhysRegs)
+  override def dcacheReqTagBits: Int = {
+    val instVsData = 1
+    val maxInFlight = log2Ceil(ibufDepth) max lsu.queueIndexBits // TODO: is this right joshua?
+    val coreBits = log2Ceil(numCores)
+    instVsData + maxInFlight + coreBits + warpIdBits + 2
+  }
 }
 
 // move to decode?
@@ -99,6 +106,7 @@ class MemRequest[T <: Bundle] (
   val size = UInt(log2Ceil(log2Ceil(dataBits / 8) + 1).W) // log size
   val tag = UInt(tagBits.W)
   val data = UInt(dataBits.W)
+  val mask = UInt((dataBits / 8).W)
   val metadata = metadataT.cloneType
 }
 
@@ -124,7 +132,7 @@ trait HasMuonCoreParameters {
   val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
   val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
-  val imemTagBits  = log2Ceil(muonParams.ibufDepth)
+  val imemTagBits  = log2Ceil(muonParams.numWarps * muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 
   // compute "derived" LSU parameters
@@ -152,50 +160,25 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
     tagBits = imemTagBits,
     addressBits = addressBits,
     dataBits = imemDataBits,
-    metadataT = new Bundle {
-      val pc = pcT
-      val wid = widT
-    }
   ).cloneType)
   val resp = Flipped(Decoupled(new MemResponse(
     tagBits = imemTagBits,
     dataBits = imemDataBits,
-    metadataT = new Bundle {
-      val pc = pcT
-      val wid = widT
-    }
   ).cloneType))
 }
 
-/** Muon core and core-private L0/L1 caches */
-class Muon(implicit p: Parameters) extends CoreModule with HasTileParameters {
+/** Muon core and core-private L0 caches */
+class MuonCore(implicit p: Parameters) extends CoreModule with HasTileParameters {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val hartid = Input(UInt(muonParams.hartIdBits.W))
+    val hartId = Input(UInt(muonParams.hartIdBits.W))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
   // TODO: L0
 
-  val core = Module(new MuonCore)
-  io.imem <> core.io.imem
-  io.dmem <> core.io.dmem
-  io.smem <> core.io.smem
-}
-
-/** Muon core without the caches.
- *  Keeps HasTileParameters out so that it can be instantiated
- *  standalone without the rocket subsystem.
- */
-class MuonCore(implicit p: Parameters) extends CoreModule {
-  val io = IO(new Bundle {
-    val imem = new InstMemIO
-    val dmem = new DataMemIO
-    val smem = new SharedMemIO
-    // TODO: LCP (threadblock start/done, warp slot, synchronization)
-  })
   dontTouch(io)
 
   val fe = Module(new Frontend)
@@ -203,6 +186,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
   fe.io.issue.eligible := 0.U.asTypeOf(fe.io.issue.eligible)
   fe.io.commit := 0.U.asTypeOf(fe.io.commit)
+  fe.io.hartId := io.hartId
   dontTouch(fe.io)
 
   val be = Module(new Backend)

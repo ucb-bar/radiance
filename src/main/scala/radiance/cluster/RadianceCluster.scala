@@ -13,15 +13,17 @@ import freechips.rocketchip.tile.{CoreParams, TileKey, TileParams, TileVisibilit
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
+import org.chipsalliance.diplomacy.DisableMonitors
 import radiance.memory._
 import radiance.muon._
 import radiance.subsystem._
 
 case class FakeRadianceClusterTileParams(
   cache: Option[DCacheParams],
+  muonCore: MuonCoreParams,
   clusterId: Int,
 ) extends TileParams {
-  val core: CoreParams = MuonCoreParams(
+  val core: CoreParams = muonCore.copy(
     xLen = 32,
   )
   val icache: Option[ICacheParams] = None
@@ -96,15 +98,24 @@ class RadianceCluster (
   // clsbus -> csbus -> sbus
   val scopeNode = AddressScopeNode(AddressSet(0, gmemSize - 1))
   val orNode = AddressOrNode(gmemAddr)
-  csbus.inwardNode :=* TLXbar() :=* orNode :=* scopeNode :=* TLXbar() :=* clsbus.outwardNode
+  val csBusXbar = TLXbar()
+  val clsBusXbar = TLXbar()
+
+  csbus.inwardNode :=* csBusXbar
+  clsBusXbar :=* clsbus.outwardNode
+
+  DisableMonitors { implicit p =>
+    csBusXbar :=* orNode :=* scopeNode :=* clsBusXbar
+  }
 
   val visibilityNode = TLEphemeralNode()
   // TODO: inflights should be ibuf depth!
-  val l1cache = LazyModule(new TLNBDCache(clusterId, 8)(
+  val l1cache = LazyModule(new TLNBDCache(clusterId)(
     p.alterMap(Map(
       // a bit hacky, but required to instantiate dcache outside a tile
       TileKey -> FakeRadianceClusterTileParams(
         cache = Some(thisClusterParams.l1Config),
+        muonCore = muonTiles.head.muonParams.core,
         clusterId = clusterId
       ),
       TileVisibilityNodeKey -> visibilityNode,
@@ -121,8 +132,8 @@ class RadianceCluster (
   //   barrierSlaveNode := tile.barrierMasterNode
   // }
 
-  val l1InNodes = muonTiles.map(_.dcacheNode)
-//  val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
+//  val l1InNodes = muonTiles.map(_.dcacheNode)
+  val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
   val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
   l1cache.inNode := l1InXbar
   l1InNodes.foreach(l1InXbar := _)

@@ -43,6 +43,7 @@ object l1CacheConfig extends DCacheParams(
   nSets = 512,
   nWays = 4,
   rowBits = 32 * 8,
+  blockBytes = 32,
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
@@ -66,7 +67,7 @@ class RadianceCyclotronConfig extends Config(
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new RadianceBaseConfig)
 
-class RadianceTapeoutConfig extends Config(
+class RadianceTapeoutSimConfig extends Config(
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(1)) ++
   new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
@@ -75,6 +76,10 @@ class RadianceTapeoutConfig extends Config(
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new RadianceBaseConfig
+)
+
+class RadianceTapeoutConfig extends Config(
   new testchipip.serdes.WithSerialTL(Seq(testchipip.serdes.SerialTLParams(
     manager = Some(
       testchipip.serdes.SerialTLManagerParams(
@@ -87,15 +92,14 @@ class RadianceTapeoutConfig extends Config(
       )
     ),
     client = Some(testchipip.serdes.SerialTLClientParams()),
-    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=1, flitWidth=16),
+    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=16),
     bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
       dataBits = 256
     )
   )
   )) ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
-
-  new RadianceBaseConfig)
+  new RadianceTapeoutSimConfig)
 
 class RadianceClusterConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++

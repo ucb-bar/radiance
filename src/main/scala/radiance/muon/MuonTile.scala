@@ -28,7 +28,8 @@ case class MuonTileParams(
   beuAddr: Option[BigInt] = None,
   blockerCtrlAddr: Option[BigInt] = None,
   clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
-  boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None
+  boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None,
+  cacheLineBytes: Int = 32,
 ) extends InstantiableTileParams[MuonTile] {
   def instantiate(
     crossing: HierarchicalElementCrossingParamsLike,
@@ -40,13 +41,35 @@ case class MuonTileParams(
   val uniqueName = s"${baseName}_$coreId"
 }
 
-object MuonMemToTL {
-  def apply[T <: Bundle](muonReq: MemRequest[T], tlA: TLBundleA) = {
-
+object MuonMemTL {
+  def toTLA[T <: Bundle](m: MemRequest[T], edge: TLEdgeOut): TLBundleA = {
+    val tla = Mux(m.store,
+      edge.Put(m.tag, m.address, m.size, m.data, m.mask)._2,
+      edge.Get(m.tag, m.address, m.size)._2
+    )
+    assert(m.mask === ((1.U << (1.U << m.size).asUInt).asUInt - 1.U),
+      "full mask required for now")
+    tla
   }
 
-  def apply[T <: Bundle](muonResp: MemResponse[T], tlD: TLBundleD) = {
+  def fromTLD[T <: Bundle](tld: TLBundleD, mT: MemResponse[T]): MemResponse[T] = {
+    val muonResp = Wire(mT.cloneType)
+    muonResp.tag := tld.source
+    muonResp.data := tld.data // TODO: sub-bus-width responses
+    muonResp
+  }
 
+  def connectTL[T <: Bundle](mreq: DecoupledIO[MemRequest[T]],
+                             mresp: DecoupledIO[MemResponse[T]],
+                             tl: TLClientNode) = {
+    val (in, ie) = tl.out.head
+    in.a.bits := MuonMemTL.toTLA(mreq.bits, ie)
+    in.a.valid := mreq.valid
+    mreq.ready := in.a.ready
+
+    mresp.valid := in.d.valid
+    mresp.bits := MuonMemTL.fromTLD(in.d.bits, mresp.bits)
+    in.d.ready := mresp.ready
   }
 }
 
@@ -107,10 +130,25 @@ class MuonTile(
 //    case None => dmemAggregateNode
 //  }
 
-  // TODO
-  val icacheNode = muonParams.icache match {
-    case _ => TLClientNode(Seq(TLMasterPortParameters.v2(Seq(TLMasterParameters.v1("i")))))
+  val icacheWordNode = muonParams.icache match {
+    case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v2(
+        name = s"muon${muonParams.coreId}_i_word",
+        requestFifo = true,
+        emits = TLMasterToSlaveTransferSizes(
+          get = TransferSizes(1, muonParams.core.instBytes)
+        ),
+        sourceId = IdRange(0, muonParams.core.numCores * muonParams.core.numWarps * muonParams.core.ibufDepth)
+      )),
+//      channelBytes = TLChannelBeatBytes(muonParams.core.instBytes),
+    )))
   }
+  val icacheNode = TLIdentityNode()
+  icacheNode :=
+    TLWidthWidget(muonParams.cacheLineBytes) :=
+    icacheWordNode
+
+  // TODO: fix source id bits
   val dcacheNode_ = muonParams.dcache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
         Seq(TLMasterParameters.v1(
@@ -164,11 +202,17 @@ class MuonTile(
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
-  val muon = Module(new Muon())
-  muon.io.imem <> DontCare
+  val muon = Module(new MuonCore())
+  MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
+
+  // TODO: both dmem and smem should be a vector of bundles
+//  MuonMemTL.connectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.dcacheNode_)
+//  MuonMemTL.connectTL(muon.io.smem.req, muon.io.smem.resp, outer.smemNodes)
+
+//  muon.io.imem.req
   muon.io.dmem <> DontCare
   muon.io.smem <> DontCare
-  muon.io.hartid := outer.muonParams.coreId.U
+  muon.io.hartId := outer.muonParams.coreId.U
   outer.reportCease(None)
   outer.reportWFI(None)
 }
