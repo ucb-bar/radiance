@@ -148,7 +148,7 @@ With the above bank mapping, the total capacity requirement for SMEM becomes:
 | 128         | 128          | 8                   | 16                   | 320                         |                                |
 
 Since we need some extra margin above the minimum numbers for storing row-wise
-max/sum factors, etc., the current recommended size for Muon is **128KiB** with
+max/sum factors, etc., the current recommended size for Muon is **128KiB/cluster** with
 `Brow=Bcol` 64 and head dimension 64.
 
 **FP8 Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
