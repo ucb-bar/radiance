@@ -84,6 +84,16 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     req.bits.no_xcpt := true.B // no vm/dp, so no page faults etc
     // TODO: use tlIn.a.bits.user to carry pc/tmask etc
 
+//    when (req.fire) {
+//      when (req.bits.cmd === M_XRD) {
+//        printf(" load-req 0x%x", req.bits.addr)
+//      }
+//      when (req.bits.cmd === M_XWR) {
+//        printf(" store-req %d 0x%x", req.bits.data, req.bits.addr)
+//      }
+//      printf(" #%d", req.bits.tag)
+//    }
+
     // D
     // assert(!resp.valid || !resp.bits.replay, "cannot replay requests")
     assert(!resp.valid || tlIn.d.ready, "response must be ready!")

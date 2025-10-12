@@ -91,23 +91,27 @@ class WarpScheduler(implicit p: Parameters)
   }
 
   // increment/set PCs, fetch from i$
-  io.icache.in.valid := false.B
   io.icache.in.bits := 0.U.asTypeOf(io.icache.in.bits)
+  io.icache.in.bits.wid := fetchWid
+  io.icache.in.valid := fetchArbiter.io.out.valid
   pcTracker.zipWithIndex.foreach { case (entry, wid) =>
     val joinPC = ipdomStack.newPC(wid)
     // only increment PC if it's 1. enabled 2. not stalled (no hazard, icache ready) 3. selected for fetch
-    when (wid.U === fetchWid && fetchArbiter.io.out.valid &&
-      entry.valid && !stallTracker.isStalled(wid.U)._1) {
+    when (joinPC.valid) {
+      entry.bits := joinPC.bits // override normal pc
+      // if this warp is being issued, we also override it
+    }
 
-      // every PC increment is accompanied by fetch fire
-      io.icache.in.valid := true.B
+    when (fetchWid === wid.U) {
       val currPC = Mux(joinPC.valid, joinPC.bits, entry.bits)
-      io.icache.in.bits.wid := wid.U
       io.icache.in.bits.pc := currPC
-      entry.bits := currPC + 8.U
-      discardTillPC(wid).bits := entry.bits // the latest issued pc
-    }.elsewhen(joinPC.valid) {
-      entry.bits := joinPC.bits
+      io.icache.in.bits.wid := wid.U
+      assert((entry.valid && (!stallTracker.isStalled(wid.U)._1 || joinPC.valid)) || !io.icache.in.valid)
+      // when the request fires, we increment
+      when (io.icache.in.fire) {
+        discardTillPC(wid).bits := currPC
+        entry.bits := currPC + 8.U
+      }
     }
   }
 
@@ -264,9 +268,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   }
 
   def isStalled(wid: UInt) = {
-    val icacheReady = outer.io.icache.in.ready
-    (stalls(wid).stallReason.asUInt.orR || !icacheReady, stalls(wid).stallReason)
-    (false.B, VecInit.fill(8)(false.B))
+    (stalls(wid).stallReason.asUInt.orR, stalls(wid).stallReason)
   }
 }
 

@@ -64,7 +64,7 @@ case class MuonCoreParams(
   numArchRegs: Int = 128,
   numIPDOMEntries: Int = 8,
   ibufDepth: Int = 8,
-  startAddress: BigInt = x"0000_0000",
+  startAddress: BigInt = x"1000_0000",
   // issue
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
@@ -75,6 +75,7 @@ case class MuonCoreParams(
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
+  cacheLineBytes: Int = 32,
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
   val hartIdBits: Int = log2Ceil(numCores)
@@ -85,6 +86,10 @@ case class MuonCoreParams(
     val coreBits = log2Ceil(numCores)
     instVsData + maxInFlight + coreBits + warpIdBits + 2
   }
+  override val useVector: Boolean = true // for cache line size
+  override val vLen: Int = 32
+  override val eLen: Int = 32
+  override def vMemDataBits: Int = cacheLineBytes * 8
 }
 
 // move to decode?

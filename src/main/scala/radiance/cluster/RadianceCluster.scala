@@ -23,8 +23,9 @@ case class FakeRadianceClusterTileParams(
   muonCore: MuonCoreParams,
   clusterId: Int,
 ) extends TileParams {
-  val core: CoreParams = muonCore.copy(
+  val core: MuonCoreParams = muonCore.copy(
     xLen = 32,
+    cacheLineBytes = cache.get.rowBits / 8
   )
   val icache: Option[ICacheParams] = None
   val dcache: Option[DCacheParams] = cache

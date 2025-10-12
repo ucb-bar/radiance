@@ -79,6 +79,8 @@ class RadianceTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
+// note: this config might throw assertions due to tlserdesser source id implementation?
+// so use sim config for now
 class RadianceTapeoutConfig extends Config(
   new testchipip.serdes.WithSerialTL(Seq(testchipip.serdes.SerialTLParams(
     manager = Some(
@@ -91,8 +93,8 @@ class RadianceTapeoutConfig extends Config(
         slaveWhere = MBUS
       )
     ),
-    client = Some(testchipip.serdes.SerialTLClientParams()),
-    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=16),
+    client = Some(testchipip.serdes.SerialTLClientParams()), // TODO: override id bits here?
+    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=32),
     bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
       dataBits = 256
     )
