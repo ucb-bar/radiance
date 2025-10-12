@@ -58,11 +58,11 @@ case class CoalescerConfig(
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size.  Nominally, this has
-                          // to be the maximum coalLogSizes.
+                          // to be the coalLogSize.
                           // This data bus carries the data bits of coalesced request/responses,
                           // and so it has to be wider than wordSizeInBytes for the coalescer
                           // to perform well.
-  coalLogSizes: Seq[Int], // list of coalescer sizes to try in the MonoCoalescers
+  coalLogSize: Int, // list of coalescer sizes to try in the MonoCoalescers
                           // each size is log(byteSize)
                           // max value should match dataBusWidth as the largest-possible
                           // single-beat coealsced size.
@@ -80,17 +80,17 @@ case class CoalescerConfig(
   // maximum coalesced size
   def maxCoalLogSize: Int = {
     require(
-      coalLogSizes.max <= dataBusWidth,
+      coalLogSize <= dataBusWidth,
       "multi-beat coalesced reads/writes are currently not supported"
     )
-    if (coalLogSizes.max < dataBusWidth) {
+    if (coalLogSize < dataBusWidth) {
       println(
         "======== Warning: coalescer's max coalescing size is set to " +
-          s"${coalLogSizes.max}, which is narrower than data bus width " +
+          s"${coalLogSize}, which is narrower than data bus width " +
           s"${dataBusWidth}.  This might indicate misconfiguration."
       )
     }
-    coalLogSizes.max
+    coalLogSize
   }
   def wordSizeWidth: Int = {
     val w = log2Ceil(wordSizeInBytes)
@@ -113,7 +113,7 @@ object DefaultCoalescerConfig extends CoalescerConfig(
   waitTimeout = 8,
   addressWidth = 24,
   dataBusWidth = 4,      // if "4": 2^4=16 bytes, 128 bit bus
-  coalLogSizes = Seq(4), // if "4": 2^4=16 bytes, 128 bit bus
+  coalLogSize = 4, // if "4": 2^4=16 bytes, 128 bit bus
   // watermark = 2,
   wordSizeInBytes = 4,
   // when attaching to SoC, 16 source IDs are not enough due to longer latency
@@ -665,61 +665,13 @@ class MultiCoalescer(
     val coalescable = Output(Vec(config.numLanes, Bool()))
   })
 
-  val coalescers = config.coalLogSizes.map(size =>
-    Module(new MonoCoalescer(config, size, queueT))
-  )
-  coalescers.foreach(_.io.window := io.window)
-
-  def normalize(valPerSize: Seq[UInt]): Seq[UInt] = {
-    (valPerSize zip config.coalLogSizes).map { case (hits, size) =>
-      (hits << (config.maxCoalLogSize - size).U).asUInt
-    }
-  }
-
-  def argMax(x: Seq[UInt]): UInt = {
-    x.zipWithIndex.map {
-      case (a, b) => (a, b.U)
-    }.reduce[(UInt, UInt)] { case ((a, i), (b, j)) =>
-      (Mux(a > b, a, b), Mux(a > b, i, j)) // > instead of >= here; want to use largest size
-    }._2
-  }
-
-  // normalize to maximum coalescing size so that we can do fair comparisons
-  // between coalescing results of different sizes
-  val normalizedMatches = normalize(coalescers.map(_.io.results.matchCount))
-  val normalizedHits = normalize(coalescers.map(_.io.results.coverageHits))
-
-  val chosenSizeIdx = Wire(UInt(log2Ceil(config.coalLogSizes.size).W))
-  val chosenValid = Wire(Bool())
-  // minimum 25% coverage
-  val minCoverage =
-    1.max(1 << ((config.maxCoalLogSize - config.wordSizeWidth) - 2))
-
-  // when(normalizedHits.map(_ > minCoverage.U).reduce(_ || _)) {
-  //   chosenSizeIdx := argMax(normalizedHits)
-  //   chosenValid := true.B
-  //   printf("coalescing success by coverage policy\n")
-  // }.else
-  when(normalizedMatches.map(_ > 1.U).reduce(_ || _)) {
-    chosenSizeIdx := argMax(normalizedMatches)
-    chosenValid := true.B
-    // printf("coalescing success by matches policy\n")
-  }.otherwise {
-    chosenSizeIdx := DontCare
-    chosenValid := false.B
-  }
-
-  def debugPolicyPrint() = {
-    printf("matchCount[0]=%d\n", coalescers(0).io.results.matchCount)
-    printf("normalizedMatches[0]=%d\n", normalizedMatches(0))
-    printf("coverageHits[0]=%d\n", coalescers(0).io.results.coverageHits)
-    printf("normalizedHits[0]=%d\n", normalizedHits(0))
-    printf("minCoverage=%d\n", minCoverage.U)
-  }
+  val coalescer = Module(new MonoCoalescer(config, config.coalLogSize, queueT))
+  coalescer.io.window := io.window
 
   // create coalesced request
-  val chosenBundle = VecInit(coalescers.map(_.io.results))(chosenSizeIdx)
-  val chosenSize = VecInit(coalescers.map(_.size.U))(chosenSizeIdx)
+  val chosenBundle = coalescer.io.results
+  val chosenSize = config.coalLogSize.U
+  val coalesceValid = chosenBundle.matchCount > 1.U
 
   // flatten requests and matches
   val flatReqs = io.window.windowElts.flatten
@@ -773,8 +725,6 @@ class MultiCoalescer(
     )
   }
 
-  val coalesceValid = chosenValid
-
   // setting source is deferred, because in order to do proper source ID
   // generation we also have to look at the responses coming back, which
   // is easier to do at the toplevel.
@@ -790,10 +740,7 @@ class MultiCoalescer(
   io.invalidate.bits := chosenBundle.matchOH
   io.invalidate.valid := io.coalReq.fire // invalidate only when fire
 
-  io.coalescable := coalescers
-    .map(_.io.results.canCoalesce.asUInt)
-    .reduce(_ | _)
-    .asBools
+  io.coalescable := coalescer.io.results.canCoalesce
 
   dontTouch(io.invalidate) // debug
 
@@ -850,7 +797,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   println(s"    enable: ${config.enable}")
   println(s"    numLanes: ${config.numLanes}")
   println(s"    wordSizeInBytes: ${config.wordSizeInBytes}")
-  println(s"    coalLogSizes: ${config.coalLogSizes}")
+  println(s"    coalLogSize: ${config.coalLogSize}")
   println(s"    timeCoalWindowSize: ${config.timeCoalWindowSize}")
   println(s"    numOldSrcIds: ${config.numOldSrcIds}")
   println(s"    numNewSrcIds: ${config.numNewSrcIds}")
@@ -1478,6 +1425,8 @@ object TLUtils {
     Mux(opcode === TLMessages.AccessAck, true.B, false.B)
   }
 }
+
+/* TESTING / DEBUGGING */
 
 // `traceHasSource` is true if the input trace file has an additional source
 // ID column.  This is useful for feeding back the output trace file genereated
@@ -2318,26 +2267,26 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // A dummy harness around the coalescer for use in VLSI flow.
 // Should not instantiate any memtrace modules.
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
+  val xbar = LazyModule(new TLXbar)
   val numLanes = p(SIMTCoreKey).get.nMemLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new DummyDriver(config))
-  val rams = Seq.fill(config.numLanes + 1)( // +1 for coalesced edge
-    LazyModule(
-      // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
-      // edges globally, by way of Diplomacy communicating the TL slave
-      // parameters to the upstream nodes.
-      new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << config.dataBusWidth)
-      )
+  val ram = LazyModule(
+    // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
+    // edges globally, by way of Diplomacy communicating the TL slave
+    // parameters to the upstream nodes.
+    new TLRAM(
+      address = AddressSet(0x0000, 0xffffff),
+      beatBytes = (1 << config.dataBusWidth)
     )
   )
 
   val coal = LazyModule(new CoalescingUnit(config))
 
   coal.cpuNode :=* driver.node
-  rams.foreach(_.node := coal.aggregateNode)
+  ram.node := xbar.node
+  xbar.node := coal.aggregateNode
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
@@ -2355,6 +2304,7 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 // tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     extends LazyModule {
+  val xbar = LazyModule(new TLXbar)
   val numLanes = p(SIMTCoreKey).get.nMemLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
@@ -2366,21 +2316,19 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
   val memSideLogger = LazyModule(
     new MemTraceLogger(numLanes + 1, filename, loggerName = "memside")
   )
-  val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
-    LazyModule(
-      // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
-      // edges globally, by way of Diplomacy communicating the TL slave
-      // parameters to the upstream nodes.
-      new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << config.dataBusWidth)
-      )
+  val ram = LazyModule(
+    // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
+    // edges globally, by way of Diplomacy communicating the TL slave
+    // parameters to the upstream nodes.
+    new TLRAM(
+      address = AddressSet(0x0000, 0xffffff),
+      beatBytes = (1 << config.dataBusWidth)
     )
   )
 
-  memSideLogger.node :=* coal.aggregateNode
   coal.cpuNode :=* coreSideLogger.node :=* driver.node
-  rams.foreach { r => r.node := memSideLogger.node }
+  xbar.node :=* memSideLogger.node :=* coal.aggregateNode
+  ram.node := xbar.node
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
@@ -2447,26 +2395,26 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
 
 // tracedriver --> coalescer --> tlram
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
+  val xbar = LazyModule(new TLXbar)
   val numLanes = p(SIMTCoreKey).get.nMemLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val filename = "vecadd.core1.thread4.trace"
   val coal = LazyModule(new CoalescingUnit(config))
   val driver = LazyModule(new MemTraceDriver(config, filename))
-  val rams = Seq.fill(numLanes + 1)( // +1 for coalesced edge
-    LazyModule(
-      // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
-      // edges globally, by way of Diplomacy communicating the TL slave
-      // parameters to the upstream nodes.
-      new TLRAM(
-        address = AddressSet(0x0000, 0xffffff),
-        beatBytes = (1 << config.dataBusWidth)
-      )
+  val ram = LazyModule(
+    // NOTE: beatBytes here sets the data bitwidth of the upstream TileLink
+    // edges globally, by way of Diplomacy communicating the TL slave
+    // parameters to the upstream nodes.
+    new TLRAM(
+      address = AddressSet(0x0000, 0xffffff),
+      beatBytes = (1 << config.dataBusWidth)
     )
   )
 
   coal.cpuNode :=* driver.node
-  rams.foreach { r => r.node := coal.aggregateNode }
+  ram.node := xbar.node
+  xbar.node := coal.aggregateNode
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) with UnitTestModule {
