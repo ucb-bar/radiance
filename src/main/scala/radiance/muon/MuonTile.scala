@@ -138,22 +138,23 @@ class MuonTile(
         emits = TLMasterToSlaveTransferSizes(
           get = TransferSizes(1, muonParams.core.instBytes)
         ),
-        sourceId = IdRange(0, muonParams.core.numCores * muonParams.core.numWarps * muonParams.core.ibufDepth)
+        sourceId = IdRange(0, muonParams.core.numWarps * muonParams.core.ibufDepth)
       )),
-//      channelBytes = TLChannelBeatBytes(muonParams.core.instBytes),
+      channelBytes = TLChannelBeatBytes(muonParams.core.instBytes),
     )))
   }
   val icacheNode = TLIdentityNode()
   icacheNode :=
-    TLWidthWidget(muonParams.cacheLineBytes) :=
+    TLWidthWidget(muonParams.core.instBytes) :=
     icacheWordNode
 
   // TODO: fix source id bits
   val dcacheNode_ = muonParams.dcache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
         Seq(TLMasterParameters.v1(
-          name = s"muon_tile${muonParams.coreId}_l0d"
-        ))
+          name = s"muon_tile${muonParams.coreId}_l0d",
+          sourceId = IdRange(0, muonParams.core.numWarps * 16) // <- joshua what is the depth here
+        )),
     )))
   }
 
