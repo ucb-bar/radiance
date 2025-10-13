@@ -17,7 +17,7 @@ class WarpScheduler(implicit p: Parameters)
     val issue = issueIO
     val csr = csrIO
     val decode = decodeIO
-    val ibuf = ibufIO
+    val ibuf = ibufEnqIO
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
   })
 
@@ -119,6 +119,7 @@ class WarpScheduler(implicit p: Parameters)
   val iresp = io.icache.out.bits
   io.decode.bits.inst := iresp.inst
   io.decode.bits.wid := iresp.wid
+  io.decode.bits.wmask := VecInit(pcTracker.map(_.valid)).asUInt.asTypeOf(wmaskT)
   val fetchNewMask = ipdomStack.newMask(iresp.wid) // forward new mask to fetch port
   io.decode.bits.tmask := Mux(fetchNewMask.valid, fetchNewMask.bits, threadMasks(iresp.wid))
 
@@ -239,6 +240,10 @@ class WarpScheduler(implicit p: Parameters)
     )
     io.csr.resp := RegNext(csrData)
   }
+
+  // misc
+  io.ibuf.enq.valid := false.B
+  io.ibuf.enq.bits := DontCare
 }
 
 class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {

@@ -94,7 +94,7 @@ class RadianceTapeoutConfig extends Config(
       )
     ),
     client = Some(testchipip.serdes.SerialTLClientParams()), // TODO: override id bits here?
-    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=32),
+    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=32, flitWidth=32),
     bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
       dataBits = 256
     )

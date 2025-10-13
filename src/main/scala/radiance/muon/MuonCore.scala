@@ -62,6 +62,7 @@ case class MuonCoreParams(
   // schedule, dispatch, rename
   numPhysRegs: Int = 256,
   numArchRegs: Int = 128,
+  logRenameMinWarps: Int = 1, // minimum 2 warps share PRF
   numIPDOMEntries: Int = 8,
   ibufDepth: Int = 8,
   startAddress: BigInt = x"1000_0000",

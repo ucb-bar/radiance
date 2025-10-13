@@ -66,15 +66,20 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def decodeIO = DecoupledIO(new Bundle {
+  def decodeIO = ValidIO(new Bundle {
     val inst = instT
     val tmask = tmaskT
+    val wmask = wmaskT
     val wid = widT
   })
 
-  def ibufIO = new Bundle {
+  def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
+    val enq = decodeIO
   }
+
+  def prT = UInt(log2Ceil(m.numPhysRegs).W)
+  def arT = UInt(log2Ceil(m.numArchRegs).W)
 }
 
 class Frontend(implicit p: Parameters)
@@ -93,6 +98,8 @@ class Frontend(implicit p: Parameters)
   })
 
   val warpScheduler = Module(new WarpScheduler)
+  val renamer = Module(new Rename())
+  val ibuffer = Module(new InstBuffer)
 
   { // scheduler & fetch
     val i$ = warpScheduler.io.icache
@@ -145,18 +152,22 @@ class Frontend(implicit p: Parameters)
     i$.out.bits.pc := userQueueDeq.bits.pc
     i$.out.bits.wid := userQueueDeq.bits.wid
     assert(!resp.fire || userQueueDeq.valid, "user queue entries got dropped")
-  }
-  // TODO: Decode
-  // TODO: Rename
 
-  warpScheduler.io.decode.ready := true.B // TODO
-  warpScheduler.io.ibuf.count := DontCare // not used
+    // other stuff
+    warpScheduler.io.ibuf.count := ibuffer.io.enq.count
+  }
+
+  { // rename
+    renamer.io.softReset := false.B // TODO
+    renamer.io.decode := warpScheduler.io.decode
+    ibuffer.io.enq :<>= renamer.io.ibuf
+    dontTouch(renamer.io.ibuf)
+  }
 
   // IBuffer
-  val ibuffer = Module(new InstBuffer)
-  // TODO: enq
-  ibuffer.io.enq.foreach(_.valid := false.B)
-  ibuffer.io.enq.foreach(_.bits := DontCare)
+  {
+
+  }
 
   io.ibuf <> ibuffer.io.deq
 }

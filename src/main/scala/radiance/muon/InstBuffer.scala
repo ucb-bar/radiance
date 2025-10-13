@@ -17,14 +17,14 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) {
   // TODO: op ext, pipe-specific args e.g. fpu rm
 }
 
-class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
+class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBundles {
   val io = IO(new Bundle {
-    val enq = Vec(muonParams.numWarps, Flipped(Decoupled(new InstBufferEntry)))
+    val enq = Flipped(ibufEnqIO)
     val deq = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
   })
 
   // TODO: fifo logic
-  io.enq.foreach(_.ready := true.B)
+  io.enq.count.foreach(_ := 0.U) // TODO
   io.deq.foreach(_.valid := false.B)
   io.deq.foreach(_.bits := DontCare)
 }
