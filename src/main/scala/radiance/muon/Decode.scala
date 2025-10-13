@@ -1,6 +1,7 @@
 package radiance.muon
 
 import chisel3._
+import chisel3.util.MixedVec
 import freechips.rocketchip.util.UIntIsOneOf
 
 object MuOpcode {
@@ -37,100 +38,137 @@ object MuOpcode {
   val NU_COMPLETE = "b101011011".U
 }
 
+abstract class DecodeField(val width: Int = 1)
+case object Opcode   extends DecodeField(9)
+case object F3       extends DecodeField(3)
+case object F7       extends DecodeField(7)
+case object Rd       extends DecodeField(8)
+case object Rs1      extends DecodeField(8)
+case object Rs2      extends DecodeField(8)
+case object Rs3      extends DecodeField(8)
+case object Pred     extends DecodeField(4)
+case object IsTMC    extends DecodeField
+case object IsWSpawn extends DecodeField
+case object IsSplit  extends DecodeField
+case object IsJoin   extends DecodeField
+case object IsBar    extends DecodeField
+case object IsPred   extends DecodeField
+case object IsToHost extends DecodeField
+case object IsCSR    extends DecodeField
+case object IsRType  extends DecodeField
+case object IsIType  extends DecodeField
+case object IsSType  extends DecodeField
+case object IsBType  extends DecodeField
+case object IsUJType extends DecodeField
+case object HasRd    extends DecodeField
+case object HasRs1   extends DecodeField
+case object HasRs2   extends DecodeField
+case object HasRs3   extends DecodeField
 
-class Decoded(inst: UInt) {
-  def opcode = inst(8, 0)
+class Decoded extends Bundle {
 
-  def f3 = inst(19, 17)
-  def f7 = inst(58, 52)
+  val signals = MixedVec(Decoder.allDecodeFields.map(f => UInt(f.width.W)))
 
-  def rd = inst(16, 9)
-  def rs1 = inst(27, 20)
-  def rs2 = inst(35, 28)
-  def rs3 = inst(43, 36)
+  def decode(field: DecodeField, signalIdx: Option[Int] = None)(implicit inst: UInt): UInt = {
+    val value = field match {
+      case Opcode => inst(8, 0)
+      case F3 =>     inst(19, 17)
+      case F7 =>     inst(58, 52)
+      case Rd =>     inst(16, 9)
+      case Rs1 =>    inst(27, 20)
+      case Rs2 =>    inst(35, 28)
+      case Rs3 =>    inst(43, 36)
+      case Pred =>   inst(63, 60)
+      case IsTMC =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 0.U}
+      case IsWSpawn =>  {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 1.U}
+      case IsSplit =>   {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 2.U}
+      case IsJoin =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 3.U}
+      case IsBar =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 4.U}
+      case IsPred =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 5.U}
+      case IsToHost =>  {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) === 0.U}
+      case IsCSR =>     {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) =/= 0.U}
+      case IsRType =>
+        decode(Opcode).isOneOf(
+          MuOpcode.CUSTOM0,
+          MuOpcode.CUSTOM1,
+          MuOpcode.CUSTOM2,
+          MuOpcode.CUSTOM3,
+          MuOpcode.OP,
+          MuOpcode.OP_FP,
+        )
+      case IsIType =>
+        decode(Opcode).isOneOf(
+          MuOpcode.LOAD,
+    //    MuOpcode.LOAD_FP, // not used
+          MuOpcode.MISC_MEM, // fence
+          MuOpcode.OP_IMM,
+          MuOpcode.SYSTEM,
+          MuOpcode.JALR,
+        )
+      case IsSType =>
+        decode(Opcode).isOneOf(
+          MuOpcode.STORE,
+    //    MuOpcode.STORE_FP, // not used
+        )
+      case IsBType =>
+        decode(Opcode).isOneOf(
+          MuOpcode.BRANCH,
+        )
+      case IsUJType =>
+        decode(Opcode).isOneOf(
+          MuOpcode.LUI, // should not be generated
+          MuOpcode.AUIPC,
+          MuOpcode.JAL,
+        )
+      case HasRd =>  !decodeB(IsBType) && !decodeB(IsSType)
+      case HasRs1 => !decodeB(IsUJType)
+      case HasRs2 => decodeB(IsRType) || decodeB(IsSType) || decodeB(IsBType)
+      case HasRs3 =>
+        opcode.isOneOf(
+          MuOpcode.MADD,
+          MuOpcode.MSUB,
+          MuOpcode.NM_ADD,
+          MuOpcode.NM_SUB,
+          // TODO: maybe amo's here as well
+        )
+    }
+    signals(signalIdx.getOrElse(Decoder.allDecodeFields.indexOf(field))) := value
+    value
+  }
 
-  def pred = inst(63, 60)
+  def decodeB(field: DecodeField)(implicit inst: UInt): Bool = decode(field)(inst)(0)
+
+  def apply(field: DecodeField): UInt = {
+    val index = Decoder.allDecodeFields.indexOf(field)
+    require(index >= 0, s"Field $field not decoded here")
+    signals(index)
+  }
+
+  def b(field: DecodeField): Bool = this(field)(0)
+
+  def opcode = this(Opcode)
+  def rs1    = this(Rs1)
+  def rs2    = this(Rs2)
+  def rs3    = this(Rs3)
+  def rd     = this(Rd)
+  def f3     = this(F3)
+  def f7     = this(F7)
 
   // TODO immediates
-
-  def isTMC: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 0.U}
-  def isWSpawn: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 1.U}
-  def isSplit: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 2.U}
-  def isJoin: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 3.U}
-  def isBar: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 4.U}
-  def isPred: Bool = {opcode === MuOpcode.CUSTOM0 && f3 === 5.U}
-  def isToHost: Bool = {opcode === MuOpcode.SYSTEM && f3 === 0.U}
-  def isCSR: Bool = {opcode === MuOpcode.SYSTEM && f3 =/= 0.U}
-
-  def isRType: Bool = {
-    opcode.isOneOf(
-      MuOpcode.CUSTOM0,
-      MuOpcode.CUSTOM1,
-      MuOpcode.CUSTOM2,
-      MuOpcode.CUSTOM3,
-      MuOpcode.OP,
-      MuOpcode.OP_FP,
-    )
-  }
-
-  def isIType: Bool = {
-    opcode.isOneOf(
-      MuOpcode.LOAD,
-//    MuOpcode.LOAD_FP, // not used
-      MuOpcode.MISC_MEM, // fence
-      MuOpcode.OP_IMM,
-      MuOpcode.SYSTEM,
-      MuOpcode.JALR,
-    )
-  }
-
-  def isBType: Bool = {
-    opcode.isOneOf(
-      MuOpcode.BRANCH,
-    )
-  }
-
-  def isSType: Bool = {
-    opcode.isOneOf(
-      MuOpcode.STORE,
-//    MuOpcode.STORE_FP, // not used
-    )
-  }
-
-  def isUJType: Bool = {
-    opcode.isOneOf(
-      MuOpcode.LUI, // should not be generated
-      MuOpcode.AUIPC,
-      MuOpcode.JAL,
-    )
-  }
-
-  def hasRd: Bool = {
-    !isBType && !isSType
-  }
-
-  def hasRs1: Bool = {
-    !isUJType
-  }
-
-  def hasRs2: Bool = {
-    isRType || isSType || isBType
-  }
-
-  def hasRs3: Bool = {
-    opcode.isOneOf(
-      MuOpcode.MADD,
-      MuOpcode.MSUB,
-      MuOpcode.NM_ADD,
-      MuOpcode.NM_SUB,
-      // TODO: maybe amo's here as well
-    )
-  }
 }
 
-object Decoded {
-  def apply(inst: UInt): Decoded = {
-    new Decoded(inst)
+object Decoder {
+  def allDecodeFields: Seq[DecodeField] = {
+    Seq(Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
+    IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
+    IsRType, IsIType, IsSType, IsBType, IsUJType,
+    HasRd, HasRs1, HasRs2, HasRs3)
+  }
+
+  def decode(inst: UInt): Decoded = {
+    val dec = Wire(new Decoded)
+    allDecodeFields.zipWithIndex.foreach { case (f, i) => dec.decode(f, Some(i))(inst) }
+    dec
   }
 }
 

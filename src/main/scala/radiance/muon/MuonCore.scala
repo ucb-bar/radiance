@@ -174,7 +174,7 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
 }
 
 /** Muon core and core-private L0 caches */
-class MuonCore(implicit p: Parameters) extends CoreModule with HasTileParameters {
+class MuonCore(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO

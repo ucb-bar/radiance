@@ -67,7 +67,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
   }))
 
   def decodeIO = ValidIO(new Bundle {
-    val inst = instT
+    val inst = new Decoded
     val tmask = tmaskT
     val wmask = wmaskT
     val wid = widT
@@ -75,7 +75,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
 
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
-    val enq = decodeIO
+    val entry = decodeIO
   }
 
   def prT = UInt(log2Ceil(m.numPhysRegs).W)

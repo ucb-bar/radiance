@@ -38,12 +38,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   val wPort = table.writePorts.head
 
   val wid = io.decode.bits.wid
-  val inst = io.decode.bits.inst
-  val decoded = Decoded(inst)
+  val decoded = io.decode.bits.inst
 
-  val instReg = RegNext(io.decode.bits.inst, 0.U)
-
-  val hasReg = Seq(decoded.hasRd, decoded.hasRs1, decoded.hasRs2, decoded.hasRs3)
+  val hasReg = Seq(decoded.b(HasRd), decoded.b(HasRs1), decoded.b(HasRs2), decoded.b(HasRs3))
   val arAddr = Seq(decoded.rd, decoded.rs1, decoded.rs2, decoded.rs3)
 
   // read translations
@@ -56,7 +53,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
 
   // update rd entry in table
   val unassigned = !assigned(wid)(decoded.rd)
-  val writesToRd = decoded.hasRd
+  val writesToRd = decoded.b(HasRd)
   val assigning = io.decode.valid && writesToRd && unassigned
 
   wPort.enable := assigning
@@ -71,20 +68,24 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(arT)))
     Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
   }
-  val newInst = Cat(
-    instReg(63, 44),
-    Mux(RegNext(hasReg(3)), bypass(arAddr(3), prAddr(3)), instReg(43, 36)),
-    Mux(RegNext(hasReg(2)), bypass(arAddr(2), prAddr(2)), instReg(35, 28)),
-    Mux(RegNext(hasReg(1)), bypass(arAddr(1), prAddr(1)), instReg(27, 20)),
-    instReg(19, 17),
-    Mux(RegNext(hasReg(0)), bypass(arAddr(0), prAddr(0)), instReg(16, 9)),
-    instReg(8, 0),
-  )
-  io.ibuf.enq.valid := RegNext(io.decode.valid)
-  io.ibuf.enq.bits.wid := RegNext(wid)
-  io.ibuf.enq.bits.inst := newInst
-  io.ibuf.enq.bits.tmask := RegNext(io.decode.bits.tmask)
-  io.ibuf.enq.bits.wmask := RegNext(io.decode.bits.wmask)
+//  val newInst = Cat(
+//    instReg(63, 44),
+//    Mux(RegNext(hasReg(3)), bypass(arAddr(3), prAddr(3)), instReg(43, 36)),
+//    Mux(RegNext(hasReg(2)), bypass(arAddr(2), prAddr(2)), instReg(35, 28)),
+//    Mux(RegNext(hasReg(1)), bypass(arAddr(1), prAddr(1)), instReg(27, 20)),
+//    instReg(19, 17),
+//    Mux(RegNext(hasReg(0)), bypass(arAddr(0), prAddr(0)), instReg(16, 9)),
+//    instReg(8, 0),
+//  )
+  val decodedReg = RegNext(decoded, 0.U.asTypeOf(decoded))
+  val microInst = WireInit(decodedReg)
+  microInst(Rs1) := Mux(RegNext(hasReg(1)), bypass(arAddr(1), prAddr(1)), decodedReg(Rs1))
+
+  io.ibuf.entry.valid := RegNext(io.decode.valid)
+  io.ibuf.entry.bits.wid := RegNext(wid)
+  io.ibuf.entry.bits.inst := microInst
+  io.ibuf.entry.bits.tmask := RegNext(io.decode.bits.tmask)
+  io.ibuf.entry.bits.wmask := RegNext(io.decode.bits.wmask)
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>

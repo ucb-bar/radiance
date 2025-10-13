@@ -3,6 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
+import freechips.rocketchip.util.UIntIsOneOf
 import org.chipsalliance.cde.config.Parameters
 
 class WarpScheduler(implicit p: Parameters)
@@ -117,7 +118,7 @@ class WarpScheduler(implicit p: Parameters)
 
   // assign decode outputs
   val iresp = io.icache.out.bits
-  io.decode.bits.inst := iresp.inst
+  io.decode.bits.inst := Decoder.decode(iresp.inst)
   io.decode.bits.wid := iresp.wid
   io.decode.bits.wmask := VecInit(pcTracker.map(_.valid)).asUInt.asTypeOf(wmaskT)
   val fetchNewMask = ipdomStack.newMask(iresp.wid) // forward new mask to fetch port
@@ -279,11 +280,11 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 
 object Predecoder {
   def decode(inst: UInt) = {
-    val d = Decoded(inst)
-    val isHazardInst = VecInit(Seq(MuOpcode.JALR, MuOpcode.JAL, MuOpcode.SYSTEM, MuOpcode.BRANCH)
-      .map(d.opcode === _)).reduceTree(_ || _) || d.isTMC || d.isSplit || d.isPred || d.isWSpawn || d.isBar
+    val d = Decoder.decode(inst)
+    val isHazardInst = d.opcode.isOneOf(MuOpcode.JALR, MuOpcode.JAL, MuOpcode.SYSTEM, MuOpcode.BRANCH) ||
+      d.b(IsTMC) || d.b(IsSplit) || d.b(IsPred) || d.b(IsWSpawn) || d.b(IsBar)
     val stall = WireInit(isHazardInst)
-    val join = WireInit(d.isJoin)
+    val join = WireInit(d.b(IsJoin))
     (stall, join)
   }
 }
