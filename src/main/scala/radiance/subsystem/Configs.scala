@@ -62,6 +62,7 @@ class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
+  headless: Boolean,
 ) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
@@ -77,35 +78,39 @@ class WithMuonCores(
     )
   }
   case TilesLocated(`location`) => {
-    val prev = up(TilesLocated(`location`))
-    val idOffset = up(NumTiles)
-    val coreIdOffset = up(NumMuonCores)
-    require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
+    if (headless) {
+      Seq()
+    } else {
+      val prev = up(TilesLocated(`location`))
+      val idOffset = up(NumTiles)
+      val coreIdOffset = up(NumMuonCores)
+      require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
 
-    val clusterParams = (location match {
-      case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
-      case _ => None
-    }).get.clusterParams.asInstanceOf[RadianceClusterParams]
+      val clusterParams = (location match {
+        case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
+        case _ => None
+      }).get.clusterParams.asInstanceOf[RadianceClusterParams]
 
-    val muon = MuonTileParams(
-      core = here(MuonKey),
-      icache = None,
-      dcache = None,
-      cacheLineBytes = clusterParams.l1Config.rowBits / 8
-    )
-    List.tabulate(n)(i => MuonTileAttachParams(
-      muon.copy(
-        tileId = i + idOffset,
-        coreId = i + coreIdOffset,
-      ),
-      crossing
-    )) ++ prev
+      val muon = MuonTileParams(
+        core = here(MuonKey),
+        icache = None,
+        dcache = None,
+        cacheLineBytes = clusterParams.l1Config.rowBits / 8
+      )
+      List.tabulate(n)(i => MuonTileAttachParams(
+        muon.copy(
+          tileId = i + idOffset,
+          coreId = i + coreIdOffset,
+        ),
+        crossing
+      )) ++ prev
+    }
   }
   case NumTiles => up(NumTiles) + n
   case NumMuonCores => up(NumMuonCores) + n
 }) {
   // constructor override that omits `crossing`
-  def this(n: Int, location: HierarchicalLocation = InSubsystem)
+  def this(n: Int, location: HierarchicalLocation = InSubsystem, headless: Boolean = false)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
     slave = HierarchicalElementSlavePortParams.locationDefault(location),
@@ -113,7 +118,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     }
-  ))
+  ), headless)
 }
 
 class WithCyclotronCores(
