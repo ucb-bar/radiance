@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles {
 
   val io = IO(new Bundle {
-    val decode = Flipped(decodeIO)
+    val rename = Flipped(renameIO)
     val ibuf = ibufEnqIO
     val softReset = Input(Bool())
   })
@@ -20,8 +20,8 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   val assigned = RegInit(defaultAssignment)
 
   // calculate wmask's (MSB idx + 1) rounded up to the nearest power of 2. eg 0b10001 => 8
-  val logMask = Log2(io.decode.bits.wmask)
-  val logLogMask = Mux(io.decode.bits.wmask <= 1.U, 0.U, Log2(logMask) + 1.U)
+  val logMask = Log2(io.rename.bits.wmask)
+  val logLogMask = Mux(io.rename.bits.wmask <= 1.U, 0.U, Log2(logMask) + 1.U)
   val clippedLogLogMask = Mux(logLogMask < m.logRenameMinWarps.U, m.logRenameMinWarps.U, logLogMask)
   // val currentOccupancy = (1.U << clippedLogLogMask).asUInt
   val maxPRUsage = (m.numPhysRegs.U >> clippedLogLogMask).asUInt
@@ -37,15 +37,16 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   val rPorts = table.readPorts
   val wPort = table.writePorts.head
 
-  val wid = io.decode.bits.wid
-  val decoded = io.decode.bits.inst
+  val wid = io.rename.bits.wid
+  val decoded = Decoder.decode(io.rename.bits.inst)
 
   val hasReg = Seq(decoded.b(HasRd), decoded.b(HasRs1), decoded.b(HasRs2), decoded.b(HasRs3))
-  val arAddr = Seq(decoded.rd, decoded.rs1, decoded.rs2, decoded.rs3)
+  val regs = Seq(Rd, Rs1, Rs2, Rs3)
+  val arAddr = regs.map(decoded(_))
 
   // read translations
   (rPorts lazyZip hasReg lazyZip arAddr).foreach { case (port, v, addr) =>
-    port.enable := io.decode.valid && v
+    port.enable := io.rename.valid && v
     port.address := Cat(wid, addr.asTypeOf(arT))
   }
 
@@ -54,7 +55,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   // update rd entry in table
   val unassigned = !assigned(wid)(decoded.rd)
   val writesToRd = decoded.b(HasRd)
-  val assigning = io.decode.valid && writesToRd && unassigned
+  val assigning = io.rename.valid && writesToRd && unassigned
 
   wPort.enable := assigning
   when (assigning) {
@@ -68,24 +69,18 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(arT)))
     Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
   }
-//  val newInst = Cat(
-//    instReg(63, 44),
-//    Mux(RegNext(hasReg(3)), bypass(arAddr(3), prAddr(3)), instReg(43, 36)),
-//    Mux(RegNext(hasReg(2)), bypass(arAddr(2), prAddr(2)), instReg(35, 28)),
-//    Mux(RegNext(hasReg(1)), bypass(arAddr(1), prAddr(1)), instReg(27, 20)),
-//    instReg(19, 17),
-//    Mux(RegNext(hasReg(0)), bypass(arAddr(0), prAddr(0)), instReg(16, 9)),
-//    instReg(8, 0),
-//  )
   val decodedReg = RegNext(decoded, 0.U.asTypeOf(decoded))
   val microInst = WireInit(decodedReg)
-  microInst(Rs1) := Mux(RegNext(hasReg(1)), bypass(arAddr(1), prAddr(1)), decodedReg(Rs1))
 
-  io.ibuf.entry.valid := RegNext(io.decode.valid)
+  regs.zipWithIndex.foreach { case (r, i) => // regs is rd/rs1/rs2/rs3
+    microInst(r) := Mux(RegNext(hasReg(i)), bypass(arAddr(i), prAddr(i)), decodedReg(r))
+  }
+
+  io.ibuf.entry.valid := RegNext(io.rename.valid)
   io.ibuf.entry.bits.wid := RegNext(wid)
-  io.ibuf.entry.bits.inst := microInst
-  io.ibuf.entry.bits.tmask := RegNext(io.decode.bits.tmask)
-  io.ibuf.entry.bits.wmask := RegNext(io.decode.bits.wmask)
+  io.ibuf.entry.bits.uop.inst := microInst
+  io.ibuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
+  io.ibuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>

@@ -66,16 +66,26 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def decodeIO = ValidIO(new Bundle {
+  def uopT = new Bundle {
     val inst = new Decoded
+    val tmask = tmaskT
+    val pc = pcT
+  }
+
+  def renameIO = ValidIO(new Bundle {
+    val inst = instT
     val tmask = tmaskT
     val wmask = wmaskT
     val wid = widT
+    val pc = pcT
   })
 
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
-    val entry = decodeIO
+    val entry = ValidIO(new Bundle {
+      val uop = uopT
+      val wid = widT
+    })
   }
 
   def prT = UInt(log2Ceil(m.numPhysRegs).W)
@@ -159,7 +169,7 @@ class Frontend(implicit p: Parameters)
 
   { // rename
     renamer.io.softReset := false.B // TODO
-    renamer.io.decode := warpScheduler.io.decode
+    renamer.io.rename := warpScheduler.io.rename
     ibuffer.io.enq.entry.bits := renamer.io.ibuf.entry.bits
     ibuffer.io.enq.entry.valid := renamer.io.ibuf.entry.valid
     renamer.io.ibuf.count := ibuffer.io.enq.count

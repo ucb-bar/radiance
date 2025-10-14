@@ -17,7 +17,7 @@ class WarpScheduler(implicit p: Parameters)
     val icache = icacheIO
     val issue = issueIO
     val csr = csrIO
-    val decode = decodeIO
+    val rename = renameIO
     val ibuf = ibufEnqIO
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
   })
@@ -116,16 +116,17 @@ class WarpScheduler(implicit p: Parameters)
     }
   }
 
-  // assign decode outputs
+  // assign outputs to rename
   val iresp = io.icache.out.bits
-  io.decode.bits.inst := Decoder.decode(iresp.inst)
-  io.decode.bits.wid := iresp.wid
-  io.decode.bits.wmask := VecInit(pcTracker.map(_.valid)).asUInt.asTypeOf(wmaskT)
+  io.rename.bits.inst := iresp.inst
+  io.rename.bits.pc := iresp.pc
+  io.rename.bits.wid := iresp.wid
+  io.rename.bits.wmask := VecInit(pcTracker.map(_.valid)).asUInt.asTypeOf(wmaskT)
   val fetchNewMask = ipdomStack.newMask(iresp.wid) // forward new mask to fetch port
-  io.decode.bits.tmask := Mux(fetchNewMask.valid, fetchNewMask.bits, threadMasks(iresp.wid))
+  io.rename.bits.tmask := Mux(fetchNewMask.valid, fetchNewMask.bits, threadMasks(iresp.wid))
 
   // handle i$ response, predecode
-  io.decode.valid := false.B
+  io.rename.valid := false.B
   when (io.icache.out.fire) {
     val discardEntry = discardTillPC(iresp.wid)
 
@@ -152,7 +153,7 @@ class WarpScheduler(implicit p: Parameters)
         ipdomStack.pop(iresp.wid) // this will set newPC/newMask, reflected elsewhere
       }
 
-      io.decode.valid := !joins // joins are dealt with internally
+      io.rename.valid := !joins // joins are dealt with internally
     }
   }
 
