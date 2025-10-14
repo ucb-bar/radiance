@@ -1,4 +1,4 @@
-module TSMCCGWrapper(
+module EICG_wrapper(
   output out,
   input en,
   input test_en,
