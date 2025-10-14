@@ -160,7 +160,9 @@ class Frontend(implicit p: Parameters)
   { // rename
     renamer.io.softReset := false.B // TODO
     renamer.io.decode := warpScheduler.io.decode
-    ibuffer.io.enq :<>= renamer.io.ibuf
+    ibuffer.io.enq.entry.bits := renamer.io.ibuf.entry.bits
+    ibuffer.io.enq.entry.valid := renamer.io.ibuf.entry.valid
+    renamer.io.ibuf.count := ibuffer.io.enq.count
     dontTouch(renamer.io.ibuf)
   }
 

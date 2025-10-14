@@ -243,8 +243,8 @@ class WarpScheduler(implicit p: Parameters)
   }
 
   // misc
-  io.ibuf.enq.valid := false.B
-  io.ibuf.enq.bits := DontCare
+  io.ibuf.entry.valid := false.B
+  io.ibuf.entry.bits := DontCare
 }
 
 class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
