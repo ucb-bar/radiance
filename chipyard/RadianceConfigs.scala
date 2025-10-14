@@ -101,6 +101,7 @@ class RadianceTapeoutConfig extends Config(
   )
   )) ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
+  new freechips.rocketchip.subsystem.WithClockGateModel("TSMCCGWrapper.v") ++
   new RadianceTapeoutSimConfig)
 
 class RadianceClusterConfig extends Config(
