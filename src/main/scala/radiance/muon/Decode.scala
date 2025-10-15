@@ -1,7 +1,7 @@
 package radiance.muon
 
 import chisel3._
-import chisel3.util.MixedVec
+import chisel3.util._
 import freechips.rocketchip.util.UIntIsOneOf
 
 object MuOpcode {
@@ -64,6 +64,13 @@ case object HasRd    extends DecodeField
 case object HasRs1   extends DecodeField
 case object HasRs2   extends DecodeField
 case object HasRs3   extends DecodeField
+case object Imm24    extends DecodeField(24)
+case object Imm32    extends DecodeField(32)
+case object CsrAddr  extends DecodeField(32)
+case object CsrImm   extends DecodeField(8)
+case object ShAmt    extends DecodeField(7)
+case object ShOp     extends DecodeField(5)
+case object Raw      extends DecodeField(64)
 
 class Decoded extends Bundle {
 
@@ -71,14 +78,14 @@ class Decoded extends Bundle {
 
   def decode(field: DecodeField, signalIdx: Option[Int] = None)(implicit inst: UInt): UInt = {
     val value = field match {
-      case Opcode => inst(8, 0)
-      case F3 =>     inst(19, 17)
-      case F7 =>     inst(58, 52)
-      case Rd =>     inst(16, 9)
-      case Rs1 =>    inst(27, 20)
-      case Rs2 =>    inst(35, 28)
-      case Rs3 =>    inst(43, 36)
-      case Pred =>   inst(63, 60)
+      case Opcode =>    inst(8, 0)
+      case F3 =>        inst(19, 17)
+      case F7 =>        inst(58, 52)
+      case Rd =>        inst(16, 9)
+      case Rs1 =>       inst(27, 20)
+      case Rs2 =>       inst(35, 28)
+      case Rs3 =>       inst(43, 36)
+      case Pred =>      inst(63, 60)
       case IsTMC =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 0.U}
       case IsWSpawn =>  {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 1.U}
       case IsSplit =>   {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 2.U}
@@ -131,6 +138,17 @@ class Decoded extends Bundle {
           MuOpcode.NM_SUB,
           // TODO: maybe amo's here as well
         )
+      case CsrAddr => decode(Imm32)
+      case CsrImm  => inst(27, 20) // separate from rs1 since that'll be renamed
+      case Imm24 => inst(59, 36)
+      case Imm32 =>
+        Mux(decodeB(HasRd),
+          Cat(inst(35, 28), decode(Imm24)), // i2 type
+          Cat(inst(16, 9),  decode(Imm24))  // s/b type
+        )
+      case ShAmt => decode(Imm24).asUInt(6, 0)
+      case ShOp  => decode(Imm24).asUInt(11, 7)
+      case Raw   => inst
     }
     signals(signalIdx.getOrElse(Decoder.allDecodeFields.indexOf(field))) := value
     value
@@ -159,10 +177,13 @@ class Decoded extends Bundle {
 
 object Decoder {
   def allDecodeFields: Seq[DecodeField] = {
-    Seq(Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
-    IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
-    IsRType, IsIType, IsSType, IsBType, IsUJType,
-    HasRd, HasRs1, HasRs2, HasRs3)
+    Seq(
+      Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
+      IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
+      IsRType, IsIType, IsSType, IsBType, IsUJType,
+      HasRd, HasRs1, HasRs2, HasRs3,
+      Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
+    )
   }
 
   def decode(inst: UInt): Decoded = {
@@ -171,5 +192,4 @@ object Decoder {
     dec
   }
 }
-
 

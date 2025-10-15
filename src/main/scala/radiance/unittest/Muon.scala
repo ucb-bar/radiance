@@ -45,7 +45,11 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
-  be.io.ibuf <> cfe.io.ibuf
+  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
+    f.ready := b.ready
+    b.valid := f.valid
+    b.bits := f.bits.toUop
+  }
 
   dontTouch(be.io)
 
@@ -67,9 +71,9 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
     ib.valid   := bbox.io.ibuf.valid(i)
     ib.bits    := DontCare // default
-    ib.bits.pc := bbox.io.ibuf.pc(i)
-    ib.bits.op := bbox.io.ibuf.op(i)
-    ib.bits.rd := bbox.io.ibuf.rd(i)
+//    ib.bits.pc := bbox.io.ibuf.pc(i)
+//    ib.bits.op := bbox.io.ibuf.op(i)
+//    ib.bits.rd := bbox.io.ibuf.rd(i)
   }
 
   // TODO: correct ready
@@ -84,7 +88,7 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "NUM_LANES" -> p(MuonKey).numLanes,
       "OP_BITS"   -> Isa.opcodeBits,
       "REG_BITS"  -> Isa.regBits,
-      "IMM_BITS"  -> Isa.immBits,
+      "IMM_BITS"  -> 32,
       "PRED_BITS" -> Isa.predBits,
     ))
     with HasBlackBoxResource with HasMuonCoreParameters {

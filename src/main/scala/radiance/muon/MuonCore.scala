@@ -95,9 +95,9 @@ case class MuonCoreParams(
 
 // move to decode?
 object Isa {
-  def opcodeBits = 7
+  def opcodeBits = 9
   def regBits = 8
-  def immBits = 8
+  def csrImmBits = 8
   def predBits = 4
 }
 

@@ -98,7 +98,7 @@ class Frontend(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val imem = new InstMemIO
-    val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(uopT))
     // TODO: writeback
     val commit = commitIO
     val issue = issueIO

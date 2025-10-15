@@ -4,11 +4,11 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class Backend(implicit p: Parameters) extends CoreModule()(p) {
+class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBundles {
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val ibuf = Vec(muonParams.numWarps, Flipped(Decoupled(new InstBufferEntry)))
+    val ibuf = Vec(muonParams.numWarps, Flipped(Decoupled(uopT)))
   })
 
   io.ibuf.foreach(_.ready := true.B)
