@@ -14,6 +14,10 @@ import testchipip.serdes.TLSerdesser
 // Radiance Configs
 // ----------------
 
+class WithNoMbusScratchpad extends Config((site, here, up) => {
+  case testchipip.soc.BankedScratchpadKey => Seq()
+})
+
 class RadianceBaseConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
@@ -23,7 +27,9 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
+
   new WithRadianceControlBus ++
+  new WithNoMbusScratchpad ++
 
   new chipyard.config.WithPeripheryBusFrequency(500.0) ++
   new chipyard.config.WithMemoryBusFrequency(500.0) ++
