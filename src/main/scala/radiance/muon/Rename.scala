@@ -90,7 +90,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(arT)))
     Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
   }
-  val decodedReg = RegNext(decoded, 0.U.asTypeOf(decoded))
+
+  val shrunkDecoded = decoded.shrink()
+  val decodedReg = RegNext(shrunkDecoded, 0.U.asTypeOf(shrunkDecoded))
   val microInst = WireInit(decodedReg)
 
   regs.zipWithIndex.foreach { case (r, i) => // regs is rd/rs1/rs2/rs3

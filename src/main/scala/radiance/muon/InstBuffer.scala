@@ -43,7 +43,7 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasFr
     val u = Wire(uopT)
     u.pc := this.pc
     u.tmask := this.tmask
-    u.inst := Decoder.decode(this.raw)
+    u.inst := Decoder.decode(this.raw).shrink()
     u.inst(Rd) := this.rd
     u.inst(Rs1) := this.rs1
     u.inst(Rs2) := this.rs2

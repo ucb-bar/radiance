@@ -38,14 +38,18 @@ object MuOpcode {
   val NU_COMPLETE = "b101011011".U
 }
 
-abstract class DecodeField(val width: Int = 1)
-case object Opcode   extends DecodeField(9)
-case object F3       extends DecodeField(3)
-case object F7       extends DecodeField(7)
-case object Rd       extends DecodeField(8)
-case object Rs1      extends DecodeField(8)
-case object Rs2      extends DecodeField(8)
-case object Rs3      extends DecodeField(8)
+abstract class DecodeField(
+  val width: Int = 1,
+  val essential: Boolean = false // default not stored in ibuffer
+)
+
+case object Opcode   extends DecodeField(9, true)
+case object F3       extends DecodeField(3, true)
+case object F7       extends DecodeField(7, true)
+case object Rd       extends DecodeField(8, true)
+case object Rs1      extends DecodeField(8, true)
+case object Rs2      extends DecodeField(8, true)
+case object Rs3      extends DecodeField(8, true)
 case object Pred     extends DecodeField(4)
 case object IsTMC    extends DecodeField
 case object IsWSpawn extends DecodeField
@@ -54,27 +58,29 @@ case object IsJoin   extends DecodeField
 case object IsBar    extends DecodeField
 case object IsPred   extends DecodeField
 case object IsToHost extends DecodeField
-case object IsCSR    extends DecodeField
-case object IsRType  extends DecodeField
-case object IsIType  extends DecodeField
-case object IsSType  extends DecodeField
-case object IsBType  extends DecodeField
-case object IsUJType extends DecodeField
-case object HasRd    extends DecodeField
-case object HasRs1   extends DecodeField
-case object HasRs2   extends DecodeField
-case object HasRs3   extends DecodeField
-case object Imm24    extends DecodeField(24)
+case object IsCSR    extends DecodeField(1, true)
+case object IsRType  extends DecodeField(1, true)
+case object IsIType  extends DecodeField(1, true)
+case object IsSType  extends DecodeField(1, true)
+case object IsBType  extends DecodeField(1, true)
+case object IsUJType extends DecodeField(1, true)
+case object HasRd    extends DecodeField(1, true)
+case object HasRs1   extends DecodeField(1, true)
+case object HasRs2   extends DecodeField(1, true)
+case object HasRs3   extends DecodeField(1, true)
+case object ImmH8    extends DecodeField(8, true)
+case object Imm24    extends DecodeField(24, true)
 case object Imm32    extends DecodeField(32)
 case object CsrAddr  extends DecodeField(32)
-case object CsrImm   extends DecodeField(8)
+case object CsrImm   extends DecodeField(8, true)
 case object ShAmt    extends DecodeField(7)
 case object ShOp     extends DecodeField(5)
 case object Raw      extends DecodeField(64)
 
-class Decoded extends Bundle {
+class Decoded(full: Boolean = true) extends Bundle {
 
-  val signals = MixedVec(Decoder.allDecodeFields.map(f => UInt(f.width.W)))
+  val essentials = MixedVec(Decoder.essentialFields.map(f => UInt(f.width.W)))
+  val optionals = Option.when(full)(MixedVec(Decoder.optionalFields.map(f => UInt(f.width.W))))
 
   def decode(field: DecodeField, signalIdx: Option[Int] = None)(implicit inst: UInt): UInt = {
     val value = field match {
@@ -140,26 +146,45 @@ class Decoded extends Bundle {
         )
       case CsrAddr => decode(Imm32)
       case CsrImm  => inst(27, 20) // separate from rs1 since that'll be renamed
-      case Imm24 => inst(59, 36)
-      case Imm32 =>
-        Mux(decodeB(HasRd),
-          Cat(inst(35, 28), decode(Imm24)), // i2 type
-          Cat(inst(16, 9),  decode(Imm24))  // s/b type
+      case ImmH8 => Mux(decodeB(HasRd),
+          inst(35, 28), // i2 type
+          inst(16, 9),  // s/b type
         )
+      case Imm24 => inst(59, 36)
+      case Imm32 => Cat(decode(ImmH8), decode(Imm24))
       case ShAmt => decode(Imm24).asUInt(6, 0)
       case ShOp  => decode(Imm24).asUInt(11, 7)
       case Raw   => inst
     }
-    signals(signalIdx.getOrElse(Decoder.allDecodeFields.indexOf(field))) := value
+
+    if (field.essential) {
+      essentials(signalIdx.getOrElse(Decoder.essentialFields.indexOf(field))) := value
+    } else {
+      optionals.foreach(_(signalIdx.getOrElse(Decoder.optionalFields.indexOf(field))) := value)
+    }
+
     value
   }
 
   def decodeB(field: DecodeField)(implicit inst: UInt): Bool = decode(field)(inst)(0)
 
   def apply(field: DecodeField): UInt = {
-    val index = Decoder.allDecodeFields.indexOf(field)
-    require(index >= 0, s"Field $field not decoded here")
-    signals(index)
+    if (field.essential) {
+      val index = Decoder.essentialFields.indexOf(field)
+      require(index >= 0, s"Field $field not decoded here")
+      essentials(index)
+    } else {
+      if (full) {
+        val index = Decoder.optionalFields.indexOf(field)
+        require(index >= 0, s"Field $field not decoded here")
+        optionals.get(index)
+      } else {
+        println(s"WARNING\n===============\nOptional field $field is extracted " +
+          s"but the decoded bundle is not full. \nIt will be recomputed, but " +
+          s"it's best to call expand() to get the full bundle")
+        decode(field)(0.U(64.W))
+      }
+    }
   }
 
   def b(field: DecodeField): Bool = this(field)(0)
@@ -172,7 +197,28 @@ class Decoded extends Bundle {
   def f3     = this(F3)
   def f7     = this(F7)
 
-  // TODO immediates
+  def shrink(): Decoded = {
+    if (full) {
+      val shrunk = Wire(new Decoded(full = false))
+      shrunk.essentials := this.essentials
+      shrunk
+    } else {
+      this
+    }
+  }
+
+  def expand(): Decoded = {
+    if (full) {
+      this
+    } else {
+      val expanded = Wire(new Decoded(full = true))
+      expanded.essentials := this.essentials
+      Decoder.optionalFields.zipWithIndex.foreach { case (f, i) =>
+        expanded.decode(f, Some(i))(0.U(64.W))
+      }
+      expanded
+    }
+  }
 }
 
 object Decoder {
@@ -182,13 +228,23 @@ object Decoder {
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
       IsRType, IsIType, IsSType, IsBType, IsUJType,
       HasRd, HasRs1, HasRs2, HasRs3,
-      Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
+      ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
     )
   }
 
+  def essentialFields: Seq[DecodeField] = {
+    allDecodeFields.filter(_.essential)
+  }
+
+  def optionalFields: Seq[DecodeField] = {
+    allDecodeFields.filter(!_.essential)
+  }
+
   def decode(inst: UInt): Decoded = {
-    val dec = Wire(new Decoded)
-    allDecodeFields.zipWithIndex.foreach { case (f, i) => dec.decode(f, Some(i))(inst) }
+    val dec = Wire(new Decoded(full = true))
+    (essentialFields.zipWithIndex ++ optionalFields.zipWithIndex).foreach { case (f, i) =>
+      dec.decode(f, Some(i))(inst)
+    }
     dec
   }
 }

@@ -193,12 +193,10 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.issue.eligible := 0.U.asTypeOf(fe.io.issue.eligible)
   fe.io.commit := 0.U.asTypeOf(fe.io.commit)
   fe.io.hartId := io.hartId
-  dontTouch(fe.io)
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
-  dontTouch(be.io)
 
   be.io.ibuf <> fe.io.ibuf
 }
