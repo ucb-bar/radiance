@@ -11,6 +11,26 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBu
     val ibuf = Vec(muonParams.numWarps, Flipped(Decoupled(uopT)))
   })
 
+  // temporary placeholders to generate reg file banks for par
+  val rfBanks = Seq.fill(muonParams.numRegBanks)(SRAM(
+    size = muonParams.numPhysRegs / muonParams.numRegBanks,
+    tpe = UInt((muonParams.archLen * muonParams.numLanes).W),
+    numReadPorts = 1,
+    numWritePorts = 1,
+    numReadwritePorts = 0
+  ))
+
+  rfBanks.foreach { b =>
+    b.readPorts.head.enable := false.B
+    b.readPorts.head.address := 0.U
+    b.writePorts.head.enable := false.B
+    b.writePorts.head.address := 0.U
+    b.writePorts.head.data := 0.U
+
+    dontTouch(b.readPorts.head)
+    dontTouch(b.writePorts.head)
+  }
+
   io.ibuf.foreach(_.ready := true.B)
 
   // TODO: Scoreboard
