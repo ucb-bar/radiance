@@ -41,9 +41,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
     (rPorts, wPort)
   } else {
     val addrWidth = log2Up(totalARs)
-    val rPorts = Vec(4, new MemoryReadPort(prT, addrWidth))
-    val wPort = new MemoryWritePort(prT, addrWidth, false)
-    val table = RegInit(VecInit.fill(totalARs)(prT))
+    val rPorts = Wire(Vec(4, new MemoryReadPort(prT, addrWidth)))
+    val wPort = Wire(new MemoryWritePort(prT, addrWidth, false))
+    val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(prT)))
 
     rPorts.foreach { p =>
       p.data := DontCare
