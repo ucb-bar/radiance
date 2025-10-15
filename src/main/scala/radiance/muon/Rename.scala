@@ -26,16 +26,37 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   // val currentOccupancy = (1.U << clippedLogLogMask).asUInt
   val maxPRUsage = (m.numPhysRegs.U >> clippedLogLogMask).asUInt
 
-  val table = SRAM(
-    size = totalARs,
-    tpe = prT,
-    numReadPorts = 4,
-    numWritePorts = 1,
-    numReadwritePorts = 0
-  )
+  val useSRAM = false
 
-  val rPorts = table.readPorts
-  val wPort = table.writePorts.head
+  val (rPorts, wPort) = if (useSRAM) {
+    val table = SRAM(
+      size = totalARs,
+      tpe = prT,
+      numReadPorts = 4,
+      numWritePorts = 1,
+      numReadwritePorts = 0
+    )
+    val rPorts = table.readPorts
+    val wPort = table.writePorts.head
+    (rPorts, wPort)
+  } else {
+    val addrWidth = log2Up(totalARs)
+    val rPorts = Vec(4, new MemoryReadPort(prT, addrWidth))
+    val wPort = new MemoryWritePort(prT, addrWidth, false)
+    val table = RegInit(VecInit.fill(totalARs)(prT))
+
+    rPorts.foreach { p =>
+      p.data := DontCare
+      when (p.enable) {
+        p.data := table(p.address)
+      }
+    }
+    when (wPort.enable) {
+      table(wPort.address) := wPort.data
+    }
+    (rPorts, wPort)
+  }
+
 
   val wid = io.rename.bits.wid
   val decoded = Decoder.decode(io.rename.bits.inst)
