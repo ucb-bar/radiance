@@ -274,14 +274,14 @@ module CyclotronBlackBox #(
         __writeback_wspawn_pc
       );
     end
-    assign commit_0_valid = __writeback_valid && (__writeback_wid == '0);
-    assign commit_1_valid = __writeback_valid && (__writeback_wid == '1);
-    assign commit_2_valid = __writeback_valid && (__writeback_wid == '2);
-    assign commit_3_valid = __writeback_valid && (__writeback_wid == '3);
-    assign commit_4_valid = __writeback_valid && (__writeback_wid == '4);
-    assign commit_5_valid = __writeback_valid && (__writeback_wid == '5);
-    assign commit_6_valid = __writeback_valid && (__writeback_wid == '6);
-    assign commit_7_valid = __writeback_valid && (__writeback_wid == '7);
+    assign commit_0_valid = __writeback_valid && (__writeback_wid == 3'h0);
+    assign commit_1_valid = __writeback_valid && (__writeback_wid == 3'h1);
+    assign commit_2_valid = __writeback_valid && (__writeback_wid == 3'h2);
+    assign commit_3_valid = __writeback_valid && (__writeback_wid == 3'h3);
+    assign commit_4_valid = __writeback_valid && (__writeback_wid == 3'h4);
+    assign commit_5_valid = __writeback_valid && (__writeback_wid == 3'h5);
+    assign commit_6_valid = __writeback_valid && (__writeback_wid == 3'h6);
+    assign commit_7_valid = __writeback_valid && (__writeback_wid == 3'h7);
 
     assign commit_0_bits_setPC_valid =                 __writeback_set_pc_valid;
     assign commit_0_bits_setPC_bits =                  __writeback_set_pc;
