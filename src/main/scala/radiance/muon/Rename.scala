@@ -104,6 +104,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
   io.ibuf.entry.bits.uop.inst := microInst
   io.ibuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
   io.ibuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
+  io.ibuf.entry.bits.uop.wid := RegNext(io.rename.bits.wid)
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>

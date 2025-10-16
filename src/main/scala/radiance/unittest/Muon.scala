@@ -30,6 +30,40 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
+class MuonFrontendTestbench(implicit p: Parameters) extends Module {
+  val io = IO(new Bundle {
+    val finished = Bool()
+  })
+
+  val m = p(MuonKey)
+
+  val fe = Module(new Frontend()(p))
+  val cbe = Module(new CyclotronBlackBox)
+
+  cbe.io.clock := clock
+  cbe.io.reset := reset
+
+  // fe csr, hartid
+  fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
+  fe.io.hartId := 0.U
+
+  // fe ibuf -> cyclotron back end
+  cbe.io.ibuf.bits.fromUop(fe.io.ibuf.bits)
+  cbe.io.ibuf.valid := fe.io.ibuf.valid
+  fe.io.ibuf.ready := cbe.io.ibuf.ready
+
+  // cyclotron back end -> fe commit
+  fe.io.commit := cbe.io.commit
+
+  // fe imem <> cyclotron back end
+  cbe.io.imem.req <> fe.io.imem.req
+  fe.io.imem.resp <> cbe.io.imem.resp
+
+  io.finished := false.B
+
+  dontTouch(fe.io)
+}
+
 /** Testbench for Muon backend */
 class MuonBackendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
@@ -45,11 +79,15 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
-  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
-    f.ready := b.ready
-    b.valid := f.valid
-    b.bits := f.bits.toUop
-  }
+  be.io.ibuf.valid := cfe.io.ibuf.valid
+  be.io.ibuf.bits := cfe.io.ibuf.bits.toUop()
+  cfe.io.ibuf.ready := be.io.ibuf.ready
+
+//  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
+//    f.ready := b.ready
+//    b.valid := f.valid
+//    b.bits := f.bits.toUop()
+//  }
 
   dontTouch(be.io)
 
@@ -59,7 +97,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
 
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
-    val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
+    val ibuf = Decoupled(new InstBufferEntry)
     val finished = Output(Bool())
   })
 
@@ -68,13 +106,16 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   bbox.io.reset := reset.asBool
 
   // connect flattened Verilog IO to Chisel
-  io.ibuf.zipWithIndex.foreach { case (ib, i) =>
-    ib.valid   := bbox.io.ibuf.valid(i)
-    ib.bits    := DontCare // default
-//    ib.bits.pc := bbox.io.ibuf.pc(i)
-//    ib.bits.op := bbox.io.ibuf.op(i)
-//    ib.bits.rd := bbox.io.ibuf.rd(i)
-  }
+
+  io.ibuf.valid := false.B
+  io.ibuf.bits := DontCare
+//  io.ibuf.zipWithIndex.foreach { case (ib, i) =>
+//    ib.valid   := bbox.io.ibuf.valid(i)
+//    ib.bits    := DontCare // default
+////    ib.bits.pc := bbox.io.ibuf.pc(i)
+////    ib.bits.op := bbox.io.ibuf.op(i)
+////    ib.bits.rd := bbox.io.ibuf.rd(i)
+//  }
 
   // TODO: correct ready
   val alltrue = VecInit((0 to muonParams.numWarps).map(_ => true.B)).asUInt
@@ -91,19 +132,17 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "IMM_BITS"  -> 32,
       "PRED_BITS" -> Isa.predBits,
     ))
-    with HasBlackBoxResource with HasMuonCoreParameters {
+    with HasBlackBoxResource with HasMuonCoreParameters with HasFrontEndBundles {
   val numWarps = muonParams.numWarps
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
-    val ibuf = new Bundle {
-      val ready = Input(UInt(numWarps.W))
-      val valid = Output(UInt(numWarps.W))
-      val pc = Output(UInt((addressBits * numWarps).W))
-      val op = Output(UInt((Isa.opcodeBits * numWarps).W))
-      val rd = Output(UInt((Isa.regBits * numWarps).W))
-    }
+
+    val imem = Flipped(new InstMemIO)
+    val ibuf = Flipped(Decoupled(new InstBufferEntry))
+    val commit = Flipped(commitIO)
+
     val finished = Output(Bool())
   })
 
@@ -116,6 +155,11 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
 
 class MuonTest(timeout: Int = 100000)(implicit p: Parameters) extends UnitTest(timeout) {
   val dut = Module(new MuonTestbench()(p))
+  io.finished := dut.io.finished
+}
+
+class MuonFrontendTest(timeout: Int = 100000)(implicit p: Parameters) extends UnitTest(timeout) {
+  val dut = Module(new MuonFrontendTestbench()(p))
   io.finished := dut.io.finished
 }
 

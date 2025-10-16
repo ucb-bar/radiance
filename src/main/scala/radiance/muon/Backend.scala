@@ -8,7 +8,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBu
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val ibuf = Vec(muonParams.numWarps, Flipped(Decoupled(uopT)))
+    val ibuf = Flipped(Decoupled(uopT))
   })
 
   // temporary placeholders to generate reg file banks for par
@@ -31,7 +31,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBu
     dontTouch(b.writePorts.head)
   }
 
-  io.ibuf.foreach(_.ready := true.B)
+  io.ibuf.ready := true.B
 
   // TODO: Scoreboard
   // TODO: Issue queue

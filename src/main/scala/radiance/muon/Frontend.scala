@@ -70,6 +70,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
     val inst = new Decoded(full = false)
     val tmask = tmaskT
     val pc = pcT
+    val wid = widT
   }
 
   def renameIO = ValidIO(new Bundle {
@@ -98,10 +99,10 @@ class Frontend(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val imem = new InstMemIO
-    val ibuf = Vec(muonParams.numWarps, Decoupled(uopT))
+    val ibuf = Decoupled(uopT)
     // TODO: writeback
     val commit = commitIO
-    val issue = issueIO
+//    val issue = issueIO
     val csr = csrIO
     val cmdProc: Option[Bundle] = None
     val hartId = Input(UInt(muonParams.hartIdBits.W))
@@ -139,7 +140,6 @@ class Frontend(implicit p: Parameters)
 //    i$.out.bits.pc := resp.bits.metadata.pc
 
     io.commit <> warpScheduler.io.commit
-    io.issue <> warpScheduler.io.issue
     io.csr <> warpScheduler.io.csr
 
     io.cmdProc.foreach { c =>
@@ -175,10 +175,16 @@ class Frontend(implicit p: Parameters)
     renamer.io.ibuf.count := ibuffer.io.enq.count
   }
 
-  // IBuffer
-  {
-
+  { // ibuffer
+    val eligible = VecInit(ibuffer.io.deq.map(_.valid)).asUInt
+    warpScheduler.io.issue.eligible.bits := eligible
+    warpScheduler.io.issue.eligible.valid := io.ibuf.ready
+    val winner = warpScheduler.io.issue.issued
+    io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
+    io.ibuf.valid := eligible.orR
+    (ibuffer.io.deq zip winner.asBools).foreach { case (warpBuf, w) =>
+      warpBuf.ready := io.ibuf.ready && w
+    }
   }
 
-  io.ibuf <> ibuffer.io.deq
 }

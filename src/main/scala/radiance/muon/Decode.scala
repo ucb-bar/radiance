@@ -82,88 +82,94 @@ class Decoded(full: Boolean = true) extends Bundle {
   val essentials = MixedVec(Decoder.essentialFields.map(f => UInt(f.width.W)))
   val optionals = Option.when(full)(MixedVec(Decoder.optionalFields.map(f => UInt(f.width.W))))
 
-  def decode(field: DecodeField, signalIdx: Option[Int] = None)(implicit inst: UInt): UInt = {
-    val value = field match {
-      case Opcode =>    inst(8, 0)
-      case F3 =>        inst(19, 17)
-      case F7 =>        inst(58, 52)
-      case Rd =>        inst(16, 9)
-      case Rs1 =>       inst(27, 20)
-      case Rs2 =>       inst(35, 28)
-      case Rs3 =>       inst(43, 36)
-      case Pred =>      inst(63, 60)
-      case IsTMC =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 0.U}
-      case IsWSpawn =>  {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 1.U}
-      case IsSplit =>   {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 2.U}
-      case IsJoin =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 3.U}
-      case IsBar =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 4.U}
-      case IsPred =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 5.U}
-      case IsToHost =>  {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) === 0.U}
-      case IsCSR =>     {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) =/= 0.U}
-      case IsRType =>
-        decode(Opcode).isOneOf(
-          MuOpcode.CUSTOM0,
-          MuOpcode.CUSTOM1,
-          MuOpcode.CUSTOM2,
-          MuOpcode.CUSTOM3,
-          MuOpcode.OP,
-          MuOpcode.OP_FP,
-        )
-      case IsIType =>
-        decode(Opcode).isOneOf(
-          MuOpcode.LOAD,
-    //    MuOpcode.LOAD_FP, // not used
-          MuOpcode.MISC_MEM, // fence
-          MuOpcode.OP_IMM,
-          MuOpcode.SYSTEM,
-          MuOpcode.JALR,
-        )
-      case IsSType =>
-        decode(Opcode).isOneOf(
-          MuOpcode.STORE,
-    //    MuOpcode.STORE_FP, // not used
-        )
-      case IsBType =>
-        decode(Opcode).isOneOf(
-          MuOpcode.BRANCH,
-        )
-      case IsUJType =>
-        decode(Opcode).isOneOf(
-          MuOpcode.LUI, // should not be generated
-          MuOpcode.AUIPC,
-          MuOpcode.JAL,
-        )
-      case HasRd =>  !decodeB(IsBType) && !decodeB(IsSType)
-      case HasRs1 => !decodeB(IsUJType)
-      case HasRs2 => decodeB(IsRType) || decodeB(IsSType) || decodeB(IsBType)
-      case HasRs3 =>
-        opcode.isOneOf(
-          MuOpcode.MADD,
-          MuOpcode.MSUB,
-          MuOpcode.NM_ADD,
-          MuOpcode.NM_SUB,
-          // TODO: maybe amo's here as well
-        )
-      case CsrAddr => decode(Imm32)
-      case CsrImm  => inst(27, 20) // separate from rs1 since that'll be renamed
-      case ImmH8 => Mux(decodeB(HasRd),
-          inst(35, 28), // i2 type
-          inst(16, 9),  // s/b type
-        )
-      case Imm24 => inst(59, 36)
-      case Imm32 => Cat(decode(ImmH8), decode(Imm24))
-      case ShAmt => decode(Imm24).asUInt(6, 0)
-      case ShOp  => decode(Imm24).asUInt(11, 7)
-      case Raw   => inst
-    }
-
-    if (field.essential) {
-      essentials(signalIdx.getOrElse(Decoder.essentialFields.indexOf(field))) := value
+  def decode(field: DecodeField, signalIdx: Option[Int] = None)
+            (implicit inst: UInt): UInt = {
+    if (!full && field.essential) {
+      // this should be pre-assigned in `shrink()`, short circuit to prevent decoding from false inst
+      this(field)
     } else {
-      optionals.foreach(_(signalIdx.getOrElse(Decoder.optionalFields.indexOf(field))) := value)
-    }
+      val value = field match {
+        case Opcode =>    inst(8, 0)
+        case F3 =>        inst(19, 17)
+        case F7 =>        inst(58, 52)
+        case Rd =>        inst(16, 9)
+        case Rs1 =>       inst(27, 20)
+        case Rs2 =>       inst(35, 28)
+        case Rs3 =>       inst(43, 36)
+        case Pred =>      inst(63, 60)
+        case IsTMC =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 0.U}
+        case IsWSpawn =>  {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 1.U}
+        case IsSplit =>   {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 2.U}
+        case IsJoin =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 3.U}
+        case IsBar =>     {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 4.U}
+        case IsPred =>    {decode(Opcode) === MuOpcode.CUSTOM0 && decode(F3) === 5.U}
+        case IsToHost =>  {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) === 0.U}
+        case IsCSR =>     {decode(Opcode) === MuOpcode.SYSTEM  && decode(F3) =/= 0.U}
+        case IsRType =>
+          decode(Opcode).isOneOf(
+            MuOpcode.CUSTOM0,
+            MuOpcode.CUSTOM1,
+            MuOpcode.CUSTOM2,
+            MuOpcode.CUSTOM3,
+            MuOpcode.OP,
+            MuOpcode.OP_FP,
+          )
+        case IsIType =>
+          decode(Opcode).isOneOf(
+            MuOpcode.LOAD,
+      //    MuOpcode.LOAD_FP, // not used
+            MuOpcode.MISC_MEM, // fence
+            MuOpcode.OP_IMM,
+            MuOpcode.SYSTEM,
+            MuOpcode.JALR,
+          )
+        case IsSType =>
+          decode(Opcode).isOneOf(
+            MuOpcode.STORE,
+      //    MuOpcode.STORE_FP, // not used
+          )
+        case IsBType =>
+          decode(Opcode).isOneOf(
+            MuOpcode.BRANCH,
+          )
+        case IsUJType =>
+          decode(Opcode).isOneOf(
+            MuOpcode.LUI, // should not be generated
+            MuOpcode.AUIPC,
+            MuOpcode.JAL,
+          )
+        case HasRd =>  !decodeB(IsBType) && !decodeB(IsSType)
+        case HasRs1 => !decodeB(IsUJType)
+        case HasRs2 => decodeB(IsRType) || decodeB(IsSType) || decodeB(IsBType)
+        case HasRs3 =>
+          opcode.isOneOf(
+            MuOpcode.MADD,
+            MuOpcode.MSUB,
+            MuOpcode.NM_ADD,
+            MuOpcode.NM_SUB,
+            // TODO: maybe amo's here as well
+          )
+        case CsrAddr => decode(Imm32)
+        case CsrImm  => inst(27, 20) // separate from rs1 since that'll be renamed
+        case ImmH8 => Mux(decodeB(HasRd),
+            inst(35, 28), // i2 type
+            inst(16, 9),  // s/b type
+          )
+        case Imm24 => inst(59, 36)
+        case Imm32 => Cat(decode(ImmH8), decode(Imm24))
+        case ShAmt => decode(Imm24).asUInt(6, 0)
+        case ShOp  => decode(Imm24).asUInt(11, 7)
+        case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(Rs1), decode(Rd), decode(Opcode))
+      }
 
-    value
+      if (field.essential) {
+        essentials(signalIdx.getOrElse(Decoder.essentialFields.indexOf(field))) := value
+      } else {
+        optionals.foreach(_(signalIdx.getOrElse(Decoder.optionalFields.indexOf(field))) := value)
+      }
+
+      value
+    }
   }
 
   def decodeB(field: DecodeField)(implicit inst: UInt): Bool = decode(field)(inst)(0)
@@ -179,9 +185,7 @@ class Decoded(full: Boolean = true) extends Bundle {
         require(index >= 0, s"Field $field not decoded here")
         optionals.get(index)
       } else {
-        println(s"WARNING\n===============\nOptional field $field is extracted " +
-          s"but the decoded bundle is not full. \nIt will be recomputed, but " +
-          s"it's best to call expand() to get the full bundle")
+        require(false, s"ERROR\n===============\nOptional field $field is extracted")
         decode(field)(0.U(64.W))
       }
     }
@@ -214,7 +218,9 @@ class Decoded(full: Boolean = true) extends Bundle {
       val expanded = Wire(new Decoded(full = true))
       expanded.essentials := this.essentials
       Decoder.optionalFields.zipWithIndex.foreach { case (f, i) =>
-        expanded.decode(f, Some(i))(0.U(64.W))
+        expanded.optionals.get(i) := this.decode(f, Some(i))(0.U)
+
+//        expanded.decode(f, Some(i))(0.U(64.W), from) // TODO
       }
       expanded
     }

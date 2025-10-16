@@ -190,7 +190,6 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
-  fe.io.issue.eligible := 0.U.asTypeOf(fe.io.issue.eligible)
   fe.io.commit := 0.U.asTypeOf(fe.io.commit)
   fe.io.hartId := io.hartId
 
