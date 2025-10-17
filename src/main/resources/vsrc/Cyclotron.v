@@ -198,6 +198,21 @@ module CyclotronBlackBox #(
     output int  writeback_wspawn_pc
   );
 
+  import "DPI-C" function void cyclotron_imem(
+    output byte imem_req_ready,
+    input  byte imem_req_valid,
+    input  byte imem_req_bits_store,
+    input  int  imem_req_bits_address,
+    input  byte imem_req_bits_size,
+    input  byte imem_req_bits_tag,
+    input  longint imem_req_bits_data,
+    input  byte imem_req_bits_mask,
+    input  byte imem_resp_ready,
+    output byte imem_resp_valid,
+    output byte imem_resp_bits_tag,
+    output longint imem_resp_bits_data
+  );
+
   // "in": C->verilog, "out": verilog->C
   // need to be in ascending order to match with C array memory layout
   bit     __out_ibuf_ready [0:NUM_WARPS-1];
@@ -272,6 +287,21 @@ module CyclotronBlackBox #(
         __writeback_wspawn_valid,
         __writeback_wspawn_count,
         __writeback_wspawn_pc
+      );
+
+      cyclotron_imem(
+        imem_req_ready,
+        imem_req_valid,
+        imem_req_bits_store,
+        imem_req_bits_address,
+        imem_req_bits_size,
+        imem_req_bits_tag,
+        imem_req_bits_data,
+        imem_req_bits_mask,
+        imem_resp_ready,
+        imem_resp_valid,
+        imem_resp_bits_tag,
+        imem_resp_bits_data
       );
     end
     assign commit_0_valid = __writeback_valid && (__writeback_wid == 3'h0);

@@ -42,6 +42,7 @@ extern "C" void cyclotron_backend_rs(
     uint8_t* writeback_valid_ptr,
     uint32_t* writeback_pc_ptr,
     uint32_t* writeback_tmask_ptr,
+    uint8_t* writeback_wid_ptr,
     uint8_t* writeback_rd_addr_ptr,
     uint32_t* writeback_rd_data_ptr,
     uint8_t* writeback_set_pc_valid_ptr,
@@ -77,6 +78,7 @@ extern "C" void cyclotron_backend(
     uint8_t* writeback_valid,
     uint32_t* writeback_pc,
     uint32_t* writeback_tmask,
+    uint8_t* writeback_wid,
     uint8_t* writeback_rd_addr,
     uint32_t* writeback_rd_data,
     uint8_t* writeback_set_pc_valid,
@@ -87,7 +89,6 @@ extern "C" void cyclotron_backend(
     uint32_t* writeback_wspawn_count,
     uint32_t* writeback_wspawn_pc
 ) {
-    // Forward to Rust FFI, converting scalars to pointers as needed
     cyclotron_backend_rs(
         issue_valid,
         issue_warp_id,
@@ -112,6 +113,7 @@ extern "C" void cyclotron_backend(
         writeback_valid,
         writeback_pc,
         writeback_tmask,
+        writeback_wid,
         writeback_rd_addr,
         writeback_rd_data,
         writeback_set_pc_valid,
@@ -121,5 +123,50 @@ extern "C" void cyclotron_backend(
         writeback_wspawn_valid,
         writeback_wspawn_count,
         writeback_wspawn_pc
+    );
+}
+
+extern "C" void cyclotron_imem_rs(
+    uint8_t* imem_req_ready_ptr,
+    const uint8_t imem_req_valid,
+    const uint8_t imem_req_bits_store,
+    const uint32_t imem_req_bits_address,
+    const uint8_t imem_req_bits_size,
+    const uint8_t imem_req_bits_tag,
+    const uint64_t imem_req_bits_data,
+    const uint8_t imem_req_bits_mask,
+    const uint8_t imem_resp_ready,
+    uint8_t* imem_resp_valid_ptr,
+    uint8_t* imem_resp_bits_tag_ptr,
+    uint64_t* imem_resp_bits_data_ptr
+);
+
+extern "C" void cyclotron_imem(
+    uint8_t* imem_req_ready,
+    const uint8_t imem_req_valid,
+    const uint8_t imem_req_bits_store,
+    const uint32_t imem_req_bits_address,
+    const uint8_t imem_req_bits_size,
+    const uint8_t imem_req_bits_tag,
+    const uint64_t imem_req_bits_data,
+    const uint8_t imem_req_bits_mask,
+    const uint8_t imem_resp_ready,
+    uint8_t* imem_resp_valid,
+    uint8_t* imem_resp_bits_tag,
+    uint64_t* imem_resp_bits_data
+) {
+    cyclotron_imem_rs(
+        imem_req_ready,
+        imem_req_valid,
+        imem_req_bits_store,
+        imem_req_bits_address,
+        imem_req_bits_size,
+        imem_req_bits_tag,
+        imem_req_bits_data,
+        imem_req_bits_mask,
+        imem_resp_ready,
+        imem_resp_valid,
+        imem_resp_bits_tag,
+        imem_resp_bits_data
     );
 }
