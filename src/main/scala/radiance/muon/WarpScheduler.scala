@@ -22,7 +22,9 @@ class WarpScheduler(implicit p: Parameters)
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
   })
 
-  val threadMasks = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(tmaskT)))
+  val threadMasks = RegInit(VecInit.tabulate(m.numWarps) { wid =>
+    if (wid == 0) { -1.S(tmaskT.getWidth).asUInt } else { 0.U.asTypeOf(tmaskT) }
+  })
   val pcTracker = io.cmdProc match {
     case Some(_) => RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
     case None => RegInit(VecInit.tabulate(m.numWarps) { wid =>
@@ -135,19 +137,20 @@ class WarpScheduler(implicit p: Parameters)
       when (iresp.pc === discardEntry.bits) {
         // exit discard mode
         discardEntry.valid := false.B
+
       }
     }.otherwise {
+      // not currently in discard mode, might enter if instruction is stalling
       val (stalls, joins) = Predecoder.decode(iresp.inst)
       when (stalls) {
         // non join hazards stall
         stallTracker.stall(iresp.wid, iresp.pc)
+        // reset fetch PC to post-stall
+        pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
       }
       // joins still enables discard, but does not stall
       discardEntry.valid := stalls || joins
       // discardEntry.bits is being set to the latest issued pc when we fetch
-
-      // reset fetch PC to post-stall
-      pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
 
       when (joins) {
         ipdomStack.pop(iresp.wid) // this will set newPC/newMask, reflected elsewhere

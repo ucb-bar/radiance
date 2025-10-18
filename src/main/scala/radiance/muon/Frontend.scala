@@ -51,7 +51,7 @@ trait HasFrontEndBundles extends HasMuonCoreParameters {
 
   def issueIO = new Bundle {
     val eligible = Flipped(ValidIO(wmaskT))
-    val issued = Output(wmaskT) // 1H, next cycle from input
+    val issued = Output(widT) // comb
   }
 
   def csrIO = new Bundle {
@@ -179,7 +179,7 @@ class Frontend(implicit p: Parameters)
     val eligible = VecInit(ibuffer.io.deq.map(_.valid)).asUInt
     warpScheduler.io.issue.eligible.bits := eligible
     warpScheduler.io.issue.eligible.valid := io.ibuf.ready
-    val winner = warpScheduler.io.issue.issued
+    val winner = UIntToOH(warpScheduler.io.issue.issued)
     io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
     io.ibuf.valid := eligible.orR
     (ibuffer.io.deq zip winner.asBools).foreach { case (warpBuf, w) =>

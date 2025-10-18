@@ -236,13 +236,71 @@ module CyclotronBlackBox #(
   int  __writeback_wspawn_count;
   int  __writeback_wspawn_pc;
 
+  byte __imem_req_ready;
+  byte __imem_resp_valid;
+  byte __imem_resp_bits_tag;
+  longint __imem_resp_bits_data;
+
   assign finished = 1'b0;
 
   // TODO: simulate backpressure
   assign ibuf_ready = 1'b1;
+
+  always @(negedge clock) begin
+    cyclotron_backend(
+      ibuf_valid,
+      ibuf_bits_wid,
+      ibuf_bits_pc,
+      ibuf_bits_op[6:0],
+      ibuf_bits_op[8:7],
+      ibuf_bits_f3,
+      ibuf_bits_rd,
+      ibuf_bits_rs1,
+      ibuf_bits_rs2,
+      ibuf_bits_rs3,
+      32'h0,
+      32'h0,
+      32'h0,
+      ibuf_bits_f7,
+      ibuf_bits_imm32,
+      ibuf_bits_imm24,
+      ibuf_bits_csrImm,
+      ibuf_bits_pred,
+      ibuf_bits_tmask,
+      ibuf_bits_raw,
+      __writeback_valid,
+      __writeback_pc,
+      __writeback_tmask,
+      __writeback_wid,
+      __writeback_rd_addr,
+      __writeback_rd_data,
+      __writeback_set_pc_valid,
+      __writeback_set_pc,
+      __writeback_set_tmask_valid,
+      __writeback_set_tmask,
+      __writeback_wspawn_valid,
+      __writeback_wspawn_count,
+      __writeback_wspawn_pc
+    );
+
+    cyclotron_imem(
+      __imem_req_ready,
+      imem_req_valid,
+      imem_req_bits_store,
+      imem_req_bits_address,
+      imem_req_bits_size,
+      imem_req_bits_tag,
+      imem_req_bits_data,
+      imem_req_bits_mask,
+      imem_resp_ready,
+      __imem_resp_valid,
+      __imem_resp_bits_tag,
+      __imem_resp_bits_data
+    );
+  end
+
   always @(posedge clock) begin
     if (reset) begin
-      imem_req_ready <= 1'b0;
       imem_resp_valid <= 1'b0;
       commit_0_valid <= 1'b0;
       commit_1_valid <= 1'b0;
@@ -253,170 +311,127 @@ module CyclotronBlackBox #(
       commit_6_valid <= 1'b0;
       commit_7_valid <= 1'b0;
     end else begin
-      cyclotron_backend(
-        ibuf_valid,
-        ibuf_bits_wid,
-        ibuf_bits_pc,
-        ibuf_bits_op[6:0],
-        ibuf_bits_op[8:7],
-        ibuf_bits_f3,
-        ibuf_bits_rd,
-        ibuf_bits_rs1,
-        ibuf_bits_rs2,
-        ibuf_bits_rs3,
-        32'h0,
-        32'h0,
-        32'h0,
-        ibuf_bits_f7,
-        ibuf_bits_imm32,
-        ibuf_bits_imm24,
-        ibuf_bits_csrImm,
-        ibuf_bits_pred,
-        ibuf_bits_tmask,
-        ibuf_bits_raw,
-        __writeback_valid,
-        __writeback_pc,
-        __writeback_tmask,
-        __writeback_wid,
-        __writeback_rd_addr,
-        __writeback_rd_data,
-        __writeback_set_pc_valid,
-        __writeback_set_pc,
-        __writeback_set_tmask_valid,
-        __writeback_set_tmask,
-        __writeback_wspawn_valid,
-        __writeback_wspawn_count,
-        __writeback_wspawn_pc
-      );
 
-      cyclotron_imem(
-        imem_req_ready,
-        imem_req_valid,
-        imem_req_bits_store,
-        imem_req_bits_address,
-        imem_req_bits_size,
-        imem_req_bits_tag,
-        imem_req_bits_data,
-        imem_req_bits_mask,
-        imem_resp_ready,
-        imem_resp_valid,
-        imem_resp_bits_tag,
-        imem_resp_bits_data
-      );
+      commit_0_valid <= __writeback_valid && (__writeback_wid == 3'h0);
+      commit_1_valid <= __writeback_valid && (__writeback_wid == 3'h1);
+      commit_2_valid <= __writeback_valid && (__writeback_wid == 3'h2);
+      commit_3_valid <= __writeback_valid && (__writeback_wid == 3'h3);
+      commit_4_valid <= __writeback_valid && (__writeback_wid == 3'h4);
+      commit_5_valid <= __writeback_valid && (__writeback_wid == 3'h5);
+      commit_6_valid <= __writeback_valid && (__writeback_wid == 3'h6);
+      commit_7_valid <= __writeback_valid && (__writeback_wid == 3'h7);
+
+      commit_0_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_0_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_0_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_0_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_0_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_0_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_0_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_0_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_0_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_0_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_0_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_0_bits_pc                           <= __writeback_pc;
+
+      commit_1_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_1_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_1_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_1_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_1_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_1_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_1_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_1_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_1_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_1_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_1_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_1_bits_pc                           <= __writeback_pc;
+
+      commit_2_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_2_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_2_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_2_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_2_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_2_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_2_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_2_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_2_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_2_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_2_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_2_bits_pc                           <= __writeback_pc;
+
+      commit_3_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_3_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_3_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_3_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_3_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_3_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_3_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_3_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_3_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_3_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_3_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_3_bits_pc                           <= __writeback_pc;
+
+      commit_4_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_4_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_4_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_4_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_4_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_4_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_4_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_4_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_4_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_4_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_4_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_4_bits_pc                           <= __writeback_pc;
+
+      commit_5_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_5_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_5_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_5_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_5_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_5_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_5_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_5_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_5_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_5_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_5_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_5_bits_pc                           <= __writeback_pc;
+
+      commit_6_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_6_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_6_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_6_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_6_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_6_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_6_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_6_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_6_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_6_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_6_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_6_bits_pc                           <= __writeback_pc;
+
+      commit_7_bits_setPC_valid                  <= __writeback_set_pc_valid;
+      commit_7_bits_setPC_bits                   <= __writeback_set_pc;
+      commit_7_bits_setTmask_valid               <= __writeback_set_tmask_valid;
+      commit_7_bits_setTmask_bits                <= __writeback_set_tmask;
+      commit_7_bits_ipdomPush_valid              <= 1'b0; // TODO
+      commit_7_bits_ipdomPush_bits_restoredMask  <= '0; // TODO
+      commit_7_bits_ipdomPush_bits_elseMask      <= '0; // TODO
+      commit_7_bits_ipdomPush_bits_elsePC        <= '0; // TODO
+      commit_7_bits_wspawn_valid                 <= __writeback_wspawn_valid;
+      commit_7_bits_wspawn_bits_count            <= __writeback_wspawn_count;
+      commit_7_bits_wspawn_bits_pc               <= __writeback_wspawn_pc;
+      commit_7_bits_pc                           <= __writeback_pc;
+
+      imem_resp_valid     <= __imem_resp_valid;
+      imem_resp_bits_data <= __imem_resp_bits_data;
+      imem_resp_bits_tag  <= __imem_resp_bits_tag;
+
     end
-    assign commit_0_valid = __writeback_valid && (__writeback_wid == 3'h0);
-    assign commit_1_valid = __writeback_valid && (__writeback_wid == 3'h1);
-    assign commit_2_valid = __writeback_valid && (__writeback_wid == 3'h2);
-    assign commit_3_valid = __writeback_valid && (__writeback_wid == 3'h3);
-    assign commit_4_valid = __writeback_valid && (__writeback_wid == 3'h4);
-    assign commit_5_valid = __writeback_valid && (__writeback_wid == 3'h5);
-    assign commit_6_valid = __writeback_valid && (__writeback_wid == 3'h6);
-    assign commit_7_valid = __writeback_valid && (__writeback_wid == 3'h7);
-
-    assign commit_0_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_0_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_0_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_0_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_0_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_0_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_0_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_0_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_0_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_0_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_0_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_0_bits_pc =                          __writeback_pc;
-
-    assign commit_1_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_1_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_1_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_1_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_1_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_1_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_1_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_1_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_1_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_1_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_1_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_1_bits_pc =                          __writeback_pc;
-
-    assign commit_2_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_2_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_2_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_2_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_2_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_2_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_2_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_2_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_2_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_2_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_2_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_2_bits_pc =                          __writeback_pc;
-
-    assign commit_3_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_3_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_3_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_3_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_3_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_3_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_3_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_3_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_3_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_3_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_3_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_3_bits_pc =                          __writeback_pc;
-
-    assign commit_4_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_4_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_4_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_4_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_4_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_4_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_4_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_4_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_4_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_4_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_4_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_4_bits_pc =                          __writeback_pc;
-
-    assign commit_5_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_5_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_5_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_5_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_5_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_5_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_5_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_5_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_5_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_5_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_5_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_5_bits_pc =                          __writeback_pc;
-
-    assign commit_6_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_6_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_6_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_6_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_6_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_6_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_6_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_6_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_6_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_6_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_6_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_6_bits_pc =                          __writeback_pc;
-
-    assign commit_7_bits_setPC_valid =                 __writeback_set_pc_valid;
-    assign commit_7_bits_setPC_bits =                  __writeback_set_pc;
-    assign commit_7_bits_setTmask_valid =              __writeback_set_tmask_valid;
-    assign commit_7_bits_setTmask_bits =               __writeback_set_tmask;
-    assign commit_7_bits_ipdomPush_valid =             1'b0; // TODO
-    assign commit_7_bits_ipdomPush_bits_restoredMask = '0; // TODO
-    assign commit_7_bits_ipdomPush_bits_elseMask =     '0; // TODO
-    assign commit_7_bits_ipdomPush_bits_elsePC =       '0; // TODO
-    assign commit_7_bits_wspawn_valid =                __writeback_wspawn_valid;
-    assign commit_7_bits_wspawn_bits_count =           __writeback_wspawn_count;
-    assign commit_7_bits_wspawn_bits_pc =              __writeback_wspawn_pc;
-    assign commit_7_bits_pc =                          __writeback_pc;
   end
+  assign imem_req_ready = __imem_req_ready;
 //   genvar g;
 //   generate
 //     for (g = 0; g < NUM_WARPS; g = g + 1) begin

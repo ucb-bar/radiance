@@ -46,10 +46,11 @@ class Rename(implicit p: Parameters) extends CoreModule with HasFrontEndBundles 
     val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(prT)))
 
     rPorts.foreach { p =>
-      p.data := DontCare
-      when (p.enable) {
-        p.data := table(p.address)
-      }
+      p.data := RegNext(table(p.address), 0.U)
+//      p.data := DontCare
+//      when (p.enable) {
+//        p.data := RegNext(table(p.address))
+//      }
     }
     when (wPort.enable) {
       table(wPort.address) := wPort.data

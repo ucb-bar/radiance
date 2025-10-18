@@ -159,7 +159,7 @@ class Decoded(full: Boolean = true) extends Bundle {
         case Imm32 => Cat(decode(ImmH8), decode(Imm24))
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
-        case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(Rs1), decode(Rd), decode(Opcode))
+        case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
       }
 
       if (field.essential) {
