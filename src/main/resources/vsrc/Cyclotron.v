@@ -195,7 +195,8 @@ module CyclotronBlackBox #(
     output int  writeback_set_tmask,
     output byte writeback_wspawn_valid,
     output int  writeback_wspawn_count,
-    output int  writeback_wspawn_pc
+    output int  writeback_wspawn_pc,
+    output byte finished
   );
 
   import "DPI-C" function void cyclotron_imem(
@@ -220,7 +221,6 @@ module CyclotronBlackBox #(
   int     __in_ibuf_pc     [0:NUM_WARPS-1];
   int     __in_ibuf_op     [0:NUM_WARPS-1];
   int     __in_ibuf_rd     [0:NUM_WARPS-1];
-  bit     __in_finished;
 
   byte __writeback_valid;
   int  __writeback_pc;
@@ -235,13 +235,13 @@ module CyclotronBlackBox #(
   byte __writeback_wspawn_valid;
   int  __writeback_wspawn_count;
   int  __writeback_wspawn_pc;
+  byte __finished;
 
   byte __imem_req_ready;
   byte __imem_resp_valid;
   byte __imem_resp_bits_tag;
   longint __imem_resp_bits_data;
 
-  assign finished = 1'b0;
 
   // TODO: simulate backpressure
   assign ibuf_ready = 1'b1;
@@ -280,7 +280,8 @@ module CyclotronBlackBox #(
       __writeback_set_tmask,
       __writeback_wspawn_valid,
       __writeback_wspawn_count,
-      __writeback_wspawn_pc
+      __writeback_wspawn_pc,
+      __finished
     );
 
     cyclotron_imem(
@@ -310,7 +311,10 @@ module CyclotronBlackBox #(
       commit_5_valid <= 1'b0;
       commit_6_valid <= 1'b0;
       commit_7_valid <= 1'b0;
+      finished <= 1'b0;
     end else begin
+
+      // i love the conciseness of verilog
 
       commit_0_valid <= __writeback_valid && (__writeback_wid == 3'h0);
       commit_1_valid <= __writeback_valid && (__writeback_wid == 3'h1);
@@ -428,6 +432,8 @@ module CyclotronBlackBox #(
       imem_resp_valid     <= __imem_resp_valid;
       imem_resp_bits_data <= __imem_resp_bits_data;
       imem_resp_bits_tag  <= __imem_resp_bits_tag;
+
+      finished <= __finished;
 
     end
   end

@@ -51,7 +51,8 @@ extern "C" void cyclotron_backend_rs(
     uint32_t* writeback_set_tmask_ptr,
     uint8_t* writeback_wspawn_valid_ptr,
     uint32_t* writeback_wspawn_count_ptr,
-    uint32_t* writeback_wspawn_pc_ptr
+    uint32_t* writeback_wspawn_pc_ptr,
+    uint8_t* finished_ptr
 );
 
 extern "C" void cyclotron_backend(
@@ -87,7 +88,8 @@ extern "C" void cyclotron_backend(
     uint32_t* writeback_set_tmask,
     uint8_t* writeback_wspawn_valid,
     uint32_t* writeback_wspawn_count,
-    uint32_t* writeback_wspawn_pc
+    uint32_t* writeback_wspawn_pc,
+    uint8_t* finished
 ) {
     cyclotron_backend_rs(
         issue_valid,
@@ -122,7 +124,8 @@ extern "C" void cyclotron_backend(
         writeback_set_tmask,
         writeback_wspawn_valid,
         writeback_wspawn_count,
-        writeback_wspawn_pc
+        writeback_wspawn_pc,
+        finished
     );
 }
 

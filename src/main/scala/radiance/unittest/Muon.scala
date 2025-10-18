@@ -59,7 +59,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   cbe.io.imem.req <> fe.io.imem.req
   fe.io.imem.resp <> cbe.io.imem.resp
 
-  io.finished := false.B
+  io.finished := cbe.io.finished
 
   dontTouch(fe.io)
 }
