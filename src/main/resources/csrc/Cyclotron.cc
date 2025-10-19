@@ -173,3 +173,70 @@ extern "C" void cyclotron_imem(
         imem_resp_bits_data
     );
 }
+
+extern "C" void *cyclotron_mem_init_rs(uint64_t num_lanes);
+
+extern "C" void *cyclotron_mem_init(uint64_t num_lanes) {
+    return cyclotron_mem_init_rs(num_lanes);
+}
+
+extern "C" void cyclotron_mem_free_rs(void *mem_model_ptr);
+
+extern "C" void cyclotron_mem_free(void *mem_model_ptr) {
+    cyclotron_mem_free_rs(mem_model_ptr);
+}
+
+extern "C" void cyclotron_mem_rs(
+    void *mem_model_ptr,
+    
+    uint8_t *req_ready,
+    uint8_t req_valid,
+
+    uint8_t req_store,
+    uint32_t req_address,
+    uint32_t req_tag,
+    const uint32_t *req_data,
+    const uint32_t *req_mask,
+
+    uint8_t resp_ready,
+    uint8_t *resp_valid,
+
+    uint32_t *resp_tag,
+    uint32_t *resp_data
+);
+
+// Note: VCS uses contiguous bits in memory to represent packed bit arrays, 
+// this may not be the case on other simulators. 
+extern "C" void cyclotron_mem(
+    void *mem_model_ptr,
+    
+    uint8_t *req_ready,
+    uint8_t req_valid,
+
+    uint8_t req_store,
+    uint32_t req_address,
+    uint32_t req_tag,
+    const uint32_t *req_data,
+    const uint32_t *req_mask,
+
+    uint8_t resp_ready,
+    uint8_t *resp_valid,
+
+    uint32_t *resp_tag,
+    uint32_t *resp_data
+) {
+    cyclotron_mem_rs(
+        mem_model_ptr,
+        req_ready,
+        req_valid,
+        req_store,
+        req_address,
+        req_tag,
+        req_data,
+        req_mask,
+        resp_ready,
+        resp_valid,
+        resp_tag,
+        resp_data
+    );
+};

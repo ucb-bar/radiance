@@ -95,6 +95,20 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   io.finished := cfe.io.finished
 }
 
+class MuonLSUTestbench(implicit p: Parameters) extends Module {
+  val io = IO(new Bundle {
+    val finished = Bool()
+  })
+
+  // TODO: get instruction trace from cyclotron
+  
+  val lsu = Module(new LoadStoreUnit()(p))
+
+  // TODO: connect lsu to CyclotronMemBlackbox
+
+  io.finished := true.B
+}
+
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val ibuf = Decoupled(new InstBufferEntry)
@@ -150,6 +164,76 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   addResource("/csrc/Cyclotron.cc")
 }
 
+class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
+  class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+      "ARCH_LEN"  -> p(MuonKey).archLen,
+      "NUM_WARPS" -> p(MuonKey).numWarps,
+      "NUM_LANES" -> p(MuonKey).numLanes,
+      "OP_BITS"   -> Isa.opcodeBits,
+      "REG_BITS"  -> Isa.regBits,
+      "IMM_BITS"  -> 32,
+      "PRED_BITS" -> Isa.predBits,
+      "TAG_BITS"  -> p(MuonKey).dcacheReqTagBits,
+      "LSU_LANES" -> p(MuonKey).lsu.numLsuLanes,
+    )) 
+    with HasBlackBoxResource {
+  
+    val archLen = p(MuonKey).archLen
+    val tagBits = p(MuonKey).dcacheReqTagBits
+    val lsuLanes = p(MuonKey).lsu.numLsuLanes
+    val dataWidth = lsuLanes * archLen
+    val maskWidth = lsuLanes
+    
+
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
+
+      val req_ready = Output(Bool())
+      val req_valid = Input(Bool())
+
+      val req_store = Input(Bool())
+      val req_address = Input(UInt(archLen.W))
+      val req_tag = Input(UInt(tagBits.W))
+      val req_data = Input(UInt(dataWidth.W))
+      val req_mask = Input(UInt(maskWidth.W))
+
+      val resp_ready = Input(Bool())
+      val resp_valid = Output(Bool())
+
+      val resp_tag = Output(UInt(tagBits.W))
+      val resp_data = Output(UInt(dataWidth.W))
+    })
+
+    addResource("/vsrc/CyclotronMem.v")
+    addResource("/csrc/Cyclotron.cc")
+  }
+  
+  val io = IO(new Bundle {
+    val dataMemIO = Flipped(new DataMemIO)
+  })
+
+  val inner = Module(new CyclotronMemBlackBox);
+
+  inner.io.clock := clock
+  inner.io.reset := reset.asBool
+
+  io.dataMemIO.req.ready := inner.io.req_ready
+  inner.io.req_valid := io.dataMemIO.req.valid
+  inner.io.req_store := io.dataMemIO.req.bits.store
+  inner.io.req_address := io.dataMemIO.req.bits.address
+  inner.io.req_tag := io.dataMemIO.req.bits.tag
+  inner.io.req_data := io.dataMemIO.req.bits.data
+  inner.io.req_mask := io.dataMemIO.req.bits.mask
+
+  inner.io.resp_ready := io.dataMemIO.resp.ready
+  io.dataMemIO.resp.valid := inner.io.resp_valid
+  io.dataMemIO.resp.bits.tag := inner.io.resp_tag
+  io.dataMemIO.resp.bits.data := inner.io.resp_data
+  
+  io.dataMemIO.resp.bits.metadata := DontCare
+}
+
 // UnitTest harnesses
 // ------------------
 
@@ -165,5 +249,10 @@ class MuonFrontendTest(timeout: Int = 100000)(implicit p: Parameters) extends Un
 
 class MuonBackendTest(timeout: Int = 100000)(implicit p: Parameters) extends UnitTest(timeout) {
   val dut = Module(new MuonBackendTestbench()(p))
+  io.finished := dut.io.finished
+}
+
+class MuonLSUTest(timeout: Int = 100000)(implicit p: Parameters) extends UnitTest(timeout) {
+  val dut = Module(new MuonLSUTestbench()(p))
   io.finished := dut.io.finished
 }

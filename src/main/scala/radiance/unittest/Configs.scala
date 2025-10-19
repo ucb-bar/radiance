@@ -44,6 +44,12 @@ class MuonBackendTestConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
+class MuonLSUTestConfig extends Config(
+  new WithMuonUnitTestHarness(new MuonLSUTest()(_)) ++
+  new WithMuonCores(1, headless = true) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new BaseSubsystemConfig)
+
 // -----------------------------------------------------------------------------
 // Tensor core tests
 // -----------------------------------------------------------------------------
