@@ -95,11 +95,14 @@ case class MuonCoreParams(
   override def vMemDataBits: Int = cacheLineBytes * 8
 }
 
-// move to decode?
 object Isa {
+  def instBits = 64
   def opcodeBits = 9
   def regBits = 8
   def csrImmBits = 8
+  def f3Bits = 3
+  def f7Bits = 7
+  def immBits = 32
   def predBits = 4
 }
 
