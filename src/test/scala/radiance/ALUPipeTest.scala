@@ -6,10 +6,10 @@ import freechips.rocketchip.tile.{TileKey, TileParams}
 import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.prci.ClockSinkParameters
-import radiance.muon.backend.int.{IntPipe, IntPipeParams}
+import radiance.muon.backend.int.{ALUPipe, IntPipeParams}
 import radiance.muon.{LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey}
 
-class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
+class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
     val core: MuonCoreParams = muon
     val icache = None
@@ -46,7 +46,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
     }
 
-  behavior of "IntPipe"
+  behavior of "ALUPipe"
 
   private def maskFrom(bits: Seq[Boolean]): BigInt =
     bits.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (flag, idx)) =>
@@ -54,7 +54,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
 
   private def driveRequest(
-      c: IntPipe,
+      c: ALUPipe,
       op: UInt,
       f3: UInt,
       f7: UInt,
@@ -81,7 +81,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   private def consumeResponse(
-      c: IntPipe,
+      c: ALUPipe,
       expected: Seq[BigInt],
       rd: Int,
       archLen: Int,
@@ -120,7 +120,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntPipe) { c =>
+    test(new ALUPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val fullTmask = (BigInt(1) << numLanes) - 1
@@ -170,7 +170,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntPipe) { c =>
+    test(new ALUPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val totalPackets = numLanes / numAluLanes
@@ -222,7 +222,7 @@ class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntPipe) { c =>
+    test(new ALUPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val fullTmask = (BigInt(1) << numLanes) - 1
