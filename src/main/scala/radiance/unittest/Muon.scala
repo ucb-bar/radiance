@@ -38,7 +38,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val m = p(MuonKey)
 
   val fe = Module(new Frontend()(p))
-  val cbe = Module(new CyclotronBlackBox)
+  val cbe = Module(new CyclotronBackendBlackBox)
 
   cbe.io.clock := clock
   cbe.io.reset := reset
@@ -47,10 +47,11 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
   fe.io.hartId := 0.U
 
-  // fe ibuf -> cyclotron back end
-  cbe.io.ibuf.bits.fromUop(fe.io.ibuf.bits)
-  cbe.io.ibuf.valid := fe.io.ibuf.valid
-  fe.io.ibuf.ready := cbe.io.ibuf.ready
+  // fe decode -> cyclotron back end
+  // note issue logic is simple pass-through of decode
+  cbe.io.issue.bits.fromUop(fe.io.ibuf.bits)
+  cbe.io.issue.valid := fe.io.ibuf.valid
+  fe.io.ibuf.ready := cbe.io.issue.ready
 
   // cyclotron back end -> fe commit
   fe.io.commit := cbe.io.commit
@@ -115,7 +116,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     val finished = Output(Bool())
   })
 
-  val bbox = Module(new CyclotronBlackBox()(p))
+  val bbox = Module(new CyclotronBackendBlackBox()(p)) // FIXME Frontend
   bbox.io.clock := clock
   bbox.io.reset := reset.asBool
 
@@ -133,11 +134,11 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 
   // TODO: correct ready
   val alltrue = VecInit((0 to muonParams.numWarps).map(_ => true.B)).asUInt
-  bbox.io.ibuf.ready := alltrue
+  bbox.io.issue.ready := alltrue
   io.finished := bbox.io.finished
 }
 
-class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"     -> p(MuonKey).archLen,
       "INST_BITS"    -> p(MuonKey).instBits,
       "NUM_WARPS"    -> p(MuonKey).numWarps,
@@ -154,13 +155,13 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
     val reset = Input(Bool())
 
     val imem = Flipped(new InstMemIO)
-    val ibuf = Flipped(Decoupled(new InstBufferEntry))
+    val issue = Flipped(Decoupled(new InstBufferEntry))
     val commit = Flipped(commitIO)
 
     val finished = Output(Bool())
   })
 
-  addResource("/vsrc/Cyclotron.v")
+  addResource("/vsrc/CyclotronBackend.v")
   addResource("/csrc/Cyclotron.cc")
 }
 
