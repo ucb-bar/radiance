@@ -80,6 +80,24 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+
+  private case class PipeOp(
+      name: String,
+      opcode: UInt,
+      f3: UInt,
+      f7: UInt,
+      rd: Int,
+      in1: Seq[BigInt],
+      in2: Seq[BigInt],
+      pc: BigInt,
+      reqMask: BigInt,
+      expectedData: Seq[BigInt],
+      dataCheckMask: BigInt,
+      expectedRespMask: BigInt,
+      expectedPcWen: Boolean,
+      holdCycles: Int
+  )
+
   private def consumeResponse(
       c: ALUPipe,
       expected: Seq[BigInt],
@@ -386,4 +404,147 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       )()
     }
   }
+
+  it should "hold responses under output backpressure" in {
+    val numLanes = 4
+    val numAluLanes = 2
+    implicit val p: Parameters = testParams(numLanes, numAluLanes)
+
+    test(new ALUPipe) { c =>
+      val archLen = p(MuonKey).archLen
+      val mask = (BigInt(1) << archLen) - 1
+      val fullTmask = (BigInt(1) << numLanes) - 1
+      val totalPackets = numLanes / numAluLanes
+
+      val beqMaskBools = Seq(true, false, true, false)
+      val beqRespMask = maskFrom(beqMaskBools)
+
+      val ops = Seq(
+        PipeOp(
+          name = "add",
+          opcode = MuOpcode.OP,
+          f3 = 0.U,
+          f7 = 0.U,
+          rd = 12,
+          in1 = Seq(BigInt(3), BigInt(7), BigInt(11), BigInt(15)),
+          in2 = Seq(BigInt(1), BigInt(2), BigInt(3), BigInt(4)),
+          pc = 0,
+          reqMask = fullTmask,
+          expectedData = Seq(BigInt(4), BigInt(9), BigInt(14), BigInt(19)).map(_ & mask),
+          dataCheckMask = fullTmask,
+          expectedRespMask = fullTmask,
+          expectedPcWen = false,
+          holdCycles = 0
+        ),
+        PipeOp(
+          name = "sub",
+          opcode = MuOpcode.OP,
+          f3 = 0.U,
+          f7 = "b0100000".U,
+          rd = 13,
+          in1 = Seq(BigInt(50), BigInt(40), BigInt(30), BigInt(20)),
+          in2 = Seq(BigInt(5), BigInt(4), BigInt(3), BigInt(2)),
+          pc = 0,
+          reqMask = fullTmask,
+          expectedData = Seq(BigInt(45), BigInt(36), BigInt(27), BigInt(18)).map(_ & mask),
+          dataCheckMask = fullTmask,
+          expectedRespMask = fullTmask,
+          expectedPcWen = false,
+          holdCycles = 2
+        ),
+        PipeOp(
+          name = "xor",
+          opcode = MuOpcode.OP,
+          f3 = 4.U,
+          f7 = 0.U,
+          rd = 14,
+          in1 = Seq(BigInt(0xAAAA), BigInt(0x5555), BigInt(0x0F0F), BigInt(0xF0F0)),
+          in2 = Seq(BigInt(0x1111), BigInt(0x2222), BigInt(0x3333), BigInt(0x4444)),
+          pc = 0,
+          reqMask = BigInt("0101", 2),
+          expectedData = Seq(BigInt(0xBBBB), BigInt(0x7777), BigInt(0x3C3C), BigInt(0xB4B4)).map(_ & mask),
+          dataCheckMask = BigInt("0101", 2),
+          expectedRespMask = BigInt("0101", 2),
+          expectedPcWen = false,
+          holdCycles = 0
+        ),
+        PipeOp(
+          name = "beq",
+          opcode = MuOpcode.BRANCH,
+          f3 = 0.U,
+          f7 = 0.U,
+          rd = 15,
+          in1 = Seq(BigInt(9), BigInt(5), BigInt(9), BigInt(7)),
+          in2 = Seq(BigInt(9), BigInt(8), BigInt(9), BigInt(1)),
+          pc = BigInt(0x400),
+          reqMask = fullTmask,
+          expectedData = Seq.fill(numLanes)(BigInt(0x400)),
+          dataCheckMask = beqRespMask,
+          expectedRespMask = beqRespMask,
+          expectedPcWen = true,
+          holdCycles = 3
+        ),
+        PipeOp(
+          name = "jal",
+          opcode = MuOpcode.JAL,
+          f3 = 0.U,
+          f7 = 0.U,
+          rd = 16,
+          in1 = Seq(BigInt(16), BigInt(32), BigInt(48), BigInt(64)),
+          in2 = Seq(BigInt(4), BigInt(4), BigInt(4), BigInt(4)),
+          pc = BigInt(0x800),
+          reqMask = BigInt("1110", 2),
+          expectedData = Seq(BigInt(20), BigInt(36), BigInt(52), BigInt(68)).map(_ & mask),
+          dataCheckMask = BigInt("1110", 2),
+          expectedRespMask = BigInt("1110", 2),
+          expectedPcWen = true,
+          holdCycles = 2
+        )
+      )
+
+      c.io.resp.ready.poke(true.B)
+
+      ops.foreach { op =>
+        while (!c.io.req.ready.peek().litToBoolean) { c.clock.step() }
+        driveRequest(c, op.opcode, op.f3, op.f7, op.rd, op.in1, op.in2, op.reqMask, archLen, op.pc)
+        c.clock.step()
+        c.io.req.valid.poke(false.B)
+
+        if (op.holdCycles > 0) c.io.resp.ready.poke(false.B) else c.io.resp.ready.poke(true.B)
+
+        var waitCycles = 0
+        while (!c.io.resp.valid.peek().litToBoolean) {
+          c.clock.step()
+          waitCycles += 1
+          require(waitCycles <= totalPackets + 4, s"${op.name} response did not arrive in time")
+        }
+
+        op.expectedData.zipWithIndex.foreach { case (value, idx) =>
+          if (((op.dataCheckMask >> idx) & 1) == 1) {
+            c.io.resp.bits.data(idx).expect(value.U(archLen.W), s"${op.name} lane $idx mismatch")
+          }
+        }
+        c.io.resp.bits.rd.expect(op.rd.U)
+        c.io.resp.bits.pc_w_en.expect(op.expectedPcWen.B)
+        c.io.resp.bits.tmask.expect(op.expectedRespMask.U)
+
+        for (_ <- 0 until op.holdCycles) {
+          c.clock.step()
+          c.io.resp.valid.expect(true.B, s"${op.name} response dropped under backpressure")
+          op.expectedData.zipWithIndex.foreach { case (value, idx) =>
+            if (((op.dataCheckMask >> idx) & 1) == 1) {
+              c.io.resp.bits.data(idx).expect(value.U(archLen.W), s"${op.name} lane $idx changed under backpressure")
+            }
+          }
+          c.io.resp.bits.pc_w_en.expect(op.expectedPcWen.B)
+          c.io.resp.bits.tmask.expect(op.expectedRespMask.U)
+        }
+
+        c.io.resp.ready.poke(true.B)
+        c.clock.step()
+        c.io.resp.valid.expect(false.B)
+      }
+    }
+  }
+
 }
