@@ -74,31 +74,34 @@ object IntegerOpDecoder {
 
 case class IntegerPipeParams (val numALULanes: Int = 8)
 
+trait HasIntegerPipeParams extends HasMuonCoreParameters {
+  def numLanes = muonParams.numLanes
+  def numALULanes  = muonParams.integerPipe.numALULanes
+  def archLen  = muonParams.archLen
+}
+
 class IntegerPipeReq(implicit val p: Parameters)
-  extends Bundle with HasMuonCoreParameters {
+  extends Bundle with HasIntegerPipeParams {
   val op = UInt(Isa.opcodeBits.W)
   val f3 = UInt(3.W)
   val f7 = UInt(7.W)
-  val in1 = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
-  val in2 = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
-  val pc = UInt(muonParams.archLen.W) // for b type
+  val in1 = Vec(numLanes, UInt(archLen.W))
+  val in2 = Vec(numLanes, UInt(archLen.W))
+  val pc = UInt(archLen.W) // for b type
   val rd = UInt(Isa.regBits.W)
-  val tmask = UInt(muonParams.numLanes.W)
+  val tmask = UInt(numLanes.W)
 }
 
 class IntegerPipeResp(implicit val p: Parameters)
-  extends Bundle with HasMuonCoreParameters {
-  val tmask = UInt(muonParams.numLanes.W)
+  extends Bundle with HasIntegerPipeParams {
+  val tmask = UInt(numLanes.W)
   val pc_w_en = Bool()
   val rd = UInt(Isa.regBits.W)
-  val data = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+  val data = Vec(numLanes, UInt(archLen.W))
 }
 
-class IntegerPipe(implicit p: Parameters) extends CoreModule {
-  val numLanes = muonParams.numLanes
-  val numALULanes = muonParams.integerPipe.numALULanes
-  val archLen = muonParams.archLen
-
+class IntegerPipe(implicit p: Parameters)
+  extends CoreModule with HasIntegerPipeParams {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new IntegerPipeReq))
     val resp = Decoupled(new IntegerPipeResp)
