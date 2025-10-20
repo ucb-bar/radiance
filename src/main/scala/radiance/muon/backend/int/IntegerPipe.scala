@@ -12,6 +12,7 @@ class IntegerOpBundle extends Bundle {
   val fn = UInt(ALU.SZ_ALU_FN.W)
   val isMulDiv = Bool()
   val isBr = Bool()
+  val isJ = Bool()
 }
 
 object IntegerOpDecoder {
@@ -65,7 +66,8 @@ object IntegerOpDecoder {
     val result = Wire(new IntegerOpBundle)
     result.fn := decoder(Cat(opcode7, f3, f7), TruthTable(table, BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W))))
     result.isMulDiv := (opcode7 === MuOpcode.OP) && (f7 === "b0000001".U)
-    result.isBr := opcode7 === MuOpcode.BRANCH || opcode7 === MuOpcode.JAL || opcode7 === MuOpcode.JALR
+    result.isBr := opcode7 === MuOpcode.BRANCH
+    result.isJ := opcode7 === MuOpcode.JAL || opcode7 === MuOpcode.JALR
     result
   }
 }
@@ -79,14 +81,15 @@ class IntegerPipeReq(implicit val p: Parameters)
   val f7 = UInt(7.W)
   val in1 = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
   val in2 = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
-  val in3 = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+  val pc = UInt(muonParams.archLen.W) // for b type
   val rd = UInt(Isa.regBits.W)
   val tmask = UInt(muonParams.numLanes.W)
 }
 
 class IntegerPipeResp(implicit val p: Parameters)
   extends Bundle with HasMuonCoreParameters {
-  val pc_w_en = Vec(muonParams.numLanes, Bool())
+  val tmask = UInt(muonParams.numLanes.W)
+  val pc_w_en = Bool()
   val rd = UInt(Isa.regBits.W)
   val data = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
 }
@@ -114,7 +117,6 @@ class IntegerPipe(implicit p: Parameters) extends CoreModule {
 
   implicit val recomposerTypes =
     Seq(chiselTypeOf(vecALU.head.io.out),
-        chiselTypeOf(vecALU.head.io.adder_out),
         chiselTypeOf(vecALU.head.io.cmp_out)
     )
   val aluRecomposer = Module(new LaneRecomposer(
@@ -125,11 +127,12 @@ class IntegerPipe(implicit p: Parameters) extends CoreModule {
 
   val ioIntOp = IntegerOpDecoder.decode(io.req.bits.op, io.req.bits.f3, io.req.bits.f7)
 
-  val req_rd = Reg(UInt(Isa.regBits.W))
   val req_op = Reg(new IntegerOpBundle)
+  val req_pc = Reg(UInt(archLen.W))
+  val req_tmask = Reg(UInt(numLanes.W))
+  val req_rd = Reg(UInt(Isa.regBits.W))
   val resp_valid = RegInit(false.B)
   val alu_out = Reg(Vec(numLanes, UInt(archLen.W)))
-  val adder_out = Reg(Vec(numLanes, UInt(archLen.W)))
   val cmp_out = Reg(Vec(numLanes, Bool()))
   val busy = RegInit(false.B)
 
@@ -147,8 +150,7 @@ class IntegerPipe(implicit p: Parameters) extends CoreModule {
     vecALU(i).io.in2 := aluDecomposer.io.out.bits.data(1)(i)
 
     aluRecomposer.io.in.bits.data(0)(i) := vecALU(i).io.out
-    aluRecomposer.io.in.bits.data(1)(i) := vecALU(i).io.adder_out
-    aluRecomposer.io.in.bits.data(2)(i) := vecALU(i).io.cmp_out
+    aluRecomposer.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
   }
   aluRecomposer.io.in.valid := aluDecomposer.io.out.valid
   aluRecomposer.io.in.bits.tmask := aluDecomposer.io.out.bits.tmask
@@ -156,8 +158,12 @@ class IntegerPipe(implicit p: Parameters) extends CoreModule {
 
   io.resp.valid := resp_valid
   io.resp.bits.rd := req_rd
-  io.resp.bits.data := alu_out
-  io.resp.bits.pc_w_en := cmp_out.map(_ && req_op.isBr)
+  io.resp.bits.data := Mux(req_op.isBr, VecInit(Seq.fill(numLanes)(req_pc)), alu_out)
+  io.resp.bits.tmask := Mux(req_op.isBr,
+    cmp_out.asUInt,
+    req_tmask
+  )
+  io.resp.bits.pc_w_en := req_op.isBr || req_op.isJ
 
   when (io.resp.fire) {
     busy := false.B
@@ -166,14 +172,15 @@ class IntegerPipe(implicit p: Parameters) extends CoreModule {
 
   when (aluRecomposer.io.out.fire) {
     alu_out := aluRecomposer.io.out.bits.data(0)
-    adder_out := aluRecomposer.io.out.bits.data(1)
-    cmp_out := aluRecomposer.io.out.bits.data(2)
+    cmp_out := aluRecomposer.io.out.bits.data(1)
     resp_valid := true.B
   }
 
   when (io.req.fire) {
     busy := true.B
     req_op := ioIntOp
+    req_pc := io.req.bits.pc
+    req_tmask := io.req.bits.tmask
     req_rd := io.req.bits.rd
   }
 }

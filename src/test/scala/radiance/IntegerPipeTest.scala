@@ -48,6 +48,11 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   behavior of "IntegerPipe"
 
+  private def maskFrom(bits: Seq[Boolean]): BigInt =
+    bits.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (flag, idx)) =>
+      if (flag) acc | (BigInt(1) << idx) else acc
+    }
+
   private def driveRequest(
       c: IntegerPipe,
       op: UInt,
@@ -57,7 +62,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       in1: Seq[BigInt],
       in2: Seq[BigInt],
       tmask: BigInt,
-      archLen: Int
+      archLen: Int,
+      pc: BigInt = 0
   ): Unit = {
     c.io.req.valid.poke(true.B)
     c.io.req.bits.op.poke(op)
@@ -65,7 +71,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     c.io.req.bits.f7.poke(f7)
     c.io.req.bits.rd.poke(rd.U)
     c.io.req.bits.tmask.poke(tmask.U)
-    c.io.req.bits.in3.foreach(_.poke(0.U))
+    c.io.req.bits.pc.poke(pc.U(archLen.W))
     in1.zipWithIndex.foreach { case (value, idx) =>
       c.io.req.bits.in1(idx).poke(value.U(archLen.W))
     }
@@ -81,7 +87,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       archLen: Int,
       totalPackets: Int,
       tmask: BigInt,
-      expectedPcWen: Option[Seq[Boolean]] = None
+      expectedPcWen: Option[Boolean] = None,
+      expectedRespTmask: Option[BigInt] = None
   )(nextAction: => Unit = ()): Unit = {
     c.io.req.valid.poke(false.B)
     var cycles = 0
@@ -95,12 +102,11 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       if (((tmask >> idx) & 1) == 1)
         c.io.resp.bits.data(idx).expect(value.U(archLen.W))
     }
-    expectedPcWen.foreach { pcWenSeq =>
-      pcWenSeq.zipWithIndex.foreach { case (flag, idx) =>
-        val active = ((tmask >> idx) & 1) == 1
-        val expectedFlag = if (active) flag else false
-        c.io.resp.bits.pc_w_en(idx).expect(expectedFlag.B)
-      }
+    expectedPcWen.foreach { flag =>
+      c.io.resp.bits.pc_w_en.expect(flag.B)
+    }
+    expectedRespTmask.foreach { value =>
+      c.io.resp.bits.tmask.expect(value.U)
     }
     c.io.resp.bits.rd.expect(rd.U)
     c.io.req.ready.expect(true.B)
@@ -135,7 +141,10 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
       driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
       c.clock.step()
-      consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask) {
+      consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(fullTmask)
+      ) {
         driveRequest(
           c,
           MuOpcode.OP,
@@ -149,7 +158,10 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
       }
 
-      consumeResponse(c, subExpected, subRd, archLen, totalPackets, fullTmask)()
+      consumeResponse(c, subExpected, subRd, archLen, totalPackets, fullTmask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(fullTmask)
+      )()
     }
   }
 
@@ -181,7 +193,10 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
       driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, activeMask, archLen)
       c.clock.step()
-      consumeResponse(c, addExpected, addRd, archLen, totalPackets, activeMask) {
+      consumeResponse(c, addExpected, addRd, archLen, totalPackets, activeMask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(activeMask)
+      ) {
         driveRequest(
           c,
           MuOpcode.OP,
@@ -195,7 +210,10 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
       }
 
-      consumeResponse(c, subExpected, subRd, archLen, totalPackets, activeMask)()
+      consumeResponse(c, subExpected, subRd, archLen, totalPackets, activeMask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(activeMask)
+      )()
     }
   }
 
@@ -226,13 +244,15 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val beqRd = 7
       val beqIn1 = Seq(BigInt(3), BigInt(10), BigInt(3), BigInt(14))
       val beqIn2 = Seq(BigInt(3), BigInt(11), BigInt(3), BigInt(20))
-      val beqExpected = Seq.fill(numLanes)(BigInt(0))
+      val beqPc = BigInt(0x1000)
+      val beqExpected = Seq.fill(numLanes)(beqPc)
       val beqPcWen = Seq(true, false, true, false) // lanes 0 & 2 equal
 
       val bneRd = 8
       val bneIn1 = Seq(BigInt(21), BigInt(22), BigInt(23), BigInt(24))
       val bneIn2 = Seq(BigInt(20), BigInt(22), BigInt(23), BigInt(30))
-      val bneExpected = Seq.fill(numLanes)(BigInt(0))
+      val bnePc = BigInt(0x2000)
+      val bneExpected = Seq.fill(numLanes)(bnePc)
       val bneMask = BigInt("1101", 2) // lanes 0,2,3 active
       val bnePcWen = Seq(true, false, false, true) // lane2 equal -> false
 
@@ -240,18 +260,19 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val jalIn1 = Seq(BigInt(50), BigInt(60), BigInt(70), BigInt(80))
       val jalIn2 = Seq(BigInt(5), BigInt(6), BigInt(7), BigInt(8))
       val jalExpected = jalIn1.zip(jalIn2).map { case (a, b) => (a + b) & mask }
-      val jalPcWen = Seq.fill(numLanes)(false)
 
       val jalrRd = 10
       val jalrIn1 = Seq(BigInt(100), BigInt(120), BigInt(140), BigInt(160))
       val jalrIn2 = Seq(BigInt(1), BigInt(3), BigInt(5), BigInt(7))
       val jalrMask = BigInt("0101", 2) // lanes 0 and 2 active
       val jalrExpected = jalrIn1.zip(jalrIn2).map { case (a, b) => (a + b) & mask }
-      val jalrPcWen = Seq.fill(numLanes)(false)
 
       driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
       c.clock.step()
-      consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask) {
+      consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(fullTmask)
+      ) {
         driveRequest(
           c,
           MuOpcode.OP,
@@ -265,7 +286,10 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
       }
 
-      consumeResponse(c, subExpected, subRd, archLen, totalPackets, fullTmask) {
+      consumeResponse(c, subExpected, subRd, archLen, totalPackets, fullTmask,
+        expectedPcWen = Some(false),
+        expectedRespTmask = Some(fullTmask)
+      ) {
         driveRequest(
           c,
           MuOpcode.BRANCH,
@@ -275,7 +299,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           beqIn1,
           beqIn2,
           fullTmask,
-          archLen
+          archLen,
+          beqPc
         )
       }
 
@@ -286,7 +311,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         archLen,
         totalPackets,
         fullTmask,
-        Some(beqPcWen)
+        expectedPcWen = Some(true),
+        expectedRespTmask = Some(maskFrom(beqPcWen))
       ) {
         driveRequest(
           c,
@@ -297,7 +323,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           bneIn1,
           bneIn2,
           bneMask,
-          archLen
+          archLen,
+          bnePc
         )
       }
 
@@ -308,7 +335,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         archLen,
         totalPackets,
         bneMask,
-        Some(bnePcWen)
+        expectedPcWen = Some(true),
+        expectedRespTmask = Some(maskFrom(bnePcWen))
       ) {
         driveRequest(
           c,
@@ -330,7 +358,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         archLen,
         totalPackets,
         fullTmask,
-        Some(jalPcWen)
+        expectedPcWen = Some(true),
+        expectedRespTmask = Some(fullTmask)
       ) {
         driveRequest(
           c,
@@ -352,7 +381,8 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         archLen,
         totalPackets,
         jalrMask,
-        Some(jalrPcWen)
+        expectedPcWen = Some(true),
+        expectedRespTmask = Some(jalrMask)
       )()
     }
   }
