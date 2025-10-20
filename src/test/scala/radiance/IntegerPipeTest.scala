@@ -6,10 +6,10 @@ import freechips.rocketchip.tile.{TileKey, TileParams}
 import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.prci.ClockSinkParameters
-import radiance.muon.backend.int.{IntegerPipe, IntegerPipeParams}
+import radiance.muon.backend.int.{IntPipe, IntPipeParams}
 import radiance.muon.{LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey}
 
-class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
+class IntPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
     val core: MuonCoreParams = muon
     val icache = None
@@ -33,7 +33,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           MuonCoreParams(
             numLanes = numLanes,
             archLen = archLen,
-            integerPipe = IntegerPipeParams(numALULanes = numAluLanes),
+            intPipe = IntPipeParams(numALULanes = numAluLanes),
             lsu = LoadStoreUnitParams(numLsuLanes = numLanes)
           )
         )
@@ -41,12 +41,12 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         MuonCoreParams(
           numLanes = numLanes,
           archLen = archLen,
-          integerPipe = IntegerPipeParams(numALULanes = numAluLanes),
+          intPipe = IntPipeParams(numALULanes = numAluLanes),
           lsu = LoadStoreUnitParams(numLsuLanes = numLanes)
         )
     }
 
-  behavior of "IntegerPipe"
+  behavior of "IntPipe"
 
   private def maskFrom(bits: Seq[Boolean]): BigInt =
     bits.zipWithIndex.foldLeft(BigInt(0)) { case (acc, (flag, idx)) =>
@@ -54,7 +54,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
 
   private def driveRequest(
-      c: IntegerPipe,
+      c: IntPipe,
       op: UInt,
       f3: UInt,
       f7: UInt,
@@ -81,7 +81,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   private def consumeResponse(
-      c: IntegerPipe,
+      c: IntPipe,
       expected: Seq[BigInt],
       rd: Int,
       archLen: Int,
@@ -95,7 +95,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     while (!c.io.resp.valid.peek().litToBoolean) {
       c.clock.step()
       cycles += 1
-      require(cycles <= totalPackets + 4, "IntegerPipe response did not arrive in time")
+      require(cycles <= totalPackets + 4, "IntPipe response did not arrive in time")
     }
 
     expected.zipWithIndex.foreach { case (value, idx) =>
@@ -120,7 +120,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntegerPipe) { c =>
+    test(new IntPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val fullTmask = (BigInt(1) << numLanes) - 1
@@ -170,7 +170,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntegerPipe) { c =>
+    test(new IntPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val totalPackets = numLanes / numAluLanes
@@ -222,7 +222,7 @@ class IntegerPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val numAluLanes = 2
     implicit val p: Parameters = testParams(numLanes, numAluLanes)
 
-    test(new IntegerPipe) { c =>
+    test(new IntPipe) { c =>
       val archLen = p(MuonKey).archLen
       val mask = (BigInt(1) << archLen) - 1
       val fullTmask = (BigInt(1) << numLanes) - 1

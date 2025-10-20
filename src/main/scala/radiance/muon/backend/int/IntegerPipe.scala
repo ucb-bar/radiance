@@ -8,15 +8,15 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
 import radiance.muon.{CoreModule, HasMuonCoreParameters, Isa, MuOpcode}
 
-class IntegerOpBundle extends Bundle {
+class IntOpBundle extends Bundle {
   val fn = UInt(ALU.SZ_ALU_FN.W)
   val isMulDiv = Bool()
   val isBr = Bool()
   val isJ = Bool()
 }
 
-object IntegerOpDecoder {
-  def decode(opcode: UInt, f3: UInt, f7: UInt): IntegerOpBundle = {
+object IntOpDecoder {
+  def decode(opcode: UInt, f3: UInt, f7: UInt): IntOpBundle = {
     val table = Seq[(BitPat, BitPat)](
       (BitPat(MuOpcode.OP)     ## BitPat("b000") ## BitPat("b0000000")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.OP)     ## BitPat("b000") ## BitPat("b0100000")) -> BitPat(ALU.FN_SUB.litValue.U(ALU.SZ_ALU_FN.W)),
@@ -63,7 +63,7 @@ object IntegerOpDecoder {
     )
 
     val opcode7 = opcode(6,0)
-    val result = Wire(new IntegerOpBundle)
+    val result = Wire(new IntOpBundle)
     result.fn := decoder(Cat(opcode7, f3, f7), TruthTable(table, BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W))))
     result.isMulDiv := (opcode7 === MuOpcode.OP) && (f7 === "b0000001".U)
     result.isBr := opcode7 === MuOpcode.BRANCH
@@ -72,16 +72,16 @@ object IntegerOpDecoder {
   }
 }
 
-case class IntegerPipeParams (val numALULanes: Int = 8)
+case class IntPipeParams (val numALULanes: Int = 8)
 
-trait HasIntegerPipeParams extends HasMuonCoreParameters {
+trait HasIntPipeParams extends HasMuonCoreParameters {
   def numLanes = muonParams.numLanes
-  def numALULanes  = muonParams.integerPipe.numALULanes
+  def numALULanes  = muonParams.intPipe.numALULanes
   def archLen  = muonParams.archLen
 }
 
-class IntegerPipeReq(implicit val p: Parameters)
-  extends Bundle with HasIntegerPipeParams {
+class IntPipeReq(implicit val p: Parameters)
+  extends Bundle with HasIntPipeParams {
   val op = UInt(Isa.opcodeBits.W)
   val f3 = UInt(3.W)
   val f7 = UInt(7.W)
@@ -92,19 +92,19 @@ class IntegerPipeReq(implicit val p: Parameters)
   val tmask = UInt(numLanes.W)
 }
 
-class IntegerPipeResp(implicit val p: Parameters)
-  extends Bundle with HasIntegerPipeParams {
+class IntPipeResp(implicit val p: Parameters)
+  extends Bundle with HasIntPipeParams {
   val tmask = UInt(numLanes.W)
   val pc_w_en = Bool()
   val rd = UInt(Isa.regBits.W)
   val data = Vec(numLanes, UInt(archLen.W))
 }
 
-class IntegerPipe(implicit p: Parameters)
-  extends CoreModule with HasIntegerPipeParams {
+class IntPipe(implicit p: Parameters)
+  extends CoreModule with HasIntPipeParams {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new IntegerPipeReq))
-    val resp = Decoupled(new IntegerPipeResp)
+    val req = Flipped(Decoupled(new IntPipeReq))
+    val resp = Decoupled(new IntPipeResp)
   })
 
   implicit val decomposerTypes =
@@ -128,9 +128,9 @@ class IntegerPipe(implicit p: Parameters)
     elemTypes = recomposerTypes,
   ))
 
-  val ioIntOp = IntegerOpDecoder.decode(io.req.bits.op, io.req.bits.f3, io.req.bits.f7)
+  val ioIntOp = IntOpDecoder.decode(io.req.bits.op, io.req.bits.f3, io.req.bits.f7)
 
-  val req_op = Reg(new IntegerOpBundle)
+  val req_op = Reg(new IntOpBundle)
   val req_pc = Reg(UInt(archLen.W))
   val req_tmask = Reg(UInt(numLanes.W))
   val req_rd = Reg(UInt(Isa.regBits.W))
