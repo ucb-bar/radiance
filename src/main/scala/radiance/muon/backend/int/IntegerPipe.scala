@@ -71,11 +71,13 @@ object IntOpDecoder {
   }
 }
 
-case class IntPipeParams (val numALULanes: Int = 8)
+case class IntPipeParams (val numALULanes: Int = 8,
+                          val numMulDivLanes: Int = 8)
 
 trait HasIntPipeParams extends HasMuonCoreParameters {
   def numLanes = muonParams.numLanes
-  def numALULanes  = muonParams.intPipe.numALULanes
+  def numALULanes = muonParams.intPipe.numALULanes
+  def numMulDivLanes = muonParams.intPipe.numMulDivLanes
   def archLen  = muonParams.archLen
 }
 
