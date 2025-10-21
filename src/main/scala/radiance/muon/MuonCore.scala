@@ -8,6 +8,7 @@ import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTilePar
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.muon.backend.int.IntPipeParams
 
 case object MuonKey extends Field[MuonCoreParams]
 
@@ -70,6 +71,7 @@ case class MuonCoreParams(
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
   // execute
+  intPipe: IntPipeParams = IntPipeParams(),
   numFp32Lanes: Int = 8,
   numFDivLanes: Int = 8,
   csrAddrBits: Int = 32,
@@ -93,11 +95,14 @@ case class MuonCoreParams(
   override def vMemDataBits: Int = cacheLineBytes * 8
 }
 
-// move to decode?
 object Isa {
+  def instBits = 64
   def opcodeBits = 9
   def regBits = 8
   def csrImmBits = 8
+  def f3Bits = 3
+  def f7Bits = 7
+  def immBits = 32
   def predBits = 4
 }
 

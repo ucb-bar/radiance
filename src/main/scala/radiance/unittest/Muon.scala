@@ -138,17 +138,17 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 }
 
 class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"  -> p(MuonKey).archLen,
-      "NUM_WARPS" -> p(MuonKey).numWarps,
-      "NUM_LANES" -> p(MuonKey).numLanes,
-      "OP_BITS"   -> Isa.opcodeBits,
-      "REG_BITS"  -> Isa.regBits,
-      "IMM_BITS"  -> 32,
-      "PRED_BITS" -> Isa.predBits,
+      "ARCH_LEN"     -> p(MuonKey).archLen,
+      "INST_BITS"    -> p(MuonKey).instBits,
+      "NUM_WARPS"    -> p(MuonKey).numWarps,
+      "NUM_LANES"    -> p(MuonKey).numLanes,
+      "OP_BITS"      -> Isa.opcodeBits,
+      "REG_BITS"     -> Isa.regBits,
+      "IMM_BITS"     -> 32,
+      "CSR_IMM_BITS" -> Isa.csrImmBits,
+      "PRED_BITS"    -> Isa.predBits,
     ))
     with HasBlackBoxResource with HasMuonCoreParameters with HasFrontEndBundles {
-  val numWarps = muonParams.numWarps
-
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
