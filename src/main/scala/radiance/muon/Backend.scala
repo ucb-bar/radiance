@@ -8,7 +8,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val ibuf = Flipped(Decoupled(uopT))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
   })
 
   // temporary placeholders to generate reg file banks for par
@@ -38,8 +38,9 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   fpu.io.req.valid := false.B
   fpu.io.resp.ready := false.B
   fpu.io.flush := false.B
+  dontTouch(fpu.io)
 
-  io.ibuf.ready := true.B
+  io.ibuf.foreach(_.ready := true.B)
 
   // TODO: Scoreboard
   // TODO: Issue queue

@@ -290,5 +290,5 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
 
-  be.io.ibuf <> fe.io.ibuf
+  (be.io.ibuf zip fe.io.ibuf).foreach { case (b, f) => b <> f }
 }

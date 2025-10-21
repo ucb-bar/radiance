@@ -49,9 +49,11 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 
   // fe decode -> cyclotron back end
   // note issue logic is simple pass-through of decode
-  cbe.io.issue.bits.fromUop(fe.io.ibuf.bits)
-  cbe.io.issue.valid := fe.io.ibuf.valid
-  fe.io.ibuf.ready := cbe.io.issue.ready
+  (cbe.io.issue zip fe.io.ibuf).foreach { case (b, f) =>
+    b.bits.fromUop(f.bits)
+    b.valid := f.valid
+    f.ready := b.ready
+  }
 
   // cyclotron back end -> fe commit
   fe.io.commit := cbe.io.commit
@@ -80,15 +82,11 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
-  be.io.ibuf.valid := cfe.io.ibuf.valid
-  be.io.ibuf.bits := cfe.io.ibuf.bits.toUop()
-  cfe.io.ibuf.ready := be.io.ibuf.ready
-
-//  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
-//    f.ready := b.ready
-//    b.valid := f.valid
-//    b.bits := f.bits.toUop()
-//  }
+  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
+    b.valid := f.valid
+    f.ready := b.ready
+    b.bits := f.bits.toUop()
+  }
 
   dontTouch(be.io)
 
@@ -112,7 +110,7 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
 
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
-    val ibuf = Decoupled(new InstBufferEntry)
+    val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
     val finished = Output(Bool())
   })
 
@@ -122,8 +120,8 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 
   // connect flattened Verilog IO to Chisel
 
-  io.ibuf.valid := false.B
-  io.ibuf.bits := DontCare
+  io.ibuf.foreach(_.valid := false.B)
+  io.ibuf.foreach(_.bits := DontCare)
 //  io.ibuf.zipWithIndex.foreach { case (ib, i) =>
 //    ib.valid   := bbox.io.ibuf.valid(i)
 //    ib.bits    := DontCare // default
@@ -134,7 +132,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 
   // TODO: correct ready
   val alltrue = VecInit((0 to muonParams.numWarps).map(_ => true.B)).asUInt
-  bbox.io.issue.ready := alltrue
+  bbox.io.issue.foreach(_.ready := true.B)
   io.finished := bbox.io.finished
 }
 
@@ -155,7 +153,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
     val reset = Input(Bool())
 
     val imem = Flipped(new InstMemIO)
-    val issue = Flipped(Decoupled(new InstBufferEntry))
+    val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new InstBufferEntry)))
     val commit = Flipped(commitIO)
 
     val finished = Output(Bool())
