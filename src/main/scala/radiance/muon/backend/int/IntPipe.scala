@@ -3,7 +3,7 @@ package radiance.muon.backend.int
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
-import freechips.rocketchip.rocket.ALU
+import freechips.rocketchip.rocket.{ALU, MulDivParams}
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.{CoreModule, HasMuonCoreParameters, Isa, MuOpcode}
 
@@ -72,12 +72,14 @@ object IntOpDecoder {
 }
 
 case class IntPipeParams (val numALULanes: Int = 8,
-                          val numMulDivLanes: Int = 8)
+                          val numMulDivLanes: Int = 8,
+                          val mulDivParams: MulDivParams = MulDivParams())
 
 trait HasIntPipeParams extends HasMuonCoreParameters {
   def numLanes = muonParams.numLanes
   def numALULanes = muonParams.intPipe.numALULanes
   def numMulDivLanes = muonParams.intPipe.numMulDivLanes
+  def mulDivParams = muonParams.intPipe.mulDivParams
   def archLen  = muonParams.archLen
 }
 
