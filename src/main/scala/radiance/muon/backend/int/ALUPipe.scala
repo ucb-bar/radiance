@@ -10,7 +10,7 @@ class ALUPipe(implicit p: Parameters)
   extends IntPipe {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W))
-  val aluDecomposer = Module(new LaneDecomposer(
+  val decomposer = Module(new LaneDecomposer(
     inLanes = numLanes,
     outLanes = numALULanes,
     elemTypes = decomposerTypes
@@ -23,7 +23,7 @@ class ALUPipe(implicit p: Parameters)
     Seq(chiselTypeOf(vecALU.head.io.out),
       chiselTypeOf(vecALU.head.io.cmp_out)
     )
-  val aluRecomposer = Module(new LaneRecomposer(
+  val recomposer = Module(new LaneRecomposer(
     inLanes = numLanes,
     outLanes = numALULanes,
     elemTypes = recomposerTypes,
@@ -34,24 +34,24 @@ class ALUPipe(implicit p: Parameters)
   val busy = RegInit(false.B)
 
   io.req.ready := !busy || io.resp.fire
-  aluDecomposer.io.in.valid := io.req.valid && !ioIntOp.isMulDiv
-  aluDecomposer.io.in.bits.data(0) := io.req.bits.in1
-  aluDecomposer.io.in.bits.data(1) := io.req.bits.in2
-  aluDecomposer.io.in.bits.tmask := io.req.bits.tmask
-  aluDecomposer.io.out.ready := true.B
+  decomposer.io.in.valid := io.req.valid && !ioIntOp.isMulDiv
+  decomposer.io.in.bits.data(0) := io.req.bits.in1
+  decomposer.io.in.bits.data(1) := io.req.bits.in2
+  decomposer.io.in.bits.tmask := io.req.bits.tmask
+  decomposer.io.out.ready := true.B
 
   for (i <- 0 until numALULanes) {
     vecALU(i).io.dw := archLen.U
     vecALU(i).io.fn := Mux(io.req.fire, ioIntOp.fn, req_op.fn)
-    vecALU(i).io.in1 := aluDecomposer.io.out.bits.data(0)(i)
-    vecALU(i).io.in2 := aluDecomposer.io.out.bits.data(1)(i)
+    vecALU(i).io.in1 := decomposer.io.out.bits.data(0)(i)
+    vecALU(i).io.in2 := decomposer.io.out.bits.data(1)(i)
 
-    aluRecomposer.io.in.bits.data(0)(i) := vecALU(i).io.out
-    aluRecomposer.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
+    recomposer.io.in.bits.data(0)(i) := vecALU(i).io.out
+    recomposer.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
   }
-  aluRecomposer.io.in.valid := aluDecomposer.io.out.valid
-  aluRecomposer.io.in.bits.tmask := aluDecomposer.io.out.bits.tmask
-  aluRecomposer.io.out.ready := true.B
+  recomposer.io.in.valid := decomposer.io.out.valid
+  recomposer.io.in.bits.tmask := 0.U // tmask not needed on recompose
+  recomposer.io.out.ready := busy
 
   io.resp.valid := resp_valid
   io.resp.bits.rd := req_rd
@@ -67,9 +67,9 @@ class ALUPipe(implicit p: Parameters)
     resp_valid := false.B
   }
 
-  when (aluRecomposer.io.out.fire) {
-    alu_out := aluRecomposer.io.out.bits.data(0)
-    cmp_out := aluRecomposer.io.out.bits.data(1)
+  when (recomposer.io.out.fire) {
+    alu_out := recomposer.io.out.bits.data(0)
+    cmp_out := recomposer.io.out.bits.data(1)
     resp_valid := true.B
   }
 
