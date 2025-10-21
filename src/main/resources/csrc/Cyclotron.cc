@@ -4,20 +4,69 @@
 #endif
 #include <stdint.h>
 
-extern "C" void cyclotron_init_rs(int num_lanes);
-extern "C" void cyclotron_init(int num_lanes) { cyclotron_init_rs(num_lanes); }
+extern "C" {
 
-// extern "C" void cyclotron_get_trace_rs(const uint8_t *ready,
-//                                     uint8_t *valid, uint32_t *pc,
-//                                     uint32_t *op, uint32_t *rd,
-//                                     uint8_t *finished);
-// extern "C" void cyclotron_get_trace(const uint8_t *ready, uint8_t *valid,
-//                                  uint32_t *pc, uint32_t *op,
-//                                  uint32_t *rd, uint8_t *finished) {
-//   cyclotron_get_trace_rs(ready, valid, pc, op, rd, finished);
-// }
+void cyclotron_init_rs(int num_lanes);
+void cyclotron_init(int num_lanes) { cyclotron_init_rs(num_lanes); }
 
-extern "C" void cyclotron_backend_rs(
+void cyclotron_frontend_rs(
+    const uint8_t* ibuf_ready_vec,
+    uint8_t*       ibuf_valid_vec,
+    uint32_t*      ibuf_pc_vec,
+    uint32_t*      ibuf_op_vec,
+    uint32_t*      ibuf_opext_vec,
+    uint8_t*       ibuf_f3_vec,
+    uint8_t*       ibuf_rd_addr_vec,
+    uint8_t*       ibuf_rs1_addr_vec,
+    uint8_t*       ibuf_rs2_addr_vec,
+    uint8_t*       ibuf_rs3_addr_vec,
+    uint8_t*       ibuf_f7_vec,
+    uint32_t*      ibuf_imm32_vec,
+    uint32_t*      ibuf_imm24_vec,
+    uint8_t*       ibuf_csr_imm_vec,
+    uint32_t*      ibuf_tmask_vec,
+    uint8_t*       finished_ptr
+);
+
+void cyclotron_frontend(
+    const uint8_t* ibuf_ready_vec,
+    uint8_t*       ibuf_valid_vec,
+    uint32_t*      ibuf_pc_vec,
+    uint32_t*      ibuf_op_vec,
+    uint32_t*      ibuf_opext_vec,
+    uint8_t*       ibuf_f3_vec,
+    uint8_t*       ibuf_rd_addr_vec,
+    uint8_t*       ibuf_rs1_addr_vec,
+    uint8_t*       ibuf_rs2_addr_vec,
+    uint8_t*       ibuf_rs3_addr_vec,
+    uint8_t*       ibuf_f7_vec,
+    uint32_t*      ibuf_imm32_vec,
+    uint32_t*      ibuf_imm24_vec,
+    uint8_t*       ibuf_csr_imm_vec,
+    uint32_t*      ibuf_tmask_vec,
+    uint8_t*       finished_ptr
+) {
+    cyclotron_frontend_rs(
+        ibuf_ready_vec,
+        ibuf_valid_vec,
+        ibuf_pc_vec,
+        ibuf_op_vec,
+        ibuf_opext_vec,
+        ibuf_f3_vec,
+        ibuf_rd_addr_vec,
+        ibuf_rs1_addr_vec,
+        ibuf_rs2_addr_vec,
+        ibuf_rs3_addr_vec,
+        ibuf_f7_vec,
+        ibuf_imm32_vec,
+        ibuf_imm24_vec,
+        ibuf_csr_imm_vec,
+        ibuf_tmask_vec,
+        finished_ptr
+    );
+}
+
+void cyclotron_backend_rs(
     uint8_t issue_valid,
     uint8_t issue_warp_id,
     uint32_t issue_pc,
@@ -54,7 +103,7 @@ extern "C" void cyclotron_backend_rs(
     uint8_t* finished_ptr
 );
 
-extern "C" void cyclotron_backend(
+void cyclotron_backend(
     uint8_t issue_valid,
     uint8_t issue_warp_id,
     uint32_t issue_pc,
@@ -128,7 +177,7 @@ extern "C" void cyclotron_backend(
     );
 }
 
-extern "C" void cyclotron_imem_rs(
+void cyclotron_imem_rs(
     uint8_t* imem_req_ready_ptr,
     const uint8_t imem_req_valid,
     const uint8_t imem_req_bits_store,
@@ -143,7 +192,7 @@ extern "C" void cyclotron_imem_rs(
     uint64_t* imem_resp_bits_data_ptr
 );
 
-extern "C" void cyclotron_imem(
+void cyclotron_imem(
     uint8_t* imem_req_ready,
     const uint8_t imem_req_valid,
     const uint8_t imem_req_bits_store,
@@ -173,19 +222,19 @@ extern "C" void cyclotron_imem(
     );
 }
 
-extern "C" void *cyclotron_mem_init_rs(uint64_t num_lanes);
+void *cyclotron_mem_init_rs(uint64_t num_lanes);
 
-extern "C" void *cyclotron_mem_init(uint64_t num_lanes) {
+void *cyclotron_mem_init(uint64_t num_lanes) {
     return cyclotron_mem_init_rs(num_lanes);
 }
 
-extern "C" void cyclotron_mem_free_rs(void *mem_model_ptr);
+void cyclotron_mem_free_rs(void *mem_model_ptr);
 
-extern "C" void cyclotron_mem_free(void *mem_model_ptr) {
+void cyclotron_mem_free(void *mem_model_ptr) {
     cyclotron_mem_free_rs(mem_model_ptr);
 }
 
-extern "C" void cyclotron_mem_rs(
+void cyclotron_mem_rs(
     void *mem_model_ptr,
     
     uint8_t *req_ready,
@@ -206,7 +255,7 @@ extern "C" void cyclotron_mem_rs(
 
 // Note: VCS uses contiguous bits in memory to represent packed bit arrays, 
 // this may not be the case on other simulators. 
-extern "C" void cyclotron_mem(
+void cyclotron_mem(
     void *mem_model_ptr,
     
     uint8_t *req_ready,
@@ -239,3 +288,5 @@ extern "C" void cyclotron_mem(
         resp_data
     );
 };
+
+} // extern "C"
