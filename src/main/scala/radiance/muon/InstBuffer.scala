@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-// This mostly exists to check for missing fields in the model interface.
 trait HasInstBufferEntryFields {
   val pc: UInt
   val wid: UInt

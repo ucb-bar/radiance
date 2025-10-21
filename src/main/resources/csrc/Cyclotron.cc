@@ -13,8 +13,8 @@ void cyclotron_frontend_rs(
     const uint8_t* ibuf_ready_vec,
     uint8_t*       ibuf_valid_vec,
     uint32_t*      ibuf_pc_vec,
-    uint32_t*      ibuf_op_vec,
-    uint32_t*      ibuf_opext_vec,
+    uint8_t*       ibuf_op_vec,
+    uint8_t*       ibuf_opext_vec,
     uint8_t*       ibuf_f3_vec,
     uint8_t*       ibuf_rd_addr_vec,
     uint8_t*       ibuf_rs1_addr_vec,
@@ -25,6 +25,7 @@ void cyclotron_frontend_rs(
     uint32_t*      ibuf_imm24_vec,
     uint8_t*       ibuf_csr_imm_vec,
     uint32_t*      ibuf_tmask_vec,
+    uint64_t*      ibuf_raw_vec,
     uint8_t*       finished_ptr
 );
 
@@ -32,8 +33,8 @@ void cyclotron_frontend(
     const uint8_t* ibuf_ready_vec,
     uint8_t*       ibuf_valid_vec,
     uint32_t*      ibuf_pc_vec,
-    uint32_t*      ibuf_op_vec,
-    uint32_t*      ibuf_opext_vec,
+    uint8_t*       ibuf_op_vec,
+    uint8_t*       ibuf_opext_vec,
     uint8_t*       ibuf_f3_vec,
     uint8_t*       ibuf_rd_addr_vec,
     uint8_t*       ibuf_rs1_addr_vec,
@@ -44,6 +45,7 @@ void cyclotron_frontend(
     uint32_t*      ibuf_imm24_vec,
     uint8_t*       ibuf_csr_imm_vec,
     uint32_t*      ibuf_tmask_vec,
+    uint64_t*      ibuf_raw_vec,
     uint8_t*       finished_ptr
 ) {
     cyclotron_frontend_rs(
@@ -62,6 +64,7 @@ void cyclotron_frontend(
         ibuf_imm24_vec,
         ibuf_csr_imm_vec,
         ibuf_tmask_vec,
+        ibuf_raw_vec,
         finished_ptr
     );
 }

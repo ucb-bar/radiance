@@ -30,6 +30,7 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
+/** Testbench for Muon frontend pipe */
 class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -41,7 +42,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val cbe = Module(new CyclotronBackendBlackBox)
 
   cbe.io.clock := clock
-  cbe.io.reset := reset
+  cbe.io.reset := reset.asBool
 
   // fe csr, hartid
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
@@ -67,7 +68,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   dontTouch(fe.io)
 }
 
-/** Testbench for Muon backend */
+/** Testbench for Muon backend pipe */
 class MuonBackendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -82,6 +83,10 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
+  // Imem in the ISA model is not used
+  cfe.io.imem.req.valid := false.B
+  cfe.io.imem.req.bits := DontCare
+  cfe.io.imem.resp.ready := false.B
 
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
@@ -94,6 +99,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   io.finished := cfe.io.finished
 }
 
+/** Testbench for Muon backend LSU pipe */
 class MuonLSUTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -108,6 +114,8 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
+/** Wraps Verilog shim to convert messy flattened 1-D arrays into
+ *  Chisel-friendly IOs. */
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
@@ -115,11 +123,11 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     val finished = Output(Bool())
   })
 
-  val bbox = Module(new CyclotronFrontendBlackBox()(p))
-  bbox.io.clock := clock
-  bbox.io.reset := reset.asBool
+  val cfbox = Module(new CyclotronFrontendBlackBox()(p))
+  cfbox.io.clock := clock
+  cfbox.io.reset := reset.asBool
 
-  // connect flattened Verilog IO to Chisel
+  // helpers for connecting flattened Verilog IO to Chisel
   def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
     require(flattened.getWidth % wordBits == 0)
     val numWords = flattened.getWidth / wordBits
@@ -130,16 +138,35 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     destWord := splitUInt(flattened, destWord.getWidth)(index)
   }
 
+  // IMem connection
+  cfbox.io.imem.req <> io.imem.req
+  io.imem.resp <> cfbox.io.imem.resp
+
+  // InstBuf connection
+  //
+  // @cleanup: prob better to make an accessor method that extracts a single
+  // IBufEntry from all the flattened arrays with a given index
+  cfbox.io.ibuf.ready := VecInit(io.ibuf.map(_.ready)).asUInt
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
-    ib.valid   := bbox.io.ibuf.valid(i)
-    ib.bits    := DontCare // default
-    connectSplit(ib.bits.pc, bbox.io.ibuf.pc, i)
-    connectSplit(ib.bits.wid, bbox.io.ibuf.wid, i)
-    connectSplit(ib.bits.op, bbox.io.ibuf.op, i)
-    // TODO continue
+    ib.valid := cfbox.io.ibuf.valid(i)
+    connectSplit(ib.bits.pc, cfbox.io.ibuf.pc, i)
+    connectSplit(ib.bits.wid, cfbox.io.ibuf.wid, i)
+    connectSplit(ib.bits.op, cfbox.io.ibuf.op, i)
+    connectSplit(ib.bits.rd, cfbox.io.ibuf.rd, i)
+    connectSplit(ib.bits.rs1, cfbox.io.ibuf.rs1, i)
+    connectSplit(ib.bits.rs2, cfbox.io.ibuf.rs2, i)
+    connectSplit(ib.bits.rs3, cfbox.io.ibuf.rs3, i)
+    connectSplit(ib.bits.imm32, cfbox.io.ibuf.imm32, i)
+    connectSplit(ib.bits.imm24, cfbox.io.ibuf.imm24, i)
+    connectSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
+    connectSplit(ib.bits.f3, cfbox.io.ibuf.f3, i)
+    connectSplit(ib.bits.f7, cfbox.io.ibuf.f7, i)
+    connectSplit(ib.bits.pred, cfbox.io.ibuf.pred, i)
+    connectSplit(ib.bits.tmask, cfbox.io.ibuf.tmask, i)
+    connectSplit(ib.bits.raw, cfbox.io.ibuf.raw, i)
   }
 
-  io.finished := bbox.io.finished
+  io.finished := cfbox.io.finished
 }
 
 class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
@@ -162,23 +189,23 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
     val imem = Flipped(new InstMemIO)
     // flattened for all numWarps
     val ibuf = new Bundle with HasInstBufferEntryFields {
-      val ready = UInt(numWarps.W)
-      val valid = UInt(numWarps.W)
-      val pc = UInt((numWarps * addressBits).W)
-      val wid = UInt((numWarps * log2Ceil(muonParams.numWarps)).W)
-      val op = UInt((numWarps * Isa.opcodeBits).W)
-      val rd = UInt((numWarps * Isa.regBits).W)
-      val rs1 = UInt((numWarps * Isa.regBits).W)
-      val rs2 = UInt((numWarps * Isa.regBits).W)
-      val rs3 = UInt((numWarps * Isa.regBits).W)
-      val imm32 = UInt((numWarps * 32).W)
-      val imm24 = UInt((numWarps * 24).W)
-      val csrImm = UInt((numWarps * Isa.csrImmBits).W)
-      val f3 = UInt((numWarps * 3).W)
-      val f7 = UInt((numWarps * 7).W)
-      val pred = UInt((numWarps * Isa.predBits).W)
-      val tmask = UInt((numWarps * muonParams.numLanes).W)
-      val raw = UInt((numWarps * muonParams.instBits).W)
+      val ready = Input(UInt(numWarps.W))
+      val valid = Output(UInt(numWarps.W))
+      val pc = Output(UInt((numWarps * addressBits).W))
+      val wid = Output(UInt((numWarps * log2Ceil(muonParams.numWarps)).W))
+      val op = Output(UInt((numWarps * Isa.opcodeBits).W))
+      val rd = Output(UInt((numWarps * Isa.regBits).W))
+      val rs1 = Output(UInt((numWarps * Isa.regBits).W))
+      val rs2 = Output(UInt((numWarps * Isa.regBits).W))
+      val rs3 = Output(UInt((numWarps * Isa.regBits).W))
+      val imm32 = Output(UInt((numWarps * 32).W))
+      val imm24 = Output(UInt((numWarps * 24).W))
+      val csrImm = Output(UInt((numWarps * Isa.csrImmBits).W))
+      val f3 = Output(UInt((numWarps * 3).W))
+      val f7 = Output(UInt((numWarps * 7).W))
+      val pred = Output(UInt((numWarps * Isa.predBits).W))
+      val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
+      val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
 
     val finished = Output(Bool())
