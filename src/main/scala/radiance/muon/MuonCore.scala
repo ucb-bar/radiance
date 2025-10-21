@@ -148,6 +148,10 @@ trait HasMuonCoreParameters {
 
   // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+
+  val numLanes = muonParams.numLanes
+  val archLen = muonParams.archLen
+  val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module

@@ -76,11 +76,9 @@ case class IntPipeParams (val numALULanes: Int = 8,
                           val mulDivParams: MulDivParams = MulDivParams())
 
 trait HasIntPipeParams extends HasMuonCoreParameters {
-  def numLanes = muonParams.numLanes
   def numALULanes = muonParams.intPipe.numALULanes
   def numMulDivLanes = muonParams.intPipe.numMulDivLanes
   def mulDivParams = muonParams.intPipe.mulDivParams
-  def archLen  = muonParams.archLen
 }
 
 class IntPipeReq(implicit val p: Parameters)
