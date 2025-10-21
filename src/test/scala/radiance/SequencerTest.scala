@@ -16,14 +16,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       )
     }
 
-  private def sliceMask(mask: Int, sliceIdx: Int, sliceWidth: Int): Int =
-    (mask >> (sliceIdx * sliceWidth)) & ((1 << sliceWidth) - 1)
-
-  private def aggregateSliceMasks(sliceMasks: Seq[Int], sliceWidth: Int): Int =
-    sliceMasks.zipWithIndex.foldLeft(0) { case (acc, (sliceMask, idx)) =>
-      acc | (sliceMask << (idx * sliceWidth))
-    }
-
   private def makeElemTypes(numInputs: Int, elemWidth: Int): Seq[Data] =
     Seq.fill(numInputs)(UInt(elemWidth.W))
 
@@ -40,19 +32,14 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneDecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int, input: Int) = (input * 16 + lane).U(elemWidth.W)
-      val tmaskValue = 0xD
-      val expectedSliceMasks = Vector.tabulate(totalPackets)(packet => sliceMask(tmaskValue, packet, outLanes))
-
       c.io.out.ready.poke(true.B)
       for (input <- 0 until numInputs; lane <- 0 until totalPackets * outLanes) {
         c.io.in.bits.data(input)(lane).poke(laneValue(lane, input))
       }
-      c.io.in.bits.tmask.poke(tmaskValue.U(p(MuonKey).numLanes.W))
       c.io.in.valid.poke(true.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.out.valid.expect(true.B)
-        c.io.out.bits.tmask.expect(expectedSliceMasks(packet).U(outLanes.W))
         for (j <- 0 until outLanes; input <- 0 until numInputs) {
           val laneIdx = packet * outLanes + j
           c.io.out.bits.data(input)(j).expect(laneValue(laneIdx, input))
@@ -81,21 +68,16 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       def uintValue(lane: Int) = (lane * 5 + 3).U(32.W)
       def sintValue(lane: Int) = (lane - 3).S(32.W)
       def boolValue(lane: Int) = (lane % 2 == 0).B
-      val tmaskValue = 0x9
-      val expectedSliceMasks = Vector.tabulate(totalPackets)(packet => sliceMask(tmaskValue, packet, outLanes))
-
       c.io.out.ready.poke(true.B)
       for (lane <- 0 until totalPackets * outLanes) {
         c.io.in.bits.data(0)(lane).poke(uintValue(lane))
         c.io.in.bits.data(1)(lane).poke(sintValue(lane))
         c.io.in.bits.data(2)(lane).poke(boolValue(lane))
       }
-      c.io.in.bits.tmask.poke(tmaskValue.U(inLanes.W))
       c.io.in.valid.poke(true.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.out.valid.expect(true.B)
-        c.io.out.bits.tmask.expect(expectedSliceMasks(packet).U(outLanes.W))
         for (j <- 0 until outLanes) {
           val laneIdx = packet * outLanes + j
           c.io.out.bits.data(0)(j).expect(uintValue(laneIdx))
@@ -122,16 +104,13 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
 
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneDecomposer(inLanes, outLanes, elemTypes)) { c =>
-      val tmaskValue = 0xA
       c.io.out.ready.poke(true.B)
       for (lane <- 0 until outLanes) {
         c.io.in.bits.data(0)(lane).poke((lane + 10).U(elemWidth.W))
       }
-      c.io.in.bits.tmask.poke(tmaskValue.U(p(MuonKey).numLanes.W))
       c.io.in.valid.poke(true.B)
 
       c.io.out.valid.expect(true.B)
-      c.io.out.bits.tmask.expect(tmaskValue.U(outLanes.W))
       for (lane <- 0 until outLanes) {
         c.io.out.bits.data(0)(lane).expect((lane + 10).U)
       }
@@ -154,20 +133,14 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneDecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int) = (lane + 5).U(elemWidth.W)
-      val tmaskValue = 0xB
-      val firstSliceMask = sliceMask(tmaskValue, 0, outLanes)
-      val secondSliceMask = sliceMask(tmaskValue, 1, outLanes)
-
       c.io.out.ready.poke(false.B)
       for (lane <- 0 until totalPackets * outLanes) {
         c.io.in.bits.data(0)(lane).poke(laneValue(lane))
       }
-      c.io.in.bits.tmask.poke(tmaskValue.U(p(MuonKey).numLanes.W))
       c.io.in.valid.poke(true.B)
 
       c.io.in.ready.expect(true.B)
       c.io.out.valid.expect(true.B)
-      c.io.out.bits.tmask.expect(firstSliceMask.U(outLanes.W))
       for (j <- 0 until outLanes) {
         c.io.out.bits.data(0)(j).expect(laneValue(j))
       }
@@ -175,7 +148,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
       c.io.in.valid.poke(false.B)
       c.io.out.valid.expect(true.B)
-      c.io.out.bits.tmask.expect(firstSliceMask.U(outLanes.W))
       for (j <- 0 until outLanes) {
         c.io.out.bits.data(0)(j).expect(laneValue(j))
       }
@@ -183,7 +155,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.out.ready.poke(true.B)
       c.clock.step()
       c.io.out.valid.expect(true.B)
-      c.io.out.bits.tmask.expect(secondSliceMask.U(outLanes.W))
       for (j <- 0 until outLanes) {
         val laneIdx = outLanes + j
         c.io.out.bits.data(0)(j).expect(laneValue(laneIdx))
@@ -207,17 +178,13 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     test(new LaneDecomposer(inLanes, outLanes, elemTypes)) { c =>
       c.io.out.ready.poke(true.B)
       def laneValue(lane: Int, input: Int) = (input * 100 + lane).U(elemWidth.W)
-      val tmaskValue = 0x5D3A
-      val expectedSliceMasks = Vector.tabulate(totalPackets)(packet => sliceMask(tmaskValue, packet, outLanes))
       for (input <- 0 until numInputs; lane <- 0 until p(MuonKey).numLanes) {
         c.io.in.bits.data(input)(lane).poke(laneValue(lane, input))
       }
-      c.io.in.bits.tmask.poke(tmaskValue.U(p(MuonKey).numLanes.W))
       c.io.in.valid.poke(true.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.out.valid.expect(true.B)
-        c.io.out.bits.tmask.expect(expectedSliceMasks(packet).U(outLanes.W))
         for (lane <- 0 until outLanes; input <- 0 until numInputs) {
           val laneIdx = packet * outLanes + lane
           c.io.out.bits.data(input)(lane).expect(laneValue(laneIdx, input))
@@ -246,15 +213,11 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneRecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int, input: Int) = (input * 16 + lane).U(elemWidth.W)
-      val sliceMasks = Vector(0x3, 0x1)
-      val expectedMask = aggregateSliceMasks(sliceMasks, outLanes)
-
       c.io.out.ready.poke(true.B)
       c.io.in.valid.poke(false.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.in.valid.poke(true.B)
-        c.io.in.bits.tmask.poke(sliceMasks(packet).U(outLanes.W))
         for (j <- 0 until outLanes; input <- 0 until numInputs) {
           val laneIdx = packet * outLanes + j
           c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
@@ -267,7 +230,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
           for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
             c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
           }
-          c.io.out.bits.tmask.expect(expectedMask.U(p(MuonKey).numLanes.W))
         }
 
         c.clock.step()
@@ -292,14 +254,10 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       def uintValue(lane: Int) = (lane * 7 + 2).U(32.W)
       def sintValue(lane: Int) = (lane * 4 - 6).S(32.W)
       def boolValue(lane: Int) = (lane % 3 == 0).B
-      val sliceMasks = Vector(0x1, 0x3)
-      val expectedMask = aggregateSliceMasks(sliceMasks, outLanes)
-
       c.io.out.ready.poke(true.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.in.valid.poke(true.B)
-        c.io.in.bits.tmask.poke(sliceMasks(packet).U(outLanes.W))
         for (j <- 0 until outLanes) {
           val laneIdx = packet * outLanes + j
           c.io.in.bits.data(0)(j).poke(uintValue(laneIdx))
@@ -316,7 +274,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
             c.io.out.bits.data(1)(lane).expect(sintValue(lane))
             c.io.out.bits.data(2)(lane).expect(boolValue(lane))
           }
-          c.io.out.bits.tmask.expect(expectedMask.U(inLanes.W))
         }
 
         c.clock.step()
@@ -339,17 +296,13 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneRecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int, input: Int) = (input * 16 + lane + 3).U(elemWidth.W)
-      val sliceMask = 0xD
-
       c.io.out.ready.poke(true.B)
       for (lane <- 0 until outLanes; input <- 0 until numInputs) {
         c.io.in.bits.data(input)(lane).poke(laneValue(lane, input))
       }
-      c.io.in.bits.tmask.poke(sliceMask.U(outLanes.W))
       c.io.in.valid.poke(true.B)
 
       c.io.out.valid.expect(true.B)
-      c.io.out.bits.tmask.expect(sliceMask.U(p(MuonKey).numLanes.W))
       for (lane <- 0 until outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
       }
@@ -372,9 +325,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneRecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int, input: Int) = (input * 32 + lane + 7).U(elemWidth.W)
-      val sliceMasks = Seq(0x3, 0x2)
-      val expectedMask = aggregateSliceMasks(sliceMasks, outLanes)
-
       c.io.out.ready.poke(false.B)
 
       // First packet
@@ -382,7 +332,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
         val laneIdx = j
         c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
       }
-      c.io.in.bits.tmask.poke(sliceMasks.head.U(outLanes.W))
       c.io.in.valid.poke(true.B)
       c.io.in.ready.expect(true.B)
       c.io.out.valid.expect(false.B)
@@ -394,14 +343,12 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
         val laneIdx = outLanes + j
         c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
       }
-      c.io.in.bits.tmask.poke(sliceMasks(1).U(outLanes.W))
       c.io.in.valid.poke(true.B)
       c.io.in.ready.expect(true.B)
       c.io.out.valid.expect(true.B)
       for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
       }
-      c.io.out.bits.tmask.expect(expectedMask.U(p(MuonKey).numLanes.W))
 
       c.clock.step()
       c.io.in.valid.poke(false.B)
@@ -409,7 +356,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
       }
-      c.io.out.bits.tmask.expect(expectedMask.U(p(MuonKey).numLanes.W))
 
       c.io.out.ready.poke(true.B)
       c.clock.step()
@@ -429,14 +375,10 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
     val elemTypes = makeElemTypes(numInputs, elemWidth)
     test(new LaneRecomposer(inLanes, outLanes, elemTypes)) { c =>
       def laneValue(lane: Int, input: Int) = (input * 64 + lane).U(elemWidth.W)
-      val sliceMasks = Vector(0x5, 0x9, 0x4, 0x7)
-      val expectedMask = aggregateSliceMasks(sliceMasks, outLanes)
-
       c.io.out.ready.poke(true.B)
 
       for (packet <- 0 until totalPackets) {
         c.io.in.valid.poke(true.B)
-        c.io.in.bits.tmask.poke(sliceMasks(packet).U(outLanes.W))
         for (j <- 0 until outLanes; input <- 0 until numInputs) {
           val laneIdx = packet * outLanes + j
           c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
@@ -449,7 +391,6 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
           for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
             c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
           }
-          c.io.out.bits.tmask.expect(expectedMask.U(p(MuonKey).numLanes.W))
         }
 
         c.clock.step()

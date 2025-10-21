@@ -37,7 +37,6 @@ class ALUPipe(implicit p: Parameters)
   decomposer.io.in.valid := io.req.valid && !ioIntOp.isMulDiv
   decomposer.io.in.bits.data(0) := io.req.bits.in1
   decomposer.io.in.bits.data(1) := io.req.bits.in2
-  decomposer.io.in.bits.tmask := io.req.bits.tmask
   decomposer.io.out.ready := true.B
 
   for (i <- 0 until numALULanes) {
@@ -50,7 +49,6 @@ class ALUPipe(implicit p: Parameters)
     recomposer.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
   }
   recomposer.io.in.valid := decomposer.io.out.valid
-  recomposer.io.in.bits.tmask := 0.U // tmask not needed on recompose
   recomposer.io.out.ready := busy
 
   io.resp.valid := resp_valid

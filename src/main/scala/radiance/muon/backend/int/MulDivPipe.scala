@@ -11,7 +11,7 @@ import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
 class MulDivPipe(implicit p: Parameters)
   extends IntPipe {
   implicit val decomposerTypes =
-    Seq(UInt(archLen.W), UInt(archLen.W))
+    Seq(UInt(archLen.W), UInt(archLen.W), Bool())
   val decomposer = Module(new LaneDecomposer(
     inLanes = numLanes,
     outLanes = numMulDivLanes,
@@ -40,11 +40,11 @@ class MulDivPipe(implicit p: Parameters)
   decomposer.io.in.valid := !busy && io.req.valid && ioIntOp.isMulDiv
   decomposer.io.in.bits.data(0) := io.req.bits.in1
   decomposer.io.in.bits.data(1) := io.req.bits.in2
-  decomposer.io.in.bits.tmask := io.req.bits.tmask
+  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.tmask.asBools)
   decomposer.io.out.ready := allMulDivReqReady
 
   for (i <- 0 until numMulDivLanes) {
-    vecMulDiv(i).io.req.valid := decomposer.io.out.valid && decomposer.io.out.bits.tmask(i) && allMulDivReqReady
+    vecMulDiv(i).io.req.valid := decomposer.io.out.valid && decomposer.io.out.bits.data(2).asUInt(i) && allMulDivReqReady
     vecMulDiv(i).io.req.bits.fn := Mux(io.req.fire, ioIntOp.fn, req_op.fn)
     vecMulDiv(i).io.req.bits.dw := (archLen == 64).B
     vecMulDiv(i).io.req.bits.in1 := decomposer.io.out.bits.data(0)(i)
@@ -57,7 +57,6 @@ class MulDivPipe(implicit p: Parameters)
   }
   // signal should not go high when pipe is idle, if tmask=zeroes, immediately enqueue to recomposer
   recomposer.io.in.valid := unmaskedMulDivsDone && busy
-  recomposer.io.in.bits.tmask := sliceTMask
   recomposer.io.out.ready := busy
 
   io.resp.valid := resp_valid
@@ -73,7 +72,7 @@ class MulDivPipe(implicit p: Parameters)
 
   when (decomposer.io.out.fire) {
     // assumes 1 cycle minimum muldiv latency
-    sliceTMask := decomposer.io.out.bits.tmask
+    sliceTMask := decomposer.io.out.bits.data(2).asUInt
   }
 
   when (recomposer.io.out.fire) {

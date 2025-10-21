@@ -7,14 +7,12 @@ import org.chipsalliance.cde.config.Parameters
 class LaneFrame
 (inLanes: Int, elemTypes: Seq[Data])
 (implicit val p: Parameters) extends Bundle {
-  val tmask = UInt(inLanes.W)
   val data = MixedVec(elemTypes.map(e => Vec(inLanes, e.cloneType)))
 }
 
 class LaneSlice
 (outLanes: Int, elemTypes: Seq[Data])
 (implicit val p: Parameters) extends Bundle {
-  val tmask = UInt(outLanes.W)
   val data = MixedVec(elemTypes.map(e => Vec(outLanes, e.cloneType)))
 }
 
@@ -59,7 +57,6 @@ class LaneDecomposer
   })
 
   val req_data = Reg(chiselTypeOf(io.in.bits.data))
-  val req_tmask = RegInit(0.U(inLanes.W))
   val packetIdx = RegInit(0.U(packetCtrBits.W))
   val busy = RegInit(0.B)
   val endPacket = packetIdx === (totalPackets - 1).U
@@ -67,7 +64,6 @@ class LaneDecomposer
 
   when (io.in.fire) {
     req_data := io.in.bits.data
-    req_tmask := io.in.bits.tmask
     busy := true.B
     packetIdx := 0.U
     // same cycle short circuit
@@ -77,7 +73,6 @@ class LaneDecomposer
         busy := false.B
       } else {
         packetIdx := 1.U
-        req_tmask := io.in.bits.tmask >> outLanes
       }
     }
   }
@@ -88,7 +83,6 @@ class LaneDecomposer
       busy := false.B
     } .otherwise {
       packetIdx := packetIdx + 1.U
-      req_tmask := req_tmask >> outLanes
     }
   }
 
@@ -98,7 +92,6 @@ class LaneDecomposer
       slice(req_data.asInstanceOf[MixedVec[Data]], laneStartIdx),
       slice(io.in.bits.data.asInstanceOf[MixedVec[Data]], 0.U)
   )
-  io.out.bits.tmask := Mux(busy, req_tmask(outLanes - 1, 0), io.in.bits.tmask(outLanes - 1, 0))
 }
 
 class LaneRecomposer
@@ -120,8 +113,6 @@ class LaneRecomposer
   val lastSliceStartIdx = (totalPackets - 1) * packetWidth
 
   val outBuf = WireInit(buffer_data)
-  val outMask = WireInit(buffer_tmask)
-  val inputMaskShifted = (io.in.bits.tmask << laneStartIdx)(inLanes - 1, 0)
 
   when (io.in.fire) {
     packetIdx := packetIdx + 1.U
@@ -132,7 +123,6 @@ class LaneRecomposer
           buffer_data(i)(laneStartIdx + j.U) := io.in.bits.data(i)(j)
         }
       }
-      buffer_tmask := buffer_tmask | inputMaskShifted
     }
     // same cycle out bypass
     when (isLastPacket) {
@@ -141,7 +131,6 @@ class LaneRecomposer
           outBuf(i)((lastSliceStartIdx + j)) := io.in.bits.data(i)(j)
         }
       }
-      outMask := buffer_tmask | inputMaskShifted
     }
   }
 
@@ -153,5 +142,4 @@ class LaneRecomposer
   io.in.ready := packetIdx =/= totalPackets.U
   io.out.valid := (io.in.fire && isLastPacket) || sawLastPacket
   io.out.bits.data := outBuf
-  io.out.bits.tmask := outMask
 }
