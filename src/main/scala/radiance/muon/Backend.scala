@@ -31,6 +31,14 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBu
     dontTouch(b.writePorts.head)
   }
 
+  val fpu = Module(new CVFPU())
+  fpu.io.clock := clock
+  fpu.io.reset := reset
+  fpu.io.req.bits := DontCare
+  fpu.io.req.valid := false.B
+  fpu.io.resp.ready := false.B
+  fpu.io.flush := false.B
+
   io.ibuf.ready := true.B
 
   // TODO: Scoreboard
