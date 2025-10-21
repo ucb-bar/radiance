@@ -4,8 +4,27 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasCoreBundles {
-  val pc = UInt(addressBits.W)
+// This mostly exists to check for missing fields in the model interface.
+trait HasInstBufferEntryFields {
+  val pc: UInt
+  val wid: UInt
+  val op: UInt
+  val rd: UInt
+  val rs1: UInt
+  val rs2: UInt
+  val rs3: UInt
+  val imm32: UInt
+  val imm24: UInt
+  val csrImm: UInt
+  val f3: UInt
+  val f7: UInt
+  val pred: UInt
+  val tmask: UInt
+  val raw: UInt
+}
+
+class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasInstBufferEntryFields {
+  val pc = pcT
   val wid = widT
   val op = UInt(Isa.opcodeBits.W)
   val rd = UInt(Isa.regBits.W)
@@ -18,9 +37,8 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasCo
   val f3 = UInt(3.W)
   val f7 = UInt(7.W)
   val pred = UInt(Isa.predBits.W)
-  val tmask = UInt(muonParams.numLanes.W)
-  val raw = UInt(muonParams.instBits.W)
-  // TODO: op ext, pipe-specific args e.g. fpu rm
+  val tmask = tmaskT
+  val raw = instT
 
   def fromUop(uop: Bundle) = {
     val u = uop.asTypeOf(uopT)

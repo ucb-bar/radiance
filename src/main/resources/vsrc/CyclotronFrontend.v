@@ -28,21 +28,21 @@ module CyclotronFrontendBlackBox #(
   // Decode interface: per-warp instruction buffer heads
   input  logic [NUM_WARPS-1:0]                ibuf_ready,
   output logic [NUM_WARPS-1:0]                ibuf_valid,
-  output logic [(NUM_WARPS*ARCH_LEN)-1:0]     ibuf_bits_pc,
-  output logic [(NUM_WARPS*WARP_ID_BITS)-1:0] ibuf_bits_wid,
-  output logic [(NUM_WARPS*OP_BITS)-1:0]      ibuf_bits_op,
-  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_bits_rd,
-  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_bits_rs1,
-  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_bits_rs2,
-  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_bits_rs3,
-  output logic [(NUM_WARPS*32)-1:0]           ibuf_bits_imm32,
-  output logic [(NUM_WARPS*24)-1:0]           ibuf_bits_imm24,
-  output logic [(NUM_WARPS*CSR_IMM_BITS)-1:0] ibuf_bits_csrImm,
-  output logic [(NUM_WARPS*3)-1:0]            ibuf_bits_f3,
-  output logic [(NUM_WARPS*7)-1:0]            ibuf_bits_f7,
-  output logic [(NUM_WARPS*PRED_BITS)-1:0]    ibuf_bits_pred,
-  output logic [(NUM_WARPS*NUM_LANES)-1:0]    ibuf_bits_tmask,
-  output logic [(NUM_WARPS*INST_BITS)-1:0]    ibuf_bits_raw,
+  output logic [(NUM_WARPS*ARCH_LEN)-1:0]     ibuf_pc,
+  output logic [(NUM_WARPS*WARP_ID_BITS)-1:0] ibuf_wid,
+  output logic [(NUM_WARPS*OP_BITS)-1:0]      ibuf_op,
+  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_rd,
+  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_rs1,
+  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_rs2,
+  output logic [(NUM_WARPS*REG_BITS)-1:0]     ibuf_rs3,
+  output logic [(NUM_WARPS*32)-1:0]           ibuf_imm32,
+  output logic [(NUM_WARPS*24)-1:0]           ibuf_imm24,
+  output logic [(NUM_WARPS*CSR_IMM_BITS)-1:0] ibuf_csrImm,
+  output logic [(NUM_WARPS*3)-1:0]            ibuf_f3,
+  output logic [(NUM_WARPS*7)-1:0]            ibuf_f7,
+  output logic [(NUM_WARPS*PRED_BITS)-1:0]    ibuf_pred,
+  output logic [(NUM_WARPS*NUM_LANES)-1:0]    ibuf_tmask,
+  output logic [(NUM_WARPS*INST_BITS)-1:0]    ibuf_raw,
 
   output logic finished
 );
@@ -166,21 +166,21 @@ module CyclotronFrontendBlackBox #(
     for (g = 0; g < NUM_WARPS; g = g + 1) begin
       assign __out_ibuf_ready[g] = ibuf_ready[g];
       assign ibuf_valid[g] = __in_ibuf_valid[g];
-      assign ibuf_bits_wid[WARP_ID_BITS*g +: WARP_ID_BITS] = __in_ibuf_wid[g][WARP_ID_BITS-1:0];
-      assign ibuf_bits_pc[ARCH_LEN*g +: ARCH_LEN]      = __in_ibuf_pc[g][ARCH_LEN-1:0];
-      assign ibuf_bits_op[OP_BITS*g  +: OP_BITS]       = __in_ibuf_op[g][OP_BITS-1:0];
-      assign ibuf_bits_rd[REG_BITS*g +: REG_BITS]      = __in_ibuf_rd[g][REG_BITS-1:0];
-      assign ibuf_bits_rs1[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs1[g][REG_BITS-1:0];
-      assign ibuf_bits_rs2[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs2[g][REG_BITS-1:0];
-      assign ibuf_bits_rs3[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs3[g][REG_BITS-1:0];
-      assign ibuf_bits_imm32[32*g +: 32]               = __in_ibuf_imm32[g][32-1:0];
-      assign ibuf_bits_imm24[24*g +: 24]               = __in_ibuf_imm24[g][24-1:0];
-      assign ibuf_bits_csrImm[CSR_IMM_BITS*g +: CSR_IMM_BITS] = __in_ibuf_csrImm[g][CSR_IMM_BITS-1:0];
-      assign ibuf_bits_f3[3*g +: 3]                    = __in_ibuf_f3[g][3-1:0];
-      assign ibuf_bits_f7[7*g +: 7]                    = __in_ibuf_f7[g][7-1:0];
-      assign ibuf_bits_pred[PRED_BITS*g +: PRED_BITS]  = __in_ibuf_pred[g][PRED_BITS-1:0];
-      assign ibuf_bits_tmask[NUM_LANES*g +: NUM_LANES] = __in_ibuf_tmask[g][NUM_LANES-1:0];
-      assign ibuf_bits_raw[INST_BITS*g +: INST_BITS]   = __in_ibuf_raw[g][INST_BITS-1:0];
+      assign ibuf_wid[WARP_ID_BITS*g +: WARP_ID_BITS] = __in_ibuf_wid[g][WARP_ID_BITS-1:0];
+      assign ibuf_pc[ARCH_LEN*g +: ARCH_LEN]      = __in_ibuf_pc[g][ARCH_LEN-1:0];
+      assign ibuf_op[OP_BITS*g  +: OP_BITS]       = __in_ibuf_op[g][OP_BITS-1:0];
+      assign ibuf_rd[REG_BITS*g +: REG_BITS]      = __in_ibuf_rd[g][REG_BITS-1:0];
+      assign ibuf_rs1[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs1[g][REG_BITS-1:0];
+      assign ibuf_rs2[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs2[g][REG_BITS-1:0];
+      assign ibuf_rs3[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs3[g][REG_BITS-1:0];
+      assign ibuf_imm32[32*g +: 32]               = __in_ibuf_imm32[g][32-1:0];
+      assign ibuf_imm24[24*g +: 24]               = __in_ibuf_imm24[g][24-1:0];
+      assign ibuf_csrImm[CSR_IMM_BITS*g +: CSR_IMM_BITS] = __in_ibuf_csrImm[g][CSR_IMM_BITS-1:0];
+      assign ibuf_f3[3*g +: 3]                    = __in_ibuf_f3[g][3-1:0];
+      assign ibuf_f7[7*g +: 7]                    = __in_ibuf_f7[g][7-1:0];
+      assign ibuf_pred[PRED_BITS*g +: PRED_BITS]  = __in_ibuf_pred[g][PRED_BITS-1:0];
+      assign ibuf_tmask[NUM_LANES*g +: NUM_LANES] = __in_ibuf_tmask[g][NUM_LANES-1:0];
+      assign ibuf_raw[INST_BITS*g +: INST_BITS]   = __in_ibuf_raw[g][INST_BITS-1:0];
     end
   endgenerate
 

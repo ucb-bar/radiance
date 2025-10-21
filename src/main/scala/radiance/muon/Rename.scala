@@ -58,7 +58,6 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     (rPorts, wPort)
   }
 
-
   val wid = io.rename.bits.wid
   val decoded = Decoder.decode(io.rename.bits.inst)
 

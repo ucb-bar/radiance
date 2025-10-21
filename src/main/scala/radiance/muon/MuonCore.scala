@@ -134,11 +134,15 @@ class MemResponse[T <: Bundle] (
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
-  val addressBits = muonParams.archLen
+  val numLanes = muonParams.numLanes
+  val numWarps = muonParams.numWarps
+  val archLen = muonParams.archLen
+  val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 
   val numLsqEntries = {
     muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
   }
+  val addressBits = muonParams.archLen
   val dmemTagBits  = log2Ceil(numLsqEntries)
   val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
@@ -148,17 +152,13 @@ trait HasMuonCoreParameters {
 
   // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
-
-  val numLanes = muonParams.numLanes
-  val archLen = muonParams.archLen
-  val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasMuonCoreParameters
 
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
-  with HasMuonCoreParameters
+  with HasMuonCoreParameters with HasCoreBundles
 
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))

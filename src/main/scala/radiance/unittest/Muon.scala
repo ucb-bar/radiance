@@ -82,12 +82,12 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
+
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
     f.ready := b.ready
     b.bits := f.bits.toUop()
   }
-
   dontTouch(be.io)
 
   // TODO: connect finished from the backend
@@ -110,30 +110,82 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
 
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
+    val imem = Flipped(new InstMemIO)
     val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
     val finished = Output(Bool())
   })
 
-  val bbox = Module(new CyclotronBackendBlackBox()(p)) // FIXME Frontend
+  val bbox = Module(new CyclotronFrontendBlackBox()(p))
   bbox.io.clock := clock
   bbox.io.reset := reset.asBool
 
   // connect flattened Verilog IO to Chisel
+  def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
+    require(flattened.getWidth % wordBits == 0)
+    val numWords = flattened.getWidth / wordBits
+    VecInit.tabulate(numWords)(i => flattened((i + 1) * wordBits - 1, i * wordBits))
+  }
+  def connectSplit(destWord: UInt, flattened: UInt, index: Int) = {
+    require(destWord.widthKnown)
+    destWord := splitUInt(flattened, destWord.getWidth)(index)
+  }
 
-  io.ibuf.foreach(_.valid := false.B)
-  io.ibuf.foreach(_.bits := DontCare)
-//  io.ibuf.zipWithIndex.foreach { case (ib, i) =>
-//    ib.valid   := bbox.io.ibuf.valid(i)
-//    ib.bits    := DontCare // default
-////    ib.bits.pc := bbox.io.ibuf.pc(i)
-////    ib.bits.op := bbox.io.ibuf.op(i)
-////    ib.bits.rd := bbox.io.ibuf.rd(i)
-//  }
+  io.ibuf.zipWithIndex.foreach { case (ib, i) =>
+    ib.valid   := bbox.io.ibuf.valid(i)
+    ib.bits    := DontCare // default
+    connectSplit(ib.bits.pc, bbox.io.ibuf.pc, i)
+    connectSplit(ib.bits.wid, bbox.io.ibuf.wid, i)
+    connectSplit(ib.bits.op, bbox.io.ibuf.op, i)
+    // TODO continue
+  }
 
-  // TODO: correct ready
-  val alltrue = VecInit((0 to muonParams.numWarps).map(_ => true.B)).asUInt
-  bbox.io.issue.foreach(_.ready := true.B)
   io.finished := bbox.io.finished
+}
+
+class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+      "ARCH_LEN"     -> p(MuonKey).archLen,
+      "INST_BITS"    -> p(MuonKey).instBits,
+      "NUM_WARPS"    -> p(MuonKey).numWarps,
+      "NUM_LANES"    -> p(MuonKey).numLanes,
+      "OP_BITS"      -> Isa.opcodeBits,
+      "REG_BITS"     -> Isa.regBits,
+      "IMM_BITS"     -> 32,
+      "CSR_IMM_BITS" -> Isa.csrImmBits,
+      "PRED_BITS"    -> Isa.predBits,
+    ))
+    with HasBlackBoxResource with HasMuonCoreParameters {
+
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    val imem = Flipped(new InstMemIO)
+    // flattened for all numWarps
+    val ibuf = new Bundle with HasInstBufferEntryFields {
+      val ready = UInt(numWarps.W)
+      val valid = UInt(numWarps.W)
+      val pc = UInt((numWarps * addressBits).W)
+      val wid = UInt((numWarps * log2Ceil(muonParams.numWarps)).W)
+      val op = UInt((numWarps * Isa.opcodeBits).W)
+      val rd = UInt((numWarps * Isa.regBits).W)
+      val rs1 = UInt((numWarps * Isa.regBits).W)
+      val rs2 = UInt((numWarps * Isa.regBits).W)
+      val rs3 = UInt((numWarps * Isa.regBits).W)
+      val imm32 = UInt((numWarps * 32).W)
+      val imm24 = UInt((numWarps * 24).W)
+      val csrImm = UInt((numWarps * Isa.csrImmBits).W)
+      val f3 = UInt((numWarps * 3).W)
+      val f7 = UInt((numWarps * 7).W)
+      val pred = UInt((numWarps * Isa.predBits).W)
+      val tmask = UInt((numWarps * muonParams.numLanes).W)
+      val raw = UInt((numWarps * muonParams.instBits).W)
+    }
+
+    val finished = Output(Bool())
+  })
+
+  addResource("/vsrc/CyclotronFrontend.v")
+  addResource("/csrc/Cyclotron.cc")
 }
 
 class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
@@ -183,7 +235,6 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
     val dataWidth = lsuLanes * archLen
     val maskWidth = lsuLanes
     
-
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
