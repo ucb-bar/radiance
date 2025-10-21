@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 
 class WarpScheduler(implicit p: Parameters)
   extends CoreModule
-  with HasFrontEndBundles {
+  with HasCoreBundles {
 
   val cmdProcOpt = None
 

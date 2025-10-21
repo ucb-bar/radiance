@@ -166,7 +166,7 @@ class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
 }
 
-class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasFrontEndBundles {
+class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreBundles {
   val req = Decoupled(new MemRequest(
     tagBits = imemTagBits,
     addressBits = addressBits,
@@ -176,6 +176,94 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
     tagBits = imemTagBits,
     dataBits = imemDataBits,
   ).cloneType))
+}
+
+trait HasCoreBundles extends HasMuonCoreParameters {
+  implicit val m = muonParams
+
+  def pcT = UInt(m.archLen.W)
+  def widT = UInt(log2Ceil(m.numWarps).W)
+  def tmaskT = UInt(m.numLanes.W)
+  def wmaskT = UInt(m.numWarps.W)
+  def instT = UInt(m.instBits.W)
+  def ibufIdxT = UInt(log2Ceil(m.ibufDepth + 1).W)
+
+  def ipdomStackEntryT = new Bundle {
+    val restoredMask = tmaskT
+    val elseMask = tmaskT
+    val elsePC = pcT
+  }
+
+  def wspawnT = new Bundle {
+    val count = UInt(log2Ceil(m.numWarps + 1).W)
+    val pc = pcT
+  }
+
+  require(isPow2(m.numIPDOMEntries))
+
+  def commitIO = Vec(m.numWarps, Flipped(ValidIO(new Bundle {
+      val setPC = ValidIO(pcT)
+      val setTmask = ValidIO(tmaskT)
+      val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
+      val wspawn = ValidIO(wspawnT)
+      val pc = pcT
+    }
+  )))
+
+  def icacheIO = new Bundle {
+    val in = DecoupledIO(new Bundle {
+      val pc = pcT
+      val wid = widT
+    }) // icache can stall scheduler
+    val out = Flipped(ValidIO(new Bundle {
+      val inst = instT
+      val pc = pcT
+      val wid = widT
+    }))
+  }
+
+  def issueIO = new Bundle {
+    val eligible = Flipped(ValidIO(wmaskT))
+    val issued = Output(widT) // comb
+  }
+
+  def csrIO = new Bundle {
+    val read = Flipped(ValidIO(new Bundle {
+      val addr = UInt(m.csrAddrBits.W)
+      val wid = widT
+    })) // reads only
+    val resp = Output(UInt(m.archLen.W)) // next cycle
+  }
+
+  def cmdProcIO = Flipped(ValidIO(new Bundle {
+    val schedule = pcT
+  }))
+
+  def uopT = new Bundle {
+    val inst = new Decoded(full = false)
+    val tmask = tmaskT
+    val pc = pcT
+    val wid = widT
+  }
+
+  def renameIO = ValidIO(new Bundle {
+    val inst = instT
+    val tmask = tmaskT
+    val wmask = wmaskT
+    val wid = widT
+    val pc = pcT
+  })
+
+  def ibufEnqIO = new Bundle {
+    val count = Input(Vec(m.numWarps, ibufIdxT))
+    val entry = ValidIO(new Bundle {
+      val uop = uopT
+      val wid = widT
+    })
+  }
+
+  def prT = UInt(log2Ceil(m.numPhysRegs).W)
+  def arT = UInt(log2Ceil(m.numArchRegs).W)
 }
 
 /** Muon core and core-private L0 caches */

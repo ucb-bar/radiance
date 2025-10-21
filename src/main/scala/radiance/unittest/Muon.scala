@@ -148,7 +148,7 @@ class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
     ))
-    with HasBlackBoxResource with HasMuonCoreParameters with HasFrontEndBundles {
+    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())

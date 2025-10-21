@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class Backend(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBundles {
+class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO

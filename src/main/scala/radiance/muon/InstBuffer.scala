@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasFrontEndBundles {
+class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasCoreBundles {
   val pc = UInt(addressBits.W)
   val wid = widT
   val op = UInt(Isa.opcodeBits.W)
@@ -56,7 +56,7 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasFr
   }
 }
 
-class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasFrontEndBundles {
+class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val enq = Flipped(ibufEnqIO)
     val deq = Vec(muonParams.numWarps, Decoupled(uopT))
