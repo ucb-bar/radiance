@@ -32,7 +32,8 @@ class MulDivPipe(implicit p: Parameters)
   val mul_out = Reg(Vec(numLanes, UInt(archLen.W)))
   val sliceTMask = Reg(UInt(numMulDivLanes.W))
   val busy = RegInit(false.B)
-  val unmaskedMulDivsDone = (vecMulDiv.map(_.io.resp.valid).asUInt & sliceTMask) === sliceTMask
+  val vecMulDivRespValid = vecMulDiv.map(_.io.resp.valid).asUInt
+  val unmaskedMulDivsDone = (vecMulDivRespValid & sliceTMask) === sliceTMask
   val allMulDivReqReady = vecMulDiv.map(_.io.req.ready).reduce(_ && _)
 
   io.req.ready := !busy || io.resp.fire
@@ -45,7 +46,7 @@ class MulDivPipe(implicit p: Parameters)
   for (i <- 0 until numMulDivLanes) {
     vecMulDiv(i).io.req.valid := decomposer.io.out.valid && decomposer.io.out.bits.tmask(i) && allMulDivReqReady
     vecMulDiv(i).io.req.bits.fn := Mux(io.req.fire, ioIntOp.fn, req_op.fn)
-    vecMulDiv(i).io.req.bits.dw := archLen.U
+    vecMulDiv(i).io.req.bits.dw := (archLen == 64).B
     vecMulDiv(i).io.req.bits.in1 := decomposer.io.out.bits.data(0)(i)
     vecMulDiv(i).io.req.bits.in2 := decomposer.io.out.bits.data(1)(i)
     vecMulDiv(i).io.req.bits.tag := req_rd
@@ -54,8 +55,8 @@ class MulDivPipe(implicit p: Parameters)
     vecMulDiv(i).io.resp.ready := sliceTMask(i) && unmaskedMulDivsDone && recomposer.io.in.ready
     recomposer.io.in.bits.data(0)(i) := vecMulDiv(i).io.resp.bits.data
   }
-  // should only go up when slicetmask is non zero
-  recomposer.io.in.valid := unmaskedMulDivsDone && sliceTMask.orR
+  // signal should not go high when pipe is idle, if tmask=zeroes, immediately enqueue to recomposer
+  recomposer.io.in.valid := unmaskedMulDivsDone && busy
   recomposer.io.in.bits.tmask := sliceTMask
   recomposer.io.out.ready := busy
 
