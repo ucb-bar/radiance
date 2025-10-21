@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.ALU
 import org.chipsalliance.cde.config.Parameters
+import radiance.muon._
 import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
 
 class ALUPipe(implicit p: Parameters)
@@ -74,8 +75,8 @@ class ALUPipe(implicit p: Parameters)
   when (io.req.fire) {
     busy := true.B
     req_op := ioIntOp
-    req_pc := io.req.bits.pc
-    req_tmask := io.req.bits.tmask
-    req_rd := io.req.bits.rd
+    req_pc := io.req.bits.uop.pc
+    req_tmask := io.req.bits.uop.tmask
+    req_rd := io.req.bits.uop.inst(Rd)
   }
 }
