@@ -14,7 +14,7 @@ class Frontend(implicit p: Parameters)
     val imem = new InstMemIO
     val ibuf = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
     // TODO: writeback
-    val commit = commitIO
+    val commit = Flipped(schedWritebackT)
 //    val issue = issueIO
     val csr = csrIO
     val cmdProc: Option[Bundle] = None

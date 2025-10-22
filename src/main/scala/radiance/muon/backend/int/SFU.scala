@@ -7,7 +7,7 @@ import radiance.muon._
 
 class SFU(implicit p: Parameters) extends IntPipe with HasCoreBundles {
 
-  val uop = io.req.bits.ibuf
+//  val uop = io.req.bits.ibuf
 
 //  uop.inst()
 }

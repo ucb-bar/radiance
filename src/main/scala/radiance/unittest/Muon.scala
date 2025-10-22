@@ -237,7 +237,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
 
     val imem = Flipped(new InstMemIO)
     val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new InstBufferEntry)))
-    val commit = Flipped(commitIO)
+    val commit = schedWritebackT
 
     val finished = Output(Bool())
   })

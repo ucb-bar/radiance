@@ -238,14 +238,32 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   require(isPow2(m.numIPDOMEntries))
 
-  def commitIO = Vec(m.numWarps, Flipped(ValidIO(new Bundle {
+  def fuInT(hasRs1: Boolean = false, hasRs2: Boolean = false, hasRs3: Boolean = false) = new Bundle {
+    val uop = ibufEntryT
+    val rs1Data = Option.when(hasRs1)(Vec(m.numWarps, regDataT))
+    val rs2Data = Option.when(hasRs2)(Vec(m.numWarps, regDataT))
+    val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
+  }
+
+  def schedWritebackT = Vec(m.numWarps, ValidIO(new Bundle {
       val setPC = ValidIO(pcT)
       val setTmask = ValidIO(tmaskT)
       val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
       val wspawn = ValidIO(wspawnT)
       val pc = pcT
     }
-  )))
+  ))
+
+  def regWritebackT = ValidIO(new Bundle {
+    val rd = aRegT
+    val data = Vec(m.numWarps, regDataT)
+    val mask = tmaskT
+  })
+
+  def writebackT(hasSched: Boolean = true, hasReg: Boolean = true) = new Bundle {
+    val sched = Option.when(hasSched)(schedWritebackT)
+    val reg = Option.when(hasReg)(regWritebackT)
+  }
 
   def icacheIO = new Bundle {
     val in = DecoupledIO(new Bundle {
@@ -269,7 +287,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
       val addr = UInt(m.csrAddrBits.W)
       val wid = widT
     })) // reads only
-    val resp = Output(UInt(m.archLen.W)) // next cycle
+    val resp = Output(regDataT) // next cycle
   }
 
   def cmdProcIO = Flipped(ValidIO(new Bundle {
@@ -301,6 +319,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
   def aRegT = UInt(log2Ceil(m.numArchRegs).W)
+  def regDataT = UInt(m.archLen.W)
 }
 
 /** Muon core and core-private L0 caches */

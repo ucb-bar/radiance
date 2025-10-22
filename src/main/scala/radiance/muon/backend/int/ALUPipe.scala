@@ -36,8 +36,8 @@ class ALUPipe(implicit p: Parameters)
 
   io.req.ready := !busy || io.resp.fire
   decomposer.io.in.valid := io.req.valid && !ioIntOp.isMulDiv
-  decomposer.io.in.bits.data(0) := io.req.bits.in1
-  decomposer.io.in.bits.data(1) := io.req.bits.in2
+  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data
+  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data
   decomposer.io.out.ready := true.B
 
   for (i <- 0 until numALULanes) {
@@ -53,9 +53,10 @@ class ALUPipe(implicit p: Parameters)
   recomposer.io.out.ready := busy
 
   io.resp.valid := resp_valid
-  io.resp.bits.rd := req_rd
-  io.resp.bits.data := Mux(req_op.isBr, VecInit(Seq.fill(numLanes)(req_pc)), alu_out)
-  io.resp.bits.tmask := Mux(req_op.isBr,
+  io.resp.bits.reg.get.bits.rd := req_rd
+  io.resp.bits.reg.get.bits.data := Mux(req_op.isBr, VecInit(Seq.fill(numLanes)(req_pc)), alu_out)
+  // TODO
+  io.resp.bits.sched.get.map(_.bits.setTmask) := Mux(req_op.isBr,
     cmp_out.asUInt,
     req_tmask
   )
