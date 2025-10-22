@@ -83,7 +83,7 @@ trait HasIntPipeParams extends HasMuonCoreParameters {
 
 class IntPipeReq(implicit val p: Parameters)
   extends Bundle with HasIntPipeParams with HasCoreBundles {
-  val uop = uopT
+  val ibuf = ibufEntryT
   val in1 = Vec(numLanes, UInt(archLen.W))
   val in2 = Vec(numLanes, UInt(archLen.W))
 }
@@ -103,7 +103,7 @@ abstract class IntPipe(implicit p: Parameters)
     val resp = Decoupled(new IntPipeResp)
   })
 
-  val inst = io.req.bits.uop.inst
+  val inst = io.req.bits.ibuf.inst
   val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val req_op = Reg(new IntOpBundle)
   val req_pc = Reg(UInt(archLen.W))

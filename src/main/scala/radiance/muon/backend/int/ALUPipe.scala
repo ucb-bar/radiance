@@ -75,8 +75,8 @@ class ALUPipe(implicit p: Parameters)
   when (io.req.fire) {
     busy := true.B
     req_op := ioIntOp
-    req_pc := io.req.bits.uop.pc
-    req_tmask := io.req.bits.uop.tmask
-    req_rd := io.req.bits.uop.inst(Rd)
+    req_pc := io.req.bits.ibuf.pc
+    req_tmask := io.req.bits.ibuf.tmask
+    req_rd := io.req.bits.ibuf.inst(Rd)
   }
 }

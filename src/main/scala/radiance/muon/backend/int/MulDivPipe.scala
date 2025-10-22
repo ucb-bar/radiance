@@ -40,7 +40,7 @@ class MulDivPipe(implicit p: Parameters)
   decomposer.io.in.valid := !busy && io.req.valid && ioIntOp.isMulDiv
   decomposer.io.in.bits.data(0) := io.req.bits.in1
   decomposer.io.in.bits.data(1) := io.req.bits.in2
-  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.uop.tmask.asBools)
+  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.ibuf.tmask.asBools)
   decomposer.io.out.ready := allMulDivReqReady
 
   for (i <- 0 until numMulDivLanes) {
@@ -83,8 +83,8 @@ class MulDivPipe(implicit p: Parameters)
   when (io.req.fire) {
     busy := true.B
     req_op := ioIntOp
-    req_pc := io.req.bits.uop.pc
-    req_tmask := io.req.bits.uop.tmask
-    req_rd := io.req.bits.uop.inst(Rd)
+    req_pc := io.req.bits.ibuf.pc
+    req_tmask := io.req.bits.ibuf.tmask
+    req_rd := io.req.bits.ibuf.inst(Rd)
   }
 }

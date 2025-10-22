@@ -243,7 +243,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def uopT = new Bundle {
+  def ibufEntryT = new Bundle {
     val inst = new Decoded(full = false)
     val tmask = tmaskT
     val pc = pcT
@@ -261,7 +261,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
     val entry = ValidIO(new Bundle {
-      val uop = uopT
+      val ibuf = ibufEntryT
       val wid = widT
     })
   }
