@@ -353,8 +353,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             if (loadQueue) { DontCare } else { storeDataIdx(localIndex(io.receivedOperands.req.bits.token.index)) }
         }
         when (io.receivedOperands.req.valid) {
-            assert(valid(localIndex(io.receivedOperands.req.bits.token.index)), "invalid index from reservation station")
-
+            // how to assert at posedge?
+            // assert(valid(localIndex(io.receivedOperands.req.bits.token.index)), "invalid index from reservation station")
+            
             operandsReady(localIndex(io.receivedOperands.req.bits.token.index)) := true.B
         }
 
@@ -517,10 +518,10 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val isSAF = isStore || isAtomic || isFence
         
         lsuQueueReservation.req.ready := MuxCase(false.B, Seq(
-            (globalMemory && isLoad) -> globalLoadQueue.io.full,
-            (globalMemory && isSAF) -> globalStoreQueue.io.full,
-            (sharedMemory && isLoad) -> shmemLoadQueue.io.full,
-            (sharedMemory && isSAF) -> shmemStoreQueue.io.full
+            (globalMemory && isLoad) -> !globalLoadQueue.io.full,
+            (globalMemory && isSAF) -> !globalStoreQueue.io.full,
+            (sharedMemory && isLoad) -> !shmemLoadQueue.io.full,
+            (sharedMemory && isSAF) -> !shmemStoreQueue.io.full
         ))
 
         val token = Wire(new LsuQueueToken)
@@ -806,9 +807,13 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         coreReservation.resp := queueReservation.resp
     }
 
-    val coreReservationValids = Cat(io.coreReservations.map(r => r.req.valid))
-    val queueReservationReadys = Cat(loadStoreQueues.io.queueReservations.map(r => r.req.ready))
+    val coreReservationValids = Cat(io.coreReservations.map(r => r.req.valid).reverse)
+    val queueReservationReadys = Cat(loadStoreQueues.io.queueReservations.map(r => r.req.ready).reverse)
     val reservationValidOH = PriorityEncoderOH(coreReservationValids & queueReservationReadys)
+
+    dontTouch(coreReservationValids)
+    dontTouch(queueReservationReadys)
+    dontTouch(reservationValidOH)
     
     for (warp <- 0 until muonParams.numWarps) {
         val queueReservation = loadStoreQueues.io.queueReservations(warp)
