@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.prci.ClockSinkParameters
 import radiance.muon.backend.int.{IntPipeParams, MulDivPipe}
-import radiance.muon.{LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey}
+import radiance.muon.{Decoder, DecodeField, Decoded, F3, F7, HasRd, HasRs1, HasRs2, HasRs3, LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey, Opcode, Rd, UseIntPipe}
 
 class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
@@ -126,18 +126,34 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  private val essentialFieldIndex = Decoder.essentialFields.zipWithIndex.toMap
+
+  private def zeroIbuf(inst: Decoded): Unit = {
+    Decoder.essentialFields.foreach { field =>
+      val idx = essentialFieldIndex(field)
+      inst.essentials(idx).poke(0.U(field.width.W))
+    }
+  }
+
+  private def pokeIbuf(inst: Decoded, field: DecodeField, value: BigInt): Unit = {
+    val idx = essentialFieldIndex(field)
+    inst.essentials(idx).poke(value.U(field.width.W))
+  }
+
   private def driveRequest(
       c: MulDivPipe,
       op: PipeOp,
       archLen: Int
   ): Unit = {
     c.io.req.valid.poke(true.B)
-    c.io.req.bits.op.poke(op.opcode)
-    c.io.req.bits.f3.poke(op.f3)
-    c.io.req.bits.f7.poke(op.f7)
-    c.io.req.bits.rd.poke(op.rd.U)
-    c.io.req.bits.pc.poke(op.pc.U(archLen.W))
-    c.io.req.bits.tmask.poke(op.reqMask.U)
+    zeroIbuf(c.io.req.bits.ibuf.inst)
+    pokeIbuf(c.io.req.bits.ibuf.inst, Opcode, op.opcode.litValue)
+    pokeIbuf(c.io.req.bits.ibuf.inst, F3, op.f3.litValue)
+    pokeIbuf(c.io.req.bits.ibuf.inst, F7, op.f7.litValue)
+    pokeIbuf(c.io.req.bits.ibuf.inst, Rd, op.rd)
+    c.io.req.bits.ibuf.pc.poke(op.pc.U(archLen.W))
+    c.io.req.bits.ibuf.tmask.poke(op.reqMask.U(c.io.req.bits.ibuf.tmask.getWidth.W))
+    c.io.req.bits.ibuf.wid.poke(0.U)
     op.in1.zipWithIndex.foreach { case (value, idx) =>
       c.io.req.bits.in1(idx).poke(value.U(archLen.W))
     }
