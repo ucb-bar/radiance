@@ -3,6 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import radiance.muon.backend.fp.CVFPU
 
 class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
