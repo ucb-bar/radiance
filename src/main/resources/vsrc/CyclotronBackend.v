@@ -634,6 +634,14 @@ module CyclotronBackendBlackBox #(
       commit_5_valid <= 1'b0;
       commit_6_valid <= 1'b0;
       commit_7_valid <= 1'b0;
+      commit_0_bits_ipdomPush_valid <= 1'b0;
+      commit_1_bits_ipdomPush_valid <= 1'b0;
+      commit_2_bits_ipdomPush_valid <= 1'b0;
+      commit_3_bits_ipdomPush_valid <= 1'b0;
+      commit_4_bits_ipdomPush_valid <= 1'b0;
+      commit_5_bits_ipdomPush_valid <= 1'b0;
+      commit_6_bits_ipdomPush_valid <= 1'b0;
+      commit_7_bits_ipdomPush_valid <= 1'b0;
       finished <= 1'b0;
     end else begin
       // default all commit outputs to zero, then populate from per-issue writebacks

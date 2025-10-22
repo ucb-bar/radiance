@@ -142,14 +142,21 @@ class WarpScheduler(implicit p: Parameters)
     }.otherwise {
       // not currently in discard mode, might enter if instruction is stalling
       val (stalls, joins) = Predecoder.decode(iresp.inst)
+      // we discard in flights - unless there are no in flights!
+      val latestPC = Mux(fetchWid === iresp.wid && io.icache.in.fire,
+        io.icache.in.bits.pc, discardTillPC(iresp.wid).bits)
+      val stallingPCIsLatestPC = iresp.pc === latestPC
       when (stalls) {
         // non join hazards stall
         stallTracker.stall(iresp.wid, iresp.pc)
-        // reset fetch PC to post-stall
-        pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
+
+        when (!stallingPCIsLatestPC) { // no discards: dont replay
+          // reset fetch PC to post-stall
+          pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
+        }
       }
       // joins still enables discard, but does not stall
-      discardEntry.valid := stalls || joins
+      discardEntry.valid := (stalls || joins) && !stallingPCIsLatestPC
       // discardEntry.bits is being set to the latest issued pc when we fetch
 
       when (joins) {
@@ -196,6 +203,10 @@ class WarpScheduler(implicit p: Parameters)
       when (commit.setTmask.valid) {
         assert(canUnstall)
         threadMasks(wid) := commit.setTmask.bits
+        when (commit.setTmask.bits === 0.U) {
+          // tmc 0 -> disable warp
+          pcTracker(wid).valid := false.B
+        }
       }
       when (commit.ipdomPush.valid) {
         assert(canUnstall)
@@ -273,7 +284,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   }
 
   def unstall(wid: UInt) = {
-    assert(stalls(wid).stallReason(HAZARD))
+//    assert(stalls(wid).stallReason(HAZARD))
     stalls(wid).stallReason(HAZARD) := false.B
   }
 
