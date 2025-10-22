@@ -1,12 +1,17 @@
 module CyclotronFrontendBlackBox #(
   parameter ARCH_LEN = 32,
+  parameter INST_BITS = 64,
   parameter NUM_WARPS = 8,
   parameter NUM_LANES = 16,
-  parameter OP_BITS = 7,
+  parameter OP_BITS = 9,
   parameter REG_BITS = 8,
   parameter IMM_BITS = 32,
   parameter CSR_IMM_BITS = 8,
-  parameter PRED_BITS = 4
+  parameter PRED_BITS = 4,
+  localparam OPNOEXT_BITS = 7,
+  localparam OPEXT_BITS = 2,
+  localparam WARP_ID_BITS = $clog2(NUM_WARPS),
+  localparam WARP_COUNT_BITS = $clog2(NUM_WARPS+1)
 ) (
   input clock,
   input reset,
@@ -52,22 +57,23 @@ module CyclotronFrontendBlackBox #(
   // (3) Verilog DPI calls inside initial/always blocks
   import "DPI-C" function void cyclotron_init();
   import "DPI-C" function void cyclotron_frontend(
-    input  bit  ready[NUM_WARPS],
-    output bit  valid[NUM_WARPS],
-    output int  pc[NUM_WARPS],
-    output int  op[NUM_WARPS],
-    output int  opext[NUM_WARPS],
-    output byte f3[NUM_WARPS],
-    output byte rd_addr[NUM_WARPS],
-    output byte rs1_addr[NUM_WARPS],
-    output byte rs2_addr[NUM_WARPS],
-    output byte rs3_addr[NUM_WARPS],
-    output byte f7[NUM_WARPS],
-    output int  imm32[NUM_WARPS],
-    output int  imm24[NUM_WARPS],
-    output byte csr_imm[NUM_WARPS],
-    output int  tmask[NUM_WARPS],
-    output bit  finished
+    input  bit     ready[NUM_WARPS],
+    output bit     valid[NUM_WARPS],
+    output int     pc[NUM_WARPS],
+    output byte    op[NUM_WARPS],
+    output byte    opext[NUM_WARPS],
+    output byte    f3[NUM_WARPS],
+    output byte    rd_addr[NUM_WARPS],
+    output byte    rs1_addr[NUM_WARPS],
+    output byte    rs2_addr[NUM_WARPS],
+    output byte    rs3_addr[NUM_WARPS],
+    output byte    f7[NUM_WARPS],
+    output int     imm32[NUM_WARPS],
+    output int     imm24[NUM_WARPS],
+    output byte    csr_imm[NUM_WARPS],
+    output int     tmask[NUM_WARPS],
+    output longint raw[NUM_WARPS],
+    output bit     finished
   );
 
   import "DPI-C" function void cyclotron_imem(
@@ -96,14 +102,15 @@ module CyclotronFrontendBlackBox #(
   bit     __in_ibuf_valid  [0:NUM_WARPS-1];
   byte    __in_ibuf_wid    [0:NUM_WARPS-1];
   int     __in_ibuf_pc     [0:NUM_WARPS-1];
-  int     __in_ibuf_op     [0:NUM_WARPS-1];
+  byte    __in_ibuf_op     [0:NUM_WARPS-1];
+  byte    __in_ibuf_opext  [0:NUM_WARPS-1];
   byte    __in_ibuf_rd     [0:NUM_WARPS-1];
   byte    __in_ibuf_rs1    [0:NUM_WARPS-1];
   byte    __in_ibuf_rs2    [0:NUM_WARPS-1];
   byte    __in_ibuf_rs3    [0:NUM_WARPS-1];
   int     __in_ibuf_imm32  [0:NUM_WARPS-1];
   int     __in_ibuf_imm24  [0:NUM_WARPS-1];
-  int     __in_ibuf_csrImm [0:NUM_WARPS-1];
+  byte    __in_ibuf_csrImm [0:NUM_WARPS-1];
   byte    __in_ibuf_f3     [0:NUM_WARPS-1];
   byte    __in_ibuf_f7     [0:NUM_WARPS-1];
   int     __in_ibuf_pred   [0:NUM_WARPS-1];
@@ -143,6 +150,7 @@ module CyclotronFrontendBlackBox #(
         __in_ibuf_wid[g] = '0;
         __in_ibuf_pc[g] = '0;
         __in_ibuf_op[g] = '0;
+        __in_ibuf_opext[g] = '0;
         __in_ibuf_rd[g] = '0;
         __in_ibuf_rs1[g] = '0;
         __in_ibuf_rs2[g] = '0;
@@ -154,6 +162,7 @@ module CyclotronFrontendBlackBox #(
         __in_ibuf_f7[g] = '0;
         __in_ibuf_pred[g] = '0;
         __in_ibuf_tmask[g] = '0;
+        __in_ibuf_raw[g] = '0;
       end
     end else begin
     end
@@ -168,7 +177,8 @@ module CyclotronFrontendBlackBox #(
       assign ibuf_valid[g] = __in_ibuf_valid[g];
       assign ibuf_wid[WARP_ID_BITS*g +: WARP_ID_BITS] = __in_ibuf_wid[g][WARP_ID_BITS-1:0];
       assign ibuf_pc[ARCH_LEN*g +: ARCH_LEN]      = __in_ibuf_pc[g][ARCH_LEN-1:0];
-      assign ibuf_op[OP_BITS*g  +: OP_BITS]       = __in_ibuf_op[g][OP_BITS-1:0];
+      assign ibuf_op[OP_BITS*g  +: OP_BITS]       =
+             {__in_ibuf_opext[g][OPEXT_BITS-1:0], __in_ibuf_op[g][OPNOEXT_BITS-1:0]};
       assign ibuf_rd[REG_BITS*g +: REG_BITS]      = __in_ibuf_rd[g][REG_BITS-1:0];
       assign ibuf_rs1[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs1[g][REG_BITS-1:0];
       assign ibuf_rs2[REG_BITS*g +: REG_BITS]     = __in_ibuf_rs2[g][REG_BITS-1:0];
@@ -214,16 +224,16 @@ module CyclotronFrontendBlackBox #(
         __in_ibuf_op,
         __in_ibuf_opext,
         __in_ibuf_f3,
-        __in_ibuf_rd_addr,
-        __in_ibuf_rs1_addr,
-        __in_ibuf_rs2_addr,
-        __in_ibuf_rs3_addr,
+        __in_ibuf_rd,
+        __in_ibuf_rs1,
+        __in_ibuf_rs2,
+        __in_ibuf_rs3,
         __in_ibuf_f7,
         __in_ibuf_imm32,
         __in_ibuf_imm24,
-        __in_ibuf_csr_imm,
+        __in_ibuf_csrImm,
         __in_ibuf_tmask,
-        // ibuf_raw missing
+        __in_ibuf_raw,
         __in_finished
       );
       // for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin

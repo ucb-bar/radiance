@@ -30,6 +30,7 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
+/** Testbench for Muon frontend pipe */
 class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -41,7 +42,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val cbe = Module(new CyclotronBackendBlackBox)
 
   cbe.io.clock := clock
-  cbe.io.reset := reset
+  cbe.io.reset := reset.asBool
 
   // fe csr, hartid
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
@@ -50,7 +51,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   // fe decode -> cyclotron back end
   // note issue logic is simple pass-through of decode
   (cbe.io.issue zip fe.io.ibuf).foreach { case (b, f) =>
-    b.bits.fromUop(f.bits)
+    b.bits.fromIBufT(f.bits)
     b.valid := f.valid
     f.ready := b.ready
   }
@@ -67,7 +68,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   dontTouch(fe.io)
 }
 
-/** Testbench for Muon backend */
+/** Testbench for Muon backend pipe */
 class MuonBackendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -82,11 +83,15 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.req.ready := false.B
 
   val cfe = Module(new CyclotronFrontend()(p))
+  // Imem in the ISA model is not used
+  cfe.io.imem.req.valid := false.B
+  cfe.io.imem.req.bits := DontCare
+  cfe.io.imem.resp.ready := false.B
 
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
     f.ready := b.ready
-    b.bits := f.bits.toUop()
+    b.bits := f.bits.toIBufT()
   }
   dontTouch(be.io)
 
@@ -94,6 +99,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   io.finished := cfe.io.finished
 }
 
+/** Testbench for Muon backend LSU pipe */
 class MuonLSUTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -102,12 +108,18 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
   // TODO: get instruction trace from cyclotron
   
   val lsu = Module(new LoadStoreUnit()(p))
+  
+  val coreGmem = Wire(new DataMemIO)
+  val coreShmem = Wire(new SharedMemIO)
+  
+  val cyclotronGmem = Module(new CyclotronMemBlackBox(coreGmem))
+  val cyclotronShmem = Module(new CyclotronMemBlackBox(coreShmem))
 
-  // TODO: connect lsu to CyclotronMemBlackbox
-
-  io.finished := true.B
+  io.finished := false.B
 }
 
+/** Wraps Verilog shim to convert messy flattened 1-D arrays into
+ *  Chisel-friendly IOs. */
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
@@ -115,11 +127,11 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     val finished = Output(Bool())
   })
 
-  val bbox = Module(new CyclotronFrontendBlackBox()(p))
-  bbox.io.clock := clock
-  bbox.io.reset := reset.asBool
+  val cfbox = Module(new CyclotronFrontendBlackBox()(p))
+  cfbox.io.clock := clock
+  cfbox.io.reset := reset.asBool
 
-  // connect flattened Verilog IO to Chisel
+  // helpers for connecting flattened Verilog IO to Chisel
   def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
     require(flattened.getWidth % wordBits == 0)
     val numWords = flattened.getWidth / wordBits
@@ -130,16 +142,35 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     destWord := splitUInt(flattened, destWord.getWidth)(index)
   }
 
+  // IMem connection
+  cfbox.io.imem.req <> io.imem.req
+  io.imem.resp <> cfbox.io.imem.resp
+
+  // InstBuf connection
+  //
+  // @cleanup: prob better to make an accessor method that extracts a single
+  // IBufEntry from all the flattened arrays with a given index
+  cfbox.io.ibuf.ready := VecInit(io.ibuf.map(_.ready)).asUInt
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
-    ib.valid   := bbox.io.ibuf.valid(i)
-    ib.bits    := DontCare // default
-    connectSplit(ib.bits.pc, bbox.io.ibuf.pc, i)
-    connectSplit(ib.bits.wid, bbox.io.ibuf.wid, i)
-    connectSplit(ib.bits.op, bbox.io.ibuf.op, i)
-    // TODO continue
+    ib.valid := cfbox.io.ibuf.valid(i)
+    connectSplit(ib.bits.pc, cfbox.io.ibuf.pc, i)
+    connectSplit(ib.bits.wid, cfbox.io.ibuf.wid, i)
+    connectSplit(ib.bits.op, cfbox.io.ibuf.op, i)
+    connectSplit(ib.bits.rd, cfbox.io.ibuf.rd, i)
+    connectSplit(ib.bits.rs1, cfbox.io.ibuf.rs1, i)
+    connectSplit(ib.bits.rs2, cfbox.io.ibuf.rs2, i)
+    connectSplit(ib.bits.rs3, cfbox.io.ibuf.rs3, i)
+    connectSplit(ib.bits.imm32, cfbox.io.ibuf.imm32, i)
+    connectSplit(ib.bits.imm24, cfbox.io.ibuf.imm24, i)
+    connectSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
+    connectSplit(ib.bits.f3, cfbox.io.ibuf.f3, i)
+    connectSplit(ib.bits.f7, cfbox.io.ibuf.f7, i)
+    connectSplit(ib.bits.pred, cfbox.io.ibuf.pred, i)
+    connectSplit(ib.bits.tmask, cfbox.io.ibuf.tmask, i)
+    connectSplit(ib.bits.raw, cfbox.io.ibuf.raw, i)
   }
 
-  io.finished := bbox.io.finished
+  io.finished := cfbox.io.finished
 }
 
 class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
@@ -162,23 +193,23 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
     val imem = Flipped(new InstMemIO)
     // flattened for all numWarps
     val ibuf = new Bundle with HasInstBufferEntryFields {
-      val ready = UInt(numWarps.W)
-      val valid = UInt(numWarps.W)
-      val pc = UInt((numWarps * addressBits).W)
-      val wid = UInt((numWarps * log2Ceil(muonParams.numWarps)).W)
-      val op = UInt((numWarps * Isa.opcodeBits).W)
-      val rd = UInt((numWarps * Isa.regBits).W)
-      val rs1 = UInt((numWarps * Isa.regBits).W)
-      val rs2 = UInt((numWarps * Isa.regBits).W)
-      val rs3 = UInt((numWarps * Isa.regBits).W)
-      val imm32 = UInt((numWarps * 32).W)
-      val imm24 = UInt((numWarps * 24).W)
-      val csrImm = UInt((numWarps * Isa.csrImmBits).W)
-      val f3 = UInt((numWarps * 3).W)
-      val f7 = UInt((numWarps * 7).W)
-      val pred = UInt((numWarps * Isa.predBits).W)
-      val tmask = UInt((numWarps * muonParams.numLanes).W)
-      val raw = UInt((numWarps * muonParams.instBits).W)
+      val ready = Input(UInt(numWarps.W))
+      val valid = Output(UInt(numWarps.W))
+      val pc = Output(UInt((numWarps * addressBits).W))
+      val wid = Output(UInt((numWarps * log2Ceil(muonParams.numWarps)).W))
+      val op = Output(UInt((numWarps * Isa.opcodeBits).W))
+      val rd = Output(UInt((numWarps * Isa.regBits).W))
+      val rs1 = Output(UInt((numWarps * Isa.regBits).W))
+      val rs2 = Output(UInt((numWarps * Isa.regBits).W))
+      val rs3 = Output(UInt((numWarps * Isa.regBits).W))
+      val imm32 = Output(UInt((numWarps * 32).W))
+      val imm24 = Output(UInt((numWarps * 24).W))
+      val csrImm = Output(UInt((numWarps * Isa.csrImmBits).W))
+      val f3 = Output(UInt((numWarps * 3).W))
+      val f7 = Output(UInt((numWarps * 7).W))
+      val pred = Output(UInt((numWarps * Isa.predBits).W))
+      val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
+      val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
 
     val finished = Output(Bool())
@@ -215,7 +246,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
+class CyclotronMemBlackBox(interface: MemInterface)(implicit val p: Parameters) extends Module {
   class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"  -> p(MuonKey).archLen,
       "NUM_WARPS" -> p(MuonKey).numWarps,
@@ -224,13 +255,12 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
       "REG_BITS"  -> Isa.regBits,
       "IMM_BITS"  -> 32,
       "PRED_BITS" -> Isa.predBits,
-      "TAG_BITS"  -> p(MuonKey).dcacheReqTagBits,
+      "TAG_BITS"  -> interface.getTagBits,
       "LSU_LANES" -> p(MuonKey).lsu.numLsuLanes,
     )) 
     with HasBlackBoxResource {
   
     val archLen = p(MuonKey).archLen
-    val tagBits = p(MuonKey).dcacheReqTagBits
     val lsuLanes = p(MuonKey).lsu.numLsuLanes
     val dataWidth = lsuLanes * archLen
     val maskWidth = lsuLanes
@@ -244,14 +274,14 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
 
       val req_store = Input(Bool())
       val req_address = Input(UInt(archLen.W))
-      val req_tag = Input(UInt(tagBits.W))
+      val req_tag = Input(UInt(interface.getTagBits.W))
       val req_data = Input(UInt(dataWidth.W))
       val req_mask = Input(UInt(maskWidth.W))
 
       val resp_ready = Input(Bool())
       val resp_valid = Output(Bool())
 
-      val resp_tag = Output(UInt(tagBits.W))
+      val resp_tag = Output(UInt(interface.getTagBits.W))
       val resp_data = Output(UInt(dataWidth.W))
     })
 
@@ -260,7 +290,8 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
   }
   
   val io = IO(new Bundle {
-    val dataMemIO = Flipped(new DataMemIO)
+    val req = Flipped(chiselTypeOf(interface.getReq))
+    val resp = Flipped(chiselTypeOf(interface.getResp))
   })
 
   val inner = Module(new CyclotronMemBlackBox);
@@ -268,20 +299,20 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends Module {
   inner.io.clock := clock
   inner.io.reset := reset.asBool
 
-  io.dataMemIO.req.ready := inner.io.req_ready
-  inner.io.req_valid := io.dataMemIO.req.valid
-  inner.io.req_store := io.dataMemIO.req.bits.store
-  inner.io.req_address := io.dataMemIO.req.bits.address
-  inner.io.req_tag := io.dataMemIO.req.bits.tag
-  inner.io.req_data := io.dataMemIO.req.bits.data
-  inner.io.req_mask := io.dataMemIO.req.bits.mask
+  io.req.ready := inner.io.req_ready
+  inner.io.req_valid := io.req.valid
+  inner.io.req_store := io.req.bits.store
+  inner.io.req_address := io.req.bits.address
+  inner.io.req_tag := io.req.bits.tag
+  inner.io.req_data := io.req.bits.data
+  inner.io.req_mask := io.req.bits.mask
 
-  inner.io.resp_ready := io.dataMemIO.resp.ready
-  io.dataMemIO.resp.valid := inner.io.resp_valid
-  io.dataMemIO.resp.bits.tag := inner.io.resp_tag
-  io.dataMemIO.resp.bits.data := inner.io.resp_data
+  inner.io.resp_ready := io.resp.ready
+  io.resp.valid := inner.io.resp_valid
+  io.resp.bits.tag := inner.io.resp_tag
+  io.resp.bits.data := inner.io.resp_data
   
-  io.dataMemIO.resp.bits.metadata := DontCare
+  io.resp.bits.metadata := DontCare
 }
 
 // UnitTest harnesses

@@ -160,14 +160,47 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasMuonCoreParameters with HasCoreBundles
 
-class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+// since DataMemIO / SharedMemIO / InstMemIO aren't related by inheritance,
+// common properties are factored out into this trait
+trait MemInterface {
+  def getReq: DecoupledIO[MemRequest[Bundle]];
+  def getResp: DecoupledIO[MemResponse[Bundle]];
+  def getTagBits: Int;
+  def getAddressBits: Int;
+  def getDataBits: Int;
+}
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
   val req = Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
   val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
+
+  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
+    req
+  }
+
+  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
+    resp
+  }
+
+  override def getTagBits: Int = dmemTagBits
+  override def getAddressBits: Int = addressBits
+  override def getDataBits: Int = dmemDataBits
 }
 
-class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
   val req = Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
   val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
+
+  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
+    req
+  }
+
+  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
+    resp
+  }
+
+  override def getTagBits: Int = smemTagBits
+  override def getAddressBits: Int = addressBits
+  override def getDataBits: Int = smemDataBits
 }
 
 class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreBundles {
@@ -243,7 +276,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def uopT = new Bundle {
+  def ibufEntryT = new Bundle {
     val inst = new Decoded(full = false)
     val tmask = tmaskT
     val pc = pcT
@@ -261,13 +294,13 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
     val entry = ValidIO(new Bundle {
-      val uop = uopT
+      val ibuf = ibufEntryT
       val wid = widT
     })
   }
 
-  def prT = UInt(log2Ceil(m.numPhysRegs).W)
-  def arT = UInt(log2Ceil(m.numArchRegs).W)
+  def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
+  def aRegT = UInt(log2Ceil(m.numArchRegs).W)
 }
 
 /** Muon core and core-private L0 caches */

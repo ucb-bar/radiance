@@ -8,7 +8,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
   })
 
   // temporary placeholders to generate reg file banks for par
