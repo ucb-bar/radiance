@@ -266,8 +266,8 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     })
   }
 
-  def prT = UInt(log2Ceil(m.numPhysRegs).W)
-  def arT = UInt(log2Ceil(m.numArchRegs).W)
+  def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
+  def aRegT = UInt(log2Ceil(m.numArchRegs).W)
 }
 
 /** Muon core and core-private L0 caches */
