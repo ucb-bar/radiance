@@ -134,11 +134,15 @@ class MemResponse[T <: Bundle] (
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
-  val addressBits = muonParams.archLen
+  val numLanes = muonParams.numLanes
+  val numWarps = muonParams.numWarps
+  val archLen = muonParams.archLen
+  val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 
   val numLsqEntries = {
     muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
   }
+  val addressBits = muonParams.archLen
   val dmemTagBits  = log2Ceil(numLsqEntries)
   val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
   val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
@@ -154,7 +158,7 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasMuonCoreParameters
 
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
-  with HasMuonCoreParameters
+  with HasMuonCoreParameters with HasCoreBundles
 
 // since DataMemIO / SharedMemIO / InstMemIO aren't related by inheritance,
 // common properties are factored out into this trait
@@ -272,7 +276,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def uopT = new Bundle {
+  def ibufEntryT = new Bundle {
     val inst = new Decoded(full = false)
     val tmask = tmaskT
     val pc = pcT
@@ -290,13 +294,13 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
     val entry = ValidIO(new Bundle {
-      val uop = uopT
+      val ibuf = ibufEntryT
       val wid = widT
     })
   }
 
-  def prT = UInt(log2Ceil(m.numPhysRegs).W)
-  def arT = UInt(log2Ceil(m.numArchRegs).W)
+  def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
+  def aRegT = UInt(log2Ceil(m.numArchRegs).W)
 }
 
 /** Muon core and core-private L0 caches */
@@ -323,5 +327,5 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
 
-  be.io.ibuf <> fe.io.ibuf
+  (be.io.ibuf zip fe.io.ibuf).foreach { case (b, f) => b <> f }
 }

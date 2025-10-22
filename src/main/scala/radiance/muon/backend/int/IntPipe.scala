@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.rocket.{ALU, MulDivParams}
 import org.chipsalliance.cde.config.Parameters
-import radiance.muon.{CoreModule, HasMuonCoreParameters, Isa, MuOpcode}
+import radiance.muon._
 
 class IntOpBundle extends Bundle {
   val fn = UInt(ALU.SZ_ALU_FN.W)
@@ -76,23 +76,16 @@ case class IntPipeParams (val numALULanes: Int = 8,
                           val mulDivParams: MulDivParams = MulDivParams())
 
 trait HasIntPipeParams extends HasMuonCoreParameters {
-  def numLanes = muonParams.numLanes
   def numALULanes = muonParams.intPipe.numALULanes
   def numMulDivLanes = muonParams.intPipe.numMulDivLanes
   def mulDivParams = muonParams.intPipe.mulDivParams
-  def archLen  = muonParams.archLen
 }
 
 class IntPipeReq(implicit val p: Parameters)
-  extends Bundle with HasIntPipeParams {
-  val op = UInt(Isa.opcodeBits.W)
-  val f3 = UInt(3.W)
-  val f7 = UInt(7.W)
+  extends Bundle with HasIntPipeParams with HasCoreBundles {
+  val ibuf = ibufEntryT
   val in1 = Vec(numLanes, UInt(archLen.W))
   val in2 = Vec(numLanes, UInt(archLen.W))
-  val pc = UInt(archLen.W) // for b type
-  val rd = UInt(Isa.regBits.W)
-  val tmask = UInt(numLanes.W)
 }
 
 class IntPipeResp(implicit val p: Parameters)
@@ -110,7 +103,8 @@ abstract class IntPipe(implicit p: Parameters)
     val resp = Decoupled(new IntPipeResp)
   })
 
-  val ioIntOp = IntOpDecoder.decode(io.req.bits.op, io.req.bits.f3, io.req.bits.f7)
+  val inst = io.req.bits.ibuf.inst
+  val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val req_op = Reg(new IntOpBundle)
   val req_pc = Reg(UInt(archLen.W))
   val req_tmask = Reg(UInt(numLanes.W))

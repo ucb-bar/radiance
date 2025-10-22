@@ -31,7 +31,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   val (rPorts, wPort) = if (useSRAM) {
     val table = SRAM(
       size = totalARs,
-      tpe = prT,
+      tpe = pRegT,
       numReadPorts = 4,
       numWritePorts = 1,
       numReadwritePorts = 0
@@ -41,9 +41,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     (rPorts, wPort)
   } else {
     val addrWidth = log2Up(totalARs)
-    val rPorts = Wire(Vec(4, new MemoryReadPort(prT, addrWidth)))
-    val wPort = Wire(new MemoryWritePort(prT, addrWidth, false))
-    val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(prT)))
+    val rPorts = Wire(Vec(4, new MemoryReadPort(pRegT, addrWidth)))
+    val wPort = Wire(new MemoryWritePort(pRegT, addrWidth, false))
+    val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(pRegT)))
 
     rPorts.foreach { p =>
       p.data := RegNext(table(p.address), 0.U)
@@ -58,7 +58,6 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     (rPorts, wPort)
   }
 
-
   val wid = io.rename.bits.wid
   val decoded = Decoder.decode(io.rename.bits.inst)
 
@@ -69,7 +68,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   // read translations
   (rPorts lazyZip hasReg lazyZip arAddr).foreach { case (port, v, addr) =>
     port.enable := io.rename.valid && v
-    port.address := Cat(wid, addr.asTypeOf(arT))
+    port.address := Cat(wid, addr.asTypeOf(aRegT))
   }
 
   val prAddr = rPorts.map(_.data.asTypeOf(UInt(8.W)))
@@ -87,8 +86,8 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   // substitute pr's for ibuf enq
   def bypass(ars: UInt, prs: UInt): UInt = {
     // bypass read result if wid matches, and prev cycle assigned, and prev rd matches
-    val prevRead = RegNext(Cat(wid, ars.asTypeOf(arT)))
-    val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(arT)))
+    val prevRead = RegNext(Cat(wid, ars.asTypeOf(aRegT)))
+    val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(aRegT)))
     Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
   }
 
@@ -102,10 +101,10 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
 
   io.ibuf.entry.valid := RegNext(io.rename.valid)
   io.ibuf.entry.bits.wid := RegNext(wid)
-  io.ibuf.entry.bits.uop.inst := microInst
-  io.ibuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
-  io.ibuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
-  io.ibuf.entry.bits.uop.wid := RegNext(io.rename.bits.wid)
+  io.ibuf.entry.bits.ibuf.inst := microInst
+  io.ibuf.entry.bits.ibuf.tmask := RegNext(io.rename.bits.tmask)
+  io.ibuf.entry.bits.ibuf.pc := RegNext(io.rename.bits.pc)
+  io.ibuf.entry.bits.ibuf.wid := RegNext(io.rename.bits.wid)
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>
@@ -115,8 +114,8 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
       reset = io.softReset,
     )._1
   }
-  wPort.address := Cat(wid, decoded.rd.asTypeOf(arT))
-  wPort.data := counters(wid).asTypeOf(prT)
+  wPort.address := Cat(wid, decoded.rd.asTypeOf(aRegT))
+  wPort.data := counters(wid).asTypeOf(pRegT)
 
   // check for oversubscription
   assert(!assigning || (wPort.data < maxPRUsage), cf"warp $wid oversubscribed PRs, capped to $maxPRUsage")

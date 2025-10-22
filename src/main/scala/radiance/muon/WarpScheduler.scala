@@ -23,7 +23,7 @@ class WarpScheduler(implicit p: Parameters)
   })
 
   val threadMasks = RegInit(VecInit.tabulate(m.numWarps) { wid =>
-    if (wid == 0) { -1.S(tmaskT.getWidth).asUInt } else { 0.U.asTypeOf(tmaskT) }
+    if (wid == 0) { -1.S(tmaskT.getWidth.W).asUInt } else { 0.U.asTypeOf(tmaskT) }
   })
   val pcTracker = io.cmdProc match {
     case Some(_) => RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
