@@ -80,38 +80,43 @@ This requires the scoreboard to keep track of a `pendingReads` signal per regist
 incrementing it when admitting an instruction that reads the register to the
 RS, and decrementing when its PRF read is complete.
 Importantly, `pendingReads` must be incremented only for regs that are
-**actually read from the PRF**.  Otherwise, if the regs are forwarded
-from the fabric, we don't need to protect them as their values will not be
-clobbered by an out-of-order WB.
+actually read from the PRF, and **not forwarded from the fabric**.  Otherwise,
+if the reg operand is forwarded from EX, we don't need to protect them as their
+values will not be clobbered by an out-of-order WB.
+
 In summary, the logic for `pendingReads` becomes:
 
 ```
-Increment pendingReads[R] when:
-    (admitting to RS an instruction writing to R)
-    AND (pendingWrite[R] == 0, i.e. R will be read from PRF)
-Decrement pendingReads[R] when:
-    (R completes operand collection from PRF)
+Increment pendingReads[inst.rs] when:
+    (admitting to RS an instruction reading inst.rs)
+    AND (pendingWrite[inst.rs] == 0, i.e. inst.rs will be read from PRF)
+Decrement pendingReads[inst.rs] when:
+    (inst.rs completes operand collection from PRF)
 ```
+
+In case where we cannot increment `pendingReads[R]` because the counter bits
+are saturated, we simply gate admission to the RS and stall that warp until the
+counter falls back down.
 
 With all of this in place, we now gate admission to RS if `pendingReads[rs]` is set:
 
 ```
 admitRS[inst] iff:
-    pendingReads[rs] == 0 for all rs in inst.rs0/1/2
+    pendingReads[inst.rd] == 0
 ```
 
-While a simple solution, this likely overly constrains the instruction window as
-false hazards are frequent.
+While a simple solution, this likely overly constricts the instruction window
+as false hazards are frequent.
 
-##### Option 2: Stall WB of younger writes
+##### Option 2: Stall WB of younger writes (Chosen)
 
 A second option is to use the same `pendingReads` counter, but **stall the
-writeback of the younger write**.  Going back to the above example, instead of
-gating admission of `i1` to the RS, we stall writeback of `i1` until
-`pendingReads[r5]` reaches 0.  This ensures `i0` reads the correct old value
-from PRF without getting clobbered by `i1`.
+writeback of the younger write until `pendingReads` clear**.  Going back to the
+above example, instead of gating admission of `i1` to the RS, we stall
+writeback of `i1` until `pendingReads[r5]` reaches 0.  This ensures `i0` reads
+the correct old value from PRF without getting clobbered by `i1`.
 
-**TODO**: this likely requires a writeback buffer so that stalled writebacks do not
+**TODO**: this likely requires a **writeback buffer** so that stalled writebacks do not
 stall the whole EX pipeline.
 
 **Non-issue**: With this option, it seems like we risk clobbering younger reads
@@ -130,7 +135,7 @@ The forwarding is guaranteed by the RAW hazard logic seeing `pendingWrite[r5]
 
 Note that this requires a **must-forward invariant**, i.e. forwarding fabric
 must not drop any value due to arbitrating multiple writebacks.  This further
-necessitates having a writeback buffer (TODO).
+necessitates having a writeback buffer.
 
 
 #### WAW hazard
