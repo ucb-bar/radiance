@@ -157,7 +157,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val subIn2 = Seq(BigInt(1), BigInt(5), BigInt(10), BigInt(15))
       val subExpected = subIn1.zip(subIn2).map { case (a, b) => (a - b) & mask }
 
-      driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
+      driveRequest(c, MuOpcode.OP.U, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
       c.clock.step()
       consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask,
         expectedPcWen = Some(false),
@@ -165,7 +165,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.OP,
+          MuOpcode.OP.U,
           0.U,
           "b0100000".U,
           subRd,
@@ -209,7 +209,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val subRaw = subIn1.zip(subIn2).map { case (a, b) => (a - b) & mask }
       val subExpected = subRaw
 
-      driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, activeMask, archLen)
+      driveRequest(c, MuOpcode.OP.U, 0.U, 0.U, addRd, addIn1, addIn2, activeMask, archLen)
       c.clock.step()
       consumeResponse(c, addExpected, addRd, archLen, totalPackets, activeMask,
         expectedPcWen = Some(false),
@@ -217,7 +217,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.OP,
+          MuOpcode.OP.U,
           0.U,
           "b0100000".U,
           subRd,
@@ -285,7 +285,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val jalrMask = BigInt("0101", 2) // lanes 0 and 2 active
       val jalrExpected = jalrIn1.zip(jalrIn2).map { case (a, b) => (a + b) & mask }
 
-      driveRequest(c, MuOpcode.OP, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
+      driveRequest(c, MuOpcode.OP.U, 0.U, 0.U, addRd, addIn1, addIn2, fullTmask, archLen)
       c.clock.step()
       consumeResponse(c, addExpected, addRd, archLen, totalPackets, fullTmask,
         expectedPcWen = Some(false),
@@ -293,7 +293,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.OP,
+          MuOpcode.OP.U,
           0.U,
           "b0100000".U,
           subRd,
@@ -310,7 +310,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.BRANCH,
+          MuOpcode.BRANCH.U,
           0.U,
           0.U,
           beqRd,
@@ -334,7 +334,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.BRANCH,
+          MuOpcode.BRANCH.U,
           1.U,
           0.U,
           bneRd,
@@ -358,7 +358,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.JAL,
+          MuOpcode.JAL.U,
           0.U,
           0.U,
           jalRd,
@@ -381,7 +381,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       ) {
         driveRequest(
           c,
-          MuOpcode.JALR,
+          MuOpcode.JALR.U,
           0.U,
           0.U,
           jalrRd,
@@ -422,7 +422,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val ops = Seq(
         PipeOp(
           name = "add",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 0.U,
           f7 = 0.U,
           rd = 12,
@@ -438,7 +438,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "sub",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 0.U,
           f7 = "b0100000".U,
           rd = 13,
@@ -454,7 +454,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "xor",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 4.U,
           f7 = 0.U,
           rd = 14,
@@ -470,7 +470,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "beq",
-          opcode = MuOpcode.BRANCH,
+          opcode = MuOpcode.BRANCH.U,
           f3 = 0.U,
           f7 = 0.U,
           rd = 15,
@@ -486,7 +486,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "jal",
-          opcode = MuOpcode.JAL,
+          opcode = MuOpcode.JAL.U,
           f3 = 0.U,
           f7 = 0.U,
           rd = 16,

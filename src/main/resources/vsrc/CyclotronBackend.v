@@ -721,7 +721,7 @@ module CyclotronBackendBlackBox #(
       imem_resp_bits_data <= __imem_resp_bits_data;
       imem_resp_bits_tag  <= __imem_resp_bits_tag;
 
-      finished <= (finished != '0);
+      finished <= __finished.or();
     end
   end
   assign imem_req_ready = __imem_req_ready;

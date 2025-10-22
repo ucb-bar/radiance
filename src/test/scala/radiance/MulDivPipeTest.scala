@@ -197,7 +197,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val ops = Seq(
         PipeOp(
           name = "mul",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 0.U,
           f7 = "b0000001".U,
           rd = 5,
@@ -212,7 +212,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "mulh",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 1.U,
           f7 = "b0000001".U,
           rd = 6,
@@ -227,7 +227,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "div",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 4.U,
           f7 = "b0000001".U,
           rd = 7,
@@ -242,7 +242,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "remu",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 7.U,
           f7 = "b0000001".U,
           rd = 8,
@@ -294,7 +294,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val ops = Seq(
         PipeOp(
           name = "mulhu",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 3.U,
           f7 = "b0000001".U,
           rd = 10,
@@ -309,7 +309,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "divu",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 5.U,
           f7 = "b0000001".U,
           rd = 11,
@@ -324,7 +324,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "mulhsu",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 2.U,
           f7 = "b0000001".U,
           rd = 12,
@@ -339,7 +339,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         ),
         PipeOp(
           name = "rem",
-          opcode = MuOpcode.OP,
+          opcode = MuOpcode.OP.U,
           f3 = 6.U,
           f7 = "b0000001".U,
           rd = 13,

@@ -64,9 +64,9 @@ object IntOpDecoder {
     val opcode7 = opcode(6,0)
     val result = Wire(new IntOpBundle)
     result.fn := decoder(Cat(opcode7, f3, f7), TruthTable(table, BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W))))
-    result.isMulDiv := (opcode7 === MuOpcode.OP) && (f7 === "b0000001".U)
-    result.isBr := opcode7 === MuOpcode.BRANCH
-    result.isJ := opcode7 === MuOpcode.JAL || opcode7 === MuOpcode.JALR
+    result.isMulDiv := (opcode7 === MuOpcode.OP.U) && (f7 === "b0000001".U)
+    result.isBr := opcode7 === MuOpcode.BRANCH.U
+    result.isJ := opcode7 === MuOpcode.JAL.U || opcode7 === MuOpcode.JALR.U
     result
   }
 }
