@@ -8,6 +8,7 @@ import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTilePar
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
 
 case object MuonKey extends Field[MuonCoreParams]
@@ -72,8 +73,7 @@ case class MuonCoreParams(
   numOpCollectorEntries: Int = 2,
   // execute
   intPipe: IntPipeParams = IntPipeParams(),
-  numFp32Lanes: Int = 8,
-  numFDivLanes: Int = 8,
+  fpPipe: FPPipeParams = FPPipeParams(),
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
