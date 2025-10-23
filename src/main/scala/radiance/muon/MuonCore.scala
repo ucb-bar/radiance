@@ -245,14 +245,15 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
   }
 
-  def schedWritebackT = Vec(m.numWarps, ValidIO(new Bundle {
+  def schedWritebackT = ValidIO(new Bundle {
       val setPC = ValidIO(pcT)
       val setTmask = ValidIO(tmaskT)
       val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
       val wspawn = ValidIO(wspawnT)
       val pc = pcT
+      val wid = widT
     }
-  ))
+  )
 
   def regWritebackT = ValidIO(new Bundle {
     val rd = aRegT
