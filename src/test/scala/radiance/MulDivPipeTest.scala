@@ -31,6 +31,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       case TileKey =>
         DummyTileParams(
           MuonCoreParams(
+            numWarps = numLanes,
             numLanes = numLanes,
             archLen = archLen,
             intPipe = IntPipeParams(numMulDivLanes = numMulDivLanes),
@@ -39,6 +40,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
       case MuonKey =>
         MuonCoreParams(
+          numWarps = numLanes,
           numLanes = numLanes,
           archLen = archLen,
           intPipe = IntPipeParams(numMulDivLanes = numMulDivLanes),
@@ -128,16 +130,23 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   private val essentialFieldIndex = Decoder.essentialFields.zipWithIndex.toMap
 
-  private def zeroIbuf(inst: Decoded): Unit = {
+  private def zeroDecoded(inst: Decoded): Unit = {
     Decoder.essentialFields.foreach { field =>
       val idx = essentialFieldIndex(field)
       inst.essentials(idx).poke(0.U(field.width.W))
     }
   }
 
-  private def pokeIbuf(inst: Decoded, field: DecodeField, value: BigInt): Unit = {
+  private def pokeDecoded(inst: Decoded, field: DecodeField, value: BigInt): Unit = {
     val idx = essentialFieldIndex(field)
     inst.essentials(idx).poke(value.U(field.width.W))
+  }
+
+  private def driveRegisterData(vec: Vec[UInt], values: Seq[BigInt], archLen: Int): Unit = {
+    val padded = values.padTo(vec.length, BigInt(0))
+    vec.zip(padded).foreach { case (port, value) =>
+      port.poke(value.U(archLen.W))
+    }
   }
 
   private def driveRequest(
@@ -146,20 +155,21 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       archLen: Int
   ): Unit = {
     c.io.req.valid.poke(true.B)
-    zeroIbuf(c.io.req.bits.ibuf.inst)
-    pokeIbuf(c.io.req.bits.ibuf.inst, Opcode, op.opcode.litValue)
-    pokeIbuf(c.io.req.bits.ibuf.inst, F3, op.f3.litValue)
-    pokeIbuf(c.io.req.bits.ibuf.inst, F7, op.f7.litValue)
-    pokeIbuf(c.io.req.bits.ibuf.inst, Rd, op.rd)
-    c.io.req.bits.ibuf.pc.poke(op.pc.U(archLen.W))
-    c.io.req.bits.ibuf.tmask.poke(op.reqMask.U(c.io.req.bits.ibuf.tmask.getWidth.W))
-    c.io.req.bits.ibuf.wid.poke(0.U)
-    op.in1.zipWithIndex.foreach { case (value, idx) =>
-      c.io.req.bits.in1(idx).poke(value.U(archLen.W))
-    }
-    op.in2.zipWithIndex.foreach { case (value, idx) =>
-      c.io.req.bits.in2(idx).poke(value.U(archLen.W))
-    }
+    zeroDecoded(c.io.req.bits.uop.inst)
+    pokeDecoded(c.io.req.bits.uop.inst, Opcode, op.opcode.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F3, op.f3.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F7, op.f7.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, Rd, op.rd)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRd, if (op.rd != 0) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs1, if (op.in1.nonEmpty) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs2, if (op.in2.nonEmpty) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs3, 0)
+    pokeDecoded(c.io.req.bits.uop.inst, UseIntPipe, 1)
+    c.io.req.bits.uop.pc.poke(op.pc.U(archLen.W))
+    c.io.req.bits.uop.tmask.poke(op.reqMask.U(c.io.req.bits.uop.tmask.getWidth.W))
+    c.io.req.bits.uop.wid.poke(0.U)
+    driveRegisterData(c.io.req.bits.rs1Data.get, op.in1, archLen)
+    driveRegisterData(c.io.req.bits.rs2Data.get, op.in2, archLen)
   }
 
   private def waitForResponse(
@@ -182,11 +192,10 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   ): Unit = {
     op.expectedData.zipWithIndex.foreach { case (value, idx) =>
       if (((op.dataCheckMask >> idx) & 1) == 1)
-        c.io.resp.bits.data(idx).expect(value.U(archLen.W), s"${op.name} lane $idx mismatch")
+        c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(archLen.W), s"${op.name} lane $idx mismatch")
     }
-    c.io.resp.bits.rd.expect(op.rd.U)
-    c.io.resp.bits.pc_w_en.expect(false.B)
-    c.io.resp.bits.tmask.expect(op.expectedRespMask.U)
+    c.io.resp.bits.reg.get.bits.rd.expect(op.rd.U)
+    c.io.resp.bits.reg.get.bits.tmask.expect(op.expectedRespMask.U)
   }
 
   private def finishResponse(c: MulDivPipe): Unit = {
