@@ -4,10 +4,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
+import radiance.muon.backend._
 
-class SFU(implicit p: Parameters) extends IntPipe with HasCoreBundles {
+class SFU(implicit p: Parameters) extends ExPipe with HasCoreBundles {
   val uop = io.req.bits.uop
-
   val firstLidOH = PriorityEncoderOH(uop.tmask)
   val firstRs1 = Mux1H(firstLidOH, io.req.bits.rs1Data.get)
   val firstRs2 = Mux1H(firstLidOH, io.req.bits.rs2Data.get)
