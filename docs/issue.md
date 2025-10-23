@@ -25,19 +25,22 @@ We go after the following key performance opportunities in the issue stage:
 
 The detailed pipeline stages for the issue logic looks like this:
 
-![Issue pipeline](fig/issue-pipe.svg)
+<img src="fig/issue-pipe.svg" width="70%" />
 
-* **SCB Read / Write**: Scoreboard is a flop-based memory with asynchronous
-  read / synchronous write.  It is important for the read and write to happen
-  at the same cycle, so that the RS Admit stage does not miss the newly-written
-  values.
-* **RS Admit** determines whether to admit the instruction at the IBUF head
-  to the reservation station by conducting a [hazard check](#hazard-check) logic.
-  It also asserts dequeue signal to the IBUF when the RS admission succeeds.
+**TODO**: Add collector pipe stages, IBUF dequeue timing, SRAM-based SCB.
+
+* **SCB Read / Write**: The [scoreboard](#scoreboard) is a flop-based memory with asynchronous
+  read / synchronous write.  It is important for the read and write stages to
+  be in the same cycle, so that the RS Admit stage does not miss the
+  newly-written values.
+* **RS Admit** determines whether to admit the instruction at the IBUF head to
+  the [reservation station](#reservation-station) by conducting a [hazard
+  check](#hazard-check) logic. It also asserts dequeue signals to the per-warp
+  IBUF upon successful admission.
 * **RS Search** conducts a CAM scan through every entry in the RS to generate
   a bit vector that indicates all issue-eligible entries.
 * **RS Dispatch** receives the eligibility vector and arbitrates a single
-  instruction out of it to send down the EX pipeline, with an appropriate
+  instruction to dispatch to the EX pipeline, using an appropriate
   warp-scheduling policy.
 
 ## Scoreboard
