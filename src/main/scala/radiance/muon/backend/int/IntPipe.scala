@@ -80,20 +80,3 @@ trait HasIntPipeParams extends HasMuonCoreParameters {
   def numMulDivLanes = muonParams.intPipe.numMulDivLanes
   def mulDivParams = muonParams.intPipe.mulDivParams
 }
-
-abstract class IntPipe(alu: Boolean) (implicit p: Parameters)
-  extends CoreModule with HasIntPipeParams with HasCoreBundles {
-  val io = IO(new Bundle {
-    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true)))
-    val resp = Decoupled(writebackT(hasSched = alu, hasReg = true))
-  })
-
-  val inst = io.req.bits.uop.inst
-  val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
-  val req_op = Reg(new IntOpBundle)
-  val req_pc = Reg(UInt(archLen.W))
-  val req_tmask = Reg(UInt(numLanes.W))
-  val req_rd = Reg(UInt(Isa.regBits.W))
-  val req_wid = RegInit(0.U(log2Ceil(muonParams.numWarps).W))
-  val resp_valid = RegInit(false.B)
-}

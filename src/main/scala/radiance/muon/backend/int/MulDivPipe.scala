@@ -6,10 +6,10 @@ import freechips.rocketchip.rocket.MulDiv
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
-import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
+import radiance.muon.backend._
 
 class MulDivPipe(implicit p: Parameters)
-  extends IntPipe(false) {
+  extends ExPipe(false, true) with HasIntPipeParams {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W), Bool())
   val decomposer = Module(new LaneDecomposer(
@@ -29,6 +29,8 @@ class MulDivPipe(implicit p: Parameters)
     elemTypes = recomposerTypes
   ))
 
+  val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
+  val req_op = Reg(new IntOpBundle)
   val mul_out = Reg(Vec(numLanes, UInt(archLen.W)))
   val sliceTMask = Reg(UInt(numMulDivLanes.W))
   val busy = RegInit(false.B)

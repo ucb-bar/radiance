@@ -5,10 +5,10 @@ import chisel3.util._
 import freechips.rocketchip.rocket.ALU
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
-import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
+import radiance.muon.backend._
 
 class ALUPipe(implicit p: Parameters)
-  extends IntPipe(true) {
+  extends ExPipe(true, true) with HasIntPipeParams {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W))
   val decomposer = Module(new LaneDecomposer(
@@ -30,6 +30,8 @@ class ALUPipe(implicit p: Parameters)
     elemTypes = recomposerTypes,
   ))
 
+  val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
+  val req_op = Reg(new IntOpBundle)
   val alu_out = Reg(Vec(numLanes, UInt(archLen.W)))
   val cmp_out = Reg(Vec(numLanes, Bool()))
   val busy = RegInit(false.B)
