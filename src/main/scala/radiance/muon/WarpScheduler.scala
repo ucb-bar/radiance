@@ -13,7 +13,7 @@ class WarpScheduler(implicit p: Parameters)
   val cmdProcOpt = None
 
   val io = IO(new Bundle {
-    val commit = Flipped(Vec(numWarps, schedWritebackT))
+    val commit = Flipped(schedWritebackT)
     val icache = icacheIO
     val issue = issueIO
     val csr = csrIO
