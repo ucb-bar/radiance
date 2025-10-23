@@ -258,7 +258,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def regWritebackT = ValidIO(new Bundle {
     val rd = aRegT
     val data = Vec(m.numWarps, regDataT)
-    val mask = tmaskT
+    val tmask = tmaskT
   })
 
   def writebackT(hasSched: Boolean = true, hasReg: Boolean = true) = new Bundle {
