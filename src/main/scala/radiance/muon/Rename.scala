@@ -71,7 +71,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     port.address := Cat(wid, addr.asTypeOf(aRegT))
   }
 
-  val prAddr = rPorts.map(_.data.asTypeOf(UInt(8.W)))
+  val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
+  val prWarpPrefix = (wid << prIdxWidth).asUInt
+  val prAddr = rPorts.map(p => (p.data | prWarpPrefix).asTypeOf(pRegT))
 
   // update rd entry in table
   val unassigned = !assigned(wid)(decoded.rd)
@@ -84,24 +86,28 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   }
 
   // substitute pr's for ibuf enq
-  def bypass(ars: UInt, prs: UInt): UInt = {
+  def bypassAndShortCircuit(ars: UInt, prs: UInt): UInt = {
     // bypass read result if wid matches, and prev cycle assigned, and prev rd matches
     val prevRead = RegNext(Cat(wid, ars.asTypeOf(aRegT)))
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(aRegT)))
-    Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
+    Mux(
+      RegNext(ars === 0.U),
+      0.U,
+      Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
+    )
   }
 
   val shrunkDecoded = decoded.shrink()
   val decodedReg = RegNext(shrunkDecoded, 0.U.asTypeOf(shrunkDecoded))
-  val microInst = WireInit(decodedReg)
+  val uop = WireInit(decodedReg)
 
   regs.zipWithIndex.foreach { case (r, i) => // regs is rd/rs1/rs2/rs3
-    microInst(r) := Mux(RegNext(hasReg(i)), bypass(arAddr(i), prAddr(i)), decodedReg(r))
+    uop(r) := Mux(RegNext(hasReg(i)), bypassAndShortCircuit(arAddr(i), prAddr(i)), decodedReg(r))
   }
 
   io.ibuf.entry.valid := RegNext(io.rename.valid)
   io.ibuf.entry.bits.wid := RegNext(wid)
-  io.ibuf.entry.bits.ibuf.inst := microInst
+  io.ibuf.entry.bits.ibuf.inst := uop
   io.ibuf.entry.bits.ibuf.tmask := RegNext(io.rename.bits.tmask)
   io.ibuf.entry.bits.ibuf.pc := RegNext(io.rename.bits.pc)
   io.ibuf.entry.bits.ibuf.wid := RegNext(io.rename.bits.wid)
