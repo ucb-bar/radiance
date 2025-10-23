@@ -8,7 +8,7 @@ import radiance.muon._
 import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
 
 class ALUPipe(implicit p: Parameters)
-  extends IntPipe {
+  extends IntPipe(true) {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W))
   val decomposer = Module(new LaneDecomposer(

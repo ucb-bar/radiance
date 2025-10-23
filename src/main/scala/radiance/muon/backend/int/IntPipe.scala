@@ -6,7 +6,6 @@ import chisel3.util.experimental.decode._
 import freechips.rocketchip.rocket.{ALU, MulDivParams}
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
-import radiance.muon.backend.Writeback
 
 class IntOpBundle extends Bundle {
   val fn = UInt(ALU.SZ_ALU_FN.W)
@@ -82,11 +81,11 @@ trait HasIntPipeParams extends HasMuonCoreParameters {
   def mulDivParams = muonParams.intPipe.mulDivParams
 }
 
-abstract class IntPipe(implicit p: Parameters)
+abstract class IntPipe(alu: Boolean) (implicit p: Parameters)
   extends CoreModule with HasIntPipeParams with HasCoreBundles {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true)))
-    val resp = Decoupled(writebackT())
+    val resp = Decoupled(writebackT(hasSched = alu, hasReg = true))
   })
 
   val inst = io.req.bits.uop.inst
@@ -95,5 +94,6 @@ abstract class IntPipe(implicit p: Parameters)
   val req_pc = Reg(UInt(archLen.W))
   val req_tmask = Reg(UInt(numLanes.W))
   val req_rd = Reg(UInt(Isa.regBits.W))
+  val req_wid = RegInit(0.U(log2Ceil(muonParams.numWarps).W))
   val resp_valid = RegInit(false.B)
 }
