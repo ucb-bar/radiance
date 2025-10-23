@@ -23,6 +23,23 @@ We go after the following key performance opportunities in the issue stage:
 * **Past-head-of-line intra-warp ILP.**
 * **Bank conflict smoothing.**
 
+The detailed pipeline stages for the issue logic looks like this:
+
+![Issue pipeline](fig/issue-pipe.svg)
+
+* **SCB Read / Write**: Scoreboard is a flop-based memory with asynchronous
+  read / synchronous write.  It is important for the read and write to happen
+  at the same cycle, so that the RS Admit stage does not miss the newly-written
+  values.
+* **RS Admit** determines whether to admit the instruction at the IBUF head
+  to the reservation station by conducting a [hazard check](#hazard-check) logic.
+  It also asserts dequeue signal to the IBUF when the RS admission succeeds.
+* **RS Search** conducts a CAM scan through every entry in the RS to generate
+  a bit vector that indicates all issue-eligible entries.
+* **RS Dispatch** receives the eligibility vector and arbitrates a single
+  instruction out of it to send down the EX pipeline, with an appropriate
+  warp-scheduling policy.
+
 ## Scoreboard
 
 The main role of the scoreboard is to **bookkeep pending writes and reads to
@@ -144,35 +161,31 @@ read and writeback can happen out-of-order**.  Consider this series of events:
   Now there is a circular dependency between `i1 WB -> i2 read -> i1 WB`,
   causing a deadlock.
 
-This deadlock must be resolved in two different ways:
+This deadlock can be resolved in one of two different options:
 
 ###### Option 2-1: Must-forward invariant
 
-If we guarantee all RAWs within the instruction window to use forwarded value
-and not access the PRF, then we can skip incrementing `pendingRead` for the
-forwarded younger reads, which prevents deadlock issue.
+If we guarantee all RAWs within the instruction window to be forwarded
+instead of reading from the PRF, then we can skip incrementing `pendingRead`
+for the forwarded reads, which prevents the deadlock issue.
 
 In the below example, `i2` will see `pendingWrite[r5] = 1` set by `i1`, which
 will cause the hazard logic to admit `i2` to the RS with the `busy` bit set.
 Whenever the `busy` is set, we skip incrementing `pendingRead` upon RS admission:
 
 ```
---------- RS ---------
 i0: lw     <- 0(r5) # pendRead -> 1
 i1: add r5 <-       # WB stalled until pendRead -> 0; pendWrite -> 1
-i2: sub    <- r5    # admitted immediately; pendRead **not incremented** since forwarding avoids PRF read
+i2: sub    <- r5    # admitted immediately; pendRead **not incremented** due to forwarding
                     # issue stalled until pendWrite -> 0
--------- IBUF --------
-i3: mul r5 <-       # admitted when pendWrite -> 0;
-                    # pendRead will be 0, PRF read can start immediately
 ```
 
 For this to work, we need a strong guarantee that whenever `busy == 1`,
-**forwarding will always success**.  That is, if multiple EX operations finish
-within one cycle, all of the ops must successfully forward, instead of doing
-any arbitration and dropping the value (which then relies on regular PRF write
--> re-read path).  This may necessitate having a **writeback buffer** to
-smooth out the back-pressure (TODO: explore).
+**forwarding always succeeds**.  That is, if multiple EX operations finish
+within one cycle, all of the ops must successfully forward, instead of dropping
+any of the values (which will cause the RAW to fall back to regular PRF write
+-> re-read path).  This may necessitate having a **writeback buffer** to smooth
+out the back-pressure (TODO: explore).
 
 
 ###### Option 2-2: Opportunistic forwarding with epoched pendingReads
