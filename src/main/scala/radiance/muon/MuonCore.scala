@@ -240,7 +240,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   require(isPow2(m.numIPDOMEntries))
 
   def fuInT(hasRs1: Boolean = false, hasRs2: Boolean = false, hasRs3: Boolean = false) = new Bundle {
-    val uop = ibufEntryT
+    val uop = uopT
     val rs1Data = Option.when(hasRs1)(Vec(m.numWarps, regDataT))
     val rs2Data = Option.when(hasRs2)(Vec(m.numWarps, regDataT))
     val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
@@ -296,7 +296,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def ibufEntryT = new Bundle {
+  def uopT = new Bundle {
     val inst = new Decoded(full = false)
     val tmask = tmaskT
     val pc = pcT
@@ -314,7 +314,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
     val entry = Valid(new Bundle {
-      val ibuf = ibufEntryT
+      val uop = uopT
       val wid = widT
     })
   }

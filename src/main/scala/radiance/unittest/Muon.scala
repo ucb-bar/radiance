@@ -51,7 +51,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   // fe decode -> cyclotron back end
   // note issue logic is simple pass-through of decode
   (cbe.io.issue zip fe.io.ibuf).foreach { case (b, f) =>
-    b.bits.fromIBufT(f.bits)
+    b.bits.fromUop(f.bits)
     b.valid := f.valid
     f.ready := b.ready
   }
@@ -93,7 +93,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
     f.ready := b.ready
-    b.bits := f.bits.toIBufT()
+    b.bits := f.bits.toUop()
   }
   dontTouch(be.io)
 
