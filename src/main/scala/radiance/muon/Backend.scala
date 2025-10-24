@@ -32,7 +32,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     dontTouch(b.writePorts.head)
   }
 
-  val fpu = Module(new CVFPU())
+  val fpu = Module(new CVFPU)
   fpu.io.clock := clock
   fpu.io.reset := reset
   fpu.io.req.bits := DontCare
@@ -43,7 +43,27 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   io.ibuf.foreach(_.ready := true.B)
 
-  // TODO: Scoreboard
+  val scoreboard = Module(new Scoreboard)
+  // TODO only looking at warp 0 ibuf
+  // TODO merge scoreboard updates from RS admit + writeback
+  scoreboard.io.readRs1.enable := io.ibuf(0).valid
+  scoreboard.io.readRs1.pReg := io.ibuf(0).bits.inst.rs1
+  scoreboard.io.readRs2.enable := false.B
+  scoreboard.io.readRs2.pReg := DontCare
+  scoreboard.io.readRs3.enable := false.B
+  scoreboard.io.readRs3.pReg := DontCare
+  scoreboard.io.readRd.enable := false.B
+  scoreboard.io.readRd.pReg := DontCare
+  // TODO rs2-rd
+
+  scoreboard.io.update.enable := true.B
+  scoreboard.io.update.pReg := 1.U
+  scoreboard.io.update.readInc := true.B
+  scoreboard.io.update.readDec := false.B
+  scoreboard.io.update.writeInc := false.B
+  scoreboard.io.update.writeDec := true.B
+  dontTouch(scoreboard.io)
+
   // TODO: Issue queue
   // TODO: Collector
   // TODO: FPU/INT/SFU

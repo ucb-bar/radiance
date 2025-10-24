@@ -12,7 +12,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     val softReset = Input(Bool())
   })
 
-  val totalARs = m.numWarps * m.numArchRegs
+  val totalArchRegs = m.numWarps * m.numArchRegs
 
   val defaultAssignment = VecInit.fill(m.numWarps)(
     VecInit.tabulate(m.numArchRegs)(i => (i == 0).B) // x0 always assigned
@@ -30,7 +30,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
 
   val (rPorts, wPort) = if (useSRAM) {
     val table = SRAM(
-      size = totalARs,
+      size = totalArchRegs,
       tpe = pRegT,
       numReadPorts = 4,
       numWritePorts = 1,
@@ -40,10 +40,10 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     val wPort = table.writePorts.head
     (rPorts, wPort)
   } else {
-    val addrWidth = log2Up(totalARs)
+    val addrWidth = log2Up(totalArchRegs)
     val rPorts = Wire(Vec(4, new MemoryReadPort(pRegT, addrWidth)))
     val wPort = Wire(new MemoryWritePort(pRegT, addrWidth, false))
-    val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(pRegT)))
+    val table = RegInit(VecInit.fill(totalArchRegs)(0.U.asTypeOf(pRegT)))
 
     rPorts.foreach { p =>
       p.data := RegNext(table(p.address), 0.U)

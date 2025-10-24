@@ -18,16 +18,16 @@ Outputs: TODO
 
 Central scoreboard and distributed reservation stations working in conjunction. (TODO)
 
-We go after the following key performance opportunities in the issue stage:
+The issue stage design captures the following key performance opportunities:
 
 * **Past-head-of-line intra-warp ILP.**
 * **Bank conflict smoothing.**
 
-The detailed pipeline stages for the issue logic looks like this:
+Detailed pipeline timing for the issue stage:
 
-<img src="fig/issue-pipe.svg" width="70%" />
-
-**TODO**: Add collector pipe stages, IBUF dequeue timing, SRAM-based SCB.
+<p align="center">
+  <img src="fig/issue-pipe.svg" width="70%" />
+</p>
 
 * **SCB Read / Write**: The [scoreboard](#scoreboard) is a flop-based memory with asynchronous
   read / synchronous write.  It is important for the read and write stages to
@@ -42,6 +42,9 @@ The detailed pipeline stages for the issue logic looks like this:
 * **RS Dispatch** receives the eligibility vector and arbitrates a single
   instruction to dispatch to the EX pipeline, using an appropriate
   warp-scheduling policy.
+
+**TODO**: Add collector pipe stages, IBUF dequeue timing, sync-read SCB.
+
 
 ## Scoreboard
 
