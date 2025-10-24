@@ -215,7 +215,8 @@ object Decoder {
     allDecodeFields.filter(!_.essential)
   }
 
-  def staticOpcodeDecode(field: DecodeField, op: String): Option[Boolean] = {
+  def staticDecode(field: DecodeField, op: String, f3: => Int): Option[Boolean] = {
+    def sd(f: DecodeField) = staticDecode(f, op, f3).get
     field match {
       case IsRType =>
         Some(Seq(
@@ -284,13 +285,11 @@ object Decoder {
           MuOpcode.STORE,
         ).contains(op))
       case HasRd =>
-        Some(!staticOpcodeDecode(IsBType, op).get && !staticOpcodeDecode(IsSType, op).get)
+        Some(!sd(IsBType) && !sd(IsSType))
       case HasRs1 =>
-        Some(!staticOpcodeDecode(IsUJType, op).get)
+        Some(!sd(IsUJType))
       case HasRs2 =>
-        Some(staticOpcodeDecode(IsRType, op).get ||
-          staticOpcodeDecode(IsSType, op).get ||
-          staticOpcodeDecode(IsBType, op).get)
+        Some(sd(IsRType) || sd(IsSType) || sd(IsBType))
       case HasRs3 =>
         Some(Seq(
           MuOpcode.MADD,
@@ -306,13 +305,7 @@ object Decoder {
           MuOpcode.SYSTEM,
           MuOpcode.BRANCH
         ).contains(op))
-      case _ => None
-    }
-  }
-
-  def staticOpcodeF3Decode(field: DecodeField, op: String, f3: => Int) : Option[Boolean] = {
-    // important: when writing these rules, make sure opcode check short circuits f3
-    field match {
+      // important: when writing these rules, make sure opcode check short circuits f3
       case IsTMC =>     Some(op == MuOpcode.CUSTOM0 && f3 == 0)
       case IsWSpawn =>  Some(op == MuOpcode.CUSTOM0 && f3 == 1)
       case IsSplit =>   Some(op == MuOpcode.CUSTOM0 && f3 == 2)
@@ -325,11 +318,6 @@ object Decoder {
     }
   }
 
-  def staticDecode(field: DecodeField, op: String, f3: => Int): Option[Boolean] = {
-    staticOpcodeDecode(field, op)
-      .orElse(staticOpcodeF3Decode(field, op, f3))
-  }
-
   // this converts field to the index in the bitpat
   val tableIndices = allDecodeFields.flatMap(f => staticDecode(f, "", 0).map(_ => f)).zipWithIndex.toMap
 
@@ -338,13 +326,12 @@ object Decoder {
       var f3Used = false
 
       def getBitPat(f3: => Int) = {
-        BitPat("b" + (allDecodeFields.flatMap {
+        BitPat("b" + allDecodeFields.flatMap {
           staticDecode(_, op, f3)
-        }.map(b => if (b) '1' else '0').mkString.reverse))
+        }.map(b => if (b) '1' else '0').mkString.reverse) // string is big endian
       }
 
-      val f0Signals = getBitPat({f3Used = true; 0}) // string is big endian
-      println(s"${op} f3 used ${f3Used}")
+      val f0Signals = getBitPat({f3Used = true; 0})
       if (f3Used) {
         Seq.tabulate(8) { f3 =>
           (BitPat(op + (("000" + f3.toBinaryString) takeRight 3)), getBitPat(f3))
@@ -355,7 +342,6 @@ object Decoder {
     },
     default = BitPat.dontCare(tableIndices.size)
   )
-  println(table.table)
 
   def decode(inst: UInt): Decoded = {
     val dec = Wire(new Decoded(full = true))
