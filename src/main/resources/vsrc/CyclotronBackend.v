@@ -564,10 +564,11 @@ module CyclotronBackendBlackBox #(
   assign issue_6_ready = issue_ready_arr[6];
   assign issue_7_ready = issue_ready_arr[7];
 
-  always @(negedge clock) begin
+  integer sel_idx;
+  always @(*) begin
     integer i;
-    integer sel_idx;
     integer idx;
+
     // default: no ready
     issue_ready_arr = '0;
     sel_idx = -1;
@@ -582,9 +583,12 @@ module CyclotronBackendBlackBox #(
     end
 
     if (sel_idx >= 0) begin
-      // mark the selected port ready (one-hot)
       issue_ready_arr[sel_idx] = 1'b1;
+    end
+  end
 
+  always @(negedge clock) begin
+    if (sel_idx >= 0) begin
       // Call backend once for the selected port
       cyclotron_backend(
         issue_valid_arr            [sel_idx],
@@ -626,6 +630,8 @@ module CyclotronBackendBlackBox #(
       // advance pointer to next port after the selected one
       rr_ptr_next = (sel_idx + 1) % ISSUE_PORTS;
     end else begin
+      __writeback_valid[0] <= '0;
+      __finished[0] <= '0;
       // no valid port found; do not call backend and keep pointer unchanged
       rr_ptr_next = rr_ptr_reg;
     end

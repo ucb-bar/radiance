@@ -229,6 +229,10 @@ class WarpScheduler(implicit p: Parameters)
       threadMasks(wid) := mask.bits
     }
   }
+  val allFinished = VecInit(pcTracker.map(!_.valid)).asUInt.andR
+  when (allFinished) {
+    printf("no more active warps\n")
+  }
 
   // select warp for fetch
   fetchArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>

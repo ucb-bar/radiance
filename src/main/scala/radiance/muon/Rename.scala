@@ -47,10 +47,6 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
 
     rPorts.foreach { p =>
       p.data := RegNext(table(p.address), 0.U)
-//      p.data := DontCare
-//      when (p.enable) {
-//        p.data := RegNext(table(p.address))
-//      }
     }
     when (wPort.enable) {
       table(wPort.address) := wPort.data
@@ -73,7 +69,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
 
   val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
   val prWarpPrefix = (wid << prIdxWidth).asUInt
-  val prAddr = rPorts.map(p => (p.data | prWarpPrefix).asTypeOf(pRegT))
+  val prAddr = rPorts.map(_.data)
 
   // update rd entry in table
   val unassigned = !assigned(wid)(decoded.rd)
@@ -93,7 +89,11 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     Mux(
       RegNext(ars === 0.U),
       0.U,
-      Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
+      Mux(
+        RegNext(assigning) && (prevRead === prevWrite),
+        RegNext(prWarpPrefix | wPort.data),
+        RegNext(prWarpPrefix) | prs
+      )
     )
   }
 
