@@ -103,14 +103,6 @@ class Decoded(full: Boolean = true) extends Bundle {
         case Rs2 =>       inst(35, 28)
         case Rs3 =>       inst(43, 36)
         case Pred =>      inst(63, 60)
-        case IsTMC =>     {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 0.U}
-        case IsWSpawn =>  {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 1.U}
-        case IsSplit =>   {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 2.U}
-        case IsJoin =>    {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 3.U}
-        case IsBar =>     {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 4.U}
-        case IsPred =>    {decode(Opcode) === MuOpcode.CUSTOM0.U && decode(F3) === 5.U}
-        case IsToHost =>  {decode(Opcode) === MuOpcode.SYSTEM.U  && decode(F3) === 0.U}
-        case IsCSR =>     {decode(Opcode) === MuOpcode.SYSTEM.U  && decode(F3) =/= 0.U}
         case CsrAddr => decode(Imm32)
         case CsrImm  => inst(27, 20) // separate from rs1 since that'll be renamed
         case ImmH8 => Mux(decodeB(HasRd),
@@ -123,7 +115,10 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
-          chisel3.util.experimental.decode.decoder(decode(Opcode), Decoder.table)(Decoder.tableIndices(field))
+          chisel3.util.experimental.decode.decoder(
+            Cat(decode(Opcode), decode(F3)),
+            Decoder.table
+          )(Decoder.tableIndices(field))
       }
 
       if (field.essential) {
@@ -315,17 +310,52 @@ object Decoder {
     }
   }
 
+  def staticOpcodeF3Decode(field: DecodeField, op: String, f3: => Int) : Option[Boolean] = {
+    // important: when writing these rules, make sure opcode check short circuits f3
+    field match {
+      case IsTMC =>     Some(op == MuOpcode.CUSTOM0 && f3 == 0)
+      case IsWSpawn =>  Some(op == MuOpcode.CUSTOM0 && f3 == 1)
+      case IsSplit =>   Some(op == MuOpcode.CUSTOM0 && f3 == 2)
+      case IsJoin =>    Some(op == MuOpcode.CUSTOM0 && f3 == 3)
+      case IsBar =>     Some(op == MuOpcode.CUSTOM0 && f3 == 4)
+      case IsPred =>    Some(op == MuOpcode.CUSTOM0 && f3 == 5)
+      case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == 0)
+      case IsCSR =>     Some(op == MuOpcode.SYSTEM  && f3 != 0)
+      case _ => None
+    }
+  }
+
+  def staticDecode(field: DecodeField, op: String, f3: => Int): Option[Boolean] = {
+    staticOpcodeDecode(field, op)
+      .orElse(staticOpcodeF3Decode(field, op, f3))
+  }
+
   // this converts field to the index in the bitpat
-  val tableIndices = allDecodeFields.flatMap(f => staticOpcodeDecode(f, "").map(_ => f)).zipWithIndex.toMap
+  val tableIndices = allDecodeFields.flatMap(f => staticDecode(f, "", 0).map(_ => f)).zipWithIndex.toMap
+
   val table = TruthTable(
-    allOpcodes.map { op =>
-      val signals = "b" + (allDecodeFields.flatMap {
-        staticOpcodeDecode(_, op)
-      }.map(b => if (b) '1' else '0').mkString.reverse) // string is big endian
-      (BitPat(op), BitPat(signals))
+    table = allOpcodes.flatMap { op =>
+      var f3Used = false
+
+      def getBitPat(f3: => Int) = {
+        BitPat("b" + (allDecodeFields.flatMap {
+          staticDecode(_, op, f3)
+        }.map(b => if (b) '1' else '0').mkString.reverse))
+      }
+
+      val f0Signals = getBitPat({f3Used = true; 0}) // string is big endian
+      println(s"${op} f3 used ${f3Used}")
+      if (f3Used) {
+        Seq.tabulate(8) { f3 =>
+          (BitPat(op + (("000" + f3.toBinaryString) takeRight 3)), getBitPat(f3))
+        }
+      } else {
+        Seq((BitPat(op + "???"), f0Signals))
+      }
     },
     default = BitPat.dontCare(tableIndices.size)
   )
+  println(table.table)
 
   def decode(inst: UInt): Decoded = {
     val dec = Wire(new Decoded(full = true))
