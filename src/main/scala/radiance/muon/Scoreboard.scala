@@ -44,7 +44,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   // flip-flops
-  val validTable = Mem(muonParams.numPhysRegs, Bool())
   val table = Mem(muonParams.numPhysRegs, entryT)
 
   val maxPendingReadsU = muonParams.maxPendingReads.U

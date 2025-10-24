@@ -246,17 +246,17 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
   }
 
-  def schedWritebackT = ValidIO(new Bundle {
-      val setPC = ValidIO(pcT)
-      val setTmask = ValidIO(tmaskT)
-      val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
-      val wspawn = ValidIO(wspawnT)
+  def schedWritebackT = Valid(new Bundle {
+      val setPC = Valid(pcT)
+      val setTmask = Valid(tmaskT)
+      val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+      val wspawn = Valid(wspawnT)
       val pc = pcT
       val wid = widT
     }
   )
 
-  def regWritebackT = ValidIO(new Bundle {
+  def regWritebackT = Valid(new Bundle {
     val rd = aRegT
     val data = Vec(m.numWarps, regDataT)
     val tmask = tmaskT
@@ -272,7 +272,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
       val pc = pcT
       val wid = widT
     }) // icache can stall scheduler
-    val out = Flipped(ValidIO(new Bundle {
+    val out = Flipped(Valid(new Bundle {
       val inst = instT
       val pc = pcT
       val wid = widT
@@ -280,19 +280,19 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   }
 
   def issueIO = new Bundle {
-    val eligible = Flipped(ValidIO(wmaskT))
+    val eligible = Flipped(Valid(wmaskT))
     val issued = Output(widT) // comb
   }
 
   def csrIO = new Bundle {
-    val read = Flipped(ValidIO(new Bundle {
+    val read = Flipped(Valid(new Bundle {
       val addr = UInt(m.csrAddrBits.W)
       val wid = widT
     })) // reads only
     val resp = Output(regDataT) // next cycle
   }
 
-  def cmdProcIO = Flipped(ValidIO(new Bundle {
+  def cmdProcIO = Flipped(Valid(new Bundle {
     val schedule = pcT
   }))
 
@@ -303,7 +303,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val wid = widT
   }
 
-  def renameIO = ValidIO(new Bundle {
+  def renameIO = Valid(new Bundle {
     val inst = instT
     val tmask = tmaskT
     val wmask = wmaskT
@@ -313,7 +313,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
-    val entry = ValidIO(new Bundle {
+    val entry = Valid(new Bundle {
       val ibuf = ibufEntryT
       val wid = widT
     })
