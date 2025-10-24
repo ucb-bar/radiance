@@ -88,6 +88,8 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   cfe.io.imem.req.bits := DontCare
   cfe.io.imem.resp.ready := false.B
 
+  // TODO: also instantiate CyclotronBackend as the issue downstream
+
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
     f.ready := b.ready

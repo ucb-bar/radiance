@@ -69,6 +69,7 @@ case class MuonCoreParams(
   ibufDepth: Int = 8,
   startAddress: BigInt = x"1000_0000",
   // issue
+  maxPendingReads: Int = 3,  // scoreboard
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
   // execute
