@@ -132,6 +132,7 @@ class MemResponse[T <: Bundle] (
   val metadata = metadataT.cloneType
 }
 
+/** Derived parameters from the op-level MuonCoreParams. */
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
@@ -153,6 +154,10 @@ trait HasMuonCoreParameters {
 
   // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+
+  require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
+  val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)
+  val scoreboardWriteCountBits = 1 // 0 or 1
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
@@ -317,6 +322,11 @@ trait HasCoreBundles extends HasMuonCoreParameters {
       val uop = uopT
       val wid = widT
     })
+  }
+
+  def scoreboardUpdateIO = new ScoreboardUpdate
+  def scoreboardReadIO = {
+    new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   }
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class ScoreboardWrite(implicit p: Parameters) extends CoreBundle()(p) {
+class ScoreboardUpdate(implicit p: Parameters) extends CoreBundle()(p) {
   val enable = Input(Bool())
   val pReg = Input(pRegT)
   val writeInc = Input(Bool())
@@ -24,22 +24,19 @@ class ScoreboardRead(
 }
 
 class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
-  require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
-  val readCountBits = log2Ceil(muonParams.maxPendingReads + 1)
-  val writeCountBits = 1 // 0 or 1
-  val io = IO(new Bundle {
+  val io = IO(new CoreBundle {
     // asynchronous-read, synchronous-write
-    val update  = new ScoreboardWrite
-    val readRs1 = new ScoreboardRead(readCountBits, writeCountBits)
-    val readRs2 = new ScoreboardRead(readCountBits, writeCountBits)
-    val readRs3 = new ScoreboardRead(readCountBits, writeCountBits)
-    val readRd  = new ScoreboardRead(readCountBits, writeCountBits)
+    val update  = scoreboardUpdateIO
+    val readRs1 = scoreboardReadIO
+    val readRs2 = scoreboardReadIO
+    val readRs3 = scoreboardReadIO
+    val readRd  = scoreboardReadIO
     // TODO: per-warp ports
   })
 
   def entryT = new Bundle {
-    val pendingReads = UInt(readCountBits.W)
-    val pendingWrites = UInt(writeCountBits.W)
+    val pendingReads = chiselTypeOf(io.readRd.pendingReads)
+    val pendingWrites = chiselTypeOf(io.readRd.pendingWrites)
     // TODO: reads epoch
   }
 
