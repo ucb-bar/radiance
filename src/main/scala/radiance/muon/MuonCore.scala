@@ -105,6 +105,7 @@ object Isa {
   def f7Bits = 7
   def immBits = 32
   def predBits = 4
+  def maxNumRegs = 3 // rs1/2/3
 }
 
 class MemRequest[T <: Bundle] (
@@ -301,13 +302,6 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def uopT = new Bundle {
-    val inst = new Decoded(full = false)
-    val tmask = tmaskT
-    val pc = pcT
-    val wid = widT
-  }
-
   def renameIO = Valid(new Bundle {
     val inst = instT
     val tmask = tmaskT
@@ -315,6 +309,8 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val wid = widT
     val pc = pcT
   })
+
+  def uopT = new UOp
 
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))

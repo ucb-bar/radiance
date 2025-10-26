@@ -12,6 +12,16 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
   })
 
+  val hazard = Module(new Hazard)
+  hazard.io.ibuf <> io.ibuf
+  hazard.io.rsEnq.ready := true.B // TODO
+
+  val scoreboard = Module(new Scoreboard)
+  scoreboard.io <> hazard.io.scb
+  dontTouch(scoreboard.io)
+
+  // TODO: Reservation station
+  // TODO: Collector
   // temporary placeholders to generate reg file banks for par
   val rfBanks = Seq.fill(muonParams.numRegBanks)(SRAM(
     size = muonParams.numPhysRegs / muonParams.numRegBanks,
@@ -41,32 +51,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   fpu.io.flush := false.B
   dontTouch(fpu.io)
 
-  io.ibuf.foreach(_.ready := true.B)
-
-  val scoreboard = Module(new Scoreboard)
-  // TODO only looking at warp 0 ibuf
-  // TODO merge scoreboard updates from RS admit + writeback
-  scoreboard.io.readRs1.enable := io.ibuf(0).valid
-  scoreboard.io.readRs1.pReg := io.ibuf(0).bits.inst.rs1
-  scoreboard.io.readRs2.enable := false.B
-  scoreboard.io.readRs2.pReg := DontCare
-  scoreboard.io.readRs3.enable := false.B
-  scoreboard.io.readRs3.pReg := DontCare
-  scoreboard.io.readRd.enable := false.B
-  scoreboard.io.readRd.pReg := DontCare
-  // TODO rs2-rd
-
-  scoreboard.io.update.enable := true.B
-  scoreboard.io.update.pReg := 1.U
-  scoreboard.io.update.readInc := true.B
-  scoreboard.io.update.readDec := false.B
-  scoreboard.io.update.writeInc := false.B
-  scoreboard.io.update.writeDec := true.B
-  dontTouch(scoreboard.io)
-
-  // TODO: Issue queue
-  // TODO: Collector
-  // TODO: FPU/INT/SFU
+  // TODO: INT/SFU
   // TODO: LSU
   io.dmem.req.valid := false.B
   io.dmem.req.bits := DontCare

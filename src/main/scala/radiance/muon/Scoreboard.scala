@@ -23,6 +23,11 @@ class ScoreboardRead(
   val pendingWrites = Output(UInt(writeCountBits.W))
 }
 
+/** Scoreboard module keeps track of pending reads and writes to every register
+ *  by the current in-flight instructions.  It instructs the Hazard module and
+ *  the reservation station whether an instruction has unresolved RAW/WAR/WAW
+ *  hazards at the time of access.
+ */
 class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new CoreBundle {
     // asynchronous-read, synchronous-write
@@ -42,9 +47,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
   // flip-flops
   val table = Mem(muonParams.numPhysRegs, entryT)
-
-  val maxPendingReadsU = muonParams.maxPendingReads.U
-  val maxPendingWritesU = 1.U
 
   // reset
   // @synthesis: unsure if this will generate expensive trees, revisit
@@ -71,6 +73,9 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   read(io.readRd)
 
   // update
+  val maxPendingReadsU = muonParams.maxPendingReads.U
+  val maxPendingWritesU = 1.U
+
   when (io.update.enable) {
     assert(!(io.update.readInc && io.update.readDec),
            "scoreboard increment and decrement cannot be both asserted")
