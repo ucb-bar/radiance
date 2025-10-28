@@ -160,47 +160,26 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasMuonCoreParameters with HasCoreBundles
 
-// since DataMemIO / SharedMemIO / InstMemIO aren't related by inheritance,
-// common properties are factored out into this trait
-trait MemInterface {
-  def getReq: DecoupledIO[MemRequest[Bundle]];
-  def getResp: DecoupledIO[MemResponse[Bundle]];
-  def getTagBits: Int;
-  def getAddressBits: Int;
-  def getDataBits: Int;
-}
-class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
-  val req = Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
-  val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
-
-  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
-    req
-  }
-
-  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
-    resp
-  }
-
-  override def getTagBits: Int = dmemTagBits
-  override def getAddressBits: Int = addressBits
-  override def getDataBits: Int = dmemDataBits
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
+  )
 }
 
-class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
-  val req = Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
-  val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
-
-  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
-    req
-  }
-
-  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
-    resp
-  }
-
-  override def getTagBits: Int = smemTagBits
-  override def getAddressBits: Int = addressBits
-  override def getDataBits: Int = smemDataBits
+class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
+  )
 }
 
 class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreBundles {
