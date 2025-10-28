@@ -103,6 +103,10 @@ void cyclotron_backend_rs(
     uint8_t* writeback_wspawn_valid_ptr,
     uint32_t* writeback_wspawn_count_ptr,
     uint32_t* writeback_wspawn_pc_ptr,
+    uint8_t* writeback_ipdom_valid_ptr,
+    uint32_t* writeback_ipdom_restored_mask_ptr,
+    uint32_t* writeback_ipdom_else_mask_ptr,
+    uint32_t* writeback_ipdom_else_pc_ptr,
     uint8_t* finished_ptr
 );
 
@@ -140,6 +144,10 @@ void cyclotron_backend(
     uint8_t* writeback_wspawn_valid,
     uint32_t* writeback_wspawn_count,
     uint32_t* writeback_wspawn_pc,
+    uint8_t* writeback_ipdom_valid,
+    uint32_t* writeback_ipdom_restored_mask,
+    uint32_t* writeback_ipdom_else_mask,
+    uint32_t* writeback_ipdom_else_pc,
     uint8_t* finished
 ) {
     cyclotron_backend_rs(
@@ -176,6 +184,10 @@ void cyclotron_backend(
         writeback_wspawn_valid,
         writeback_wspawn_count,
         writeback_wspawn_pc,
+        writeback_ipdom_valid,
+        writeback_ipdom_restored_mask,
+        writeback_ipdom_else_mask,
+        writeback_ipdom_else_pc,
         finished
     );
 }
