@@ -27,7 +27,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
   io.ibuf.foreach(_.ready := true.B)
 
-  def checkWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
+  def tryWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
     val uopValid = ibufPort.valid
     val hasRd    = ibufPort.bits.inst(HasRd) .asBool
     val hasRs1   = ibufPort.bits.inst(HasRs1).asBool
@@ -68,10 +68,10 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     rsEnq
   }
 
-  // TODO only looking at warp 0 at the moment
+  // TODO only handling warp 0 because of single-port scoreboard
   val rsEnqAllWarps = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
     wid match {
-      case 0 => checkWarp(ibPort)
+      case 0 => tryWarp(ibPort)
       case _ => {
         val rsEnq = Wire(Decoupled(new ReservationStationEntry))
         rsEnq.valid := false.B
@@ -91,28 +91,37 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   io.rsEnq <> rsEnqArbiter.io.out
 
   // update scoreboard upon RS admission
+  // this must be done at the same cycle as scoreboard read, so that updated
+  // values are immediately visible at the next cycle and never lost.
   when (io.rsEnq.fire) {
     assert(rsEnqArbiter.io.chosen === 0.U,
            "TODO: arbiter chose something else than warp 0") // FIXME
 
     val chosenUop = io.rsEnq.bits.uop
     val hasRd    = chosenUop.inst(HasRd) .asBool
-    val hasRs1   = chosenUop.inst(HasRs1).asBool
-    val hasRs2   = chosenUop.inst(HasRs2).asBool
-    val hasRs3   = chosenUop.inst(HasRs3).asBool
+    val hasRss   = Seq(chosenUop.inst(HasRs1).asBool,
+                       chosenUop.inst(HasRs2).asBool,
+                       chosenUop.inst(HasRs3).asBool)
+    val rss      = Seq(chosenUop.inst.rs1, chosenUop.inst.rs2, chosenUop.inst.rs3)
 
     io.scb.update.enable := hasRd
-    io.scb.update.pReg   := chosenUop.inst.rd
-    io.scb.update.readInc  := false.B // TODO: check rs1/2/3
-    io.scb.update.readDec  := false.B // TODO: check rs1/2/3
-    io.scb.update.writeInc := true.B
-    io.scb.update.writeDec := false.B
+    io.scb.update.write.pReg := chosenUop.inst.rd
+    io.scb.update.write.incr := true.B
+    io.scb.update.write.decr := false.B
+    (io.scb.update.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
+      read.pReg := rs
+      read.incr := hasRs
+      read.decr := false.B
+    }
   }.otherwise {
     io.scb.update.enable := false.B
-    io.scb.update.pReg   := 0.U
-    io.scb.update.readInc  := false.B
-    io.scb.update.readDec  := false.B
-    io.scb.update.writeInc := false.B
-    io.scb.update.writeDec := false.B
+    io.scb.update.write.pReg := 0.U
+    io.scb.update.write.incr := false.B
+    io.scb.update.write.decr := false.B
+    io.scb.update.reads.foreach { read =>
+      read.pReg := 0.U
+      read.incr := false.B
+      read.decr := false.B
+    }
   }
 }
