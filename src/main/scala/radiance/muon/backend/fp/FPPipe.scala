@@ -54,3 +54,28 @@ object FpOpDecoder {
     result
   }
 }
+
+class FPPipe(implicit p: Parameters)
+  extends ExPipe(writebackSched = false, writebackReg = true)
+    with HasFPPipeParams {
+  implicit val decomposerTypes =
+    Seq(UInt(archLen.W), UInt(archLen.W), UInt(archLen.W), Bool())
+  val decomposer = Module(new LaneDecomposer(
+    inLanes = numLanes,
+    outLanes = numFP32Lanes,
+    elemTypes = decomposerTypes
+  ))
+
+  val cvFPU = Module(new CVFPU(numFp16Lanes = numFP32Lanes * 2, tagWidth = Isa.regBits))
+
+  implicit val recomposerTypes =
+    Seq(UInt(archLen.W))
+  val recomposer = Module(new LaneRecomposer(
+    inLanes = numLanes,
+    outLanes = numFP32Lanes * 2,
+    elemTypes = recomposerTypes,
+  ))
+
+  // assume same fpconv across all lanes
+  val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), io.req.bits.rs2Data.get(0))
+}
