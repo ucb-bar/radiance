@@ -5,11 +5,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 
-abstract class ExPipe(hasSched: Boolean = true, hasReg: Boolean = true) (implicit p: Parameters)
-  extends CoreModule with HasCoreBundles {
+abstract class ExPipe(
+  writebackSched: Boolean = true,
+  writebackReg: Boolean = true)
+(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true)))
-    val resp = Decoupled(writebackT(hasSched, hasReg))
+    val resp = Decoupled(writebackT(writebackSched, writebackReg))
   })
 
   val inst = io.req.bits.uop.inst

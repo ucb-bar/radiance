@@ -105,6 +105,7 @@ object Isa {
   def f7Bits = 7
   def immBits = 32
   def predBits = 4
+  def maxNumRegs = 3 // rs1/2/3
 }
 
 class MemRequest[T <: Bundle] (
@@ -132,6 +133,7 @@ class MemResponse[T <: Bundle] (
   val metadata = metadataT.cloneType
 }
 
+/** Derived parameters from the op-level MuonCoreParams. */
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
@@ -153,6 +155,10 @@ trait HasMuonCoreParameters {
 
   // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+
+  require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
+  val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)
+  val scoreboardWriteCountBits = 1 // 0 or 1
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
@@ -161,47 +167,26 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasMuonCoreParameters with HasCoreBundles
 
-// since DataMemIO / SharedMemIO / InstMemIO aren't related by inheritance,
-// common properties are factored out into this trait
-trait MemInterface {
-  def getReq: DecoupledIO[MemRequest[Bundle]];
-  def getResp: DecoupledIO[MemResponse[Bundle]];
-  def getTagBits: Int;
-  def getAddressBits: Int;
-  def getDataBits: Int;
-}
-class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
-  val req = Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
-  val resp = Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
-
-  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
-    req
-  }
-
-  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
-    resp
-  }
-
-  override def getTagBits: Int = dmemTagBits
-  override def getAddressBits: Int = addressBits
-  override def getDataBits: Int = dmemDataBits
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
+  )
 }
 
-class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) with MemInterface {
-  val req = Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
-  val resp = Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
-
-  override def getReq: DecoupledIO[MemRequest[Bundle]] = {
-    req
-  }
-
-  override def getResp: DecoupledIO[MemResponse[Bundle]] = {
-    resp
-  }
-
-  override def getTagBits: Int = smemTagBits
-  override def getAddressBits: Int = addressBits
-  override def getDataBits: Int = smemDataBits
+class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
+  )
 }
 
 class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreBundles {
@@ -296,13 +281,6 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val schedule = pcT
   }))
 
-  def uopT = new Bundle {
-    val inst = new Decoded(full = false)
-    val tmask = tmaskT
-    val pc = pcT
-    val wid = widT
-  }
-
   def renameIO = Valid(new Bundle {
     val inst = instT
     val tmask = tmaskT
@@ -311,12 +289,19 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val pc = pcT
   })
 
+  def uopT = new UOp
+
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
     val entry = Valid(new Bundle {
       val uop = uopT
       val wid = widT
     })
+  }
+
+  def scoreboardUpdateIO = new ScoreboardUpdate
+  def scoreboardReadIO = {
+    new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   }
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)

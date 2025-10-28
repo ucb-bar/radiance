@@ -4,6 +4,16 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
+/** UOp represents a single instruction executed in the backend, as well as a
+ *  single entry in InstBuffer.
+ */
+class UOp(implicit p: Parameters) extends CoreBundle()(p) {
+  val inst = new Decoded(full = false)
+  val tmask = tmaskT
+  val pc = pcT
+  val wid = widT
+}
+
 trait HasInstBufferEntryFields {
   val pc: UInt
   val wid: UInt

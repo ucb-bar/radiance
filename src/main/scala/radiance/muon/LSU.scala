@@ -352,12 +352,15 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         io.receivedOperands.resp.bits.storeDataIdx := {
             if (loadQueue) { DontCare } else { storeDataIdx(localIndex(io.receivedOperands.req.bits.token.index)) }
         }
+
         when (io.receivedOperands.req.valid) {
-            // how to assert at posedge?
-            // assert(valid(localIndex(io.receivedOperands.req.bits.token.index)), "invalid index from reservation station")
-            
             operandsReady(localIndex(io.receivedOperands.req.bits.token.index)) := true.B
         }
+        val badIndex = RegNext(
+            io.receivedOperands.req.valid && !valid(localIndex(io.receivedOperands.req.bits.token.index)), 
+            false.B
+        );
+        assert(!badIndex, "invalid index from reservation station")
 
         // find entries ready to issue a mem request
         if (loadQueue) {
@@ -646,7 +649,25 @@ class LsuResponse(implicit p: Parameters) extends CoreBundle {
     val writebackData = Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W))
 }
 
-// Downstream memory interface
+/* 
+# Downstream memory interface
+
+The LSU Memory Request interface is per-warp with separate data / address / tmask per lane, 
+but the tag is shared across all lanes.
+
+The core's memory interface is fully per-LSU-lane, with a per-LSU-lane tag as well. Generally, for coalesced requests, 
+the responses will come back together, but for uncoalesced requests, no such guarantee is made. As such, we
+need to support partial writes into the load data staging SRAM, and we need to keep track of which words in a row
+are valid, only advancing the state machine to begin writing back once all of them are.
+
+As such, we need to convert from LSU memory request to core memory request by appending LSU lane id, 
+and the LSU Memory Response interface should support per-LSU-lane valids. 
+We also need to convert from core memory response to LSU memory response(s). This is done very naively, 
+by picking the first valid lane on the core side, and filtering only those responses whose tag (excluding lane id) 
+matches it. 
+
+In the future, it may be possible to begin writing back once a packet is ready, rather than the full warp
+*/
 class LsuMemTag(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
     val packet = UInt(lsuDerived.packetBits.W)
@@ -664,6 +685,7 @@ class LsuMemRequest(implicit p: Parameters) extends CoreBundle {
 class LsuMemResponse(implicit p: Parameters) extends CoreBundle {
     val tag = UInt(lsuDerived.sourceIdBits.W)
 
+    val valid = Vec(muonParams.lsu.numLsuLanes, Bool())
     val data = Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W))
 }
 
@@ -1106,4 +1128,33 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             pRegTmask := pRegTmaskMem.read(tokenToPRegTmaskIndex(token))
         }
     }
+}
+
+// See [Downstream memory interface]
+class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
+    val io = IO(new Bundle {
+        val lsu = new Bundle {
+            val globalMemReq = Decoupled(new LsuMemRequest)
+            val globalMemResp = Flipped(Decoupled(new LsuMemResponse))
+
+            val shmemReq = Decoupled(new LsuMemRequest)
+            val shmemResp = Flipped(Decoupled(new LsuMemResponse))
+        }
+
+        val core = new Bundle {
+            val dmem = new DataMemIO
+            val smem = new SharedMemIO
+        }
+    })
+
+    def connectReq = (lsuReq: DecoupledIO[LsuMemRequest], coreReq: Vec[DecoupledIO[MemRequest[Bundle]]]) => {
+        val readys = coreReq.map(_.ready)
+        val allReady = readys.reduce(_ && _)
+        for (lane <- coreReq) {
+            lane.valid := allReady && lsuReq.valid
+        }
+        lsuReq.ready := allReady
+    }
+
+
 }
