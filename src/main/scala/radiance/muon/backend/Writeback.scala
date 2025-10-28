@@ -3,8 +3,7 @@ package radiance.muon.backend
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import radiance.muon.{CoreModule, HasMuonCoreParameters, Isa}
-import radiance.muon.backend.int.IntPipeResp
+import radiance.muon._
 
 class WritebackReq(implicit val p: Parameters)
   extends Bundle with HasMuonCoreParameters {
@@ -21,9 +20,10 @@ class IssueIF(implicit val p: Parameters)
   val wmask = UInt(numLaneBytes.W)
 }
 
-class Writeback(implicit p: Parameters) extends CoreModule {
+class Writeback(implicit p: Parameters)
+  extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new IntPipeResp))
+    val req = Flipped(Decoupled(writebackT()))
     val rfWIssueIF = Output(Valid(new IssueIF))
     val schedIF = Output(new Bundle {
       val pc = UInt(muonParams.archLen.W)

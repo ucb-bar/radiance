@@ -8,6 +8,7 @@ import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTilePar
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
 
 case object MuonKey extends Field[MuonCoreParams]
@@ -68,12 +69,12 @@ case class MuonCoreParams(
   ibufDepth: Int = 8,
   startAddress: BigInt = x"1000_0000",
   // issue
+  maxPendingReads: Int = 3,  // scoreboard
   numRegBanks: Int = 4,
   numOpCollectorEntries: Int = 2,
   // execute
   intPipe: IntPipeParams = IntPipeParams(),
-  numFp32Lanes: Int = 8,
-  numFDivLanes: Int = 8,
+  fpPipe: FPPipeParams = FPPipeParams(),
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
@@ -104,6 +105,7 @@ object Isa {
   def f7Bits = 7
   def immBits = 32
   def predBits = 4
+  def maxNumRegs = 3 // rs1/2/3
 }
 
 class MemRequest[T <: Bundle] (
@@ -131,6 +133,7 @@ class MemResponse[T <: Bundle] (
   val metadata = metadataT.cloneType
 }
 
+/** Derived parameters from the op-level MuonCoreParams. */
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
@@ -152,6 +155,10 @@ trait HasMuonCoreParameters {
 
   // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+
+  require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
+  val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)
+  val scoreboardWriteCountBits = 1 // 0 or 1
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
@@ -218,25 +225,26 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   require(isPow2(m.numIPDOMEntries))
 
   def fuInT(hasRs1: Boolean = false, hasRs2: Boolean = false, hasRs3: Boolean = false) = new Bundle {
-    val uop = ibufEntryT
+    val uop = uopT
     val rs1Data = Option.when(hasRs1)(Vec(m.numWarps, regDataT))
     val rs2Data = Option.when(hasRs2)(Vec(m.numWarps, regDataT))
     val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
   }
 
-  def schedWritebackT = Vec(m.numWarps, ValidIO(new Bundle {
-      val setPC = ValidIO(pcT)
-      val setTmask = ValidIO(tmaskT)
-      val ipdomPush = ValidIO(ipdomStackEntryT) // this should be split PC+8
-      val wspawn = ValidIO(wspawnT)
+  def schedWritebackT = Valid(new Bundle {
+      val setPC = Valid(pcT)
+      val setTmask = Valid(tmaskT)
+      val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+      val wspawn = Valid(wspawnT)
       val pc = pcT
+      val wid = widT
     }
-  ))
+  )
 
-  def regWritebackT = ValidIO(new Bundle {
+  def regWritebackT = Valid(new Bundle {
     val rd = aRegT
     val data = Vec(m.numWarps, regDataT)
-    val mask = tmaskT
+    val tmask = tmaskT
   })
 
   def writebackT(hasSched: Boolean = true, hasReg: Boolean = true) = new Bundle {
@@ -249,7 +257,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
       val pc = pcT
       val wid = widT
     }) // icache can stall scheduler
-    val out = Flipped(ValidIO(new Bundle {
+    val out = Flipped(Valid(new Bundle {
       val inst = instT
       val pc = pcT
       val wid = widT
@@ -257,30 +265,23 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   }
 
   def issueIO = new Bundle {
-    val eligible = Flipped(ValidIO(wmaskT))
+    val eligible = Flipped(Valid(wmaskT))
     val issued = Output(widT) // comb
   }
 
   def csrIO = new Bundle {
-    val read = Flipped(ValidIO(new Bundle {
+    val read = Flipped(Valid(new Bundle {
       val addr = UInt(m.csrAddrBits.W)
       val wid = widT
     })) // reads only
     val resp = Output(regDataT) // next cycle
   }
 
-  def cmdProcIO = Flipped(ValidIO(new Bundle {
+  def cmdProcIO = Flipped(Valid(new Bundle {
     val schedule = pcT
   }))
 
-  def ibufEntryT = new Bundle {
-    val inst = new Decoded(full = false)
-    val tmask = tmaskT
-    val pc = pcT
-    val wid = widT
-  }
-
-  def renameIO = ValidIO(new Bundle {
+  def renameIO = Valid(new Bundle {
     val inst = instT
     val tmask = tmaskT
     val wmask = wmaskT
@@ -288,12 +289,19 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val pc = pcT
   })
 
+  def uopT = new UOp
+
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
-    val entry = ValidIO(new Bundle {
-      val ibuf = ibufEntryT
+    val entry = Valid(new Bundle {
+      val uop = uopT
       val wid = widT
     })
+  }
+
+  def scoreboardUpdateIO = new ScoreboardUpdate
+  def scoreboardReadIO = {
+    new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   }
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)

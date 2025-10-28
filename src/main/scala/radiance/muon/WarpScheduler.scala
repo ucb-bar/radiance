@@ -67,23 +67,25 @@ class WarpScheduler(implicit p: Parameters)
         val valid = Bool()
         val bits = wspawnT
       }
-      val wspawn = VecInit(io.commit.map { c =>
-        val base = Wire(winnerT)
-        base.valid := c.valid && c.bits.wspawn.valid
-        base.bits := c.bits.wspawn.bits
-        base
-      }).reduceTree { case (c0, c1) =>
-        val winner = Wire(winnerT)
-        winner.valid := c0.valid || c1.valid
-        winner.bits := Mux(c0.valid, c0.bits, c1.bits)
-        winner
-      }
 
-      when (wspawn.valid) {
+      val wspawn = io.commit.bits.wspawn
+      // val wspawn = VecInit(io.commit.map { c =>
+      //   val base = Wire(winnerT)
+      //   base.valid := c.valid && c.bits.wspawn.valid
+      //   base.bits := c.bits.wspawn.bits
+      //   base
+      // }).reduceTree { case (c0, c1) =>
+      //   val winner = Wire(winnerT)
+      //   winner.valid := c0.valid || c1.valid
+      //   winner.bits := Mux(c0.valid, c0.bits, c1.bits)
+      //   winner
+      // }
+
+      when(io.commit.valid && wspawn.valid) {
         val wspawnMask = ((1.U << wspawn.bits.count).asUInt - 1.U).asTypeOf(wmaskT)
 
         wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
-          when (en) {
+          when(en) {
             threadMasks(wid) := fullThreadMask
             pcTracker(wid).bits := wspawn.bits.pc
             pcTracker(wid).valid := true.B
@@ -129,12 +131,12 @@ class WarpScheduler(implicit p: Parameters)
 
   // handle i$ response, predecode
   io.rename.valid := false.B
-  when (io.icache.out.fire) {
+  when(io.icache.out.fire) {
     val discardEntry = discardTillPC(iresp.wid)
 
-    when (discardEntry.valid) {
+    when(discardEntry.valid) {
       // we are currently in discard mode, check if we can exit
-      when (iresp.pc === discardEntry.bits) {
+      when(iresp.pc === discardEntry.bits) {
         // exit discard mode
         discardEntry.valid := false.B
 
@@ -183,8 +185,13 @@ class WarpScheduler(implicit p: Parameters)
   }
 
   // update warp scheduler upon commit
-  io.commit.zipWithIndex.foreach { case (commitBundle, wid) =>
+  // io.commit.zipWithIndex.foreach { case (commitBundle, wid) =>
+  //   val commit = commitBundle.bits
+  //   when (commitBundle.valid) {
+  {
+    val commitBundle = io.commit
     val commit = commitBundle.bits
+    val wid = commit.wid
 
     when (commitBundle.valid) {
       // update stalls
@@ -192,7 +199,7 @@ class WarpScheduler(implicit p: Parameters)
       val warpStalled = stallEntry.stallReason(stallTracker.HAZARD)
       val canUnstall = warpStalled && (stallEntry.pc === commit.pc)
       when (canUnstall) {
-        stallTracker.unstall(wid.U)
+        stallTracker.unstall(wid)
       }
 
       // update thread masks, pc, ipdom
@@ -210,7 +217,7 @@ class WarpScheduler(implicit p: Parameters)
       }
       when (commit.ipdomPush.valid) {
         assert(canUnstall)
-        ipdomStack.push(wid.U, commit.ipdomPush.bits)
+        ipdomStack.push(wid, commit.ipdomPush.bits)
       }
     }
 
@@ -221,6 +228,10 @@ class WarpScheduler(implicit p: Parameters)
         "cannot set mask while there's a join")
       threadMasks(wid) := mask.bits
     }
+  }
+  val allFinished = VecInit(pcTracker.map(!_.valid)).asUInt.andR
+  when (allFinished) {
+    printf("no more active warps\n")
   }
 
   // select warp for fetch

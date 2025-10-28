@@ -173,117 +173,132 @@ module CyclotronBackendBlackBox #(
   input  logic [INST_BITS-1:0]       issue_7_bits_raw,
 
   // Writeback interface
-  output logic                       commit_0_valid,
-  output logic                       commit_0_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_0_bits_setPC_bits,
-  output logic                       commit_0_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_0_bits_setTmask_bits,
-  output logic                       commit_0_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_0_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_0_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_0_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_0_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_0_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_0_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_0_bits_pc,
+  output logic                       commit_valid,
+  output logic                       commit_bits_setPC_valid,
+  output logic [ARCH_LEN-1:0]        commit_bits_setPC_bits,
+  output logic                       commit_bits_setTmask_valid,
+  output logic [NUM_LANES-1:0]       commit_bits_setTmask_bits,
+  output logic                       commit_bits_ipdomPush_valid,
+  output logic [NUM_LANES-1:0]       commit_bits_ipdomPush_bits_restoredMask,
+  output logic [NUM_LANES-1:0]       commit_bits_ipdomPush_bits_elseMask,
+  output logic [ARCH_LEN-1:0]        commit_bits_ipdomPush_bits_elsePC,
+  output logic                       commit_bits_wspawn_valid,
+  output logic [WARP_COUNT_BITS-1:0] commit_bits_wspawn_bits_count,
+  output logic [ARCH_LEN-1:0]        commit_bits_wspawn_bits_pc,
+  output logic [ARCH_LEN-1:0]        commit_bits_pc,
+  output logic [WARP_ID_BITS-1:0]    commit_bits_wid,
 
-  output logic                       commit_1_valid,
-  output logic                       commit_1_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_1_bits_setPC_bits,
-  output logic                       commit_1_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_1_bits_setTmask_bits,
-  output logic                       commit_1_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_1_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_1_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_1_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_1_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_1_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_1_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_1_bits_pc,
+  // output logic                       commit_0_valid,
+  // output logic                       commit_0_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_0_bits_setPC_bits,
+  // output logic                       commit_0_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_0_bits_setTmask_bits,
+  // output logic                       commit_0_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_0_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_0_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_0_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_0_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_0_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_0_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_0_bits_pc,
 
-  output logic                       commit_2_valid,
-  output logic                       commit_2_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_2_bits_setPC_bits,
-  output logic                       commit_2_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_2_bits_setTmask_bits,
-  output logic                       commit_2_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_2_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_2_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_2_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_2_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_2_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_2_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_2_bits_pc,
+  // output logic                       commit_1_valid,
+  // output logic                       commit_1_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_1_bits_setPC_bits,
+  // output logic                       commit_1_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_1_bits_setTmask_bits,
+  // output logic                       commit_1_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_1_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_1_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_1_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_1_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_1_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_1_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_1_bits_pc,
 
-  output logic                       commit_3_valid,
-  output logic                       commit_3_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_3_bits_setPC_bits,
-  output logic                       commit_3_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_3_bits_setTmask_bits,
-  output logic                       commit_3_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_3_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_3_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_3_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_3_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_3_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_3_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_3_bits_pc,
+  // output logic                       commit_2_valid,
+  // output logic                       commit_2_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_2_bits_setPC_bits,
+  // output logic                       commit_2_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_2_bits_setTmask_bits,
+  // output logic                       commit_2_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_2_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_2_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_2_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_2_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_2_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_2_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_2_bits_pc,
 
-  output logic                       commit_4_valid,
-  output logic                       commit_4_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_4_bits_setPC_bits,
-  output logic                       commit_4_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_4_bits_setTmask_bits,
-  output logic                       commit_4_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_4_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_4_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_4_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_4_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_4_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_4_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_4_bits_pc,
+  // output logic                       commit_3_valid,
+  // output logic                       commit_3_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_3_bits_setPC_bits,
+  // output logic                       commit_3_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_3_bits_setTmask_bits,
+  // output logic                       commit_3_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_3_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_3_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_3_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_3_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_3_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_3_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_3_bits_pc,
 
-  output logic                       commit_5_valid,
-  output logic                       commit_5_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_5_bits_setPC_bits,
-  output logic                       commit_5_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_5_bits_setTmask_bits,
-  output logic                       commit_5_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_5_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_5_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_5_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_5_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_5_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_5_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_5_bits_pc,
+  // output logic                       commit_4_valid,
+  // output logic                       commit_4_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_4_bits_setPC_bits,
+  // output logic                       commit_4_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_4_bits_setTmask_bits,
+  // output logic                       commit_4_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_4_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_4_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_4_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_4_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_4_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_4_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_4_bits_pc,
 
-  output logic                       commit_6_valid,
-  output logic                       commit_6_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_6_bits_setPC_bits,
-  output logic                       commit_6_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_6_bits_setTmask_bits,
-  output logic                       commit_6_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_6_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_6_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_6_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_6_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_6_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_6_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_6_bits_pc,
+  // output logic                       commit_5_valid,
+  // output logic                       commit_5_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_5_bits_setPC_bits,
+  // output logic                       commit_5_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_5_bits_setTmask_bits,
+  // output logic                       commit_5_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_5_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_5_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_5_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_5_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_5_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_5_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_5_bits_pc,
 
-  output logic                       commit_7_valid,
-  output logic                       commit_7_bits_setPC_valid,
-  output logic [ARCH_LEN-1:0]        commit_7_bits_setPC_bits,
-  output logic                       commit_7_bits_setTmask_valid,
-  output logic [NUM_LANES-1:0]       commit_7_bits_setTmask_bits,
-  output logic                       commit_7_bits_ipdomPush_valid,
-  output logic [NUM_LANES-1:0]       commit_7_bits_ipdomPush_bits_restoredMask,
-  output logic [NUM_LANES-1:0]       commit_7_bits_ipdomPush_bits_elseMask,
-  output logic [ARCH_LEN-1:0]        commit_7_bits_ipdomPush_bits_elsePC,
-  output logic                       commit_7_bits_wspawn_valid,
-  output logic [WARP_COUNT_BITS-1:0] commit_7_bits_wspawn_bits_count,
-  output logic [ARCH_LEN-1:0]        commit_7_bits_wspawn_bits_pc,
-  output logic [ARCH_LEN-1:0]        commit_7_bits_pc,
+  // output logic                       commit_6_valid,
+  // output logic                       commit_6_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_6_bits_setPC_bits,
+  // output logic                       commit_6_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_6_bits_setTmask_bits,
+  // output logic                       commit_6_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_6_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_6_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_6_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_6_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_6_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_6_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_6_bits_pc,
+
+  // output logic                       commit_7_valid,
+  // output logic                       commit_7_bits_setPC_valid,
+  // output logic [ARCH_LEN-1:0]        commit_7_bits_setPC_bits,
+  // output logic                       commit_7_bits_setTmask_valid,
+  // output logic [NUM_LANES-1:0]       commit_7_bits_setTmask_bits,
+  // output logic                       commit_7_bits_ipdomPush_valid,
+  // output logic [NUM_LANES-1:0]       commit_7_bits_ipdomPush_bits_restoredMask,
+  // output logic [NUM_LANES-1:0]       commit_7_bits_ipdomPush_bits_elseMask,
+  // output logic [ARCH_LEN-1:0]        commit_7_bits_ipdomPush_bits_elsePC,
+  // output logic                       commit_7_bits_wspawn_valid,
+  // output logic [WARP_COUNT_BITS-1:0] commit_7_bits_wspawn_bits_count,
+  // output logic [ARCH_LEN-1:0]        commit_7_bits_wspawn_bits_pc,
+  // output logic [ARCH_LEN-1:0]        commit_7_bits_pc,
 
   output logic        finished
 );
@@ -531,56 +546,94 @@ module CyclotronBackendBlackBox #(
   assign issue_tmask_arr[7] = issue_7_bits_tmask;
   assign issue_raw_arr[7]   = issue_7_bits_raw;
 
-  // For now drive per-issue ready signals high (no backpressure)
-  assign issue_0_ready = 1'b1;
-  assign issue_1_ready = 1'b1;
-  assign issue_2_ready = 1'b1;
-  assign issue_3_ready = 1'b1;
-  assign issue_4_ready = 1'b1;
-  assign issue_5_ready = 1'b1;
-  assign issue_6_ready = 1'b1;
-  assign issue_7_ready = 1'b1;
+  // Round-robin arbitration: only one port may be issued (backend called) per cycle.
+  // Replace original per-issue ready=1 and per-port backend calls with a single
+  // selected-port call driven by a round-robin pointer.
+  // ready vector driven by arbiter (one-hot)
+  logic [ISSUE_PORTS-1:0] issue_ready_arr;
+  // Round-robin pointer and next pointer
+  logic [$clog2(ISSUE_PORTS)-1:0] rr_ptr_reg;
+  logic [$clog2(ISSUE_PORTS)-1:0] rr_ptr_next;
+
+  assign issue_0_ready = issue_ready_arr[0];
+  assign issue_1_ready = issue_ready_arr[1];
+  assign issue_2_ready = issue_ready_arr[2];
+  assign issue_3_ready = issue_ready_arr[3];
+  assign issue_4_ready = issue_ready_arr[4];
+  assign issue_5_ready = issue_ready_arr[5];
+  assign issue_6_ready = issue_ready_arr[6];
+  assign issue_7_ready = issue_ready_arr[7];
+
+  integer sel_idx;
+  always @(*) begin
+    integer i;
+    integer idx;
+
+    // default: no ready
+    issue_ready_arr = '0;
+    sel_idx = -1;
+
+    // Find first valid port in round-robin order starting at rr_ptr_reg
+    for (i = 0; i < ISSUE_PORTS; i = i + 1) begin
+      idx = (rr_ptr_reg + i) % ISSUE_PORTS;
+      if (issue_valid_arr[idx]) begin
+        sel_idx = idx;
+        break;
+      end
+    end
+
+    if (sel_idx >= 0) begin
+      issue_ready_arr[sel_idx] = 1'b1;
+    end
+  end
 
   always @(negedge clock) begin
-    integer i;
-    // call backend once per issue port; each call fills the per-issue __writeback_* and __finished entries
-    for (i = 0; i < ISSUE_PORTS; i = i + 1) begin
+    if (sel_idx >= 0) begin
+      // Call backend once for the selected port
       cyclotron_backend(
-        issue_valid_arr[i],
-        issue_wid_arr[i],
-        issue_pc_arr[i],
-        issue_op_arr[i][6:0],
-        issue_op_arr[i][8:7],
-        issue_f3_arr[i],
-        issue_rd_arr[i],
-        issue_rs1_arr[i],
-        issue_rs2_arr[i],
-        issue_rs3_arr[i],
+        issue_valid_arr            [sel_idx],
+        issue_wid_arr              [sel_idx],
+        issue_pc_arr               [sel_idx],
+        issue_op_arr               [sel_idx][6:0],
+        issue_op_arr               [sel_idx][8:7],
+        issue_f3_arr               [sel_idx],
+        issue_rd_arr               [sel_idx],
+        issue_rs1_arr              [sel_idx],
+        issue_rs2_arr              [sel_idx],
+        issue_rs3_arr              [sel_idx],
         32'h0,
         32'h0,
         32'h0,
-        issue_f7_arr[i],
-        issue_imm32_arr[i],
-        issue_imm24_arr[i],
-        issue_csrImm_arr[i],
-        issue_pred_arr[i],
-        issue_tmask_arr[i],
-        issue_raw_arr[i],
-        __writeback_valid[i],
-        __writeback_pc[i],
-        __writeback_tmask[i],
-        __writeback_wid[i],
-        __writeback_rd_addr[i],
-        __writeback_rd_data[i],
-        __writeback_set_pc_valid[i],
-        __writeback_set_pc[i],
-        __writeback_set_tmask_valid[i],
-        __writeback_set_tmask[i],
-        __writeback_wspawn_valid[i],
-        __writeback_wspawn_count[i],
-        __writeback_wspawn_pc[i],
-        __finished[i]
+        issue_f7_arr               [sel_idx],
+        issue_imm32_arr            [sel_idx],
+        issue_imm24_arr            [sel_idx],
+        issue_csrImm_arr           [sel_idx],
+        issue_pred_arr             [sel_idx],
+        issue_tmask_arr            [sel_idx],
+        issue_raw_arr              [sel_idx],
+        __writeback_valid          [0],
+        __writeback_pc             [0],
+        __writeback_tmask          [0],
+        __writeback_wid            [0],
+        __writeback_rd_addr        [0],
+        __writeback_rd_data        [0],
+        __writeback_set_pc_valid   [0],
+        __writeback_set_pc         [0],
+        __writeback_set_tmask_valid[0],
+        __writeback_set_tmask      [0],
+        __writeback_wspawn_valid   [0],
+        __writeback_wspawn_count   [0],
+        __writeback_wspawn_pc      [0],
+        __finished                 [0]
       );
+
+      // advance pointer to next port after the selected one
+      rr_ptr_next = (sel_idx + 1) % ISSUE_PORTS;
+    end else begin
+      __writeback_valid[0] <= '0;
+      __finished[0] <= '0;
+      // no valid port found; do not call backend and keep pointer unchanged
+      rr_ptr_next = rr_ptr_reg;
     end
 
     cyclotron_imem(
@@ -617,6 +670,7 @@ module CyclotronBackendBlackBox #(
         __writeback_wspawn_valid[i] <= '0;
         __writeback_wspawn_count[i] <= '0;
         __writeback_wspawn_pc[i] <= '0;
+        __writeback_wid[i] <= '0;
         __finished[i] <= '0;
       end
 
@@ -626,110 +680,125 @@ module CyclotronBackendBlackBox #(
       __imem_resp_bits_data <= '0;
 
       imem_resp_valid <= 1'b0;
-      commit_0_valid <= 1'b0;
-      commit_1_valid <= 1'b0;
-      commit_2_valid <= 1'b0;
-      commit_3_valid <= 1'b0;
-      commit_4_valid <= 1'b0;
-      commit_5_valid <= 1'b0;
-      commit_6_valid <= 1'b0;
-      commit_7_valid <= 1'b0;
-      commit_0_bits_ipdomPush_valid <= 1'b0;
-      commit_1_bits_ipdomPush_valid <= 1'b0;
-      commit_2_bits_ipdomPush_valid <= 1'b0;
-      commit_3_bits_ipdomPush_valid <= 1'b0;
-      commit_4_bits_ipdomPush_valid <= 1'b0;
-      commit_5_bits_ipdomPush_valid <= 1'b0;
-      commit_6_bits_ipdomPush_valid <= 1'b0;
-      commit_7_bits_ipdomPush_valid <= 1'b0;
+      commit_valid <= 1'b0;
+      commit_bits_ipdomPush_valid <= 1'b0;
+      // commit_0_valid <= 1'b0;
+      // commit_1_valid <= 1'b0;
+      // commit_2_valid <= 1'b0;
+      // commit_3_valid <= 1'b0;
+      // commit_4_valid <= 1'b0;
+      // commit_5_valid <= 1'b0;
+      // commit_6_valid <= 1'b0;
+      // commit_7_valid <= 1'b0;
+      // commit_0_bits_ipdomPush_valid <= 1'b0;
+      // commit_1_bits_ipdomPush_valid <= 1'b0;
+      // commit_2_bits_ipdomPush_valid <= 1'b0;
+      // commit_3_bits_ipdomPush_valid <= 1'b0;
+      // commit_4_bits_ipdomPush_valid <= 1'b0;
+      // commit_5_bits_ipdomPush_valid <= 1'b0;
+      // commit_6_bits_ipdomPush_valid <= 1'b0;
+      // commit_7_bits_ipdomPush_valid <= 1'b0;
       finished <= 1'b0;
+      rr_ptr_reg <= '0;
     end else begin
       // default all commit outputs to zero, then populate from per-issue writebacks
-      commit_0_valid <= __writeback_valid[0];
-      commit_0_bits_setPC_valid <= __writeback_set_pc_valid[0];
-      commit_0_bits_setPC_bits  <= __writeback_set_pc[0];
-      commit_0_bits_setTmask_valid <= __writeback_set_tmask_valid[0];
-      commit_0_bits_setTmask_bits  <= __writeback_set_tmask[0];
-      commit_0_bits_wspawn_valid    <= __writeback_wspawn_valid[0];
-      commit_0_bits_wspawn_bits_count <= __writeback_wspawn_count[0];
-      commit_0_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[0];
-      commit_0_bits_pc <= __writeback_pc[0];
+      commit_valid                  <= __writeback_valid[0];
+      commit_bits_setPC_valid       <= __writeback_set_pc_valid[0];
+      commit_bits_setPC_bits        <= __writeback_set_pc[0];
+      commit_bits_setTmask_valid    <= __writeback_set_tmask_valid[0];
+      commit_bits_setTmask_bits     <= __writeback_set_tmask[0];
+      commit_bits_wspawn_valid      <= __writeback_wspawn_valid[0];
+      commit_bits_wspawn_bits_count <= __writeback_wspawn_count[0];
+      commit_bits_wspawn_bits_pc    <= __writeback_wspawn_pc[0];
+      commit_bits_pc                <= __writeback_pc[0];
+      commit_bits_wid               <= __writeback_wid[0];
 
-      commit_1_valid <= __writeback_valid[1];
-      commit_1_bits_setPC_valid <= __writeback_set_pc_valid[1];
-      commit_1_bits_setPC_bits  <= __writeback_set_pc[1];
-      commit_1_bits_setTmask_valid <= __writeback_set_tmask_valid[1];
-      commit_1_bits_setTmask_bits  <= __writeback_set_tmask[1];
-      commit_1_bits_wspawn_valid    <= __writeback_wspawn_valid[1];
-      commit_1_bits_wspawn_bits_count <= __writeback_wspawn_count[1];
-      commit_1_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[1];
-      commit_1_bits_pc <= __writeback_pc[1];
+      // commit_0_valid <= __writeback_valid[0];
+      // commit_0_bits_setPC_valid <= __writeback_set_pc_valid[0];
+      // commit_0_bits_setPC_bits  <= __writeback_set_pc[0];
+      // commit_0_bits_setTmask_valid <= __writeback_set_tmask_valid[0];
+      // commit_0_bits_setTmask_bits  <= __writeback_set_tmask[0];
+      // commit_0_bits_wspawn_valid    <= __writeback_wspawn_valid[0];
+      // commit_0_bits_wspawn_bits_count <= __writeback_wspawn_count[0];
+      // commit_0_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[0];
+      // commit_0_bits_pc <= __writeback_pc[0];
 
-      commit_2_valid <= __writeback_valid[2];
-      commit_2_bits_setPC_valid <= __writeback_set_pc_valid[2];
-      commit_2_bits_setPC_bits  <= __writeback_set_pc[2];
-      commit_2_bits_setTmask_valid <= __writeback_set_tmask_valid[2];
-      commit_2_bits_setTmask_bits  <= __writeback_set_tmask[2];
-      commit_2_bits_wspawn_valid    <= __writeback_wspawn_valid[2];
-      commit_2_bits_wspawn_bits_count <= __writeback_wspawn_count[2];
-      commit_2_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[2];
-      commit_2_bits_pc <= __writeback_pc[2];
+      // commit_1_valid <= __writeback_valid[1];
+      // commit_1_bits_setPC_valid <= __writeback_set_pc_valid[1];
+      // commit_1_bits_setPC_bits  <= __writeback_set_pc[1];
+      // commit_1_bits_setTmask_valid <= __writeback_set_tmask_valid[1];
+      // commit_1_bits_setTmask_bits  <= __writeback_set_tmask[1];
+      // commit_1_bits_wspawn_valid    <= __writeback_wspawn_valid[1];
+      // commit_1_bits_wspawn_bits_count <= __writeback_wspawn_count[1];
+      // commit_1_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[1];
+      // commit_1_bits_pc <= __writeback_pc[1];
 
-      commit_3_valid <= __writeback_valid[3];
-      commit_3_bits_setPC_valid <= __writeback_set_pc_valid[3];
-      commit_3_bits_setPC_bits  <= __writeback_set_pc[3];
-      commit_3_bits_setTmask_valid <= __writeback_set_tmask_valid[3];
-      commit_3_bits_setTmask_bits  <= __writeback_set_tmask[3];
-      commit_3_bits_wspawn_valid    <= __writeback_wspawn_valid[3];
-      commit_3_bits_wspawn_bits_count <= __writeback_wspawn_count[3];
-      commit_3_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[3];
-      commit_3_bits_pc <= __writeback_pc[3];
+      // commit_2_valid <= __writeback_valid[2];
+      // commit_2_bits_setPC_valid <= __writeback_set_pc_valid[2];
+      // commit_2_bits_setPC_bits  <= __writeback_set_pc[2];
+      // commit_2_bits_setTmask_valid <= __writeback_set_tmask_valid[2];
+      // commit_2_bits_setTmask_bits  <= __writeback_set_tmask[2];
+      // commit_2_bits_wspawn_valid    <= __writeback_wspawn_valid[2];
+      // commit_2_bits_wspawn_bits_count <= __writeback_wspawn_count[2];
+      // commit_2_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[2];
+      // commit_2_bits_pc <= __writeback_pc[2];
 
-      commit_4_valid <= __writeback_valid[4];
-      commit_4_bits_setPC_valid <= __writeback_set_pc_valid[4];
-      commit_4_bits_setPC_bits  <= __writeback_set_pc[4];
-      commit_4_bits_setTmask_valid <= __writeback_set_tmask_valid[4];
-      commit_4_bits_setTmask_bits  <= __writeback_set_tmask[4];
-      commit_4_bits_wspawn_valid    <= __writeback_wspawn_valid[4];
-      commit_4_bits_wspawn_bits_count <= __writeback_wspawn_count[4];
-      commit_4_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[4];
-      commit_4_bits_pc <= __writeback_pc[4];
+      // commit_3_valid <= __writeback_valid[3];
+      // commit_3_bits_setPC_valid <= __writeback_set_pc_valid[3];
+      // commit_3_bits_setPC_bits  <= __writeback_set_pc[3];
+      // commit_3_bits_setTmask_valid <= __writeback_set_tmask_valid[3];
+      // commit_3_bits_setTmask_bits  <= __writeback_set_tmask[3];
+      // commit_3_bits_wspawn_valid    <= __writeback_wspawn_valid[3];
+      // commit_3_bits_wspawn_bits_count <= __writeback_wspawn_count[3];
+      // commit_3_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[3];
+      // commit_3_bits_pc <= __writeback_pc[3];
 
-      commit_5_valid <= __writeback_valid[5];
-      commit_5_bits_setPC_valid <= __writeback_set_pc_valid[5];
-      commit_5_bits_setPC_bits  <= __writeback_set_pc[5];
-      commit_5_bits_setTmask_valid <= __writeback_set_tmask_valid[5];
-      commit_5_bits_setTmask_bits  <= __writeback_set_tmask[5];
-      commit_5_bits_wspawn_valid    <= __writeback_wspawn_valid[5];
-      commit_5_bits_wspawn_bits_count <= __writeback_wspawn_count[5];
-      commit_5_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[5];
-      commit_5_bits_pc <= __writeback_pc[5];
+      // commit_4_valid <= __writeback_valid[4];
+      // commit_4_bits_setPC_valid <= __writeback_set_pc_valid[4];
+      // commit_4_bits_setPC_bits  <= __writeback_set_pc[4];
+      // commit_4_bits_setTmask_valid <= __writeback_set_tmask_valid[4];
+      // commit_4_bits_setTmask_bits  <= __writeback_set_tmask[4];
+      // commit_4_bits_wspawn_valid    <= __writeback_wspawn_valid[4];
+      // commit_4_bits_wspawn_bits_count <= __writeback_wspawn_count[4];
+      // commit_4_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[4];
+      // commit_4_bits_pc <= __writeback_pc[4];
 
-      commit_6_valid <= __writeback_valid[6];
-      commit_6_bits_setPC_valid <= __writeback_set_pc_valid[6];
-      commit_6_bits_setPC_bits  <= __writeback_set_pc[6];
-      commit_6_bits_setTmask_valid <= __writeback_set_tmask_valid[6];
-      commit_6_bits_setTmask_bits  <= __writeback_set_tmask[6];
-      commit_6_bits_wspawn_valid    <= __writeback_wspawn_valid[6];
-      commit_6_bits_wspawn_bits_count <= __writeback_wspawn_count[6];
-      commit_6_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[6];
-      commit_6_bits_pc <= __writeback_pc[6];
+      // commit_5_valid <= __writeback_valid[5];
+      // commit_5_bits_setPC_valid <= __writeback_set_pc_valid[5];
+      // commit_5_bits_setPC_bits  <= __writeback_set_pc[5];
+      // commit_5_bits_setTmask_valid <= __writeback_set_tmask_valid[5];
+      // commit_5_bits_setTmask_bits  <= __writeback_set_tmask[5];
+      // commit_5_bits_wspawn_valid    <= __writeback_wspawn_valid[5];
+      // commit_5_bits_wspawn_bits_count <= __writeback_wspawn_count[5];
+      // commit_5_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[5];
+      // commit_5_bits_pc <= __writeback_pc[5];
 
-      commit_7_valid <= __writeback_valid[7];
-      commit_7_bits_setPC_valid <= __writeback_set_pc_valid[7];
-      commit_7_bits_setPC_bits  <= __writeback_set_pc[7];
-      commit_7_bits_setTmask_valid <= __writeback_set_tmask_valid[7];
-      commit_7_bits_setTmask_bits  <= __writeback_set_tmask[7];
-      commit_7_bits_wspawn_valid    <= __writeback_wspawn_valid[7];
-      commit_7_bits_wspawn_bits_count <= __writeback_wspawn_count[7];
-      commit_7_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[7];
-      commit_7_bits_pc <= __writeback_pc[7];
+      // commit_6_valid <= __writeback_valid[6];
+      // commit_6_bits_setPC_valid <= __writeback_set_pc_valid[6];
+      // commit_6_bits_setPC_bits  <= __writeback_set_pc[6];
+      // commit_6_bits_setTmask_valid <= __writeback_set_tmask_valid[6];
+      // commit_6_bits_setTmask_bits  <= __writeback_set_tmask[6];
+      // commit_6_bits_wspawn_valid    <= __writeback_wspawn_valid[6];
+      // commit_6_bits_wspawn_bits_count <= __writeback_wspawn_count[6];
+      // commit_6_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[6];
+      // commit_6_bits_pc <= __writeback_pc[6];
+
+      // commit_7_valid <= __writeback_valid[7];
+      // commit_7_bits_setPC_valid <= __writeback_set_pc_valid[7];
+      // commit_7_bits_setPC_bits  <= __writeback_set_pc[7];
+      // commit_7_bits_setTmask_valid <= __writeback_set_tmask_valid[7];
+      // commit_7_bits_setTmask_bits  <= __writeback_set_tmask[7];
+      // commit_7_bits_wspawn_valid    <= __writeback_wspawn_valid[7];
+      // commit_7_bits_wspawn_bits_count <= __writeback_wspawn_count[7];
+      // commit_7_bits_wspawn_bits_pc  <= __writeback_wspawn_pc[7];
+      // commit_7_bits_pc <= __writeback_pc[7];
 
       imem_resp_valid     <= __imem_resp_valid;
       imem_resp_bits_data <= __imem_resp_bits_data;
       imem_resp_bits_tag  <= __imem_resp_bits_tag;
 
       finished <= __finished.or();
+      rr_ptr_reg <= rr_ptr_next;
     end
   end
   assign imem_req_ready = __imem_req_ready;

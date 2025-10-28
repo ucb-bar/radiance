@@ -12,7 +12,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     val softReset = Input(Bool())
   })
 
-  val totalARs = m.numWarps * m.numArchRegs
+  val totalArchRegs = m.numWarps * m.numArchRegs
 
   val defaultAssignment = VecInit.fill(m.numWarps)(
     VecInit.tabulate(m.numArchRegs)(i => (i == 0).B) // x0 always assigned
@@ -30,7 +30,7 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
 
   val (rPorts, wPort) = if (useSRAM) {
     val table = SRAM(
-      size = totalARs,
+      size = totalArchRegs,
       tpe = pRegT,
       numReadPorts = 4,
       numWritePorts = 1,
@@ -40,17 +40,13 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     val wPort = table.writePorts.head
     (rPorts, wPort)
   } else {
-    val addrWidth = log2Up(totalARs)
+    val addrWidth = log2Up(totalArchRegs)
     val rPorts = Wire(Vec(4, new MemoryReadPort(pRegT, addrWidth)))
     val wPort = Wire(new MemoryWritePort(pRegT, addrWidth, false))
-    val table = RegInit(VecInit.fill(totalARs)(0.U.asTypeOf(pRegT)))
+    val table = RegInit(VecInit.fill(totalArchRegs)(0.U.asTypeOf(pRegT)))
 
     rPorts.foreach { p =>
       p.data := RegNext(table(p.address), 0.U)
-//      p.data := DontCare
-//      when (p.enable) {
-//        p.data := RegNext(table(p.address))
-//      }
     }
     when (wPort.enable) {
       table(wPort.address) := wPort.data
@@ -71,7 +67,9 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     port.address := Cat(wid, addr.asTypeOf(aRegT))
   }
 
-  val prAddr = rPorts.map(_.data.asTypeOf(UInt(8.W)))
+  val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
+  val prWarpPrefix = (wid << prIdxWidth).asUInt
+  val prAddr = rPorts.map(_.data)
 
   // update rd entry in table
   val unassigned = !assigned(wid)(decoded.rd)
@@ -84,27 +82,35 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   }
 
   // substitute pr's for ibuf enq
-  def bypass(ars: UInt, prs: UInt): UInt = {
+  def bypassAndShortCircuit(ars: UInt, prs: UInt): UInt = {
     // bypass read result if wid matches, and prev cycle assigned, and prev rd matches
     val prevRead = RegNext(Cat(wid, ars.asTypeOf(aRegT)))
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(aRegT)))
-    Mux(RegNext(assigning) && (prevRead === prevWrite), RegNext(wPort.data), prs)
+    Mux(
+      RegNext(ars === 0.U),
+      0.U,
+      Mux(
+        RegNext(assigning) && (prevRead === prevWrite),
+        RegNext(prWarpPrefix | wPort.data),
+        RegNext(prWarpPrefix) | prs
+      )
+    )
   }
 
   val shrunkDecoded = decoded.shrink()
   val decodedReg = RegNext(shrunkDecoded, 0.U.asTypeOf(shrunkDecoded))
-  val microInst = WireInit(decodedReg)
+  val uop = WireInit(decodedReg)
 
   regs.zipWithIndex.foreach { case (r, i) => // regs is rd/rs1/rs2/rs3
-    microInst(r) := Mux(RegNext(hasReg(i)), bypass(arAddr(i), prAddr(i)), decodedReg(r))
+    uop(r) := Mux(RegNext(hasReg(i)), bypassAndShortCircuit(arAddr(i), prAddr(i)), decodedReg(r))
   }
 
   io.ibuf.entry.valid := RegNext(io.rename.valid)
   io.ibuf.entry.bits.wid := RegNext(wid)
-  io.ibuf.entry.bits.ibuf.inst := microInst
-  io.ibuf.entry.bits.ibuf.tmask := RegNext(io.rename.bits.tmask)
-  io.ibuf.entry.bits.ibuf.pc := RegNext(io.rename.bits.pc)
-  io.ibuf.entry.bits.ibuf.wid := RegNext(io.rename.bits.wid)
+  io.ibuf.entry.bits.uop.inst := uop
+  io.ibuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
+  io.ibuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
+  io.ibuf.entry.bits.uop.wid := RegNext(io.rename.bits.wid)
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>

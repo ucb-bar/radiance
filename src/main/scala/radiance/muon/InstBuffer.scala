@@ -4,6 +4,16 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
+/** UOp represents a single instruction executed in the backend, as well as a
+ *  single entry in InstBuffer.
+ */
+class UOp(implicit p: Parameters) extends CoreBundle()(p) {
+  val inst = new Decoded(full = false)
+  val tmask = tmaskT
+  val pc = pcT
+  val wid = widT
+}
+
 trait HasInstBufferEntryFields {
   val pc: UInt
   val wid: UInt
@@ -39,11 +49,11 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasIn
   val tmask = tmaskT
   val raw = instT
 
-  def fromIBufT(bundle: Bundle) = {
-    val ib = bundle.asTypeOf(ibufEntryT)
-    val inst = ib.inst.expand()
-    this.pc := ib.pc
-    this.wid := ib.wid
+  def fromUop(bundle: Bundle) = {
+    val uop = bundle.asTypeOf(uopT)
+    val inst = uop.inst.expand()
+    this.pc := uop.pc
+    this.wid := uop.wid
     this.op := inst(Opcode)
     this.rd := inst(Rd)
     this.rs1 := inst(Rs1)
@@ -55,33 +65,33 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasIn
     this.f3 := inst(F3)
     this.f7 := inst(F7)
     this.pred := inst(Pred)
-    this.tmask := ib.tmask
+    this.tmask := uop.tmask
     this.raw := inst(Raw)
   }
 
-  def toIBufT(): Bundle = {
-    val ib = Wire(ibufEntryT)
-    ib.pc := this.pc
-    ib.wid := this.wid
-    ib.tmask := this.tmask
-    ib.inst := Decoder.decode(this.raw).shrink()
-    ib.inst(Rd) := this.rd
-    ib.inst(Rs1) := this.rs1
-    ib.inst(Rs2) := this.rs2
-    ib.inst(Rs3) := this.rs3
-    ib
+  def toUop(): Bundle = {
+    val uop = Wire(uopT)
+    uop.pc := this.pc
+    uop.wid := this.wid
+    uop.tmask := this.tmask
+    uop.inst := Decoder.decode(this.raw).shrink()
+    uop.inst(Rd) := this.rd
+    uop.inst(Rs1) := this.rs1
+    uop.inst(Rs2) := this.rs2
+    uop.inst(Rs3) := this.rs3
+    uop
   }
 }
 
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val enq = Flipped(ibufEnqIO)
-    val deq = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
+    val deq = Vec(muonParams.numWarps, Decoupled(uopT))
   })
 
   val warpBufs = Seq.tabulate(muonParams.numWarps){ wid =>
     val buf = Module(new Queue(
-      gen = ibufEntryT,
+      gen = uopT,
       entries = muonParams.ibufDepth,
       pipe = false,
       flow = false,
@@ -93,7 +103,7 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
   }
   (warpBufs zip io.deq).zipWithIndex.foreach { case ((b, deq), wid) =>
     b.io.enq.valid := io.enq.entry.valid && (io.enq.entry.bits.wid === wid.U)
-    b.io.enq.bits := io.enq.entry.bits.ibuf
+    b.io.enq.bits := io.enq.entry.bits.uop
     assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
 
     deq <> b.io.deq

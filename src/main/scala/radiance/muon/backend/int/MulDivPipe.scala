@@ -6,10 +6,10 @@ import freechips.rocketchip.rocket.MulDiv
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
-import radiance.muon.backend.{LaneDecomposer, LaneRecomposer}
+import radiance.muon.backend._
 
 class MulDivPipe(implicit p: Parameters)
-  extends IntPipe {
+  extends ExPipe(false, true) with HasIntPipeParams {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W), Bool())
   val decomposer = Module(new LaneDecomposer(
@@ -29,6 +29,8 @@ class MulDivPipe(implicit p: Parameters)
     elemTypes = recomposerTypes
   ))
 
+  val ioIntOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
+  val req_op = Reg(new IntOpBundle)
   val mul_out = Reg(Vec(numLanes, UInt(archLen.W)))
   val sliceTMask = Reg(UInt(numMulDivLanes.W))
   val busy = RegInit(false.B)
@@ -38,9 +40,9 @@ class MulDivPipe(implicit p: Parameters)
 
   io.req.ready := !busy || io.resp.fire
   decomposer.io.in.valid := !busy && io.req.valid && ioIntOp.isMulDiv
-  decomposer.io.in.bits.data(0) := io.req.bits.in1
-  decomposer.io.in.bits.data(1) := io.req.bits.in2
-  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.ibuf.tmask.asBools)
+  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
+  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.uop.tmask.asBools)
   decomposer.io.out.ready := allMulDivReqReady
 
   for (i <- 0 until numMulDivLanes) {
@@ -60,10 +62,10 @@ class MulDivPipe(implicit p: Parameters)
   recomposer.io.out.ready := busy
 
   io.resp.valid := resp_valid
-  io.resp.bits.rd := req_rd
-  io.resp.bits.data := mul_out
-  io.resp.bits.tmask := req_tmask
-  io.resp.bits.pc_w_en := false.B
+  io.resp.bits.reg.get.valid := resp_valid
+  io.resp.bits.reg.get.bits.rd := req_rd
+  io.resp.bits.reg.get.bits.data := mul_out
+  io.resp.bits.reg.get.bits.tmask := req_tmask
 
   when (io.resp.fire) {
     busy := false.B
@@ -83,8 +85,9 @@ class MulDivPipe(implicit p: Parameters)
   when (io.req.fire) {
     busy := true.B
     req_op := ioIntOp
-    req_pc := io.req.bits.ibuf.pc
-    req_tmask := io.req.bits.ibuf.tmask
-    req_rd := io.req.bits.ibuf.inst(Rd)
+    req_pc := io.req.bits.uop.pc
+    req_tmask := io.req.bits.uop.tmask
+    req_rd := io.req.bits.uop.inst(Rd)
+    req_wid := io.req.bits.uop.wid
   }
 }
