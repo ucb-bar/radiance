@@ -53,11 +53,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   // TODO: INT/SFU
   // TODO: LSU
-  io.dmem.req.valid := false.B
-  io.dmem.req.bits := DontCare
-  io.dmem.resp.ready := false.B
-  io.smem.req.valid := false.B
-  io.smem.req.bits := DontCare
-  io.smem.resp.ready := false.B
+  io.dmem.req.foreach(_.valid := false.B)
+  io.dmem.req.foreach(_.bits := DontCare)
+  io.dmem.resp.foreach(_.ready := false.B)
+  io.smem.req.foreach(_.valid := false.B)
+  io.smem.req.foreach(_.bits := DontCare)
+  io.smem.resp.foreach(_.ready := false.B)
   // TODO: Writeback
 }

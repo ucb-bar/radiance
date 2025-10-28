@@ -20,12 +20,13 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   muon.io.imem.resp.valid := false.B
   muon.io.imem.resp.bits := DontCare
   muon.io.imem.req.ready := false.B
-  muon.io.dmem.resp.valid := false.B
-  muon.io.dmem.resp.bits := DontCare
-  muon.io.dmem.req.ready := false.B
-  muon.io.smem.resp.valid := false.B
-  muon.io.smem.resp.bits := DontCare
-  muon.io.smem.req.ready := false.B
+  
+  muon.io.dmem.resp.foreach(_.valid := false.B)
+  muon.io.dmem.resp.foreach(_.bits := DontCare)
+  muon.io.dmem.req.foreach(_.ready := false.B)
+  muon.io.smem.resp.foreach(_.valid := false.B)
+  muon.io.smem.resp.foreach(_.bits := DontCare)
+  muon.io.smem.req.foreach(_.ready := false.B)
 
   io.finished := true.B
 }
@@ -75,12 +76,12 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   })
 
   val be = Module(new Backend()(p))
-  be.io.dmem.resp.valid := false.B
-  be.io.dmem.resp.bits := DontCare
-  be.io.dmem.req.ready := false.B
-  be.io.smem.resp.valid := false.B
-  be.io.smem.resp.bits := DontCare
-  be.io.smem.req.ready := false.B
+  be.io.dmem.resp.foreach(_.valid := false.B)
+  be.io.dmem.resp.foreach(_.bits := DontCare)
+  be.io.dmem.req.foreach(_.ready := false.B)
+  be.io.smem.resp.foreach(_.valid := false.B)
+  be.io.smem.resp.foreach(_.bits := DontCare)
+  be.io.smem.req.foreach(_.ready := false.B)
 
   val cfe = Module(new CyclotronFrontend()(p))
   // Imem in the ISA model is not used
@@ -101,7 +102,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   io.finished := cfe.io.finished
 }
 
-/** Testbench for Muon backend LSU pipe */
+/** Testbench for Muon backend LSU pipe and coalescer */
 class MuonLSUTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -113,10 +114,11 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
   
   val coreGmem = Wire(new DataMemIO)
   val coreShmem = Wire(new SharedMemIO)
-  
-  val cyclotronGmem = Module(new CyclotronMemBlackBox(coreGmem))
-  val cyclotronShmem = Module(new CyclotronMemBlackBox(coreShmem))
 
+  // TODO: connect LSU to coalescer
+
+  // TODO: connect coalescer to cyclotron memory backend
+  
   io.finished := false.B
 }
 
@@ -248,6 +250,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   addResource("/csrc/Cyclotron.cc")
 }
 
+/*
 class CyclotronMemBlackBox(interface: MemInterface)(implicit val p: Parameters) extends Module {
   class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"  -> p(MuonKey).archLen,
@@ -316,6 +319,7 @@ class CyclotronMemBlackBox(interface: MemInterface)(implicit val p: Parameters) 
   
   io.resp.bits.metadata := DontCare
 }
+*/
 
 // UnitTest harnesses
 // ------------------
