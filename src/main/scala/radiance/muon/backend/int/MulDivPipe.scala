@@ -39,8 +39,8 @@ class MulDivPipe(implicit p: Parameters)
   val unmaskedMulDivsDone = (vecMulDivRespValid & sliceTMask) === sliceTMask
   val allMulDivReqReady = vecMulDiv.map(_.io.req.ready).reduce(_ && _)
 
-  io.req.ready := !busy || io.resp.fire
-  decomposer.io.in.valid := !busy && io.req.valid
+  io.req.ready := (!busy || io.resp.fire) && decomposer.io.in.ready
+  decomposer.io.in.valid := io.req.fire
   decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
   decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
   decomposer.io.in.bits.data(2) := VecInit(io.req.bits.uop.tmask.asBools)
