@@ -15,9 +15,13 @@ abstract class ExPipe(
   })
 
   val inst = io.req.bits.uop.inst
-  val req_pc = Reg(UInt(archLen.W))
-  val req_tmask = Reg(UInt(numLanes.W))
-  val req_rd = Reg(UInt(Isa.regBits.W))
-  val req_wid = RegInit(0.U(log2Ceil(muonParams.numWarps).W))
-  val resp_valid = RegInit(false.B)
+  val latchedUop = RegEnable(io.req.bits.uop, 0.U.asTypeOf(uopT), io.req.fire)
+
+  def reqInst = latchedUop.inst.expand()
+  def reqPC = latchedUop.pc
+  def reqTmask = latchedUop.tmask
+  def reqWid = latchedUop.wid
+  def reqRd = reqInst(Rd)
+
+  val respValid = RegInit(false.B)
 }
