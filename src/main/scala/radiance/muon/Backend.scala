@@ -20,8 +20,13 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
-  reservStation.io.enq <> hazard.io.rsEnq
-  reservStation.io.issue.ready := true.B // TODO bogus
+  reservStation.io.admit <> hazard.io.rsAdmit
+  hazard.io.writeback <> reservStation.io.writebackHazard
+
+  // TODO bogus
+  val fakeExPipe = Module(new FakeWriteback)
+  fakeExPipe.io.issue <> reservStation.io.issue
+  reservStation.io.writeback <> fakeExPipe.io.writeback
 
   // TODO: Collector
   // temporary placeholders to generate reg file banks for par

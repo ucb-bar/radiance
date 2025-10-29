@@ -6,6 +6,15 @@ import chisel3.util._
 import freechips.rocketchip.util.UIntIsOneOf
 import org.chipsalliance.cde.config.Parameters
 
+class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
+  val setPC = Valid(pcT)
+  val setTmask = Valid(tmaskT)
+  val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+  val wspawn = Valid(wspawnT)
+  val pc = pcT
+  val wid = widT
+}
+
 class WarpScheduler(implicit p: Parameters)
   extends CoreModule
   with HasCoreBundles {

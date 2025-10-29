@@ -8,6 +8,7 @@ import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTilePar
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.muon.backend.RegWriteback
 import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
 
@@ -69,7 +70,7 @@ case class MuonCoreParams(
   ibufDepth: Int = 8,
   startAddress: BigInt = x"1000_0000",
   // issue
-  numIssueQueueEntries: Int = 2,  // RS
+  numIssueQueueEntries: Int = 8,  // RS
   maxPendingReads: Int = 3,       // scoreboard
   numRegBanks: Int = 4,           // collector
   numOpCollectorEntries: Int = 2, // collector
@@ -232,21 +233,8 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
   }
 
-  def schedWritebackT = Valid(new Bundle {
-      val setPC = Valid(pcT)
-      val setTmask = Valid(tmaskT)
-      val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
-      val wspawn = Valid(wspawnT)
-      val pc = pcT
-      val wid = widT
-    }
-  )
-
-  def regWritebackT = Valid(new Bundle {
-    val rd = aRegT
-    val data = Vec(m.numWarps, regDataT)
-    val tmask = tmaskT
-  })
+  def schedWritebackT = Valid(new SchedWriteback)
+  def regWritebackT = Valid(new RegWriteback)
 
   def writebackT(hasSched: Boolean = true, hasReg: Boolean = true) = new Bundle {
     val sched = Option.when(hasSched)(schedWritebackT)
