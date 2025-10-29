@@ -53,8 +53,6 @@ case class CoalescerConfig(
   enable: Boolean,        // globally enable or disable coalescing
   numLanes: Int,          // number of lanes (or threads) in a warp
   reqQueueDepth: Int,     // request window per lane
-  timeCoalWindowSize: Int,// maximum single-lane, different-time requests that can be coalesced
-                          // into a single request
   waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size.  Nominally, this has
@@ -100,16 +98,12 @@ case class CoalescerConfig(
     )
     w
   }
-  require(timeCoalWindowSize <= reqQueueDepth,
-    s"time-coalescing window size (${timeCoalWindowSize}) cannot be larger " +
-    s"than the request queue depth (${reqQueueDepth})")
 }
 
 object DefaultCoalescerConfig extends CoalescerConfig(
   enable = true,
   numLanes = 4,
   reqQueueDepth = 2,
-  timeCoalWindowSize = 1,
   waitTimeout = 8,
   addressWidth = 24,
   dataBusWidth = 4,      // if "4": 2^4=16 bytes, 128 bit bus
@@ -372,10 +366,10 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
       val deq = Vec(config.numLanes, EnqIO(gen.cloneType))
     }
     // note we're only exposing the time-coalescing window part of the queues
-    val invalidate = Input(Valid(Vec(config.numLanes, UInt(config.timeCoalWindowSize.W))))
+    val invalidate = Input(Valid(Vec(config.numLanes, UInt(1.W))))
     val coalescable = Input(Vec(config.numLanes, Bool()))
-    val mask = Output(Vec(config.numLanes, UInt(config.timeCoalWindowSize.W)))
-    val windowElts = Output(Vec(config.numLanes, Vec(config.timeCoalWindowSize, gen)))
+    val mask = Output(Vec(config.numLanes, UInt(1.W)))
+    val windowElts = Output(Vec(config.numLanes, Vec(1, gen)))
   })
 
 //  val eltPrototype = Wire(Valid(gen))
@@ -438,7 +432,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
           elt.valid := false.B
         } else {
           elt.bits := elts(i)(j + 1).bits
-          if (j == config.timeCoalWindowSize - 1) { // tail of time window
+          if (j == 0) { // tail of time window
             elt.valid := elts(i)(j + 1).valid
           } else {
             elt.valid := elts(i)(
@@ -481,8 +475,8 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
       writePtr.map(_ === writePtr.head).reduce(_ && _)
   assert(queueInSync, "shift queue lanes are not in sync")
 
-  io.mask := elts.map(lane => VecInit(lane.map(_.valid).slice(0, config.timeCoalWindowSize)).asUInt)
-  io.windowElts := elts.map(lane => VecInit(lane.map(_.bits).slice(0, config.timeCoalWindowSize)))
+  io.mask := elts.map(lane => VecInit(lane.map(_.valid).slice(0, 1)).asUInt)
+  io.windowElts := elts.map(lane => VecInit(lane.map(_.bits).slice(0, 1)))
 }
 
 // Main coalescing logic that finds which lanes with valid requests can be coalesced
@@ -501,11 +495,11 @@ class MonoCoalescer(
     val results = Output(new Bundle {
       val leaderIdx = Output(UInt(log2Ceil(config.numLanes).W))
       val baseAddr = Output(UInt(config.addressWidth.W))
-      val matchOH = Output(Vec(config.numLanes, UInt(config.timeCoalWindowSize.W)))
+      val matchOH = Output(Vec(config.numLanes, UInt(1.W)))
       // number of entries matched with this leader lane's head.
       // maximum is numLanes * queueDepth
       val matchCount =
-        Output(UInt(log2Ceil(config.numLanes * config.timeCoalWindowSize + 1).W))
+        Output(UInt(log2Ceil(config.numLanes + 1).W))
       val coverageHits =
         Output(UInt((config.maxCoalLogSize - config.wordSizeWidth + 1).W))
       val canCoalesce = Output(Vec(config.numLanes, Bool()))
@@ -651,7 +645,7 @@ class MultiCoalescer(
     queueT: CoalShiftQueue[NonCoalescedRequest],
     coalReqT: CoalescedRequest
 ) extends Module {
-  val invalidateT = Valid(Vec(config.numLanes, UInt(config.timeCoalWindowSize.W)))
+  val invalidateT = Valid(Vec(config.numLanes, UInt(1.W)))
   val io = IO(new Bundle {
     // coalescing window, connected to the contents of the request queues
     val window = Input(queueT.io.cloneType)
@@ -798,7 +792,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   println(s"    numLanes: ${config.numLanes}")
   println(s"    wordSizeInBytes: ${config.wordSizeInBytes}")
   println(s"    coalLogSize: ${config.coalLogSize}")
-  println(s"    timeCoalWindowSize: ${config.timeCoalWindowSize}")
   println(s"    numOldSrcIds: ${config.numOldSrcIds}")
   println(s"    numNewSrcIds: ${config.numNewSrcIds}")
   println(s"    reqQueueDepth: ${config.reqQueueDepth}")
@@ -965,7 +958,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
   // The maximum number of requests from a single lane that can go into a
   // coalesced request.
-  val numPerLaneReqs = config.timeCoalWindowSize
+  val numPerLaneReqs = 1
 
   // FIXME: no need to contain maxCoalLogSize data
   val respQueueEntryT = new Response(
@@ -1073,7 +1066,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       // requests that can go into a single coalesced response.  We need to
       // have that many enq ports to not backpressure the uncoalescer.
       require(
-        q.io.enq.length == config.timeCoalWindowSize + respQueueUncoalPortOffset,
+        q.io.enq.length == 1 + respQueueUncoalPortOffset,
         s"wrong number of enq ports for MultiPort response queue"
       )
       // slice the ports reserved for uncoalesced response
@@ -1113,7 +1106,7 @@ class Uncoalescer(
     val coalResp = Flipped(Decoupled(new CoalescedResponse(config)))
     val respQueueIO = Vec(
       config.numLanes,
-      Vec(config.timeCoalWindowSize, Decoupled(new NonCoalescedResponse(config)))
+      Vec(1, Decoupled(new NonCoalescedResponse(config)))
     )
   })
 
@@ -1151,7 +1144,7 @@ class Uncoalescer(
   // Pipeline registers staging the uncoalesced requests before it goes into
   // respQueues.
   val uncoalPipeRegs = Seq.fill(config.numLanes)(
-    Seq.fill(config.timeCoalWindowSize)(
+    Seq.fill(1)(
       Module(new Queue(new NonCoalescedResponse(config), 1, pipe = true)))
   )
   val allUncoalPipelineRegsReady =
@@ -1230,7 +1223,7 @@ class InFlightTable(
     config.maxCoalLogSize - config.wordSizeWidth // assumes word offset
   val entryT = new InFlightTableEntry(
     config.numLanes,
-    config.timeCoalWindowSize,
+    1,
     log2Ceil(config.numOldSrcIds),
     log2Ceil(config.numNewSrcIds),
     config.maxCoalLogSize, // FIXME: offsetBits?
@@ -1250,12 +1243,12 @@ class InFlightTable(
     // invalidate signal coming out of coalescer.  Needed to generate new entry
     // for the table.
     val invalidate =
-      Input(Valid(Vec(config.numLanes, UInt(config.timeCoalWindowSize.W))))
+      Input(Valid(Vec(config.numLanes, UInt(1.W))))
     // coalescing window, connected to the contents of the request queues.
     // Need this to generate new entry for the table.
     // TODO: duplicate type construction
     val windowElts =
-      Input(Vec(config.numLanes, Vec(config.timeCoalWindowSize, nonCoalReqT)))
+      Input(Vec(config.numLanes, Vec(1, nonCoalReqT)))
     // InflightTable simply passes through the inCoalReq to outCoalReq, only snooping
     // on its data to record what's necessary.
     val outCoalReq = Decoupled(coalReqT)
