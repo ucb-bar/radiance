@@ -69,7 +69,9 @@ class ALUPipe(implicit p: Parameters)
 
   schedResp.valid := respValid && setPcValid
   schedResp.bits.setPC.valid := setPcValid
-  schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch), reqPC, PriorityMux(reqTmask, aluOut))
+  schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch),
+    (reqPC + reqInst(Imm32)).asTypeOf(pcT), // to shashank: cannot add at req fire, that causes race for reqPC value
+    PriorityMux(reqTmask, aluOut).asTypeOf(pcT))
   schedResp.bits.setTmask.valid := reqInst.b(IsBranch)
   schedResp.bits.setTmask.bits := branchTakenMask
 
@@ -86,6 +88,5 @@ class ALUPipe(implicit p: Parameters)
 
   when (io.req.fire) {
     busy := true.B
-    reqPC := reqPC + reqInst(Imm32)
   }
 }

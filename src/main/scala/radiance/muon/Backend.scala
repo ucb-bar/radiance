@@ -49,14 +49,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     dontTouch(b.writePorts.head)
   }
 
-  val fpu = Module(new CVFPU)
-  fpu.io.clock := clock
-  fpu.io.reset := reset
-  fpu.io.req.bits := DontCare
-  fpu.io.req.valid := false.B
-  fpu.io.resp.ready := false.B
-  fpu.io.flush := false.B
-  dontTouch(fpu.io)
+  val execute = Module(new Execute())
+  execute.io.req.valid := false.B
+  execute.io.req.bits := DontCare // TODO
+  execute.io.resp.ready := true.B
 
   // TODO: INT/SFU
   // TODO: LSU

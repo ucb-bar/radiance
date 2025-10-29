@@ -67,6 +67,8 @@ case object IsUJType         extends DecodeField(1, true)
 case object UseALUPipe       extends DecodeField(1, true)
 case object UseMulDivPipe    extends DecodeField(1, true)
 case object UseFPPipe        extends DecodeField(1, true)
+case object UseFP32Pipe      extends DecodeField(1, true)
+case object UseFP16Pipe      extends DecodeField(1, true)
 case object UseLSUPipe       extends DecodeField(1, true)
 case object UseSFUPipe       extends DecodeField(1, true)
 case object HasRd            extends DecodeField(1, true)
@@ -119,6 +121,8 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case UseMulDivPipe => (decode(Opcode) === MuOpcode.OP.U) && (decode(F7) === "b0000001".U)
+        case UseFP32Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b00".U)
+        case UseFP16Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b10".U)
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
@@ -207,7 +211,7 @@ object Decoder {
       Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
       IsRType, IsIType, IsSType, IsBType, IsUJType,
-      UseALUPipe, UseMulDivPipe, UseFPPipe, UseLSUPipe, UseSFUPipe,
+      UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
       ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
