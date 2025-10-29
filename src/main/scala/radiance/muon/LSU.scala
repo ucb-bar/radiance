@@ -48,6 +48,12 @@ class LoadStoreUnitDerivedParams(
     val numPackets = muonParams.numLanes / muonParams.lsu.numLsuLanes
     val packetBits = log2Up(numPackets)
 
+    val loadDataPhysicalIdxBits = if (numPackets == 1) {
+        muonParams.lsu.loadDataIdxBits
+    } else {
+        muonParams.lsu.loadDataIdxBits + packetBits
+    } 
+
     // "request tag"
     val sourceIdBits = LsuQueueToken.width(muonParams) + packetBits
 }
@@ -85,7 +91,7 @@ object MemOp extends ChiselEnum {
 }
 
 // Uniquely identifies an entry in load/store queues (warpId, addressSpace, ldq, index)
-// Used as request tag into downstream memory interfaces
+// Used as part the request tag into downstream memory interfaces
 class LsuQueueToken(implicit p: Parameters) extends CoreBundle {
     val warpId = UInt(muonParams.warpIdBits.W)
     val addressSpace = AddressSpace()
@@ -100,12 +106,13 @@ object LsuQueueToken {
 }
 
 // Note: below LSQ interfaces are all bidirectional, with separate request and response channels. 
-// At the moment, both directions are combinationally coupled, 
-// but this may be relaxed in future if performance is an issue.
+// At the moment, both directions are combinationally coupled, but this may be relaxed in 
+// future if performance is an issue.
 
 // LSQ reserves slots in program order and produce a token for the reserved slot
 // This token must be held in reservation station and given to LSU when a memory instruction issues from RS
 // (possibly out-of-order!).
+
 // We expose a separate interface per warp to simplify checking for structural hazard on queue entries from per-warp IBUF
 // Even if IBUF looks past its head to issue to RS, it still needs to ensure in-order reservations occur
 // Allocated index into address and storeData SRAM is also stored in the newly reserved LSQ entry.
@@ -135,7 +142,7 @@ class LSQOperandUpdateResp(implicit p: Parameters) extends CoreBundle {
 }
 
 // Each load and store queue attempts to issue requests back to LSU in a correct order once 
-// operands for that request are received and hazards resolved.
+// operands for that request are received and potential memory hazards resolved.
 // All requests (shared / global) (stores / loads) (across all warps) are arbitrated into a single
 // outbound request from LSU (due to only having a single read port for address / storeData SRAMs).
 // Deallocation of address / store data, and allocation for load data entry both occur here.
@@ -152,7 +159,8 @@ class LSQResp(implicit p: Parameters) extends CoreBundle {
 }
 
 // Once memory subsystem responds with load data (or store ack), LSU notifies Load and Store queues
-// so it can either reclaim the entry immediately (stores) or start driving writebacks (loads / atomics)
+// to obtain the SRAM index it should write that data into. 
+// LSQ can either reclaim the entry immediately (stores) or start driving a writeback request (loads / atomics)
 class LSQMemReturnReq(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken    
 }
@@ -176,8 +184,11 @@ class LSQWritebackReq(implicit p: Parameters) extends CoreBundle {
     val loadDataIdx = UInt(muonParams.lsu.loadDataIdxBits.W)
 }
 
-// perf: memReq, writebackReq goes through numWarps * 4 radix arbiter
+// @perf: memReq, writebackReq goes through numWarps * 4 radix arbiter
 // similarly, receivedOperands / receivedMemUpdate / receivedMemResponse all fanout to numWarps * 4
+
+// TODO: create versions or parameterizations where the LDQ/STQ are shared between warps, 
+// between shared/global, or both
 class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
     val io = IO(new Bundle {
         val queueReservations = Vec(muonParams.numWarps, new Bundle {
@@ -312,6 +323,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         // - addressTmaskIndex: SRAM index for address/tmask data
         // - storeDataIndex: SRAM index for store data (STQ only)
         // - loadDataIndex: SRAM index for load data (LDQ and STQ, since latter has to deal with atomics also)
+        // - loadPackets: number of packets which have been received for this entry
         // - done: either we received a mem update or mem response; dependent memory instructions are free to go
         //   (but we can't deallocate entry yet; need loadDataIndex to do writeback)
         // - writeback: we received a mem response and can begin to write back
@@ -323,13 +335,12 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val addressIdx         = RegInit(VecInit.fill(entries)(0.U(muonParams.lsu.addressIdxBits.W)))
         val storeDataIdx       = RegInit(VecInit.fill(entries)(0.U(muonParams.lsu.storeDataIdxBits.W)))
         val loadDataIdx        = RegInit(VecInit.fill(entries)(0.U(muonParams.lsu.loadDataIdxBits.W)))
+        val loadPackets        = RegInit(VecInit.fill(entries)(0.U(lsuDerived.packetBits.W)))
         val done               = RegInit(VecInit.fill(entries)(false.B))
         val writeback          = RegInit(VecInit.fill(entries)(false.B))
         
         // allocation logic
         when (io.enqueue) {
-            assert(!full, "overflow of per-warp queue")
-            
             valid(idxBits(tail)) := true.B
             op(idxBits(tail)) := io.op
             otherQueueTail(idxBits(tail)) := io.otherTail
@@ -340,10 +351,17 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             if (!loadQueue) {
                 storeDataIdx(idxBits(tail)) := io.storeDataIdx
             }
+            loadPackets(idxBits(tail)) := 0.U(lsuDerived.packetBits.W)
             done(idxBits(tail)) := false.B
-            
+
             tail := tail + 1.U
         }
+        
+        val overflow = RegNext(
+            io.enqueue && full,
+            false.B
+        )
+        assert(!overflow, "overflow of per-warp queue")
 
         // mark when operands received from reservation station and respond with
         // addressIdx and storeDataIdx
@@ -356,6 +374,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         when (io.receivedOperands.req.valid) {
             operandsReady(localIndex(io.receivedOperands.req.bits.token.index)) := true.B
         }
+        
         val badIndex = RegNext(
             io.receivedOperands.req.valid && !valid(localIndex(io.receivedOperands.req.bits.token.index)), 
             false.B
@@ -423,31 +442,34 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             }
         }
 
-        // set done when receiving mem update or mem response, allow logical head to move forward
+        // set done when receiving mem update or mem response, allowing logical head to move forward
         when (io.receivedMemUpdate.valid) {
             done(localIndex(io.receivedMemUpdate.bits.token.index)) := true.B    
         }
 
+        val memResponseIndex = localIndex(io.receivedMemResponse.req.bits.token.index)
         when (io.receivedMemResponse.req.valid) {
-            done(localIndex(io.receivedMemResponse.req.bits.token.index)) := true.B
             
-            if (loadQueue) {
-                // every load needs to write back
-                writeback(localIndex(io.receivedMemResponse.req.bits.token.index)) := true.B
-            }
-            else {
-                // only atomics need to write back; others can retire immediately
-                val atomic = MemOp.isAtomic(op(localIndex(io.receivedMemResponse.req.bits.token.index)))
-                writeback(localIndex(io.receivedMemResponse.req.bits.token.index)) := atomic
+            loadPackets(memResponseIndex) := loadPackets(memResponseIndex) + 1.U
 
-                when (!atomic) {
-                    valid(localIndex(io.receivedMemResponse.req.bits.token.index)) := false.B
+            when (loadPackets(memResponseIndex) === (lsuDerived.numPackets - 1).U) {
+                done(memResponseIndex) := true.B
+
+                if (loadQueue) {
+                    // every load needs to write back
+                    writeback(memResponseIndex) := true.B
+                }
+                else {
+                    // only atomics need to write back; others can retire immediately
+                    val atomic = MemOp.isAtomic(op(memResponseIndex))
+                    writeback(memResponseIndex) := atomic
+                    valid(memResponseIndex) := atomic
                 }
             }
         }
 
         io.receivedMemResponse.resp.valid := io.receivedMemResponse.req.valid
-        io.receivedMemResponse.resp.bits.loadDataIdx := loadDataIdx(localIndex(io.receivedMemResponse.req.bits.token.index))
+        io.receivedMemResponse.resp.bits.loadDataIdx := loadDataIdx(memResponseIndex)
 
         // drive writeback requests
         val writebackIdx = PriorityEncoder(writeback.asUInt)
@@ -666,7 +688,8 @@ We also need to convert from core memory response to LSU memory response(s). Thi
 by picking the first valid lane on the core side, and filtering only those responses whose tag (excluding lane id) 
 matches it. 
 
-In the future, it may be possible to begin writing back once a packet is ready, rather than the full warp
+In the future, it may be possible to begin writing back to register files once a packet is ready (or even
+individual lanes within a packet), rather than the full warp
 */
 class LsuMemTag(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
@@ -805,8 +828,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     val addressTmaskMem = SyncReadMem(muonParams.lsu.addressEntries, new AddressTmask)
     val storeDataMem = SyncReadMem(muonParams.lsu.storeDataEntries, Vec(muonParams.numLanes, UInt(muonParams.archLen.W)))
-    val loadDataMem = SyncReadMem(muonParams.lsu.loadDataEntries * lsuDerived.numPackets, Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)))
     
+    val loadDataMem = SyncReadMem(muonParams.lsu.loadDataEntries * lsuDerived.numPackets, Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)))
+    val loadDataValidTy = Vec(muonParams.lsu.loadDataEntries * lsuDerived.numPackets, Vec(muonParams.lsu.numLsuLanes, Bool()))
+    val loadDataValid = RegInit(loadDataValidTy, 0.U.asTypeOf(loadDataValidTy))
+
     val totalQueueEntries = muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
     val pRegTmaskMem = SyncReadMem(totalQueueEntries, new PRegTmask)
 
@@ -831,42 +857,42 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     val coreReservationValids = Cat(io.coreReservations.map(r => r.req.valid).reverse)
     val queueReservationReadys = Cat(loadStoreQueues.io.queueReservations.map(r => r.req.ready).reverse)
-    val reservationValidOH = PriorityEncoderOH(coreReservationValids & queueReservationReadys)
-
-    dontTouch(coreReservationValids)
-    dontTouch(queueReservationReadys)
-    dontTouch(reservationValidOH)
+    val reservationFireOH = PriorityEncoderOH(coreReservationValids & queueReservationReadys)
     
     for (warp <- 0 until muonParams.numWarps) {
         val queueReservation = loadStoreQueues.io.queueReservations(warp)
         val coreReservation = io.coreReservations(warp)
-        val reserve = reservationValidOH(warp)
+        val attemptReserve = reservationFireOH(warp)
 
-        coreReservation.req.ready := reserve
-
-        when (reserve) {
+        when (attemptReserve) {
             // fences don't need a slot in store data, despite being kept in store queue
             // stores and atomics require both a store data slot and address/tmask slot
             // other memory ops only need address/tmask slot
             when (MemOp.isFence(coreReservation.req.bits.op)) {
+                coreReservation.req.ready := true.B
+
                 queueReservation.req.valid := true.B
                 queueReservation.req.bits.addressIdx := DontCare
                 queueReservation.req.bits.storeDataIdx := DontCare
             }.elsewhen(MemOp.isStore(coreReservation.req.bits.op) || MemOp.isAtomic(coreReservation.req.bits.op)) {
                 addressTmaskAllocator.io.allocate := true.B
                 storeDataAllocator.io.allocate := true.B
-                
+                coreReservation.req.ready := addressTmaskAllocator.io.allocationValid && storeDataAllocator.io.allocationValid
+
                 queueReservation.req.valid := addressTmaskAllocator.io.allocationValid && storeDataAllocator.io.allocationValid
                 queueReservation.req.bits.addressIdx := addressTmaskAllocator.io.allocatedIndex
                 queueReservation.req.bits.storeDataIdx := storeDataAllocator.io.allocatedIndex
             }.otherwise {
                 addressTmaskAllocator.io.allocate := true.B
+                coreReservation.req.ready := addressTmaskAllocator.io.allocationValid
 
                 queueReservation.req.valid := addressTmaskAllocator.io.allocationValid
                 queueReservation.req.bits.addressIdx := addressTmaskAllocator.io.allocatedIndex
                 queueReservation.req.bits.storeDataIdx := DontCare
             }
         }.otherwise {
+            coreReservation.req.ready := true.B
+
             queueReservation.req.valid := false.B
             queueReservation.req.bits.addressIdx := DontCare
             queueReservation.req.bits.storeDataIdx := DontCare
@@ -1004,8 +1030,6 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.addressSpace := token.addressSpace
     }
 
-    
-
     // TODO: utilize both memory interfaces in parallel?
     val reqGen = Module(new MemRequestGen)
 
@@ -1050,84 +1074,142 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     // -- Receive memory responses --
     {
         // arbitration: responses from global > responses from shared
-        val valids = Cat(io.shmemResp.valid, io.globalMemReq.valid)
-        val readys = PriorityEncoderOH(valids)
+        val respValids = Cat(io.shmemResp.valid, io.globalMemReq.valid)
+        val readys = PriorityEncoderOH(respValids)
         io.globalMemResp.ready := readys(0)
         io.shmemResp.ready := readys(1)
 
-        val receivedResp = valids.orR
-        
-        val loadDataWriteIdx = Wire(UInt(muonParams.lsu.loadDataIdxBits.W))
-        val loadDataWriteVal = Mux1H(valids, Seq(
-            io.globalMemResp.bits.data,
-            io.shmemResp.bits.data
-        ))
+        val receivedResp = respValids.orR
 
-        when (receivedResp.orR) {
-            loadDataMem.write(loadDataWriteIdx, loadDataWriteVal)
-        }
-
-        val respTagBits = Mux1H(valids, Seq(
+        val respTagBits = Mux1H(respValids, Seq(
             io.globalMemResp.bits.tag,
             io.shmemResp.bits.tag
         ))
         
         val respTag = respTagBits.asTypeOf(new LsuMemTag)
         
-        loadStoreQueues.io.receivedMemResponse.req.valid := valids.orR
-        loadStoreQueues.io.receivedMemResponse.req.bits.token := respTag.token
-        
         // packet forms LSBs of index
+        val loadDataWriteIdx = Wire(UInt(lsuDerived.loadDataPhysicalIdxBits.W))
         loadDataWriteIdx := (loadStoreQueues.io.receivedMemResponse.resp.bits.loadDataIdx * lsuDerived.numPackets.U) + respTag.packet
+        
+        val loadDataWriteVal = Mux1H(respValids, Seq(
+            io.globalMemResp.bits.data,
+            io.shmemResp.bits.data
+        ))
+        val loadDataValids = Mux1H(respValids, Seq(
+            io.globalMemResp.bits.valid,
+            io.shmemResp.bits.valid
+        ))
+
+        val loadDataValidNext = loadDataValid(loadDataWriteIdx) | loadDataValids
+
+        when (receivedResp.orR) {
+            when (loadDataValidNext.andR) {
+                loadDataValid(loadDataWriteIdx) := 0.U.asTypeOf(loadDataValid(loadDataWriteIdx))
+            }.otherwise {
+                loadDataValid(loadDataWriteIdx) := loadDataValidNext
+            }
+            
+            loadDataMem.write(loadDataWriteIdx, loadDataWriteVal, loadDataValids)
+        }
+
+        loadStoreQueues.io.receivedMemResponse.req.valid := respValids.orR && loadDataValidNext.andR
+        loadStoreQueues.io.receivedMemResponse.req.bits.token := respTag.token
     }
     
-
     // -- Writeback --
-    {
-        val valid = RegInit(false.B)
-        val packet = RegInit(0.U(lsuDerived.packetBits.W))
-        val finalPacket = (packet === (lsuDerived.numPackets - 1).U)
-        val warp = RegInit(0.U(muonParams.warpIdBits.W))
+    class Writeback extends CoreModule {
+        val io = IO(new Bundle {
+            val writebackReq = Flipped(Decoupled(new LSQWritebackReq))
+            val coreResp = Decoupled(new LsuResponse)
 
-        val writebackData = RegInit(VecInit.fill(muonParams.lsu.numLsuLanes)(0.U(muonParams.archLen.W)))
-        val pRegTmask = RegInit(0.U.asTypeOf(new PRegTmask))
+            val loadDataReadIdx = Output(UInt(lsuDerived.loadDataPhysicalIdxBits.W))
+            val loadDataReadVal = Input(Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)))
 
-        io.coreResp.valid := valid
-        io.coreResp.bits.tmask := pRegTmask.tmask
-        io.coreResp.bits.destReg := pRegTmask.destReg
-        io.coreResp.bits.writebackData := writebackData
-        io.coreResp.bits.warpId := warp
-        io.coreResp.bits.packet := packet
+            val pRegTmaskReadIdx = Output(new LsuQueueToken)
+            val pRegTmaskReadVal = Input(new PRegTmask)
+
+            val deallocateLoadData = Output(Bool())
+            val deallocateLoadDataIdx = Output(UInt(muonParams.lsu.loadDataIdxBits.W))
+        })
+
+        io.deallocateLoadData := false.B
+        io.deallocateLoadDataIdx := DontCare
+
+        // Writeback state machine
+        
+        // stage 1: accept writeback request, initiate first read to data SRAM, initiate read from metadata SRAM
+        // stage 2: read from SRAM, drive core writeback interface
+        val s1_valid = RegInit(false.B)
+        val s1_ready = Wire(Bool())
+        val s1_req = RegInit(0.U.asTypeOf(new LSQWritebackReq))
+        
+        val s2_valid = RegInit(false.B)
+        val s2_ready = Wire(Bool())
+        val s2_req = RegInit(0.U.asTypeOf(new LSQWritebackReq))
+        val s2_packet = RegInit(0.U(lsuDerived.packetBits.W))
+        val s2_metadata = RegInit(0.U.asTypeOf(new PRegTmask))
+        val finalPacket = Wire(Bool())
+        finalPacket := (s2_packet + 1.U) === lsuDerived.numPackets.U
+
+        io.writebackReq.ready := s1_ready
+        s1_ready := !s1_valid || (s1_valid && s2_ready)
+
+        when (s1_valid && s2_ready) {
+            s1_valid := false.B
+        }
+        
+        when (io.writebackReq.fire) {
+            s1_valid := true.B
+            s1_req := io.writebackReq.bits
+        }
+    
+        io.loadDataReadIdx := Mux(
+            s2_ready,
+            s1_req.loadDataIdx * lsuDerived.numPackets.U,
+            s2_req.loadDataIdx * lsuDerived.numPackets.U + s2_packet + 1.U
+        )
+        
+        io.pRegTmaskReadIdx := s1_req.token
 
         when (io.coreResp.fire) {
-            packet := packet + 1.U
-            when (finalPacket) {
-                valid := false.B
-            }
+            s2_packet := s2_packet + 1.U
         }
 
-        val writebackReady = !valid || (valid && io.coreResp.fire)
-        loadStoreQueues.io.writebackReq.ready := writebackReady
+        s2_ready := !s2_valid || (s2_valid && finalPacket && io.coreResp.fire)
 
-        loadDataAllocator.io.deallocate := false.B
-        loadDataAllocator.io.deallocateIndex := DontCare
-
-        when (loadStoreQueues.io.writebackReq.fire) {
-            valid := true.B
-            packet := 0.U
-            warp := loadStoreQueues.io.writebackReq.bits.token.warpId
-
-            writebackData := loadDataMem.read(loadStoreQueues.io.writebackReq.bits.loadDataIdx)
-
-            loadDataAllocator.io.deallocate := true.B
-            loadDataAllocator.io.deallocateIndex := loadStoreQueues.io.writebackReq.bits.loadDataIdx
-
-            val token = Wire(new LsuQueueToken)
-            token := loadStoreQueues.io.writebackReq.bits.token
-
-            pRegTmask := pRegTmaskMem.read(tokenToPRegTmaskIndex(token))
+        when (s2_valid && finalPacket && io.coreResp.fire) {
+            s2_valid := false.B
+            io.deallocateLoadData := true.B
+            io.deallocateLoadDataIdx := s2_req.loadDataIdx
         }
+
+        when (s1_valid && s2_ready) {
+            s2_valid := true.B
+            s2_req := s1_req
+            s2_packet := 0.U
+            s2_metadata := io.pRegTmaskReadVal
+        }
+
+        io.coreResp.valid := s2_valid
+        io.coreResp.bits.tmask := s2_metadata.tmask
+        io.coreResp.bits.destReg := s2_metadata.destReg
+        io.coreResp.bits.writebackData := io.loadDataReadVal
+        io.coreResp.bits.warpId := s2_req.token.warpId
+        io.coreResp.bits.packet := s2_packet
     }
+
+    val writeback = Module(new Writeback)
+    io.coreResp :<>= writeback.io.coreResp
+    writeback.io.writebackReq :<>= loadStoreQueues.io.writebackReq
+    
+    loadDataAllocator.io.deallocate := writeback.io.deallocateLoadData
+    loadDataAllocator.io.deallocateIndex := writeback.io.deallocateLoadDataIdx
+
+    writeback.io.loadDataReadVal := loadDataMem.read(writeback.io.loadDataReadIdx)
+    writeback.io.pRegTmaskReadVal := pRegTmaskMem.read(
+        tokenToPRegTmaskIndex(writeback.io.pRegTmaskReadIdx)
+    )
 }
 
 // See [Downstream memory interface]
@@ -1147,14 +1229,50 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         }
     })
 
+    def lsuTagToCoreTag = (lsuTag: UInt, lane: Int) => {
+        lsuTag * muonParams.numLanes.U + lane.U
+    }
+
+    def coreTagToLsuTag = (coreTag: UInt) => {
+        coreTag >> log2Ceil(muonParams.numLanes).U
+    }
+
     def connectReq = (lsuReq: DecoupledIO[LsuMemRequest], coreReq: Vec[DecoupledIO[MemRequest[Bundle]]]) => {
         val readys = coreReq.map(_.ready)
         val allReady = readys.reduce(_ && _)
-        for (lane <- coreReq) {
-            lane.valid := allReady && lsuReq.valid
+        for ((lane, laneId) <- coreReq.zipWithIndex) {
+            lane.valid := allReady && lsuReq.valid && lsuReq.bits.tmask(laneId)
+            lane.bits.tag := lsuTagToCoreTag(lsuReq.bits.tag, laneId)
+            lane.bits.address := lsuReq.bits.address(laneId)
+            lane.bits.data := lsuReq.bits.data(laneId)
+            lane.bits.mask := ???
+            lane.bits.metadata := DontCare
+            lane.bits.size := ???
+            lane.bits.store := MemOp.isStore(lsuReq.bits.op)
         }
         lsuReq.ready := allReady
     }
 
+    def connectResp = (lsuResp: DecoupledIO[LsuMemResponse], coreResp: Vec[DecoupledIO[MemResponse[Bundle]]]) => {
+        val respValids = coreResp.map(_.valid)
+        val lsuTags = VecInit(coreResp.map(r => coreTagToLsuTag(r.bits.tag)))
+        val leader = PriorityEncoder(respValids)
+        val leaderLsuTag = lsuTags(leader)
+        val matchesLeader = VecInit(lsuTags.map(t => t === leaderLsuTag))
+        val respData = VecInit(coreResp.map(_.bits.data))
 
+        lsuResp.valid := respValids.orR
+        lsuResp.bits.tag := leaderLsuTag
+        lsuResp.bits.valid := matchesLeader
+        lsuResp.bits.data := respData
+        
+        for ((lane, laneId) <- coreResp.zipWithIndex) {
+            lane.ready := lsuResp.ready && matchesLeader(laneId)
+        }
+    }
+
+    connectReq(io.lsu.globalMemReq, io.core.dmem.req)
+    connectReq(io.lsu.shmemReq, io.core.smem.req)
+    connectResp(io.lsu.globalMemResp, io.core.dmem.resp)
+    connectResp(io.lsu.shmemResp, io.core.smem.resp)
 }

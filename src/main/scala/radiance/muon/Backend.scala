@@ -14,13 +14,20 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   val hazard = Module(new Hazard)
   hazard.io.ibuf <> io.ibuf
-  hazard.io.rsEnq.ready := true.B // TODO
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io <> hazard.io.scb
   dontTouch(scoreboard.io)
 
-  // TODO: Reservation station
+  val reservStation = Module(new ReservationStation)
+  reservStation.io.admit <> hazard.io.rsAdmit
+  hazard.io.writeback <> reservStation.io.writebackHazard
+
+  // TODO bogus
+  val fakeExPipe = Module(new FakeWriteback)
+  fakeExPipe.io.issue <> reservStation.io.issue
+  reservStation.io.writeback <> fakeExPipe.io.writeback
+
   // TODO: Collector
   // temporary placeholders to generate reg file banks for par
   val rfBanks = Seq.fill(muonParams.numRegBanks)(SRAM(
