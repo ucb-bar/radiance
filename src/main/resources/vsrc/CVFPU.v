@@ -15,7 +15,7 @@ module CVFPU
   input logic [WIDTH-1:0]                   req_bits_operands_2,
 
   input logic [2:0]                         req_bits_roundingMode,
-  input logic [4:0]                         req_bits_op, // op_mod is msb
+  input logic [4:0]                         req_bits_op, // op_mod is lsb
   input logic [2:0]                         req_bits_srcFormat,
   input logic [2:0]                         req_bits_dstFormat,
   input logic [1:0]                         req_bits_intFormat,
@@ -68,8 +68,8 @@ module CVFPU
         req_bits_operands_0
     }),
     .rnd_mode_i     (req_bits_roundingMode),
-    .op_i           (req_bits_op[3:0]     ),
-    .op_mod_i       (req_bits_op[4]       ),
+    .op_i           (req_bits_op[4:1]     ),
+    .op_mod_i       (req_bits_op[0]       ),
     .src_fmt_i      (req_bits_srcFormat   ),
     .dst_fmt_i      (req_bits_dstFormat   ),
     .int_fmt_i      (req_bits_intFormat   ),

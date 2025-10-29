@@ -11,9 +11,9 @@ import org.chipsalliance.cde.config.Parameters
  */
 class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
-    // per-warp IBUF interface
+    /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
-    // scoreboard interface
+    /** scoreboard interface */
     val scb = new Bundle {
       val update  = Flipped(scoreboardUpdateIO)
       val readRs1 = Flipped(scoreboardReadIO)
@@ -22,12 +22,15 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
       val readRd  = Flipped(scoreboardReadIO)
     }
     // TODO: per-FU RS
-    val rsEnq = Decoupled(new ReservationStationEntry)
+    val rsAdmit = Decoupled(new ReservationStationEntry)
+    /** writeback interface from EX */
+    val writeback = Flipped(regWritebackT)
   })
 
+  // TODO: bogus
   io.ibuf.foreach(_.ready := true.B)
 
-  def checkWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
+  def tryWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
     val uopValid = ibufPort.valid
     val hasRd    = ibufPort.bits.inst(HasRd) .asBool
     val hasRs1   = ibufPort.bits.inst(HasRs1).asBool
@@ -44,8 +47,8 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     io.scb.readRd.enable  := uopValid && hasRd
     io.scb.readRd.pReg    := ibufPort.bits.inst.rd
 
-    // RS enqueue logic
-    val rsEnq = Wire(Decoupled(new ReservationStationEntry))
+    // RS admission logic
+    val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
 
     // assumes combinational-read scoreboard
     val hasWAW = hasRd && (io.scb.readRd.pendingWrites =/= 0.U)
@@ -53,9 +56,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
     // TODO: for now simply gates WAR into RS; relax this into stalling at
     // writeback
-    rsEnq.valid := uopValid && !hasWAW && !hasWAR
+    rsAdmit.valid := uopValid && !hasWAW && !hasWAR
 
-    val rsEntry = rsEnq.bits
+    val rsEntry = rsAdmit.bits
     rsEntry.uop := ibufPort.bits
     // TODO connect collector
     rsEntry.valid(0) := !hasRs1
@@ -65,54 +68,78 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     rsEntry.busy(1) := (io.scb.readRs2.pendingWrites =/= 0.U)
     rsEntry.busy(2) := (io.scb.readRs3.pendingWrites =/= 0.U)
 
-    rsEnq
+    rsAdmit
   }
 
-  // TODO only looking at warp 0 at the moment
-  val rsEnqAllWarps = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
+  // TODO only handling warp 0 because of single-port scoreboard
+  val rsAdmitAllWarps = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
     wid match {
-      case 0 => checkWarp(ibPort)
+      case 0 => tryWarp(ibPort)
       case _ => {
-        val rsEnq = Wire(Decoupled(new ReservationStationEntry))
-        rsEnq.valid := false.B
-        rsEnq.bits := DontCare
-        rsEnq
+        val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
+        rsAdmit.valid := false.B
+        rsAdmit.bits := DontCare
+        rsAdmit
       }
     }
   }
 
   // arbitrates multiple RS enqueue signals into the single write port for each
   // RS table
-  // TODO: only outputs to one unified table at the moment
-  val rsEnqArbiter = Module(
-    new RRArbiter(chiselTypeOf(rsEnqAllWarps.head.bits), rsEnqAllWarps.length)
+  // TODO: per-FU RS
+  val rsAdmitArbiter = Module(
+    new RRArbiter(chiselTypeOf(rsAdmitAllWarps.head.bits), rsAdmitAllWarps.length)
   )
-  (rsEnqArbiter.io.in zip rsEnqAllWarps).foreach { case (a, w) => a <> w }
-  io.rsEnq <> rsEnqArbiter.io.out
+  (rsAdmitArbiter.io.in zip rsAdmitAllWarps).foreach { case (a, w) => a <> w }
+  val rsAdmitChosen = rsAdmitArbiter.io.out
+
+  // TODO: consolidate writeback scoreboard update with RS admission update
 
   // update scoreboard upon RS admission
-  when (io.rsEnq.fire) {
-    assert(rsEnqArbiter.io.chosen === 0.U,
+  // this must be done at the same cycle as scoreboard read, so that updated
+  // values are immediately visible at the next cycle and never lost.
+  //
+  // Note that io.rsAdmit.ready needs to be checked so that we trigger scoreboard
+  // update only when there's guaranteed space in the RS.
+  when (rsAdmitChosen.valid && io.rsAdmit.ready) {
+    assert(rsAdmitArbiter.io.chosen === 0.U,
            "TODO: arbiter chose something else than warp 0") // FIXME
 
-    val chosenUop = io.rsEnq.bits.uop
+    val chosenUop = rsAdmitChosen.bits.uop
     val hasRd    = chosenUop.inst(HasRd) .asBool
-    val hasRs1   = chosenUop.inst(HasRs1).asBool
-    val hasRs2   = chosenUop.inst(HasRs2).asBool
-    val hasRs3   = chosenUop.inst(HasRs3).asBool
+    val hasRss   = Seq(chosenUop.inst(HasRs1).asBool,
+                       chosenUop.inst(HasRs2).asBool,
+                       chosenUop.inst(HasRs3).asBool)
+    val rss      = Seq(chosenUop.inst.rs1, chosenUop.inst.rs2, chosenUop.inst.rs3)
 
-    io.scb.update.enable := hasRd
-    io.scb.update.pReg   := chosenUop.inst.rd
-    io.scb.update.readInc  := false.B // TODO: check rs1/2/3
-    io.scb.update.readDec  := false.B // TODO: check rs1/2/3
-    io.scb.update.writeInc := true.B
-    io.scb.update.writeDec := false.B
+    io.scb.update.enable := hasRd || hasRss.reduce(_ || _)
+    io.scb.update.write.pReg := chosenUop.inst.rd
+    io.scb.update.write.incr := hasRd
+    io.scb.update.write.decr := false.B
+    (io.scb.update.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
+      read.pReg := rs
+      read.incr := hasRs
+      read.decr := false.B
+    }
   }.otherwise {
+    // due diligence to value-gate
     io.scb.update.enable := false.B
-    io.scb.update.pReg   := 0.U
-    io.scb.update.readInc  := false.B
-    io.scb.update.readDec  := false.B
-    io.scb.update.writeInc := false.B
-    io.scb.update.writeDec := false.B
+    io.scb.update.write.pReg := 0.U
+    io.scb.update.write.incr := false.B
+    io.scb.update.write.decr := false.B
+    io.scb.update.reads.foreach { read =>
+      read.pReg := 0.U
+      read.incr := false.B
+      read.decr := false.B
+    }
   }
+
+  // gate RS entry if scoreboard update failed
+  io.rsAdmit.valid := rsAdmitChosen.valid && io.scb.update.success
+  rsAdmitChosen.ready := io.rsAdmit.ready && io.scb.update.success
+  io.rsAdmit.bits  := rsAdmitChosen.bits
+  // for good measure, assert scoreboard update has always succeeded upon RS
+  // admission fire
+  assert(!io.rsAdmit.fire || (!io.scb.update.enable || io.scb.update.success),
+         "uop entered RS without succeeding scoreboard update")
 }

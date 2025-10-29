@@ -5,6 +5,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 
+// TODO: consolidate with below types
+class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
+  val rd = aRegT
+  val data = Vec(muonParams.numLanes, regDataT)
+  val tmask = tmaskT
+}
+
 class WritebackReq(implicit val p: Parameters)
   extends Bundle with HasMuonCoreParameters {
   val wmask = UInt(numLaneBytes.W)

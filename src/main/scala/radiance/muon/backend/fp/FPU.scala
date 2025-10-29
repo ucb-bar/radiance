@@ -94,7 +94,7 @@ class CVFPU(
 
     val req = Flipped(Decoupled(new Bundle {
       val roundingMode = FPRoundingMode()
-      val op = FPUOp() // op mod is msb
+      val op = FPUOp() // op mod is lsb
       val srcFormat = FPFormat()
       val dstFormat = FPFormat()
       val intFormat = IntFormat()

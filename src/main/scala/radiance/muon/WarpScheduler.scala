@@ -6,6 +6,15 @@ import chisel3.util._
 import freechips.rocketchip.util.UIntIsOneOf
 import org.chipsalliance.cde.config.Parameters
 
+class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
+  val setPC = Valid(pcT)
+  val setTmask = Valid(tmaskT)
+  val ipdomPush = Valid(ipdomStackEntryT) // this should be split PC+8
+  val wspawn = Valid(wspawnT)
+  val pc = pcT
+  val wid = widT
+}
+
 class WarpScheduler(implicit p: Parameters)
   extends CoreModule
   with HasCoreBundles {
@@ -34,6 +43,9 @@ class WarpScheduler(implicit p: Parameters)
   val icacheInFlights = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(ibufIdxT)))
   val icacheInFlightsReg = RegNext(icacheInFlights, 0.U.asTypeOf(icacheInFlights.cloneType))
   val discardTillPC = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
+  // TODO: do we want to discard when wspawn happens? what happens if there are
+  // two consecutive wspawns from other warps?
+  // val spawning = WireInit(VecInit.fill(m.numWarps)(false.B))
 
   val stallTracker = new StallTracker(this)
   val ipdomStack = new IPDOMStack(this)
@@ -86,9 +98,13 @@ class WarpScheduler(implicit p: Parameters)
 
         wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
           when(en) {
-            threadMasks(wid) := fullThreadMask
+            when (!pcTracker(wid).valid) {
+              // only set thread mask if warp not already active
+              threadMasks(wid) := fullThreadMask
+            }
             pcTracker(wid).bits := wspawn.bits.pc
             pcTracker(wid).valid := true.B
+            // spawning(wid) := true.B
             stallTracker.unstall(wid.U)
           }
         }
@@ -118,6 +134,8 @@ class WarpScheduler(implicit p: Parameters)
         entry.bits := currPC + 8.U
       }
     }
+
+    assert(!entry.valid || threadMasks(wid).orR, s"pc tracker warp ${wid} valid but thread masks all 0")
   }
 
   // assign outputs to rename
@@ -151,7 +169,9 @@ class WarpScheduler(implicit p: Parameters)
       when (stalls) {
         // non join hazards stall
         stallTracker.stall(iresp.wid, iresp.pc)
+      }
 
+      when (stalls || joins) {
         when (!stallingPCIsLatestPC) { // no discards: dont replay
           // reset fetch PC to post-stall
           pcTracker(iresp.wid).bits := iresp.pc + 8.U // for branches: setPC overrides this
@@ -159,6 +179,7 @@ class WarpScheduler(implicit p: Parameters)
       }
       // joins still enables discard, but does not stall
       discardEntry.valid := (stalls || joins) && !stallingPCIsLatestPC
+      // discardEntry.valid := stalls && !stallingPCIsLatestPC
       // discardEntry.bits is being set to the latest issued pc when we fetch
 
       when (joins) {
@@ -204,11 +225,13 @@ class WarpScheduler(implicit p: Parameters)
 
       // update thread masks, pc, ipdom
       when (commit.setPC.valid) {
-        assert(canUnstall)
+        // TODO: disabled assertion because wspawn from another warp can unstall a currently stalled warp
+        // TODO: and when the unstalling commit comes back, there's nothing to unstall
+        // assert(canUnstall)
         pcTracker(wid).bits := commit.setPC.bits
       }
       when (commit.setTmask.valid) {
-        assert(canUnstall)
+        // assert(canUnstall)
         threadMasks(wid) := commit.setTmask.bits
         when (commit.setTmask.bits === 0.U) {
           // tmc 0 -> disable warp
@@ -216,19 +239,24 @@ class WarpScheduler(implicit p: Parameters)
         }
       }
       when (commit.ipdomPush.valid) {
+        // TODO: however this one cannot be disabled because it mutates state
         assert(canUnstall)
         ipdomStack.push(wid, commit.ipdomPush.bits)
       }
     }
+  }
 
+  Seq.tabulate(numWarps) { wid =>
     // join mask update
     val mask = ipdomStack.newMask(wid)
     when (mask.valid) {
-      assert(!commitBundle.valid || !commit.setTmask.valid,
+      assert((io.commit.bits.wid =/= wid.U) || !io.commit.valid || !io.commit.bits.setTmask.valid,
         "cannot set mask while there's a join")
+      assert(mask.bits.orR, "join mask should not be zero")
       threadMasks(wid) := mask.bits
     }
   }
+
   val allFinished = VecInit(pcTracker.map(!_.valid)).asUInt.andR
   when (allFinished) {
     printf("no more active warps\n")
@@ -319,7 +347,8 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val ipdomStackMem = Seq.fill(m.numWarps)(SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 0, 0, 1))
   val branchTaken = RegInit(VecInit.fill(m.numWarps)(VecInit.fill(m.numIPDOMEntries)(false.B)))
 
-  val ptr = RegInit(VecInit.fill(m.numWarps)(0.U(log2Ceil(m.numIPDOMEntries).W)))
+  val wptr = RegInit(VecInit.fill(m.numWarps)(0.U(log2Ceil(m.numIPDOMEntries + 1).W)))
+  val rptr = WireInit(VecInit(wptr.map(x => (x - 1.U)(log2Ceil(m.numIPDOMEntries) - 1, 0))))
   val pushing = WireInit(VecInit.fill(m.numWarps)(false.B))
   val joiningElse = RegInit(VecInit.fill(m.numWarps)(false.B))
   val joiningEnd = RegInit(VecInit.fill(m.numWarps)(false.B))
@@ -327,7 +356,10 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val ports = VecInit(ipdomStackMem.map(m => m.readwritePorts(0)))
 
   val newPC = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(outer.pcT))))
-  val newMask = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(outer.wmaskT))))
+  val newMask = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(outer.tmaskT))))
+
+  joiningElse.foreach(_ := false.B)
+  joiningEnd.foreach(_ := false.B)
 
   (joiningElse lazyZip joiningEnd lazyZip newPC lazyZip newMask).zipWithIndex
     .foreach { case ((j0, j1, pc, mask), wid) =>
@@ -338,41 +370,39 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
     }
 
 
-  (ports zip ptr).foreach { case (p, pa) =>
+  (ports lazyZip rptr lazyZip wptr).foreach { case (p, ra, wa) =>
     p.enable := false.B
-    p.address := pa
     p.isWrite := false.B
+    p.address := Mux(p.isWrite, wa, ra)
     p.writeData := DontCare
   }
 
   def push(wid: UInt, ent: Bundle): Unit = {
     ports(wid).enable := true.B
     ports(wid).isWrite := true.B
-    ports(wid).writeData := ent.asTypeOf(outer.ipdomStackEntryT)
-    branchTaken(wid)(ptr(wid)) := false.B
+    val entry = ent.asTypeOf(outer.ipdomStackEntryT)
+    ports(wid).writeData := entry
+    branchTaken(wid)(wptr(wid)) := (entry.elseMask === 0.U) // non-divergent branch
     pushing(wid) := true.B
-    assert(ptr(wid) < (m.numIPDOMEntries - 1).U, "ipdom stack is full")
-    ptr(wid) := ptr(wid) + 1.U
+    assert(wptr(wid) < m.numIPDOMEntries.U, "ipdom stack is full")
+    wptr(wid) := wptr(wid) + 1.U
   }
 
   def pop(wid: UInt) = {
     assert(!pushing(wid)) // there should never be a simultaneous push and pop
+    ports(wid).enable := true.B
+    ports(wid).isWrite := false.B
+    assert(wptr(wid) > 0.U, "ipdom stack is empty")
 
-    joiningElse.foreach(_ := false.B)
-    joiningEnd.foreach(_ := false.B)
-
-    when (!branchTaken(wid)(ptr(wid))) {
+    when (!branchTaken(wid)(rptr(wid))) {
       // done with then, start with else: set pc, update taken
 //      newMask := ports(wid).readData.elseMask
       // this is handled earlier
-      branchTaken(wid)(ptr(wid)) := true.B
+      branchTaken(wid)(rptr(wid)) := true.B
       joiningElse(wid) := true.B
     }.otherwise {
       // done with else, pop but don't set pc
-      ports(wid).enable := true.B
-      ports(wid).isWrite := false.B
-      assert(ptr(wid) > 0.U, "ipdom stack is empty")
-      ptr(wid) := ptr(wid) - 1.U
+      wptr(wid) := wptr(wid) - 1.U
       joiningEnd(wid) := true.B
     }
   }

@@ -341,6 +341,10 @@ module CyclotronBackendBlackBox #(
     output byte writeback_wspawn_valid,
     output int  writeback_wspawn_count,
     output int  writeback_wspawn_pc,
+    output byte writeback_ipdom_valid,
+    output int  writeback_ipdom_restored_mask,
+    output int  writeback_ipdom_else_mask,
+    output int  writeback_ipdom_else_pc,
     output byte finished
   );
 
@@ -376,6 +380,12 @@ module CyclotronBackendBlackBox #(
   byte __writeback_wspawn_valid    [0:ISSUE_PORTS-1];
   int  __writeback_wspawn_count    [0:ISSUE_PORTS-1];
   int  __writeback_wspawn_pc       [0:ISSUE_PORTS-1];
+
+  byte __writeback_ipdom_valid         [0:ISSUE_PORTS-1];
+  int  __writeback_ipdom_restored_mask [0:ISSUE_PORTS-1];
+  int  __writeback_ipdom_else_mask     [0:ISSUE_PORTS-1];
+  int  __writeback_ipdom_else_pc       [0:ISSUE_PORTS-1];
+
   byte __finished                  [0:ISSUE_PORTS-1];
 
   byte __imem_req_ready;
@@ -624,6 +634,10 @@ module CyclotronBackendBlackBox #(
         __writeback_wspawn_valid   [0],
         __writeback_wspawn_count   [0],
         __writeback_wspawn_pc      [0],
+        __writeback_ipdom_valid         [0],
+        __writeback_ipdom_restored_mask [0],
+        __writeback_ipdom_else_mask     [0],
+        __writeback_ipdom_else_pc       [0],
         __finished                 [0]
       );
 
@@ -671,6 +685,10 @@ module CyclotronBackendBlackBox #(
         __writeback_wspawn_count[i] <= '0;
         __writeback_wspawn_pc[i] <= '0;
         __writeback_wid[i] <= '0;
+        __writeback_ipdom_valid[i] <= '0;
+        __writeback_ipdom_restored_mask[i] <= '0;
+        __writeback_ipdom_else_mask[i] <= '0;
+        __writeback_ipdom_else_pc[i] <= '0;
         __finished[i] <= '0;
       end
 
@@ -701,7 +719,6 @@ module CyclotronBackendBlackBox #(
       finished <= 1'b0;
       rr_ptr_reg <= '0;
     end else begin
-      // default all commit outputs to zero, then populate from per-issue writebacks
       commit_valid                  <= __writeback_valid[0];
       commit_bits_setPC_valid       <= __writeback_set_pc_valid[0];
       commit_bits_setPC_bits        <= __writeback_set_pc[0];
@@ -712,6 +729,10 @@ module CyclotronBackendBlackBox #(
       commit_bits_wspawn_bits_pc    <= __writeback_wspawn_pc[0];
       commit_bits_pc                <= __writeback_pc[0];
       commit_bits_wid               <= __writeback_wid[0];
+      commit_bits_ipdomPush_valid             <= __writeback_ipdom_valid[0];
+      commit_bits_ipdomPush_bits_restoredMask <= __writeback_ipdom_restored_mask[0];
+      commit_bits_ipdomPush_bits_elseMask     <= __writeback_ipdom_else_mask[0];
+      commit_bits_ipdomPush_bits_elsePC       <= __writeback_ipdom_else_pc[0];
 
       // commit_0_valid <= __writeback_valid[0];
       // commit_0_bits_setPC_valid <= __writeback_set_pc_valid[0];
