@@ -174,10 +174,9 @@ class FP16Pipe(implicit p: Parameters)
 
   io.req.ready := (!busy || io.resp.fire) && decomposer.io.in.ready && ioIsFP32
   decomposer.io.in.valid := io.req.valid && ioIsFP32
-  decomposer.io.in.bits.data(0) := VecInit(io.req.bits.rs1Data.get.map(reg => reg(15,0)))
-  decomposer.io.in.bits.data(1) := VecInit(io.req.bits.rs2Data.get.map(reg => reg(15,0)))
-  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.rs3Data.getOrElse(Seq.fill(numLanes)(0.U(archLen.W)))
-                                          .map(reg => reg(15,0)))
+  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
+  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
   decomposer.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
   decomposer.io.out.ready := cvFPUIF.req.ready
   val cvFPUReq = WireInit(req)
