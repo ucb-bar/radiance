@@ -1,13 +1,16 @@
 package radiance
 
 import chisel3._
+import chisel3.util._
 import chiseltest._
 import freechips.rocketchip.prci.ClockSinkParameters
 import freechips.rocketchip.tile.{TileKey, TileParams}
 import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import radiance.muon._
+import radiance.muon.backend._
 import radiance.muon.backend.fp._
+import scala.util.Random
 
 class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
@@ -39,6 +42,83 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       case TileKey => DummyTileParams(muonParams)
       case MuonKey => muonParams
     }
+  }
+
+  private class MockCVFPU(numFp16Lanes: Int, tagWidth: Int) extends Module {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Reset())
+      val req = Flipped(Decoupled(new CVFPUReq(numFp16Lanes, tagWidth)))
+      val resp = Decoupled(new CVFPUResp(numFp16Lanes, tagWidth))
+      val flush = Input(Bool())
+      val busy = Output(Bool())
+      val test = new Bundle {
+        val forceReqReady = Input(Bool())
+        val forceRespValid = Input(Bool())
+        val respBits = Input(new CVFPUResp(numFp16Lanes, tagWidth))
+        val observedReqValid = Output(Bool())
+        val observedReqBits = Output(new CVFPUReq(numFp16Lanes, tagWidth))
+        val observedRespReady = Output(Bool())
+      }
+    })
+
+    io.req.ready := io.test.forceReqReady
+    io.busy := false.B
+    io.resp.valid := io.test.forceRespValid
+    io.resp.bits := io.test.respBits
+    io.test.observedReqValid := io.req.valid
+    io.test.observedReqBits := io.req.bits
+    io.test.observedRespReady := io.resp.ready
+  }
+
+  private class TestFPPipe(implicit p: Parameters)
+      extends ExPipe(writebackSched = false, writebackReg = true, requiresRs3 = true)
+      with HasFPPipeParams {
+    val FP16Pipe = Module(new FP16Pipe)
+    val FP32Pipe = Module(new FP32Pipe)
+    val CVFPU = Module(new MockCVFPU(numFP32Lanes * 2, Isa.regBits))
+
+    val cvfpuTest = IO(new Bundle {
+      val forceReqReady = Input(Bool())
+      val forceRespValid = Input(Bool())
+      val respBits = Input(new CVFPUResp(numFP32Lanes * 2, Isa.regBits))
+      val observedReqValid = Output(Bool())
+      val observedReqBits = Output(new CVFPUReq(numFP32Lanes * 2, Isa.regBits))
+      val observedRespReady = Output(Bool())
+    })
+
+    CVFPU.io.clock := clock
+    CVFPU.io.reset := reset
+    CVFPU.io.flush := false.B
+
+    CVFPU.io.test.forceReqReady := cvfpuTest.forceReqReady
+    CVFPU.io.test.forceRespValid := cvfpuTest.forceRespValid
+    CVFPU.io.test.respBits := cvfpuTest.respBits
+    cvfpuTest.observedReqValid := CVFPU.io.test.observedReqValid
+    cvfpuTest.observedReqBits := CVFPU.io.test.observedReqBits
+    cvfpuTest.observedRespReady := CVFPU.io.test.observedRespReady
+
+    FP16Pipe.io.req.valid := io.req.valid
+    FP16Pipe.io.req.bits := io.req.bits
+    FP32Pipe.io.req.valid := io.req.valid
+    FP32Pipe.io.req.bits := io.req.bits
+    io.req.ready := FP32Pipe.io.req.ready || FP16Pipe.io.req.ready
+
+    val rr = Module(new RRArbiter(new CVFPUReq(numFP32Lanes * 2, Isa.regBits), 2))
+    rr.io.in(0) <> FP32Pipe.cvFPUIF.req
+    rr.io.in(1) <> FP16Pipe.cvFPUIF.req
+    CVFPU.io.req <> rr.io.out
+
+    FP32Pipe.cvFPUIF.resp.bits := CVFPU.io.resp.bits
+    FP16Pipe.cvFPUIF.resp.bits := CVFPU.io.resp.bits
+    FP32Pipe.cvFPUIF.resp.valid := CVFPU.io.resp.valid
+    FP16Pipe.cvFPUIF.resp.valid := CVFPU.io.resp.valid
+    CVFPU.io.resp.ready := FP32Pipe.cvFPUIF.resp.ready || FP16Pipe.cvFPUIF.resp.ready
+
+    FP32Pipe.io.resp.ready := io.resp.ready
+    FP16Pipe.io.resp.ready := io.resp.ready && !FP32Pipe.io.resp.valid
+    io.resp.valid := FP32Pipe.io.resp.valid || FP16Pipe.io.resp.valid
+    io.resp.bits := Mux(FP32Pipe.io.resp.valid, FP32Pipe.io.resp.bits, FP16Pipe.io.resp.bits)
   }
 
   private val essentialFieldIndex = Decoder.essentialFields.zipWithIndex.toMap
@@ -326,6 +406,186 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     for (_ <- 0 until postResponseGap) {
       c.clock.step()
     }
+  }
+
+  private def issueAndCheckFPPipe(
+      c: TestFPPipe,
+      spec: FPRequestSpec,
+      env: TestEnv,
+      postResponseGap: Int,
+      reqReadyDelay: Int,
+      applyRespBackpressure: Boolean
+  ): Unit = {
+    val archLen = env.archLen
+    val isFp16 = spec.expectedDstFmt == FPFormat.FP16
+    val laneWidth = if (isFp16) 16 else archLen
+    val laneMaskPerValue = (BigInt(1) << laneWidth) - 1
+    val laneCount = if (isFp16) env.numLanes else env.numFP32Lanes
+
+    def maskValues(values: Seq[BigInt]) = values.take(laneCount).map(_ & laneMaskPerValue)
+
+    val packedRs1 = packLanes(maskValues(spec.rs1Lanes), laneWidth)
+    val packedRs2 = packLanes(maskValues(spec.rs2Lanes), laneWidth)
+    val packedRs3 = packLanes(maskValues(spec.rs3Lanes), laneWidth)
+    val packedResult =
+      if (isFp16) {
+        packLanes(spec.expectedResultLanes.take(env.numLanes).map(_ & 0xffff), 16)
+      } else {
+        packLanes(spec.expectedResultLanes.take(env.numFP32Lanes).map(_ & laneMaskPerValue), archLen)
+      }
+    val expectedMask: BigInt =
+      if (isFp16) {
+        val width = env.numFP32Lanes * 2
+        val mask = (BigInt(1) << width) - 1
+        spec.tmask & mask
+      } else {
+        expandedMask(spec.tmask, env.numFP32Lanes)
+      }
+
+    zeroDecoded(c.io.req.bits.uop.inst)
+    pokeDecoded(c.io.req.bits.uop.inst, Opcode, spec.opcode.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F3, spec.f3.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F7, spec.f7.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, Rd, spec.rd)
+    pokeDecoded(c.io.req.bits.uop.inst, Rs1, spec.rs1Idx)
+    pokeDecoded(c.io.req.bits.uop.inst, Rs2, spec.rs2Field)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRd, if (spec.rd != 0) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs1, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs2, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs3, spec.rs3Idx.fold(0)(_ => 1))
+    pokeDecoded(c.io.req.bits.uop.inst, UseFPPipe, 1)
+    spec.rs3Idx.foreach(rs3 => pokeDecoded(c.io.req.bits.uop.inst, Rs3, rs3))
+
+    c.io.req.bits.uop.tmask.poke(spec.tmask.U(c.io.req.bits.uop.tmask.getWidth.W))
+    c.io.req.bits.uop.pc.poke(0.U(archLen.W))
+    c.io.req.bits.uop.wid.poke(0.U)
+
+    pokeLaneVec(c.io.req.bits.rs1Data.get, spec.rs1Lanes, archLen)
+    pokeLaneVec(c.io.req.bits.rs2Data.get, spec.rs2Lanes, archLen)
+    c.io.req.bits.rs3Data.foreach(rs3 => pokeLaneVec(rs3, spec.rs3Lanes, archLen))
+
+    var reqReadyCounter = reqReadyDelay
+    if (reqReadyCounter == 0) {
+      c.cvfpuTest.forceReqReady.poke(true.B)
+    } else {
+      c.cvfpuTest.forceReqReady.poke(false.B)
+    }
+    c.cvfpuTest.forceRespValid.poke(false.B)
+    c.cvfpuTest.respBits.status.poke(0.U)
+
+    c.io.req.valid.poke(true.B)
+    var reqWaitCycles = 0
+    while (!c.io.req.ready.peek().litToBoolean) {
+      c.clock.step()
+      reqWaitCycles += 1
+      if (reqReadyCounter > 0) {
+        reqReadyCounter -= 1
+        if (reqReadyCounter == 0) {
+          c.cvfpuTest.forceReqReady.poke(true.B)
+        }
+      }
+      require(reqWaitCycles <= 10, s"${spec.name}: request was not accepted in time")
+    }
+
+    var cvReqSeen = false
+    var cvReqCycles = 0
+    def checkCvReq(): Unit = {
+      if (!cvReqSeen && c.cvfpuTest.observedReqValid.peek().litToBoolean) {
+        val dstFmt = c.cvfpuTest.observedReqBits.dstFormat.peek().litValue
+        if (dstFmt == spec.expectedDstFmt.litValue) {
+          val observed = c.cvfpuTest.observedReqBits
+          observed.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
+          observed.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
+          observed.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
+          observed.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
+          observed.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
+          observed.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
+          observed.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
+          observed.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
+          observed.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+          cvReqSeen = true
+        }
+      }
+    }
+
+    checkCvReq()
+
+    def stepAndCheck(): Unit = {
+      c.clock.step()
+      cvReqCycles += 1
+      c.io.req.valid.poke(false.B)
+      checkCvReq()
+      if (!cvReqSeen) {
+        require(cvReqCycles <= 12, s"${spec.name}: CVFPU request did not fire")
+      }
+    }
+
+    stepAndCheck()
+    while (!cvReqSeen) {
+      stepAndCheck()
+    }
+
+    for (_ <- 0 until spec.responseLatency) {
+      c.clock.step()
+    }
+
+    c.cvfpuTest.respBits.result.poke(packedResult.U)
+    c.cvfpuTest.respBits.status.poke(0.U)
+    c.cvfpuTest.respBits.tag.poke(spec.rd.U)
+    c.cvfpuTest.forceRespValid.poke(true.B)
+    var respDriveCycles = 0
+    var respAccepted = false
+    while (!respAccepted) {
+      respAccepted = c.cvfpuTest.observedRespReady.peek().litToBoolean
+      c.clock.step()
+      respDriveCycles += 1
+      require(respDriveCycles <= 12, s"${spec.name}: CVFPU response not accepted")
+    }
+    // provide one extra cycle with valid asserted to mimic CVFPU behavior
+    c.clock.step()
+    c.cvfpuTest.forceRespValid.poke(false.B)
+
+    var respSeen = false
+    var respCycles = 0
+    var holdRespReadyLow = applyRespBackpressure
+    while (!respSeen) {
+      val respValid = c.io.resp.valid.peek().litToBoolean
+      if (respValid && holdRespReadyLow) {
+        c.io.resp.ready.poke(false.B)
+        holdRespReadyLow = false
+      } else {
+        c.io.resp.ready.poke(true.B)
+        if (respValid) {
+          c.io.resp.bits.reg.get.valid.expect(true.B, s"${spec.name}: expected register write")
+          c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
+          c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
+          val checkLanes = if (isFp16) env.numLanes else env.numFP32Lanes
+          val maskWidth = if (isFp16) 16 else archLen
+          val laneMask = (BigInt(1) << maskWidth) - 1
+          spec.expectedResultLanes.take(checkLanes).zipWithIndex.foreach { case (value, idx) =>
+            val observed = c.io.resp.bits.reg.get.bits.data(idx).peekInt()
+            val observedMasked = observed & laneMask
+            val expectedMasked = value & laneMask
+            require(
+              observedMasked == expectedMasked,
+              f"${spec.name}: lane $idx data mismatch (got 0x${observedMasked.toString(16)}, expected 0x${expectedMasked.toString(16)})"
+            )
+          }
+          respSeen = true
+        }
+      }
+      if (!respSeen) {
+        c.clock.step()
+        respCycles += 1
+        require(respCycles <= 30, s"${spec.name}: pipeline response not observed")
+      }
+    }
+
+    c.io.resp.ready.poke(true.B)
+    for (_ <- 0 until postResponseGap) {
+      c.clock.step()
+    }
+    c.cvfpuTest.forceReqReady.poke(true.B)
   }
 
   behavior of "FP32Pipe"
@@ -708,6 +968,274 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
       specs.foreach { spec =>
         issueAndCheckFp16(c, spec, env, postResponseGap = 2)
+      }
+    }
+  }
+
+  behavior of "FPPipe"
+
+  it should "handle mixed FP requests back-to-back" in {
+    implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
+    test(new TestFPPipe) { c =>
+      val muon = p(MuonKey)
+      val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
+
+      c.io.resp.ready.poke(true.B)
+      c.cvfpuTest.forceReqReady.poke(true.B)
+      c.cvfpuTest.forceRespValid.poke(false.B)
+      c.cvfpuTest.respBits.result.poke(0.U)
+      c.cvfpuTest.respBits.status.poke(0.U)
+      c.cvfpuTest.respBits.tag.poke(0.U)
+
+      val fp32Specs = Seq(
+        FPRequestSpec(
+          name = "mixed_fadd.s",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000000".U,
+          rs1Idx = 1,
+          rs2Field = 2,
+          rs3Idx = None,
+          rd = 8,
+          rs1Lanes = Seq(0x3f800000L, 0x40800000L, 0x40a00000L, 0x40c00000L),
+          rs2Lanes = Seq(0x3f800000L, 0x3f800000L, 0x3f000000L, 0x3f000000L),
+          rs3Lanes = Seq.fill(4)(0L),
+          tmask = 0xF,
+          expectedOp = FPUOp.ADD,
+          expectedSrcFmt = FPFormat.FP32,
+          expectedDstFmt = FPFormat.FP32,
+          expectedResultLanes = Seq(0x40000000L, 0x40a00000L, 0x40c00000L, 0x40e00000L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "mixed_fmadd.s",
+          opcode = MuOpcode.MADD.U,
+          f3 = "b000".U,
+          f7 = "b0000000".U,
+          rs1Idx = 5,
+          rs2Field = 6,
+          rs3Idx = Some(7),
+          rd = 10,
+          rs1Lanes = Seq(0x3f800000L, 0x40000000L, 0x40400000L, 0x40800000L),
+          rs2Lanes = Seq(0x3f800000L, 0x40400000L, 0x3f800000L, 0x40400000L),
+          rs3Lanes = Seq(0x3f800000L, 0x3f000000L, 0x3f800000L, 0x3f000000L),
+          tmask = 0xF,
+          expectedOp = FPUOp.FMADD,
+          expectedSrcFmt = FPFormat.FP32,
+          expectedDstFmt = FPFormat.FP32,
+          expectedResultLanes = Seq(0x40000000L, 0x40b00000L, 0x40c00000L, 0x40f00000L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "mixed_fcvt.s.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0100000".U,
+          rs1Idx = 11,
+          rs2Field = 0x2,
+          rs3Idx = None,
+          rd = 12,
+          rs1Lanes = Seq(0x00004000L, 0x0000c000L, 0x00014000L, 0x0001c000L),
+          rs2Lanes = Seq.fill(4)(0L),
+          rs3Lanes = Seq.fill(4)(0L),
+          tmask = 0xF,
+          expectedOp = FPUOp.F2F,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP32,
+          expectedResultLanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
+          responseLatency = 2
+        )
+      )
+
+      val fp16Specs = Seq(
+        FPRequestSpec(
+          name = "mixed_fadd.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000010".U,
+          rs1Idx = 1,
+          rs2Field = 2,
+          rs3Idx = None,
+          rd = 9,
+          rs1Lanes = Seq(0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L),
+          rs2Lanes = Seq(0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L, 0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.ADD,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "mixed_fmul.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0001010".U,
+          rs1Idx = 7,
+          rs2Field = 8,
+          rs3Idx = None,
+          rd = 13,
+          rs1Lanes = Seq(0x00003c00L, 0x00003c00L, 0x00004000L, 0x00004000L, 0x00004200L, 0x00004200L, 0x00004400L, 0x00004400L),
+          rs2Lanes = Seq(0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.MUL,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "mixed_fsgnj.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0010010".U,
+          rs1Idx = 9,
+          rs2Field = 10,
+          rs3Idx = None,
+          rd = 14,
+          rs1Lanes = Seq(0x00007c00L, 0x0000fc00L, 0x00017c00L, 0x0001fc00L, 0x00027c00L, 0x0002fc00L, 0x00037c00L, 0x0003fc00L),
+          rs2Lanes = Seq(0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.SGNJ,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00013c00L, 0x0001bc00L, 0x00023c00L, 0x0002bc00L, 0x00033c00L, 0x0003bc00L),
+          responseLatency = 2
+        )
+      )
+
+      val baseSpecs = fp32Specs ++ fp16Specs
+      val random = new Random(0)
+      val mixes = (0 until 3).map(_ => random.shuffle(baseSpecs.toList))
+      mixes.foreach { seq =>
+        seq.foreach { spec =>
+          issueAndCheckFPPipe(
+            c,
+            spec,
+            env,
+            postResponseGap = 0,
+            reqReadyDelay = 0,
+            applyRespBackpressure = false
+          )
+        }
+      }
+    }
+  }
+
+  it should "handle mixed FP requests with backpressure" in {
+    implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
+    test(new TestFPPipe) { c =>
+      val muon = p(MuonKey)
+      val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
+
+      c.io.resp.ready.poke(true.B)
+      c.cvfpuTest.forceReqReady.poke(true.B)
+      c.cvfpuTest.forceRespValid.poke(false.B)
+      c.cvfpuTest.respBits.result.poke(0.U)
+      c.cvfpuTest.respBits.status.poke(0.U)
+      c.cvfpuTest.respBits.tag.poke(0.U)
+
+      val fp32Specs = Seq(
+        FPRequestSpec(
+          name = "bp_fsub.s",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000100".U,
+          rs1Idx = 3,
+          rs2Field = 4,
+          rs3Idx = None,
+          rd = 16,
+          rs1Lanes = Seq(0x41000000L, 0x40f00000L, 0x40e00000L, 0x40d00000L),
+          rs2Lanes = Seq(0x3f800000L, 0x3f000000L, 0x3f000000L, 0x3f000000L),
+          rs3Lanes = Seq.fill(4)(0L),
+          tmask = 0xF,
+          expectedOp = FPUOp.SUB,
+          expectedSrcFmt = FPFormat.FP32,
+          expectedDstFmt = FPFormat.FP32,
+          expectedResultLanes = Seq(0x40800000L, 0x40a00000L, 0x40c00000L, 0x40e00000L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "bp_fmin.s",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0010100".U,
+          rs1Idx = 5,
+          rs2Field = 6,
+          rs3Idx = None,
+          rd = 17,
+          rs1Lanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
+          rs2Lanes = Seq(0x3f800000L, 0x3f000000L, 0x40800000L, 0x40400000L),
+          rs3Lanes = Seq.fill(4)(0L),
+          tmask = 0xF,
+          expectedOp = FPUOp.MINMAX,
+          expectedSrcFmt = FPFormat.FP32,
+          expectedDstFmt = FPFormat.FP32,
+          expectedResultLanes = Seq(0x3f000000L, 0x3f000000L, 0x40400000L, 0x40400000L),
+          responseLatency = 2
+        )
+      )
+
+      val fp16Specs = Seq(
+        FPRequestSpec(
+          name = "bp_fsub.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000110".U,
+          rs1Idx = 3,
+          rs2Field = 4,
+          rs3Idx = None,
+          rd = 18,
+          rs1Lanes = Seq(0x00004500L, 0x00004400L, 0x00004300L, 0x00004200L, 0x00004100L, 0x00004000L, 0x00003f00L, 0x00003e00L),
+          rs2Lanes = Seq(0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L, 0x00003000L, 0x00002c00L, 0x00002800L, 0x00002400L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.SUB,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "bp_fmin.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0010110".U,
+          rs1Idx = 5,
+          rs2Field = 6,
+          rs3Idx = None,
+          rd = 19,
+          rs1Lanes = Seq(0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L, 0x00005400L, 0x00005800L),
+          rs2Lanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.MINMAX,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
+          responseLatency = 2
+        )
+      )
+
+      val baseSpecs = fp32Specs ++ fp16Specs
+      val random = new Random(42)
+      val mixes = (0 until 3).map(_ => random.shuffle(baseSpecs.toList))
+      mixes.zipWithIndex.foreach { case (seq, mixIdx) =>
+        seq.zipWithIndex.foreach { case (spec, idx) =>
+          val reqDelay = (idx + mixIdx) % 3
+          val applyBackpressure = ((idx + mixIdx) % 2 == 0)
+          issueAndCheckFPPipe(
+            c,
+            spec,
+            env,
+            postResponseGap = 2,
+            reqReadyDelay = reqDelay,
+            applyRespBackpressure = applyBackpressure
+          )
+        }
       }
     }
   }
