@@ -5,6 +5,45 @@
 #include <stdint.h>
 
 extern "C" {
+void cyclotron_trace_rs(
+    uint8_t*  warp_id,
+    uint8_t*  tmask_vec,
+
+    uint32_t* rs1_data,
+    uint32_t* rs2_data,
+    uint32_t* imm_data,
+
+    uint8_t*  rd_addr,
+    uint32_t* rd_data,
+
+    uint8_t*  finished_ptr
+);
+
+void cyclotron_trace(
+    uint8_t*  warp_id,
+    uint8_t*  tmask_vec,
+
+    uint32_t* rs1_data,
+    uint32_t* rs2_data,
+    uint32_t* imm_data,
+
+    uint8_t*  rd_addr,
+    uint32_t* rd_data,
+
+    uint8_t*  finished_ptr
+) {
+    cyclotron_trace_rs(
+        warp_id,
+        tmask_vec,
+        rs1_data,
+        rs2_data,
+        imm_data,
+        rd_addr,
+        rd_data,
+        finished_ptr
+    );
+}
+
 
 void cyclotron_init_rs(int num_lanes);
 void cyclotron_init(int num_lanes) { cyclotron_init_rs(num_lanes); }
@@ -256,16 +295,17 @@ void cyclotron_mem_rs(
     uint8_t req_valid,
 
     uint8_t req_store,
-    uint32_t req_address,
     uint32_t req_tag,
+    const uint32_t *req_address,
     const uint32_t *req_data,
-    const uint32_t *req_mask,
+    const uint8_t  *req_mask,
 
     uint8_t resp_ready,
     uint8_t *resp_valid,
 
     uint32_t *resp_tag,
-    uint32_t *resp_data
+    uint32_t *resp_data,
+    uint8_t  *resp_valids
 );
 
 // Note: VCS uses contiguous bits in memory to represent packed bit arrays, 
@@ -277,30 +317,32 @@ void cyclotron_mem(
     uint8_t req_valid,
 
     uint8_t req_store,
-    uint32_t req_address,
     uint32_t req_tag,
+    const uint32_t *req_address,
     const uint32_t *req_data,
-    const uint32_t *req_mask,
+    const uint8_t  *req_mask,
 
     uint8_t resp_ready,
     uint8_t *resp_valid,
 
     uint32_t *resp_tag,
-    uint32_t *resp_data
+    uint32_t *resp_data,
+    uint8_t  *resp_valids
 ) {
     cyclotron_mem_rs(
         mem_model_ptr,
         req_ready,
         req_valid,
         req_store,
-        req_address,
         req_tag,
+        req_address,
         req_data,
         req_mask,
         resp_ready,
         resp_valid,
         resp_tag,
-        resp_data
+        resp_data,
+        resp_valids
     );
 };
 

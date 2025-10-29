@@ -1,4 +1,4 @@
-module CyclotronBlackBox #(
+module CyclotronMemBlackBox #(
   parameter ARCH_LEN = 32,
   parameter NUM_WARPS = 8,
   parameter NUM_LANES = 16,
@@ -17,16 +17,17 @@ module CyclotronBlackBox #(
   input  logic req_valid,
 
   input  logic req_store,
-  input  logic [ARCH_LEN-1:0] req_address,
+  input  logic [DATA_WIDTH-1:0] req_address,
   input  logic [TAG_BITS-1:0] req_tag,
   input  logic [DATA_WIDTH-1:0] req_data,
-  input  logic [MASK_WIDTH-1:0] req_mask,
+  input  logic [LSU_LANES-1:0] req_mask,
 
   input  logic resp_ready,
   output logic resp_valid,
 
   output logic [TAG_BITS-1:0] resp_tag,
-  output logic [DATA_WIDTH-1:0] resp_data
+  output logic [DATA_WIDTH-1:0] resp_data,
+  output logic [LSU_LANES-1:0] resp_valids
 );
   localparam DATA_WIDTH = LSU_LANES * ARCH_LEN;
   localparam MASK_WIDTH = DATA_WIDTH / 8;
@@ -41,7 +42,7 @@ module CyclotronBlackBox #(
   end
 
   import "DPI-C" function chandle cyclotron_mem_init(
-    input longint num_lanes,
+    input longint num_lanes
   );
 
   import "DPI-C" function void cyclotron_mem_free(
@@ -55,43 +56,45 @@ module CyclotronBlackBox #(
     input  byte                  req_valid,
 
     input  byte                  req_store,
-    input  int                   req_address,
     input  int                   req_tag,
+    input  bit  [DATA_WIDTH-1:0] req_address,
     input  bit  [DATA_WIDTH-1:0] req_data,
-    input  bit  [MASK_WIDTH-1:0] req_mask,
+    input  bit  [LSU_LANES-1:0]  req_mask,
 
     input  byte                  resp_ready,
     output byte                  resp_valid,
 
     output int                   resp_tag,
-    output bit  [DATA_WIDTH-1:0] resp_data
+    output bit  [DATA_WIDTH-1:0] resp_data,
+    output bit  [LSU_LANES-1:0]  resp_valids
   );
 
   chandle               mem_model_ptr;
   byte                  __req_ready;
   byte                  __req_valid;
   byte                  __req_store;
-  int                   __req_address;
+  bit  [DATA_WIDTH-1:0] __req_address;
   int                   __req_tag;
   bit  [DATA_WIDTH-1:0] __req_data;
-  bit  [MASK_WIDTH-1:0] __req_mask;
+  bit  [LSU_LANES-1:0]  __req_mask;
   byte                  __resp_ready;
   byte                  __resp_valid;
   int                   __resp_tag;
   bit  [DATA_WIDTH-1:0] __resp_data;
+  bit  [LSU_LANES-1:0]  __resp_valids;
 
   initial begin
-    mem_model_ptr = cyclotron_mem_init();
+    mem_model_ptr = cyclotron_mem_init(LSU_LANES);
   end
 
 
   always @(negedge clock) begin
     __req_valid = req_valid;
-    __req_store = req_store;
+    __req_store   = req_store;
     __req_address = req_address;
-    __req_tag = req_tag;
-    __req_data = req_data;
-    __req_mask = req_mask;
+    __req_tag     = req_tag;
+    __req_data    = req_data;
+    __req_mask    = req_mask;
     __resp_ready = resp_ready;
 
     cyclotron_mem(
@@ -101,8 +104,8 @@ module CyclotronBlackBox #(
       __req_valid,
 
       __req_store,
-      __req_address,
       __req_tag,
+      __req_address,
       __req_data,
       __req_mask,
 
@@ -110,13 +113,15 @@ module CyclotronBlackBox #(
       __resp_valid,
 
       __resp_tag,
-      __resp_data
+      __resp_data,
+      __resp_valids
     );
 
     req_ready <= __req_ready;
     resp_valid <= __resp_valid;
     resp_tag <= __resp_tag;
     resp_data <= __resp_data;
+    resp_valids <= __resp_valids;
   end
 
 endmodule
