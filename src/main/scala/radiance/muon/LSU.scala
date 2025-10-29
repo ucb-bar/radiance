@@ -48,7 +48,11 @@ class LoadStoreUnitDerivedParams(
     val numPackets = muonParams.numLanes / muonParams.lsu.numLsuLanes
     val packetBits = log2Up(numPackets)
 
-    val loadDataPhysicalIdxBits = muonParams.lsu.loadDataIdxBits + packetBits
+    val loadDataPhysicalIdxBits = if (numPackets == 1) {
+        muonParams.lsu.loadDataIdxBits
+    } else {
+        muonParams.lsu.loadDataIdxBits + packetBits
+    } 
 
     // "request tag"
     val sourceIdBits = LsuQueueToken.width(muonParams) + packetBits
