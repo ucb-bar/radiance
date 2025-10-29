@@ -386,7 +386,13 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             // loads can only issue once all older stores have retired, but consecutive loads can be reordered
             val readyLoads = Wire(Vec(entries, Bool()))
             for (i <- 0 until entries) {
-                val olderStoresRetired = msb(io.otherHead - otherQueueTail(i)) 
+                // we don't need to worry about otherHead advancing past otherQueueTail
+                // 2 cases:
+                // - entry pointed to by otherHead was reserved prior to this entry, but in this
+                // case otherQueueTail would be larger
+                // - entry pointed to by otherHead was reserved after this entry, in which case
+                // we block it from issuing
+                val olderStoresRetired = io.otherHead === otherQueueTail(i)
                 readyLoads(i) := valid(i) && operandsReady(i) && olderStoresRetired && !issued(i)
             }
 
@@ -409,8 +415,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         else {
             // Stores always issued in order, and must issue after older loads retired to avoid
             // WAR hazards through memory
-            val olderLoadsRetired = msb(io.otherHead - otherQueueTail(idxBits(logicalHead)))
-
+            val olderLoadsRetired = io.otherHead === otherQueueTail(idxBits(logicalHead))
+            
             val readyStore = {
                 valid(idxBits(logicalHead)) &&
                 operandsReady(idxBits(logicalHead)) &&
@@ -891,7 +897,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 queueReservation.req.bits.storeDataIdx := DontCare
             }
         }.otherwise {
-            coreReservation.req.ready := true.B
+            // Not selected by arbitration or queue not ready: do not accept the reservation
+            coreReservation.req.ready := false.B
 
             queueReservation.req.valid := false.B
             queueReservation.req.bits.addressIdx := DontCare
@@ -1051,11 +1058,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     io.shmemReq.bits := reqGen.io.memRequest.bits
     
     when (reqGen.io.addressSpace === AddressSpace.globalMemory) {
-        io.globalMemReq.valid := true.B
+        io.globalMemReq.valid := reqGen.io.memRequest.valid
         io.shmemReq.valid := false.B
         reqGen.io.memRequest.ready := io.globalMemReq.ready
     }.otherwise {
-        io.globalMemReq.valid := false.B
+        io.globalMemReq.valid := reqGen.io.memRequest.valid
         io.shmemReq.valid := true.B
         reqGen.io.memRequest.ready := io.shmemReq.ready
     }
@@ -1074,7 +1081,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     // -- Receive memory responses --
     {
         // arbitration: responses from global > responses from shared
-        val respValids = Cat(io.shmemResp.valid, io.globalMemReq.valid)
+        val respValids = Cat(io.shmemResp.valid, io.globalMemResp.valid)
         val readys = PriorityEncoderOH(respValids)
         io.globalMemResp.ready := readys(0)
         io.shmemResp.ready := readys(1)

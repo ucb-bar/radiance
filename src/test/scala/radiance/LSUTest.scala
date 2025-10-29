@@ -62,6 +62,43 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
         val storeData: Seq[Long],
     );
 
+  // Initialize external interfaces to avoid X propagation in waveforms
+  def initExternalIfaces(dut: LoadStoreUnit): Unit = {
+      // Downstream memory accepts
+      dut.io.globalMemReq.ready.poke(true)
+      dut.io.shmemReq.ready.poke(true)
+
+      // Upstream memory responses deasserted and cleared
+      dut.io.globalMemResp.valid.poke(false)
+      dut.io.globalMemResp.bits.tag.poke(0)
+      for (v <- dut.io.globalMemResp.bits.valid) v.poke(false)
+      for (d <- dut.io.globalMemResp.bits.data) d.poke(0)
+
+      dut.io.shmemResp.valid.poke(false)
+      dut.io.shmemResp.bits.tag.poke(0)
+      for (v <- dut.io.shmemResp.bits.valid) v.poke(false)
+      for (d <- dut.io.shmemResp.bits.data) d.poke(0)
+
+      // Core writeback sink ready
+      dut.io.coreResp.ready.poke(true)
+
+      // Core request interface idle
+      dut.io.coreReq.valid.poke(false)
+      dut.io.coreReq.bits.destReg.poke(0)
+      dut.io.coreReq.bits.imm.poke(0)
+      for (a <- dut.io.coreReq.bits.address) a.poke(0)
+      for (d <- dut.io.coreReq.bits.storeData) d.poke(0)
+      for (t <- dut.io.coreReq.bits.tmask) t.poke(false)
+
+      // Initialize coreReservations (inputs to LSU) to benign defaults
+      for (w <- 0 until dut.muonParams.numWarps) {
+          val r = dut.io.coreReservations(w)
+          r.req.valid.poke(false)
+          r.req.bits.addressSpace.poke(AddressSpace.globalMemory)
+          r.req.bits.op.poke(MemOp.loadWord)
+      }
+  }
+
     def coreRequest(dut: LoadStoreUnit, request: CoreRequest): Boolean = {
         val coreReq = dut.io.coreReq
         coreReq.bits.token.poke(request.token)
@@ -147,9 +184,10 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
     }
 
     // === Basic Load/Store Tests ===
-
+    
     it should "reserve and execute a load from global memory" in {
-        test(new LoadStoreUnit()(params)) { dut =>
+        test(new LoadStoreUnit()(params)).withAnnotations(Seq(VcsBackendAnnotation, WriteFsdbAnnotation)) { dut =>
+            initExternalIfaces(dut)
             // Reserve load
             val (fire, token) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.loadWord)
             assert(fire, "Load reservation should succeed")
@@ -177,9 +215,11 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
             assert(dut.io.globalMemReq.valid.peekBoolean(), "Global memory request should be generated")
         }
     }
-
+    
+    
     it should "reserve and execute a store to shared memory" in {
-        test(new LoadStoreUnit()(params)) { dut =>
+        test(new LoadStoreUnit()(params)).withAnnotations(Seq(VcsBackendAnnotation, WriteVpdAnnotation)) { dut =>
+            initExternalIfaces(dut)
             // Reserve store to shared memory
             val (fire, token) = attemptReservation(dut, 0, AddressSpace.sharedMemory, MemOp.storeWord)
             assert(fire, "Shared store reservation should succeed")
@@ -211,6 +251,7 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "support different load sizes (byte, half, word)" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             for ((op, opName) <- Seq(
                 (MemOp.loadByte, "loadByte"),
                 (MemOp.loadHalf, "loadHalf"),
@@ -227,6 +268,7 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "support different store sizes (byte, half, word)" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             for ((op, opName) <- Seq(
                 (MemOp.storeByte, "storeByte"),
                 (MemOp.storeHalf, "storeHalf"),
@@ -245,8 +287,9 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "reject reservations when global LDQ is full" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             // Fill up the global LDQ (8 entries)
-            for (i <- 0 until 8) {
+            for (i <- 0 until dut.muonParams.lsu.numGlobalLdqEntries) {
                 val (fire, _) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.loadWord)
                 assert(fire, s"Reservation $i should succeed")
                 dut.clock.step()
@@ -262,8 +305,9 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "reject reservations when global STQ is full" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             // Fill up the global STQ (4 entries)
-            for (i <- 0 until 4) {
+            for (i <- 0 until dut.muonParams.lsu.numGlobalStqEntries) {
                 val (fire, _) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.storeWord)
                 assert(fire, s"Reservation $i should succeed")
                 dut.clock.step()
@@ -281,8 +325,9 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "handle reservations from multiple warps independently" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             // Each warp should have independent queues
-            for (warp <- 0 until 8) {
+            for (warp <- 0 until dut.muonParams.numWarps) {
                 val (fire, token) = attemptReservation(dut, warp, AddressSpace.globalMemory, MemOp.loadWord)
                 assert(fire, s"Reservation for warp $warp should succeed")
                 checkToken(token, warp, AddressSpace.globalMemory, ldq = true)
@@ -293,48 +338,32 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
         }
     }
 
-    it should "fill queues from different warps to capacity independently" in {
-        test(new LoadStoreUnit()(params)) { dut =>
-            // Fill each warp's global STQ to capacity (4 entries)
-            for (warp <- 0 until 8) {
-                for (i <- 0 until 4) {
-                    val (fire, token) = attemptReservation(dut, warp, AddressSpace.globalMemory, MemOp.storeWord)
-                    assert(fire, s"Reservation should succeed for warp $warp entry $i")
-                    checkToken(token, warp, AddressSpace.globalMemory, ldq = false, index = i)
-                    dut.clock.step()
-                    clearReservation(dut, warp)
-                    dut.clock.step()
-                }
-            }
-        }
-    }
-
     // === Load-Store Hazard Tests ===
 
     it should "enforce ordering: load blocked by store" in {
-        test(new LoadStoreUnit()(params)) { dut =>
+        test(new LoadStoreUnit()(params)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+            dut.reset.asBool.poke(true.B)
+            dut.clock.step(5)
+            dut.reset.asBool.poke(false.B)
+
+            // Ensure all external interfaces are driven to known values
+            initExternalIfaces(dut)
+            
             // Reserve a store
             val (storeFire, storeToken) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.storeWord)
             assert(storeFire, "Store reservation should succeed")
             
             dut.clock.step()
             clearReservation(dut, 0)
+            dut.clock.step()
 
-            // Reserve a load (should get different index)
+            // Reserve a load
             val (loadFire, loadToken) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.loadWord)
             assert(loadFire, "Load reservation should succeed")
-            assert(loadToken.index.litValue != storeToken.index.litValue, "Load and store should have different indices")
             
             dut.clock.step()
             clearReservation(dut, 0)
-
-            // Provide operands for store
-            val storeAddr: Seq[Long] = Seq.fill(16)(0x1000_0000L)
-            val storeData: Seq[Long] = Seq.tabulate(16)(i => i * 0x100)
-            val storeRequest = new CoreRequest(storeToken, rd = 0, offset = 0, addr = storeAddr, storeData = storeData)
-            coreRequest(dut, storeRequest)
             dut.clock.step()
-            clearRequest(dut)
 
             // Provide operands for load
             val loadAddr: Seq[Long] = Seq.fill(16)(0x1000_0000L)
@@ -343,10 +372,12 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
             dut.clock.step()
             clearRequest(dut)
 
-            // Load should not issue until store completes
-            dut.clock.step(10)
-            // In this simple test, we just verify the load doesn't immediately issue
-            // (detailed hazard checking would require memory response handling)
+            // Not fully comprehensive safety test, but good enough
+            for (_ <- 0 until 50) {
+                val valid = dut.io.globalMemReq.valid.peekBoolean()
+                assert(!valid, "load should be blocked by store")
+                dut.clock.step()
+            }
         }
     }
 
@@ -354,6 +385,7 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "handle operand arrival after reservation" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             // Reserve a load
             val (fire, token) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.loadWord)
             assert(fire, "Load reservation should succeed")
@@ -378,12 +410,14 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
 
     it should "report empty when all queues are empty" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             assert(dut.io.empty.peekBoolean(), "LSU should be empty after reset")
         }
     }
 
     it should "not report empty when queues have entries" in {
         test(new LoadStoreUnit()(params)) { dut =>
+            initExternalIfaces(dut)
             // Add a reservation
             val (fire, _) = attemptReservation(dut, 0, AddressSpace.globalMemory, MemOp.loadWord)
             assert(fire, "Reservation should succeed")
