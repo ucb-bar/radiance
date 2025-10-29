@@ -15,6 +15,8 @@ abstract class ExPipe(
     val resp = Decoupled(writebackT(writebackSched, writebackReg))
   })
 
+  val busy = RegInit(false.B)
+
   val uop = io.req.bits.uop
   val inst = uop.inst.expand()
   val latchedUop = RegEnable(io.req.bits.uop, 0.U.asTypeOf(uopT), io.req.fire)
@@ -26,4 +28,11 @@ abstract class ExPipe(
   def reqRd = reqInst(Rd)
 
   val respValid = RegInit(false.B)
+
+  // req fire has precedence
+  when (io.req.fire) {
+    busy := true.B
+  }.elsewhen (io.resp.fire) {
+    busy := false.B
+  }
 }

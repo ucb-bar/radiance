@@ -34,7 +34,6 @@ class MulDivPipe(implicit p: Parameters)
 
   val mulOut = Reg(Vec(numLanes, UInt(archLen.W)))
   val sliceTMask = Reg(UInt(numMulDivLanes.W))
-  val busy = RegInit(false.B)
   val vecMulDivRespValid = vecMulDiv.map(_.io.resp.valid).asUInt
   val unmaskedMulDivsDone = (vecMulDivRespValid & sliceTMask) === sliceTMask
   val allMulDivReqReady = vecMulDiv.map(_.io.req.ready).reduce(_ && _)
@@ -69,7 +68,6 @@ class MulDivPipe(implicit p: Parameters)
   io.resp.bits.reg.get.bits.tmask := reqTmask
 
   when (io.resp.fire) {
-    busy := false.B
     respValid := false.B
   }
 
@@ -81,9 +79,5 @@ class MulDivPipe(implicit p: Parameters)
   when (recomposer.io.out.fire) {
     mulOut := recomposer.io.out.bits.data(0)
     respValid := true.B
-  }
-
-  when (io.req.fire) {
-    busy := true.B
   }
 }

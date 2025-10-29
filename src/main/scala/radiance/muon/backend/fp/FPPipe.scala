@@ -77,11 +77,9 @@ class FPPipe(fmt: FPFormat.Type)
 
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = Reg(new FpOpBundle)
-  val busy = RegInit(false.B)
 
   when (io.req.fire && ioFpOp.dstFmt === fmt) {
     req := ioFpOp
-    busy := true.B
   }
 }
 
@@ -145,7 +143,6 @@ class FP32Pipe(implicit p: Parameters)
   }
 
   when (io.resp.fire) {
-    busy := false.B
     respValid := false.B
   }
 
@@ -218,7 +215,6 @@ class FP16Pipe(implicit p: Parameters)
   }
 
   when (io.resp.fire) {
-    busy := false.B
     respValid := false.B
   }
 

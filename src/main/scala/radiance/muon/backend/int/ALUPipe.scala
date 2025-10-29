@@ -35,7 +35,6 @@ class ALUPipe(implicit p: Parameters)
 
   val aluOut = Reg(Vec(numLanes, UInt(archLen.W)))
   val cmpOut = Reg(Vec(numLanes, Bool()))
-  val busy = RegInit(false.B)
 
   io.req.ready := !busy || io.resp.fire
   decomposer.io.in.valid := io.req.valid
@@ -86,7 +85,6 @@ class ALUPipe(implicit p: Parameters)
   schedResp.bits.setTmask.bits := branchTakenMask
 
   when (io.resp.fire) {
-    busy := false.B
     respValid := false.B
   }
 
@@ -94,9 +92,5 @@ class ALUPipe(implicit p: Parameters)
     aluOut := recomposer.io.out.bits.data(0)
     cmpOut := recomposer.io.out.bits.data(1)
     respValid := true.B
-  }
-
-  when (io.req.fire) {
-    busy := true.B
   }
 }

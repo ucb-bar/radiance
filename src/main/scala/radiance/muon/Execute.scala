@@ -14,16 +14,18 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   })
 
   val aluPipe = Module(new ALUPipe())
-  val fp32Pipe = Module(new FP32Pipe())
-  val fp16Pipe = Module(new FP16Pipe())
+  // val fp32Pipe = Module(new FP32Pipe())
+  // val fp16Pipe = Module(new FP16Pipe())
+  val fp32Pipe = Module(new ALUPipe()) // TODO: these don't work
+  val fp16Pipe = Module(new ALUPipe())
   val mulDivPipe = Module(new MulDivPipe())
   val lsuPipe = Module(new ALUPipe()) // TODO: should be lsu pipe
-  val sfuPipe = Module(new SFU()) // TODO: doesn't work yet
+  val sfuPipe = Module(new SFUPipe()) // TODO: doesn't work yet
 
   val inst = io.req.bits.uop.inst
 
-  // val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, aluPipe)
-  val pipes = Seq(aluPipe, aluPipe, aluPipe, aluPipe, aluPipe, aluPipe)
+  val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, sfuPipe)
+  // val pipes = Seq(aluPipe, aluPipe, aluPipe, aluPipe, aluPipe, aluPipe)
   val uses = Seq(UseALUPipe, UseFP32Pipe, UseFP16Pipe, UseMulDivPipe, UseLSUPipe, UseSFUPipe)
 
   (pipes zip uses).foreach { case (pipe, use) =>
@@ -42,4 +44,5 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     arbIn.valid := pipe.io.resp.valid
     pipe.io.resp.ready := arbIn.ready
   }
+  io.resp :<>= respArbiter.io.out
 }

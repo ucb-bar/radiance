@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
 
-class SFU(implicit p: Parameters) extends ExPipe with HasCoreBundles {
+class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBundles {
   // TODO: piping, csr
 
   val firstLidOH = PriorityEncoderOH(uop.tmask)
@@ -14,7 +14,7 @@ class SFU(implicit p: Parameters) extends ExPipe with HasCoreBundles {
   val firstRs2 = Mux1H(firstLidOH, io.req.bits.rs2Data.get)
   val rs1Mask = VecInit(io.req.bits.rs1Data.get.map(_(0))).asUInt
 
-  val writeback = Wire(schedWritebackT)
+  val writeback = io.resp.bits.sched.get
 
   writeback.bits.setTmask.bits := DontCare
   writeback.bits.setTmask.valid := inst.b(IsTMC) || inst.b(IsSplit) || inst.b(IsPred) || inst.b(IsToHost)
@@ -77,6 +77,11 @@ class SFU(implicit p: Parameters) extends ExPipe with HasCoreBundles {
         printf("test failed with tohost=%d", firstRs1)
       }
       writeback.bits.setTmask.bits := 0.U
+    }.elsewhen (inst.b(IsCSR)) {
+      assert(false.B, "i dont have csrs yet")
     }
   }
+
+  io.req.ready := !busy || io.resp.fire
+  io.resp.valid := busy
 }
