@@ -7,10 +7,11 @@ import radiance.muon._
 
 abstract class ExPipe(
   writebackSched: Boolean = true,
-  writebackReg: Boolean = true)
+  writebackReg: Boolean = true,
+  requiresRs3: Boolean = false)
 (implicit p: Parameters) extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true)))
+    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = requiresRs3)))
     val resp = Decoupled(writebackT(writebackSched, writebackReg))
   })
 
