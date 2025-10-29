@@ -214,6 +214,120 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  private def issueAndCheckFp16(
+      c: FP16Pipe,
+      spec: FPRequestSpec,
+      env: TestEnv,
+      postResponseGap: Int
+  ): Unit = {
+    val archLen = env.archLen
+    val numLanes = env.numLanes
+    val laneWidthFp = 16
+    val laneMask = (BigInt(1) << numLanes) - 1
+    val packedRs1 = packLanes(spec.rs1Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val packedRs2 = packLanes(spec.rs2Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val packedRs3 = packLanes(spec.rs3Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val packedResult = packLanes(spec.expectedResultLanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val expectedMask = spec.tmask & laneMask.toInt
+
+    zeroDecoded(c.io.req.bits.uop.inst)
+    pokeDecoded(c.io.req.bits.uop.inst, Opcode, spec.opcode.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F3, spec.f3.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, F7, spec.f7.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, Rd, spec.rd)
+    pokeDecoded(c.io.req.bits.uop.inst, Rs1, spec.rs1Idx)
+    pokeDecoded(c.io.req.bits.uop.inst, Rs2, spec.rs2Field)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRd, if (spec.rd != 0) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs1, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs2, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRs3, spec.rs3Idx.fold(0)(_ => 1))
+    pokeDecoded(c.io.req.bits.uop.inst, UseFPPipe, 1)
+    spec.rs3Idx.foreach(rs3 => pokeDecoded(c.io.req.bits.uop.inst, Rs3, rs3))
+
+    c.io.req.bits.uop.tmask.poke(spec.tmask.U(c.io.req.bits.uop.tmask.getWidth.W))
+    c.io.req.bits.uop.pc.poke(0.U(archLen.W))
+    c.io.req.bits.uop.wid.poke(0.U)
+
+    pokeLaneVec(c.io.req.bits.rs1Data.get, spec.rs1Lanes, archLen)
+    pokeLaneVec(c.io.req.bits.rs2Data.get, spec.rs2Lanes, archLen)
+    c.io.req.bits.rs3Data.foreach(rs3 => pokeLaneVec(rs3, spec.rs3Lanes, archLen))
+
+    c.io.req.valid.poke(true.B)
+    var reqWaitCycles = 0
+    while (!c.io.req.ready.peek().litToBoolean) {
+      c.clock.step()
+      reqWaitCycles += 1
+      require(reqWaitCycles <= 10, s"${spec.name}: request was not accepted in time")
+    }
+    var cvReqSeen = false
+    var cvReqCycles = 0
+    def checkCvReq(): Unit = {
+      c.cvFPUIF.resp.valid.poke(false.B)
+      if (!cvReqSeen && c.cvFPUIF.req.valid.peek().litToBoolean) {
+        c.cvFPUIF.req.bits.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
+        c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
+        c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
+        c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
+        c.cvFPUIF.req.bits.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
+        c.cvFPUIF.req.bits.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
+        c.cvFPUIF.req.bits.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
+        c.cvFPUIF.req.bits.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
+        c.cvFPUIF.req.bits.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+        cvReqSeen = true
+      }
+    }
+
+    checkCvReq()
+
+    def stepAndCheck(): Unit = {
+      c.clock.step()
+      cvReqCycles += 1
+      c.io.req.valid.poke(false.B)
+      checkCvReq()
+      if (!cvReqSeen) {
+        require(cvReqCycles <= 10, s"${spec.name}: CVFPU request did not fire")
+      }
+    }
+
+    stepAndCheck()
+    while (!cvReqSeen) {
+      stepAndCheck()
+    }
+
+    for (_ <- 0 until spec.responseLatency) {
+      c.cvFPUIF.resp.valid.poke(false.B)
+      c.clock.step()
+    }
+
+    c.cvFPUIF.resp.bits.result.poke(packedResult.U)
+    c.cvFPUIF.resp.bits.status.poke(0.U)
+    c.cvFPUIF.resp.bits.tag.poke(spec.rd.U)
+    c.cvFPUIF.resp.valid.poke(true.B)
+    c.clock.step()
+    c.cvFPUIF.resp.valid.poke(false.B)
+
+    var respCycles = 0
+    var respSeen = false
+    while (!respSeen) {
+      if (c.io.resp.valid.peek().litToBoolean) {
+        c.io.resp.bits.reg.get.valid.expect(true.B, s"${spec.name}: expected register write")
+        c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
+        c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
+        spec.expectedResultLanes.take(numLanes).zipWithIndex.foreach { case (value, idx) =>
+          c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(archLen.W), s"${spec.name}: lane $idx data mismatch")
+        }
+        respSeen = true
+      }
+      c.clock.step()
+      respCycles += 1
+      require(respCycles <= 20, s"${spec.name}: pipeline response not observed")
+    }
+
+    for (_ <- 0 until postResponseGap) {
+      c.clock.step()
+    }
+  }
+
   behavior of "FP32Pipe"
 
   it should "handle back-to-back FP32 requests" in {
@@ -459,6 +573,141 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
       specs.foreach { spec =>
         issueAndCheck(c, spec, env, postResponseGap = 1)
+      }
+    }
+  }
+
+  behavior of "FP16Pipe"
+
+  it should "handle back-to-back FP16 requests" in {
+    implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
+    test(new FP16Pipe) { c =>
+      val muon = p(MuonKey)
+      val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
+
+      c.io.resp.ready.poke(true.B)
+      c.cvFPUIF.req.ready.poke(true.B)
+      c.cvFPUIF.resp.valid.poke(false.B)
+
+      val specs = Seq(
+        FPRequestSpec(
+          name = "fadd.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000010".U,
+          rs1Idx = 1,
+          rs2Field = 2,
+          rs3Idx = None,
+          rd = 8,
+          rs1Lanes = Seq(0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L),
+          rs2Lanes = Seq(0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L, 0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.ADD,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "fsub.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0000110".U,
+          rs1Idx = 3,
+          rs2Field = 4,
+          rs3Idx = None,
+          rd = 9,
+          rs1Lanes = Seq(0x00004500L, 0x00004400L, 0x00004300L, 0x00004200L, 0x00004100L, 0x00004000L, 0x00003f00L, 0x00003e00L),
+          rs2Lanes = Seq(0x00004000L, 0x00003c00L, 0x00003800L, 0x00003400L, 0x00003000L, 0x00002c00L, 0x00002800L, 0x00002400L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.SUB,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "fmin.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0010110".U,
+          rs1Idx = 5,
+          rs2Field = 6,
+          rs3Idx = None,
+          rd = 10,
+          rs1Lanes = Seq(0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L, 0x00005400L, 0x00005800L),
+          rs2Lanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.MINMAX,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
+          responseLatency = 2
+        )
+      )
+
+      specs.foreach { spec =>
+        issueAndCheckFp16(c, spec, env, postResponseGap = 0)
+      }
+    }
+  }
+
+  it should "handle FP16 requests with response gaps" in {
+    implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
+    test(new FP16Pipe) { c =>
+      val muon = p(MuonKey)
+      val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
+
+      c.io.resp.ready.poke(true.B)
+      c.cvFPUIF.req.ready.poke(true.B)
+      c.cvFPUIF.resp.valid.poke(false.B)
+
+      val specs = Seq(
+        FPRequestSpec(
+          name = "fmul.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0001010".U,
+          rs1Idx = 7,
+          rs2Field = 8,
+          rs3Idx = None,
+          rd = 11,
+          rs1Lanes = Seq(0x00003c00L, 0x00003c00L, 0x00004000L, 0x00004000L, 0x00004200L, 0x00004200L, 0x00004400L, 0x00004400L),
+          rs2Lanes = Seq(0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L, 0x00003c00L, 0x00004000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.MUL,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
+          responseLatency = 2
+        ),
+        FPRequestSpec(
+          name = "fsgnj.h",
+          opcode = MuOpcode.OP_FP.U,
+          f3 = "b000".U,
+          f7 = "b0010010".U,
+          rs1Idx = 9,
+          rs2Field = 10,
+          rs3Idx = None,
+          rd = 12,
+          rs1Lanes = Seq(0x00003c00L, 0x00003c00L, 0x00003c00L, 0x00003c00L, 0x00003c00L, 0x00003c00L, 0x00003c00L, 0x00003c00L),
+          rs2Lanes = Seq(0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L, 0x00000000L, 0x00008000L),
+          rs3Lanes = Seq.fill(8)(0L),
+          tmask = 0xFF,
+          expectedOp = FPUOp.SGNJ,
+          expectedSrcFmt = FPFormat.FP16,
+          expectedDstFmt = FPFormat.FP16,
+          expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L),
+          responseLatency = 2
+        )
+      )
+
+      specs.foreach { spec =>
+        issueAndCheckFp16(c, spec, env, postResponseGap = 2)
       }
     }
   }
