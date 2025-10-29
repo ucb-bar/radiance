@@ -57,9 +57,9 @@ object IntOpDecoder {
   }
 }
 
-case class IntPipeParams (val numALULanes: Int = 8,
-                          val numMulDivLanes: Int = 8,
-                          val mulDivParams: MulDivParams = MulDivParams())
+case class IntPipeParams(numALULanes: Int = 8,
+                         numMulDivLanes: Int = 8,
+                         mulDivParams: MulDivParams = MulDivParams())
 
 trait HasIntPipeParams extends HasMuonCoreParameters {
   def numALULanes = muonParams.intPipe.numALULanes

@@ -15,7 +15,8 @@ abstract class ExPipe(
     val resp = Decoupled(writebackT(writebackSched, writebackReg))
   })
 
-  val inst = io.req.bits.uop.inst
+  val uop = io.req.bits.uop
+  val inst = uop.inst.expand()
   val latchedUop = RegEnable(io.req.bits.uop, 0.U.asTypeOf(uopT), io.req.fire)
 
   def reqInst = latchedUop.inst.expand()

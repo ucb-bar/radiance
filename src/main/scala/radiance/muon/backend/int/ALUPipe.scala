@@ -39,8 +39,18 @@ class ALUPipe(implicit p: Parameters)
 
   io.req.ready := !busy || io.resp.fire
   decomposer.io.in.valid := io.req.valid
-  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
-  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.io.in.bits.data(0) := MuxCase(
+    io.req.bits.rs1Data.get,
+    Seq(
+      inst.b(Rs1IsPC) -> VecInit.fill(numLanes)(uop.pc),
+      inst.b(Rs1IsZero) -> VecInit.fill(numLanes)(0.U(archLen.W)),
+    )
+  )
+  decomposer.io.in.bits.data(1) := Mux(
+    inst.b(Rs2IsImm),
+    VecInit.fill(numLanes)(inst(Imm32)),
+    io.req.bits.rs2Data.get
+  )
   decomposer.io.out.ready := true.B
 
   for (i <- 0 until numALULanes) {

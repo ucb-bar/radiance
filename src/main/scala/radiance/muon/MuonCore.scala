@@ -75,8 +75,8 @@ case class MuonCoreParams(
   numRegBanks: Int = 4,           // collector
   numOpCollectorEntries: Int = 2, // collector
   // execute
-  intPipe: IntPipeParams = IntPipeParams(),
-  fpPipe: FPPipeParams = FPPipeParams(),
+  intPipe: IntPipeParams = IntPipeParams(16, 16),
+  fpPipe: FPPipeParams = FPPipeParams(8, 1),
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
@@ -228,9 +228,9 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   def fuInT(hasRs1: Boolean = false, hasRs2: Boolean = false, hasRs3: Boolean = false) = new Bundle {
     val uop = uopT
-    val rs1Data = Option.when(hasRs1)(Vec(m.numWarps, regDataT))
-    val rs2Data = Option.when(hasRs2)(Vec(m.numWarps, regDataT))
-    val rs3Data = Option.when(hasRs3)(Vec(m.numWarps, regDataT))
+    val rs1Data = Option.when(hasRs1)(Vec(m.numLanes, regDataT))
+    val rs2Data = Option.when(hasRs2)(Vec(m.numLanes, regDataT))
+    val rs3Data = Option.when(hasRs3)(Vec(m.numLanes, regDataT))
   }
 
   def schedWritebackT = Valid(new SchedWriteback)

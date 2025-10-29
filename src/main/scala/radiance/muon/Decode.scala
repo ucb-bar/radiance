@@ -324,7 +324,7 @@ object Decoder {
       case Rs1IsPC =>
         Some(Seq(
           MuOpcode.AUIPC,
-          MuOpcode.BRANCH,
+          // MuOpcode.BRANCH,
           MuOpcode.JAL,
           MuOpcode.JALR,
         ).contains(op))
@@ -338,7 +338,7 @@ object Decoder {
           MuOpcode.OP_IMM,
           MuOpcode.AUIPC,
           MuOpcode.LUI,
-          MuOpcode.BRANCH,
+          // MuOpcode.BRANCH,
         ).contains(op))
       case IsBranch =>  Some(op == MuOpcode.BRANCH)
       case IsJump =>    Some(op == MuOpcode.JAL || op == MuOpcode.JALR)

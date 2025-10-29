@@ -7,13 +7,14 @@ import radiance.muon._
 import radiance.muon.backend._
 
 class SFU(implicit p: Parameters) extends ExPipe with HasCoreBundles {
-  val uop = io.req.bits.uop
+  // TODO: piping, csr
+
   val firstLidOH = PriorityEncoderOH(uop.tmask)
   val firstRs1 = Mux1H(firstLidOH, io.req.bits.rs1Data.get)
   val firstRs2 = Mux1H(firstLidOH, io.req.bits.rs2Data.get)
   val rs1Mask = VecInit(io.req.bits.rs1Data.get.map(_(0))).asUInt
 
-  val writeback = schedWritebackT
+  val writeback = Wire(schedWritebackT)
 
   writeback.bits.setTmask.bits := DontCare
   writeback.bits.setTmask.valid := inst.b(IsTMC) || inst.b(IsSplit) || inst.b(IsPred) || inst.b(IsToHost)
