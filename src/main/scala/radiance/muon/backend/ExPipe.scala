@@ -7,17 +7,22 @@ import radiance.muon._
 
 abstract class ExPipe(
   writebackSched: Boolean = true,
-  writebackReg: Boolean = true)
+  writebackReg: Boolean = true,
+  requiresRs3: Boolean = false)
 (implicit p: Parameters) extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true)))
+    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = requiresRs3)))
     val resp = Decoupled(writebackT(writebackSched, writebackReg))
   })
 
   val inst = io.req.bits.uop.inst
-  val req_pc = Reg(UInt(archLen.W))
-  val req_tmask = Reg(UInt(numLanes.W))
-  val req_rd = Reg(UInt(Isa.regBits.W))
-  val req_wid = RegInit(0.U(log2Ceil(muonParams.numWarps).W))
-  val resp_valid = RegInit(false.B)
+  val latchedUop = RegEnable(io.req.bits.uop, 0.U.asTypeOf(uopT), io.req.fire)
+
+  def reqInst = latchedUop.inst.expand()
+  def reqPC = latchedUop.pc
+  def reqTmask = latchedUop.tmask
+  def reqWid = latchedUop.wid
+  def reqRd = reqInst(Rd)
+
+  val respValid = RegInit(false.B)
 }

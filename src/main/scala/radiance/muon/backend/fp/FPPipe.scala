@@ -12,12 +12,14 @@ case class FPPipeParams (val numFP32Lanes: Int = 8,
 
 trait HasFPPipeParams extends HasMuonCoreParameters {
   def numFP32Lanes = muonParams.fpPipe.numFP32Lanes
+  def numFP16Lanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFPDivLanes = muonParams.fpPipe.numFPDivLanes
 }
 
 class FpOpBundle extends Bundle {
   val op = FPUOp()
-  val fmt = FPFormat()
+  val srcFmt = FPFormat()
+  val dstFmt = FPFormat()
   val roundingMode = FPRoundingMode()
 }
 
@@ -48,28 +50,119 @@ object FpOpDecoder {
     val f5 = f7(6,2)
     val fmt = f7(1,0)
     val result = Wire(new FpOpBundle)
-    result.op := decoder(Cat(opcode(6,0), f3, f5, rs2(4,0)), TruthTable(table, BitPat(FPUOp.ADD.litValue.U(fpOpW))))
-    result.fmt := Cat(0.U(1.W), fmt)
-    result.roundingMode := f3
+    val decodedOp = decoder(Cat(opcode(6,0), f3, f5, rs2(4,0)), TruthTable(table, BitPat(FPUOp.ADD.litValue.U(fpOpW))))
+    result.op := FPUOp.safe(decodedOp)._1
+    val fmtBits = Cat(0.U(1.W), fmt)
+    val srcFmtBits = Mux(result.op === FPUOp.F2F, rs2(2,0), fmtBits)
+    result.srcFmt := FPFormat.safe(srcFmtBits)._1
+    result.dstFmt := FPFormat.safe(fmtBits)._1
+    result.roundingMode := FPRoundingMode.safe(f3)._1
     result
   }
 }
 
-class FPPipe(implicit p: Parameters)
-  extends ExPipe(writebackSched = false, writebackReg = true)
+class FPPipe(fmt: FPFormat.Type)
+  (implicit p: Parameters)
+  extends ExPipe(writebackSched = false, writebackReg = true, requiresRs3 = true)
     with HasFPPipeParams {
   implicit val decomposerTypes =
     Seq(UInt(archLen.W), UInt(archLen.W), UInt(archLen.W), Bool())
+  implicit val recomposerTypes =
+    Seq(UInt(archLen.W))
+
+  val cvFPUIF = IO(new Bundle {
+    val req = Decoupled(new CVFPUReq(numFP32Lanes * 2, Isa.regBits))
+    val resp = Flipped(Decoupled(new CVFPUResp(numFP32Lanes * 2, Isa.regBits)))
+  })
+
+  val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
+  val req = Reg(new FpOpBundle)
+  val busy = RegInit(false.B)
+
+  when (io.req.fire && ioFpOp.dstFmt === fmt) {
+    req := ioFpOp
+    busy := true.B
+  }
+}
+
+class FP32Pipe(implicit p: Parameters)
+  extends FPPipe(FPFormat.FP32) {
   val decomposer = Module(new LaneDecomposer(
     inLanes = numLanes,
     outLanes = numFP32Lanes,
     elemTypes = decomposerTypes
   ))
 
-  val cvFPU = Module(new CVFPU(numFp16Lanes = numFP32Lanes * 2, tagWidth = Isa.regBits))
+  val recomposer = Module(new LaneRecomposer(
+    inLanes = numLanes,
+    outLanes = numFP32Lanes,
+    elemTypes = recomposerTypes,
+  ))
 
-  implicit val recomposerTypes =
-    Seq(UInt(archLen.W))
+  // assume same fpconv across all lanes
+  val fpu_out = Reg(UInt((numFP32Lanes * archLen).W))
+
+  val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP32
+  val expandedLaneMask = Cat(decomposer.io.out.bits.data(3).reverse.map(b => Fill(2, b.asUInt)))
+
+  io.req.ready := (!busy || io.resp.fire) && decomposer.io.in.ready && ioIsFP32
+  decomposer.io.in.valid := io.req.valid && ioIsFP32
+  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
+  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
+  decomposer.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
+  decomposer.io.out.ready := cvFPUIF.req.ready
+  val cvFPUReq = WireInit(req)
+
+  cvFPUReq := Mux(io.req.fire, ioFpOp, req)
+
+  cvFPUIF.req.valid := decomposer.io.out.valid
+  cvFPUIF.req.bits.roundingMode := cvFPUReq.roundingMode
+  cvFPUIF.req.bits.op := cvFPUReq.op
+  cvFPUIF.req.bits.srcFormat := cvFPUReq.srcFmt
+  cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
+  cvFPUIF.req.bits.intFormat := IntFormat.INT32
+  cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
+  cvFPUIF.req.bits.operands(0) := decomposer.io.out.bits.data(0).asUInt
+  cvFPUIF.req.bits.operands(1) := decomposer.io.out.bits.data(1).asUInt
+  cvFPUIF.req.bits.operands(2) := decomposer.io.out.bits.data(2).asUInt
+  cvFPUIF.req.bits.simdMask := expandedLaneMask
+  cvFPUIF.resp.ready := recomposer.io.in.ready
+
+  val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
+  recomposer.io.in.valid := cvFPUIF.resp.valid && respIsFp32
+  recomposer.io.in.bits.data(0) := cvFPUIF.resp.bits.result.asTypeOf(recomposer.io.in.bits.data(0))
+  recomposer.io.out.ready := busy
+
+  io.resp.valid := respValid
+  io.resp.bits.reg.get.valid := respValid
+  io.resp.bits.reg.get.bits.rd := reqRd
+  io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
+  io.resp.bits.reg.get.bits.tmask := reqTmask
+
+  when (io.req.fire) {
+    cvFPUReq := ioFpOp
+  }
+
+  when (io.resp.fire) {
+    busy := false.B
+    respValid := false.B
+  }
+
+  when (recomposer.io.out.fire) {
+    fpu_out := recomposer.io.out.bits.data(0).asUInt
+    respValid := true.B
+  }
+}
+
+class FP16Pipe(implicit p: Parameters)
+  extends FPPipe(FPFormat.FP16) {
+  val decomposer = Module(new LaneDecomposer(
+    inLanes = numLanes,
+    outLanes = numFP32Lanes * 2,
+    elemTypes = decomposerTypes
+  ))
+
   val recomposer = Module(new LaneRecomposer(
     inLanes = numLanes,
     outLanes = numFP32Lanes * 2,
@@ -77,5 +170,60 @@ class FPPipe(implicit p: Parameters)
   ))
 
   // assume same fpconv across all lanes
-  val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), io.req.bits.rs2Data.get(0))
+  val fpu_out = Reg(UInt((numFP32Lanes * archLen).W))
+
+  val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP16
+  val expandedLaneMask = decomposer.io.out.bits.data(3)
+
+  io.req.ready := (!busy || io.resp.fire) && decomposer.io.in.ready && ioIsFP32
+  decomposer.io.in.valid := io.req.valid && ioIsFP32
+  decomposer.io.in.bits.data(0) := VecInit(io.req.bits.rs1Data.get.map(reg => reg(15,0)))
+  decomposer.io.in.bits.data(1) := VecInit(io.req.bits.rs2Data.get.map(reg => reg(15,0)))
+  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.rs3Data.getOrElse(Seq.fill(numLanes)(0.U(archLen.W)))
+                                          .map(reg => reg(15,0)))
+  decomposer.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
+  decomposer.io.out.ready := cvFPUIF.req.ready
+  val cvFPUReq = WireInit(req)
+
+  cvFPUReq := Mux(io.req.fire, ioFpOp, req)
+
+  cvFPUIF.req.valid := decomposer.io.out.valid
+  cvFPUIF.req.bits.roundingMode := cvFPUReq.roundingMode
+  cvFPUIF.req.bits.op := cvFPUReq.op
+  cvFPUIF.req.bits.srcFormat := cvFPUReq.srcFmt
+  cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
+  cvFPUIF.req.bits.intFormat := IntFormat.INT32
+  cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
+  cvFPUIF.req.bits.operands(0) := decomposer.io.out.bits.data(0).asUInt
+  cvFPUIF.req.bits.operands(1) := decomposer.io.out.bits.data(1).asUInt
+  cvFPUIF.req.bits.operands(2) := decomposer.io.out.bits.data(2).asUInt
+  cvFPUIF.req.bits.simdMask := expandedLaneMask
+  cvFPUIF.resp.ready := recomposer.io.in.ready
+
+  val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
+  recomposer.io.in.valid := cvFPUIF.resp.valid && respIsFp32
+  val chunks = VecInit.tabulate(numFP32Lanes * 2)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
+  val zeroExtcvFPURes = Cat(chunks.map(reg => Cat(0.U(16.W), reg)).reverse)
+  recomposer.io.in.bits.data(0) := zeroExtcvFPURes
+  recomposer.io.out.ready := busy
+
+  io.resp.valid := respValid
+  io.resp.bits.reg.get.valid := respValid
+  io.resp.bits.reg.get.bits.rd := reqRd
+  io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
+  io.resp.bits.reg.get.bits.tmask := reqTmask
+
+  when (io.req.fire) {
+    cvFPUReq := ioFpOp
+  }
+
+  when (io.resp.fire) {
+    busy := false.B
+    respValid := false.B
+  }
+
+  when (recomposer.io.out.fire) {
+    fpu_out := recomposer.io.out.bits.data(0).asUInt
+    respValid := true.B
+  }
 }

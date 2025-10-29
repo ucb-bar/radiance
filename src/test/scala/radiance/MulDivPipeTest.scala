@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.prci.ClockSinkParameters
 import radiance.muon.backend.int.{IntPipeParams, MulDivPipe}
-import radiance.muon.{Decoder, DecodeField, Decoded, F3, F7, HasRd, HasRs1, HasRs2, HasRs3, LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey, Opcode, Rd, UseIntPipe}
+import radiance.muon.{Decoder, DecodeField, Decoded, F3, F7, HasRd, HasRs1, HasRs2, HasRs3, LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey, Opcode, Rd, UseALUPipe}
 
 class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
@@ -164,7 +164,7 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     pokeDecoded(c.io.req.bits.uop.inst, HasRs1, if (op.in1.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs2, if (op.in2.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs3, 0)
-    pokeDecoded(c.io.req.bits.uop.inst, UseIntPipe, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, UseALUPipe, 1)
     c.io.req.bits.uop.pc.poke(op.pc.U(archLen.W))
     c.io.req.bits.uop.tmask.poke(op.reqMask.U(c.io.req.bits.uop.tmask.getWidth.W))
     c.io.req.bits.uop.wid.poke(0.U)
@@ -399,6 +399,82 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         c.io.resp.ready.poke(true.B)
         finishResponse(c)
       }
+    }
+  }
+
+  it should "accept back-to-back mul/div requests without a bubble" in {
+    val numLanes = 4
+    val numMulDivLanes = 2
+    implicit val p: Parameters = testParams(numLanes, numMulDivLanes)
+
+    test(new MulDivPipe) { c =>
+      val archLen = p(MuonKey).archLen
+      val fullMask = (BigInt(1) << numLanes) - 1
+      val maxWait = 80
+
+      val firstIn1 = Seq(BigInt(9), BigInt(7), BigInt(5), BigInt(3))
+      val firstIn2 = Seq(BigInt(8), BigInt(6), BigInt(4), BigInt(2))
+      val secondIn1 = Seq(BigInt(90), BigInt(60), BigInt(30), BigInt(15))
+      val secondIn2 = Seq(BigInt(3), BigInt(5), BigInt(6), BigInt(9))
+
+      val opMul = PipeOp(
+        name = "mul",
+        opcode = MuOpcode.OP.U,
+        f3 = 0.U,
+        f7 = "b0000001".U,
+        rd = 20,
+        in1 = firstIn1,
+        in2 = firstIn2,
+        pc = 0,
+        reqMask = fullMask,
+        expectedData = computeExpected(0.U, firstIn1, firstIn2, archLen),
+        dataCheckMask = fullMask,
+        expectedRespMask = fullMask,
+        holdCycles = 0
+      )
+
+      val opDivu = PipeOp(
+        name = "divu",
+        opcode = MuOpcode.OP.U,
+        f3 = 5.U,
+        f7 = "b0000001".U,
+        rd = 21,
+        in1 = secondIn1,
+        in2 = secondIn2,
+        pc = 0,
+        reqMask = fullMask,
+        expectedData = computeExpected(5.U, secondIn1, secondIn2, archLen),
+        dataCheckMask = fullMask,
+        expectedRespMask = fullMask,
+        holdCycles = 0
+      )
+
+      c.io.resp.ready.poke(true.B)
+
+      while (!c.io.req.ready.peek().litToBoolean) { c.clock.step() }
+      driveRequest(c, opMul, archLen)
+      c.clock.step()
+      c.io.req.valid.poke(false.B)
+
+      var cycles = 0
+      while (!c.io.resp.valid.peek().litToBoolean) {
+        c.clock.step()
+        cycles += 1
+        require(cycles <= maxWait, s"${opMul.name} response did not arrive in time")
+      }
+
+      checkResponse(c, opMul, archLen)
+      require(c.io.req.ready.peek().litToBoolean, "MulDiv pipe not ready when issuing back-to-back request")
+
+      driveRequest(c, opDivu, archLen)
+      c.clock.step()
+      c.io.req.valid.poke(false.B)
+
+      c.io.resp.valid.expect(false.B, "First response should be consumed when second request fires")
+
+      waitForResponse(c, maxWait, opDivu.name)
+      checkResponse(c, opDivu, archLen)
+      finishResponse(c)
     }
   }
 }

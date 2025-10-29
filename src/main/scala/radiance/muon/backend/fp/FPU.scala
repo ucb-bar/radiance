@@ -77,6 +77,23 @@ object IntFormat extends ChiselEnum {
   val INT64 = Value("b11".U) // unsupported
 }
 
+class CVFPUReq(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
+  val roundingMode = FPRoundingMode()
+  val op = FPUOp() // op mod is lsb
+  val srcFormat = FPFormat()
+  val dstFormat = FPFormat()
+  val intFormat = IntFormat()
+  val tag = UInt(tagWidth.W)
+  val simdMask = UInt(numFp16Lanes.W)
+  val operands = Vec(3, UInt((numFp16Lanes * 16).W))
+}
+
+class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
+  val result = UInt((numFp16Lanes * 16).W)
+  val status = UInt(5.W) // {invalid, div by zero, overflow, underflow, inexact}
+  val tag = UInt(tagWidth.W)
+}
+
 class CVFPU(
   numFp16Lanes: Int = 16,
   tagWidth: Int = 1,
@@ -92,22 +109,9 @@ class CVFPU(
     val clock = Input(Clock())
     val reset = Input(Reset())
 
-    val req = Flipped(Decoupled(new Bundle {
-      val roundingMode = FPRoundingMode()
-      val op = FPUOp() // op mod is lsb
-      val srcFormat = FPFormat()
-      val dstFormat = FPFormat()
-      val intFormat = IntFormat()
-      val tag = UInt(tagWidth.W)
-      val simdMask = UInt(numFp16Lanes.W)
-      val operands = Vec(3, UInt((numFp16Lanes * 16).W))
-    }))
+    val req = Flipped(Decoupled(new CVFPUReq(numFp16Lanes, tagWidth)))
 
-    val resp = Decoupled(new Bundle {
-      val result = UInt((numFp16Lanes * 16).W)
-      val status = UInt(5.W) // {invalid, div by zero, overflow, underflow, inexact}
-      val tag = UInt(tagWidth.W)
-    })
+    val resp = Decoupled(new CVFPUResp(numFp16Lanes, tagWidth))
 
     val flush = Input(Bool())
     val busy = Output(Bool())

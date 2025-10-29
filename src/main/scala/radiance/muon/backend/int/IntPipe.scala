@@ -7,15 +7,8 @@ import freechips.rocketchip.rocket.{ALU, MulDivParams}
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 
-class IntOpBundle extends Bundle {
-  val fn = UInt(ALU.SZ_ALU_FN.W)
-  val isMulDiv = Bool()
-  val isBr = Bool()
-  val isJ = Bool()
-}
-
 object IntOpDecoder {
-  def decode(opcode: UInt, f3: UInt, f7: UInt): IntOpBundle = {
+  def decode(opcode: UInt, f3: UInt, f7: UInt): UInt = {
     val table = Seq[(BitPat, BitPat)](
       (BitPat(MuOpcode.OP)     ## BitPat("b000") ## BitPat("b0000000")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.OP)     ## BitPat("b000") ## BitPat("b0100000")) -> BitPat(ALU.FN_SUB.litValue.U(ALU.SZ_ALU_FN.W)),
@@ -60,14 +53,7 @@ object IntOpDecoder {
       (BitPat(MuOpcode.JAL)    ## BitPat("b???") ## BitPat("b???????")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.JALR)   ## BitPat("b000") ## BitPat("b???????")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
     )
-
-    val opcode7 = opcode(6,0)
-    val result = Wire(new IntOpBundle)
-    result.fn := decoder(Cat(opcode7, f3, f7), TruthTable(table, BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W))))
-    result.isMulDiv := (opcode7 === MuOpcode.OP.U) && (f7 === "b0000001".U)
-    result.isBr := opcode7 === MuOpcode.BRANCH.U
-    result.isJ := opcode7 === MuOpcode.JAL.U || opcode7 === MuOpcode.JALR.U
-    result
+    decoder(Cat(opcode(6, 0), f3, f7), TruthTable(table, BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W))))
   }
 }
 

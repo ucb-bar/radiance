@@ -3,7 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.resources.BigIntHexContext
-import freechips.rocketchip.rocket.MulDivParams
+import freechips.rocketchip.rocket.{ALU, MulDivParams}
 import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTileParameters, HasTileParameters}
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
 import org.chipsalliance.cde.config.{Field, Parameters}
@@ -296,6 +296,8 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
   def aRegT = UInt(log2Ceil(m.numArchRegs).W)
   def regDataT = UInt(m.archLen.W)
+
+  def aluOpT = UInt(ALU.SZ_ALU_FN.W)
 }
 
 /** Muon core and core-private L0 caches */

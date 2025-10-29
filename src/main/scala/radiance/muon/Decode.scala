@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
-import freechips.rocketchip.util.UIntIsOneOf
 
 object MuOpcode {
   val LOAD = "b0000011"
@@ -65,7 +64,8 @@ case object IsIType          extends DecodeField(1, true)
 case object IsSType          extends DecodeField(1, true)
 case object IsBType          extends DecodeField(1, true)
 case object IsUJType         extends DecodeField(1, true)
-case object UseIntPipe       extends DecodeField(1, true)
+case object UseALUPipe       extends DecodeField(1, true)
+case object UseMulDivPipe    extends DecodeField(1, true)
 case object UseFPPipe        extends DecodeField(1, true)
 case object UseLSUPipe       extends DecodeField(1, true)
 case object UseSFUPipe       extends DecodeField(1, true)
@@ -74,6 +74,11 @@ case object HasRs1           extends DecodeField(1, true)
 case object HasRs2           extends DecodeField(1, true)
 case object HasRs3           extends DecodeField(1, true)
 case object HasControlHazard extends DecodeField
+case object Rs1IsPC          extends DecodeField(1, true)
+case object Rs1IsZero        extends DecodeField(1, true)
+case object Rs2IsImm         extends DecodeField(1, true)
+case object IsBranch         extends DecodeField
+case object IsJump           extends DecodeField
 case object ImmH8            extends DecodeField(8, true)
 case object Imm24            extends DecodeField(24, true)
 case object Imm32            extends DecodeField(32)
@@ -113,6 +118,7 @@ class Decoded(full: Boolean = true) extends Bundle {
         case Imm32 => Cat(decode(ImmH8), decode(Imm24))
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
+        case UseMulDivPipe => (decode(Opcode) === MuOpcode.OP.U) && (decode(F7) === "b0000001".U)
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
@@ -201,8 +207,9 @@ object Decoder {
       Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
       IsRType, IsIType, IsSType, IsBType, IsUJType,
-      UseIntPipe, UseFPPipe, UseLSUPipe, UseSFUPipe,
+      UseALUPipe, UseMulDivPipe, UseFPPipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
+      Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
       ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
     )
   }
@@ -251,7 +258,7 @@ object Decoder {
           MuOpcode.AUIPC,
           MuOpcode.JAL,
         ).contains(op))
-      case UseIntPipe =>
+      case UseALUPipe =>
         Some(Seq(
           MuOpcode.OP,
           MuOpcode.OP_IMM,
@@ -282,7 +289,10 @@ object Decoder {
           MuOpcode.CUSTOM2,
           MuOpcode.CUSTOM3,
           MuOpcode.SYSTEM,
-          MuOpcode.STORE,
+          MuOpcode.NU_INVOKE,
+          MuOpcode.NU_INVOKE_IMM,
+          MuOpcode.NU_PAYLOAD,
+          MuOpcode.NU_COMPLETE,
         ).contains(op))
       case HasRd =>
         Some(!sd(IsBType) && !sd(IsSType))
@@ -304,7 +314,30 @@ object Decoder {
           MuOpcode.JAL,
           MuOpcode.SYSTEM,
           MuOpcode.BRANCH
+        ).contains(op) ||
+          sd(IsTMC) || sd(IsSplit) || sd(IsPred) || sd(IsWSpawn) || sd(IsBar)
+        )
+      case Rs1IsPC =>
+        Some(Seq(
+          MuOpcode.AUIPC,
+          MuOpcode.BRANCH,
+          MuOpcode.JAL,
+          MuOpcode.JALR,
         ).contains(op))
+      case Rs1IsZero => Some(op == MuOpcode.LUI)
+      case Rs2IsImm =>
+        Some(Seq(
+          MuOpcode.LOAD,
+          MuOpcode.STORE,
+          MuOpcode.JAL,
+          MuOpcode.JALR,
+          MuOpcode.OP_IMM,
+          MuOpcode.AUIPC,
+          MuOpcode.LUI,
+          MuOpcode.BRANCH,
+        ).contains(op))
+      case IsBranch =>  Some(op == MuOpcode.BRANCH)
+      case IsJump =>    Some(op == MuOpcode.JAL || op == MuOpcode.JALR)
       // important: when writing these rules, make sure opcode check short circuits f3
       case IsTMC =>     Some(op == MuOpcode.CUSTOM0 && f3 == 0)
       case IsWSpawn =>  Some(op == MuOpcode.CUSTOM0 && f3 == 1)

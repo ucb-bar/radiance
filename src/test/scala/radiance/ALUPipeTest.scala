@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
 import freechips.rocketchip.prci.ClockSinkParameters
 import radiance.muon.backend.int.{ALUPipe, IntPipeParams}
-import radiance.muon.{Decoder, DecodeField, Decoded, F3, F7, HasRd, HasRs1, HasRs2, HasRs3, LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey, Opcode, Rd, UseIntPipe}
+import radiance.muon.{Decoder, DecodeField, Decoded, F3, F7, HasRd, HasRs1, HasRs2, HasRs3, LoadStoreUnitParams, MuOpcode, MuonCoreParams, MuonKey, Opcode, Rd, UseALUPipe}
 
 class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
@@ -98,7 +98,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     pokeDecoded(c.io.req.bits.uop.inst, HasRs1, if (in1.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs2, if (in2.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs3, 0)
-    pokeDecoded(c.io.req.bits.uop.inst, UseIntPipe, 1)
+    pokeDecoded(c.io.req.bits.uop.inst, UseALUPipe, 1)
     c.io.req.bits.uop.tmask.poke(tmask.U(c.io.req.bits.uop.tmask.getWidth.W))
     c.io.req.bits.uop.pc.poke(pc.U(archLen.W))
     c.io.req.bits.uop.wid.poke(0.U)
