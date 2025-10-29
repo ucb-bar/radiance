@@ -12,14 +12,6 @@ class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
   val tmask = tmaskT
 }
 
-class WritebackReq(implicit val p: Parameters)
-  extends Bundle with HasMuonCoreParameters {
-  val wmask = UInt(numLaneBytes.W)
-  val pc_w_en = Bool()
-  val rd = UInt(Isa.regBits.W)
-  val data = Vec(numLanes, UInt(archLen.W))
-}
-
 class IssueIF(implicit val p: Parameters)
   extends Bundle with HasMuonCoreParameters {
   val regAddr = UInt(Isa.regBits.W)
@@ -27,14 +19,31 @@ class IssueIF(implicit val p: Parameters)
   val wmask = UInt(numLaneBytes.W)
 }
 
+class SchedIF(implicit val p: Parameters)
+  extends Bundle with HasMuonCoreParameters {
+  val pc = UInt(muonParams.archLen.W)
+}
+
 class Writeback(implicit p: Parameters)
   extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(writebackT()))
     val rfWIssueIF = Output(Valid(new IssueIF))
-    val schedIF = Output(new Bundle {
-      val pc = UInt(muonParams.archLen.W)
-      val pc_w_en = UInt(muonParams.numLanes.W)
-    })
+    val schedIF = Output(Valid(new SchedIF))
   })
+
+  // TODO optimize for multi bank write if we have time
+  val regRF    = RegInit(0.U.asTypeOf(Valid(new IssueIF)))
+  val regSched = RegInit(0.U.asTypeOf(Valid(new SchedIF)))
+  io.rfWIssueIF := regRF
+  io.schedIF := regSched
+  
+  when (io.req.fire) {
+    regRF.valid := io.req.bits.reg.get.valid
+    regRF.bits.regAddr := io.req.bits.reg.get.bits.rd
+    regRF.bits.data := io.req.bits.reg.get.bits.data
+    regRF.bits.wmask := VecInit(io.req.bits.reg.get.bits.tmask.asBools.map(t => Fill(archLen/8, t.asUInt)))
+    regSched.valid := io.req.bits.reg.get.valid && io.req.bits.sched.get.bits.setPC.valid
+    regSched.bits.pc := io.req.bits.sched.get.bits.setPC.bits
+  }
 }
