@@ -9,7 +9,8 @@ import radiance.muon.backend.fp._
 class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
 
   val aluPipe = Module(new ALUPipe())
-  val fpPipe = Module(new FPPipe())
+  val fp32Pipe = Module(new FP32Pipe())
+  val fp16Pipe = Module(new FP16Pipe())
   val mulDivPipe = Module(new MulDivPipe())
   val sfuPipe = Module(new SFU())
 
