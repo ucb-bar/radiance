@@ -401,4 +401,80 @@ class MulDivPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       }
     }
   }
+
+  it should "accept back-to-back mul/div requests without a bubble" in {
+    val numLanes = 4
+    val numMulDivLanes = 2
+    implicit val p: Parameters = testParams(numLanes, numMulDivLanes)
+
+    test(new MulDivPipe) { c =>
+      val archLen = p(MuonKey).archLen
+      val fullMask = (BigInt(1) << numLanes) - 1
+      val maxWait = 80
+
+      val firstIn1 = Seq(BigInt(9), BigInt(7), BigInt(5), BigInt(3))
+      val firstIn2 = Seq(BigInt(8), BigInt(6), BigInt(4), BigInt(2))
+      val secondIn1 = Seq(BigInt(90), BigInt(60), BigInt(30), BigInt(15))
+      val secondIn2 = Seq(BigInt(3), BigInt(5), BigInt(6), BigInt(9))
+
+      val opMul = PipeOp(
+        name = "mul",
+        opcode = MuOpcode.OP.U,
+        f3 = 0.U,
+        f7 = "b0000001".U,
+        rd = 20,
+        in1 = firstIn1,
+        in2 = firstIn2,
+        pc = 0,
+        reqMask = fullMask,
+        expectedData = computeExpected(0.U, firstIn1, firstIn2, archLen),
+        dataCheckMask = fullMask,
+        expectedRespMask = fullMask,
+        holdCycles = 0
+      )
+
+      val opDivu = PipeOp(
+        name = "divu",
+        opcode = MuOpcode.OP.U,
+        f3 = 5.U,
+        f7 = "b0000001".U,
+        rd = 21,
+        in1 = secondIn1,
+        in2 = secondIn2,
+        pc = 0,
+        reqMask = fullMask,
+        expectedData = computeExpected(5.U, secondIn1, secondIn2, archLen),
+        dataCheckMask = fullMask,
+        expectedRespMask = fullMask,
+        holdCycles = 0
+      )
+
+      c.io.resp.ready.poke(true.B)
+
+      while (!c.io.req.ready.peek().litToBoolean) { c.clock.step() }
+      driveRequest(c, opMul, archLen)
+      c.clock.step()
+      c.io.req.valid.poke(false.B)
+
+      var cycles = 0
+      while (!c.io.resp.valid.peek().litToBoolean) {
+        c.clock.step()
+        cycles += 1
+        require(cycles <= maxWait, s"${opMul.name} response did not arrive in time")
+      }
+
+      checkResponse(c, opMul, archLen)
+      require(c.io.req.ready.peek().litToBoolean, "MulDiv pipe not ready when issuing back-to-back request")
+
+      driveRequest(c, opDivu, archLen)
+      c.clock.step()
+      c.io.req.valid.poke(false.B)
+
+      c.io.resp.valid.expect(false.B, "First response should be consumed when second request fires")
+
+      waitForResponse(c, maxWait, opDivu.name)
+      checkResponse(c, opDivu, archLen)
+      finishResponse(c)
+    }
+  }
 }
