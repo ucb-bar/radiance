@@ -9,25 +9,15 @@ import radiance.muon._
 import radiance.muon.backend._
 
 class MulDivPipe(implicit p: Parameters)
-  extends ExPipe(false, true) with HasIntPipeParams {
-  implicit val decomposerTypes =
-    Seq(UInt(archLen.W), UInt(archLen.W), Bool())
-  val decomposer = Module(new LaneDecomposer(
-    inLanes = numLanes,
-    outLanes = numMulDivLanes,
-    elemTypes = decomposerTypes
-  ))
+  extends ExPipe(
+    decomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), UInt(p(MuonKey).archLen.W), Bool())),
+    recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W))),
+    outLanes = Some(p(MuonKey).intPipe.numMulDivLanes),
+    writebackSched = false, writebackReg = true) with HasIntPipeParams {
 
   val vecMulDiv = Seq.fill(numMulDivLanes)(Module(
     new MulDiv(mulDivParams, archLen, Isa.regBits))
   )
-
-  implicit val recomposerTypes = Seq(UInt(archLen.W))
-  val recomposer = Module(new LaneRecomposer (
-    inLanes = numLanes,
-    outLanes = numMulDivLanes,
-    elemTypes = recomposerTypes
-  ))
 
   val ioReqOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val reqOp = RegEnable(ioReqOp, 0.U.asTypeOf(aluOpT), io.req.fire)
@@ -38,28 +28,28 @@ class MulDivPipe(implicit p: Parameters)
   val unmaskedMulDivsDone = (vecMulDivRespValid & sliceTMask) === sliceTMask
   val allMulDivReqReady = vecMulDiv.map(_.io.req.ready).reduce(_ && _)
 
-  io.req.ready := (!busy || io.resp.fire) && decomposer.io.in.ready
-  decomposer.io.in.valid := io.req.fire
-  decomposer.io.in.bits.data(0) := io.req.bits.rs1Data.get
-  decomposer.io.in.bits.data(1) := io.req.bits.rs2Data.get
-  decomposer.io.in.bits.data(2) := VecInit(io.req.bits.uop.tmask.asBools)
-  decomposer.io.out.ready := allMulDivReqReady
+  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
+  decomposer.get.io.in.valid := io.req.fire
+  decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
+  decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.get.io.in.bits.data(2) := VecInit(io.req.bits.uop.tmask.asBools)
+  decomposer.get.io.out.ready := allMulDivReqReady
 
   for (i <- 0 until numMulDivLanes) {
-    vecMulDiv(i).io.req.valid := decomposer.io.out.valid && decomposer.io.out.bits.data(2).asUInt(i) && allMulDivReqReady
+    vecMulDiv(i).io.req.valid := decomposer.get.io.out.valid && decomposer.get.io.out.bits.data(2).asUInt(i) && allMulDivReqReady
     vecMulDiv(i).io.req.bits.fn := Mux(io.req.fire, ioReqOp, reqOp)
     vecMulDiv(i).io.req.bits.dw := (archLen == 64).B
-    vecMulDiv(i).io.req.bits.in1 := decomposer.io.out.bits.data(0)(i)
-    vecMulDiv(i).io.req.bits.in2 := decomposer.io.out.bits.data(1)(i)
+    vecMulDiv(i).io.req.bits.in1 := decomposer.get.io.out.bits.data(0)(i)
+    vecMulDiv(i).io.req.bits.in2 := decomposer.get.io.out.bits.data(1)(i)
     vecMulDiv(i).io.req.bits.tag := reqRd
     vecMulDiv(i).io.kill := false.B
 
-    vecMulDiv(i).io.resp.ready := sliceTMask(i) && unmaskedMulDivsDone && recomposer.io.in.ready
-    recomposer.io.in.bits.data(0)(i) := vecMulDiv(i).io.resp.bits.data
+    vecMulDiv(i).io.resp.ready := sliceTMask(i) && unmaskedMulDivsDone && recomposer.get.io.in.ready
+    recomposer.get.io.in.bits.data(0)(i) := vecMulDiv(i).io.resp.bits.data
   }
   // signal should not go high when pipe is idle, if tmask=zeroes, immediately enqueue to recomposer
-  recomposer.io.in.valid := unmaskedMulDivsDone && busy
-  recomposer.io.out.ready := busy
+  recomposer.get.io.in.valid := unmaskedMulDivsDone && busy
+  recomposer.get.io.out.ready := busy
 
   io.resp.valid := respValid
   io.resp.bits.reg.get.valid := respValid
@@ -71,13 +61,13 @@ class MulDivPipe(implicit p: Parameters)
     respValid := false.B
   }
 
-  when (decomposer.io.out.fire) {
+  when (decomposer.get.io.out.fire) {
     // assumes 1 cycle minimum muldiv latency
-    sliceTMask := decomposer.io.out.bits.data(2).asUInt
+    sliceTMask := decomposer.get.io.out.bits.data(2).asUInt
   }
 
-  when (recomposer.io.out.fire) {
-    mulOut := recomposer.io.out.bits.data(0)
+  when (recomposer.get.io.out.fire) {
+    mulOut := recomposer.get.io.out.bits.data(0)
     respValid := true.B
   }
 }

@@ -8,27 +8,14 @@ import radiance.muon._
 import radiance.muon.backend._
 
 class ALUPipe(implicit p: Parameters)
-  extends ExPipe(true, true) with HasIntPipeParams with HasCoreBundles {
-  implicit val decomposerTypes =
-    Seq(UInt(archLen.W), UInt(archLen.W))
-  val decomposer = Module(new LaneDecomposer(
-    inLanes = numLanes,
-    outLanes = numALULanes,
-    elemTypes = decomposerTypes
-  ))
+  extends ExPipe(
+    decomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), UInt(p(MuonKey).archLen.W))),
+    recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), Bool())),
+    outLanes = Some(p(MuonKey).intPipe.numALULanes),
+    writebackSched = true, writebackReg = true) with HasIntPipeParams with HasCoreBundles {
 
   val vecALU = Seq.fill(numALULanes)(Module(new ALU))
   vecALU.foreach(alu => alu.io.dw := archLen.U)
-
-  implicit val recomposerTypes =
-    Seq(chiselTypeOf(vecALU.head.io.out),
-      chiselTypeOf(vecALU.head.io.cmp_out)
-    )
-  val recomposer = Module(new LaneRecomposer(
-    inLanes = numLanes,
-    outLanes = numALULanes,
-    elemTypes = recomposerTypes,
-  ))
 
   val ioReqOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val reqOp = RegEnable(ioReqOp, 0.U.asTypeOf(aluOpT), io.req.fire)
@@ -37,32 +24,32 @@ class ALUPipe(implicit p: Parameters)
   val cmpOut = Reg(Vec(numLanes, Bool()))
 
   io.req.ready := !busy || io.resp.fire
-  decomposer.io.in.valid := io.req.valid
-  decomposer.io.in.bits.data(0) := MuxCase(
+  decomposer.get.io.in.valid := io.req.valid
+  decomposer.get.io.in.bits.data(0) := MuxCase(
     io.req.bits.rs1Data.get,
     Seq(
       inst.b(Rs1IsPC) -> VecInit.fill(numLanes)(uop.pc),
       inst.b(Rs1IsZero) -> VecInit.fill(numLanes)(0.U(archLen.W)),
     )
   )
-  decomposer.io.in.bits.data(1) := Mux(
+  decomposer.get.io.in.bits.data(1) := Mux(
     inst.b(Rs2IsImm),
     VecInit.fill(numLanes)(inst(Imm32)),
     io.req.bits.rs2Data.get
   )
-  decomposer.io.out.ready := true.B
+  decomposer.get.io.out.ready := true.B
 
   for (i <- 0 until numALULanes) {
     vecALU(i).io.dw := archLen.U
     vecALU(i).io.fn := Mux(io.req.fire, ioReqOp, reqOp)
-    vecALU(i).io.in1 := decomposer.io.out.bits.data(0)(i)
-    vecALU(i).io.in2 := decomposer.io.out.bits.data(1)(i)
+    vecALU(i).io.in1 := decomposer.get.io.out.bits.data(0)(i)
+    vecALU(i).io.in2 := decomposer.get.io.out.bits.data(1)(i)
 
-    recomposer.io.in.bits.data(0)(i) := vecALU(i).io.out
-    recomposer.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
+    recomposer.get.io.in.bits.data(0)(i) := vecALU(i).io.out
+    recomposer.get.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
   }
-  recomposer.io.in.valid := decomposer.io.out.valid
-  recomposer.io.out.ready := busy
+  recomposer.get.io.in.valid := decomposer.get.io.out.valid
+  recomposer.get.io.out.ready := busy
 
   io.resp.valid := respValid
   io.resp.bits.reg.get.valid := respValid && !reqInst.b(IsBranch) && !reqInst.b(IsJump)
@@ -88,9 +75,9 @@ class ALUPipe(implicit p: Parameters)
     respValid := false.B
   }
 
-  when (recomposer.io.out.fire) {
-    aluOut := recomposer.io.out.bits.data(0)
-    cmpOut := recomposer.io.out.bits.data(1)
+  when (recomposer.get.io.out.fire) {
+    aluOut := recomposer.get.io.out.bits.data(0)
+    cmpOut := recomposer.get.io.out.bits.data(1)
     respValid := true.B
   }
 }
