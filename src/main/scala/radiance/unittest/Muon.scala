@@ -5,9 +5,11 @@ package radiance.unittest
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import radiance.cluster.FakeRadianceClusterTileParams
 import radiance.muon._
 
 /** Testbench for Muon with the test signals */
@@ -75,7 +77,9 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
     val finished = Bool()
   })
 
-  val be = Module(new Backend()(p))
+  val be = Module(new Backend()(p.alterMap(Map(
+    TileKey -> FakeRadianceClusterTileParams(None, p(MuonKey), 0),
+  ))))
   be.io.dmem.resp.foreach(_.valid := false.B)
   be.io.dmem.resp.foreach(_.bits := DontCare)
   be.io.dmem.req.foreach(_.ready := false.B)
