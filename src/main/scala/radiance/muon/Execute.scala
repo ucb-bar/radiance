@@ -20,12 +20,21 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val fp16Pipe = Module(new ALUPipe())
   val mulDivPipe = Module(new MulDivPipe())
   val lsuPipe = Module(new ALUPipe()) // TODO: should be lsu pipe
-  val sfuPipe = Module(new SFUPipe()) // TODO: doesn't work yet
+  val sfuPipe = Module(new SFUPipe())
 
   val inst = io.req.bits.uop.inst
 
+  // placeholder for area estimation
+  val fpu = Module(new CVFPU)
+  fpu.io.clock := clock
+  fpu.io.reset := reset
+  fpu.io.req.bits := DontCare
+  fpu.io.req.valid := false.B
+  fpu.io.resp.ready := false.B
+  fpu.io.flush := false.B
+  dontTouch(fpu.io)
+
   val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, sfuPipe)
-  // val pipes = Seq(aluPipe, aluPipe, aluPipe, aluPipe, aluPipe, aluPipe)
   val uses = Seq(UseALUPipe, UseFP32Pipe, UseFP16Pipe, UseMulDivPipe, UseLSUPipe, UseSFUPipe)
 
   (pipes zip uses).foreach { case (pipe, use) =>

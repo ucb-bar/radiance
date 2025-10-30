@@ -14,7 +14,9 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
   val firstRs2 = Mux1H(firstLidOH, io.req.bits.rs2Data.get)
   val rs1Mask = VecInit(io.req.bits.rs1Data.get.map(_(0))).asUInt
 
-  val writeback = io.resp.bits.sched.get
+  val writeback = Wire(schedWritebackT)
+
+  writeback.valid := true.B
 
   writeback.bits.setTmask.bits := DontCare
   writeback.bits.setTmask.valid := inst.b(IsTMC) || inst.b(IsSplit) || inst.b(IsPred) || inst.b(IsToHost)
@@ -30,10 +32,6 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
 
   writeback.bits.pc := uop.pc
   writeback.bits.wid := uop.wid
-
-  // TODO: handshake, pipeline
-  writeback.valid := io.req.fire
-  io.req.ready := io.resp.ready
 
   when (inst.b(IsTMC)) {
     writeback.bits.setTmask.bits := firstRs1
@@ -84,4 +82,6 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
 
   io.req.ready := !busy || io.resp.fire
   io.resp.valid := busy
+  io.resp.bits.sched.get := RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire)
+  writeback.valid := busy
 }

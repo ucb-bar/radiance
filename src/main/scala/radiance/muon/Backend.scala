@@ -53,6 +53,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   execute.io.req.valid := false.B
   execute.io.req.bits := DontCare // TODO
   execute.io.resp.ready := true.B
+  dontTouch(execute.io.req)
+  dontTouch(execute.io.resp)
 
   // TODO: INT/SFU
   // TODO: LSU
