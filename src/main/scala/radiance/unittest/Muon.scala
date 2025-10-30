@@ -102,7 +102,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   io.finished := cfe.io.finished
 }
 
-/** Testbench for Muon backend LSU pipe and coalescer */
+/** Testbench for Muon backend LSU pipe */
 class MuonLSUTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -110,14 +110,33 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
 
   // TODO: get instruction trace from cyclotron
   
-  val lsu = Module(new LoadStoreUnit()(p))
   
-  val coreGmem = Wire(new DataMemIO)
-  val coreShmem = Wire(new SharedMemIO)
+  val lsu = Module(new LoadStoreUnit()(p))
+  // connect lsu to just global mem blackbox for now
+  val lsuGmemBlackBox = Module(new CyclotronMemBlackBox)
+  lsuGmemBlackBox.io.clock := clock
+  lsuGmemBlackBox.io.reset := reset.asBool
+  
+  lsu.io.globalMemReq.ready := lsuGmemBlackBox.io.req_ready
+  lsuGmemBlackBox.io.req_valid := lsu.io.globalMemReq.valid 
 
-  // TODO: connect LSU to coalescer
+  lsuGmemBlackBox.io.req_store := MemOp.isStore(lsu.io.globalMemReq.bits.op)
+  lsuGmemBlackBox.io.req_tag := lsu.io.globalMemReq.bits.tag.pad(32)
+  lsuGmemBlackBox.io.req_address := Cat(lsu.io.globalMemReq.bits.address.reverse)
+  lsuGmemBlackBox.io.req_data := Cat(lsu.io.globalMemReq.bits.data.reverse)
+  lsuGmemBlackBox.io.req_mask := Cat(lsu.io.globalMemReq.bits.tmask.reverse)
 
-  // TODO: connect coalescer to cyclotron memory backend
+  lsuGmemBlackBox.io.resp_ready := lsu.io.globalMemResp.ready
+  lsu.io.globalMemResp.valid := lsuGmemBlackBox.io.resp_valid
+
+  lsu.io.globalMemResp.bits.tag := lsuGmemBlackBox.io.resp_tag
+  lsu.io.globalMemResp.bits.data := lsuGmemBlackBox.io.resp_data
+  lsu.io.globalMemResp.bits.valid := lsuGmemBlackBox.io.resp_valids
+
+  // tie off shared mem
+  lsu.io.shmemReq.ready := false.B
+  lsu.io.shmemResp.valid := false.B
+  lsu.io.shmemResp.bits := DontCare
   
   io.finished := false.B
 }
@@ -250,9 +269,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   addResource("/csrc/Cyclotron.cc")
 }
 
-/*
-class CyclotronMemBlackBox(interface: MemInterface)(implicit val p: Parameters) extends Module {
-  class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"  -> p(MuonKey).archLen,
       "NUM_WARPS" -> p(MuonKey).numWarps,
       "NUM_LANES" -> p(MuonKey).numLanes,
@@ -260,66 +277,43 @@ class CyclotronMemBlackBox(interface: MemInterface)(implicit val p: Parameters) 
       "REG_BITS"  -> Isa.regBits,
       "IMM_BITS"  -> 32,
       "PRED_BITS" -> Isa.predBits,
-      "TAG_BITS"  -> interface.getTagBits,
+      "TAG_BITS"  -> 32,
       "LSU_LANES" -> p(MuonKey).lsu.numLsuLanes,
-    )) 
+    ))
     with HasBlackBoxResource {
-  
-    val archLen = p(MuonKey).archLen
-    val lsuLanes = p(MuonKey).lsu.numLsuLanes
-    val dataWidth = lsuLanes * archLen
-    val maskWidth = lsuLanes
-    
-    val io = IO(new Bundle {
-      val clock = Input(Clock())
-      val reset = Input(Bool())
 
-      val req_ready = Output(Bool())
-      val req_valid = Input(Bool())
+  val archLen = p(MuonKey).archLen
+  val lsuLanes = p(MuonKey).lsu.numLsuLanes
+  val dataWidth = lsuLanes * archLen
+  val maskWidth = lsuLanes
 
-      val req_store = Input(Bool())
-      val req_address = Input(UInt(archLen.W))
-      val req_tag = Input(UInt(interface.getTagBits.W))
-      val req_data = Input(UInt(dataWidth.W))
-      val req_mask = Input(UInt(maskWidth.W))
-
-      val resp_ready = Input(Bool())
-      val resp_valid = Output(Bool())
-
-      val resp_tag = Output(UInt(interface.getTagBits.W))
-      val resp_data = Output(UInt(dataWidth.W))
-    })
-
-    addResource("/vsrc/CyclotronMem.v")
-    addResource("/csrc/Cyclotron.cc")
-  }
-  
   val io = IO(new Bundle {
-    val req = Flipped(chiselTypeOf(interface.getReq))
-    val resp = Flipped(chiselTypeOf(interface.getResp))
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    val req_ready = Output(Bool())
+    val req_valid = Input(Bool())
+
+    val req_store = Input(Bool())
+    // Per-lane addresses packed into dataWidth
+    val req_address = Input(UInt(dataWidth.W))
+    val req_tag = Input(UInt(32.W))
+    val req_data = Input(UInt(dataWidth.W))
+    // Per-lane mask, 1 bit per lane
+    val req_mask = Input(UInt(maskWidth.W))
+
+    val resp_ready = Input(Bool())
+    val resp_valid = Output(Bool())
+
+    val resp_tag = Output(UInt(32.W))
+    val resp_data = Output(UInt(dataWidth.W))
+    // Per-lane response valids
+    val resp_valids = Output(UInt(maskWidth.W))
   })
 
-  val inner = Module(new CyclotronMemBlackBox);
-
-  inner.io.clock := clock
-  inner.io.reset := reset.asBool
-
-  io.req.ready := inner.io.req_ready
-  inner.io.req_valid := io.req.valid
-  inner.io.req_store := io.req.bits.store
-  inner.io.req_address := io.req.bits.address
-  inner.io.req_tag := io.req.bits.tag
-  inner.io.req_data := io.req.bits.data
-  inner.io.req_mask := io.req.bits.mask
-
-  inner.io.resp_ready := io.resp.ready
-  io.resp.valid := inner.io.resp_valid
-  io.resp.bits.tag := inner.io.resp_tag
-  io.resp.bits.data := inner.io.resp_data
-  
-  io.resp.bits.metadata := DontCare
+  addResource("/vsrc/CyclotronMem.v")
+  addResource("/csrc/Cyclotron.cc")
 }
-*/
 
 // UnitTest harnesses
 // ------------------
