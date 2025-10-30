@@ -60,9 +60,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     rsEntry.valid(2) := !hasRs3
     // TODO: if writeback happends to these rs's at the same cycle, busy should
     // be set to false!
-    rsEntry.busy(0) := (io.scb.readRs1.pendingWrites =/= 0.U)
-    rsEntry.busy(1) := (io.scb.readRs2.pendingWrites =/= 0.U)
-    rsEntry.busy(2) := (io.scb.readRs3.pendingWrites =/= 0.U)
+    rsEntry.busy(0) := hasRs1 && (io.scb.readRs1.pendingWrites =/= 0.U)
+    rsEntry.busy(1) := hasRs2 && (io.scb.readRs2.pendingWrites =/= 0.U)
+    rsEntry.busy(2) := hasRs3 && (io.scb.readRs3.pendingWrites =/= 0.U)
 
     rsAdmit
   }

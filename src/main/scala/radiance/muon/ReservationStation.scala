@@ -42,6 +42,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   val rowEmptyVec = VecInit((0 until numEntries).map(!rowValidTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
+  dontTouch(rowEmptyVec)
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
   when (io.admit.fire) {
@@ -50,19 +51,28 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     uopTable(emptyRow)   := io.admit.bits.uop
     validTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
+
+    printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
+    printTable
   }
 
   // check issue eligiblity
-  val eligibles = (0 until numEntries).map { i =>
+  val eligibles = VecInit((0 until numEntries).map { i =>
+    val rowValid = rowValidTable(i)
     val valids = validTable(i)
     val busys  = busyTable(i)
-    val allValid = valids.reduce(_ && _)
+    val allCollected = valids.reduce(_ && _)
+    val noneBusy = !busys.reduce(_ || _)
+
+    assert(!rowValid || !allCollected || noneBusy, "operand valid but still marked busy?")
 
     val out = Wire(Decoupled(uopT))
-    out.valid := allValid
+    out.valid := rowValid && allCollected
     out.bits := uopTable(i)
     out
-  }
+  })
+  dontTouch(eligibles)
+
   // TODO: warp-aware issue scheduling
   val issueScheduler = Module(
     new RRArbiter(chiselTypeOf(eligibles.head.bits), eligibles.length)
@@ -79,18 +89,22 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
                      uop.inst(HasRs3).asBool)
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
 
-    val busy = busyTable(i)
-    val newBusy = WireDefault(busy)
+    val rowValid = rowValidTable(i)
+    val busys = busyTable(i)
+    val newBusys = WireDefault(busys)
     val rdWriteback = io.writeback.bits.rd
+    val updated = WireDefault(false.B)
     (hasRss zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
-      when (io.writeback.valid && hasRs && (rs === rdWriteback)) {
-        assert(newBusy(rsi), "RS: busy was already low before writeback")
-        newBusy(rsi) := false.B
+      when (io.writeback.fire && rowValid && hasRs && (rs === rdWriteback)) {
+        assert(newBusys(rsi), "RS: busy was already low before writeback")
+        newBusys(rsi) := false.B
+        updated := true.B
       }
     }
 
-    when (io.writeback.fire) {
-      busyTable(i) := newBusy
+    when (updated) {
+      busyTable(i) := newBusys
+      printf(cf"RS: writeback to PC=0x${uop.pc}%x at row ${emptyRow}\n")
     }
   }
 
@@ -101,6 +115,23 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   when (reset.asBool) {
     (0 until numEntries).foreach { i => rowValidTable(i) := false.B }
     // @synthesis: do other entries need to be reset?
+  }
+
+  // debug print
+  def printTable = {
+    printf("=" * 40 + " ReservationStation " + "=" * 40 + "\n")
+    for (i <- 0 until numEntries) {
+      val rowValid = rowValidTable(i)
+      when (rowValid) {
+        val valids = validTable(i)
+        val busys  = busyTable(i)
+        val uop    = uopTable(i)
+        printf(cf"${i} | warp:${uop.wid} | pc:${uop.pc} | " +
+               cf"opvalid: (rs1:${valids(0)} rs2:${valids(1)} rs3:${valids(2)}) | " +
+               cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)})\n")
+      }
+    }
+    printf("=" * 100 + "\n")
   }
 }
 
