@@ -113,9 +113,11 @@ class FakeWriteback(implicit p: Parameters) extends CoreModule()(p) with HasCore
   val latency = 4
   val depth = 2
   val queue = Module(new Queue(gen = uopT, entries = depth))
+
+  val wbValid = io.issue.valid && io.issue.bits.inst(HasRd).asBool
   io.issue.ready := queue.io.enq.ready
-  queue.io.enq.valid := ShiftRegister(io.issue.valid, latency, queue.io.enq.ready)
-  queue.io.enq.bits  := ShiftRegister(io.issue.bits,  latency, queue.io.enq.ready)
+  queue.io.enq.valid := ShiftRegister(wbValid,       latency, queue.io.enq.ready)
+  queue.io.enq.bits  := ShiftRegister(io.issue.bits, latency, queue.io.enq.ready)
   io.writeback.valid := queue.io.deq.valid
   io.writeback.bits.rd := queue.io.deq.bits.inst.rd
   (0 until io.writeback.bits.data.length).foreach { i =>
