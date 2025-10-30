@@ -82,6 +82,8 @@ case class MuonCoreParams(
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
   cacheLineBytes: Int = 32,
+  // debug bundles and prints
+  debug: Boolean = true
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
   val hartIdBits: Int = log2Ceil(numCores)

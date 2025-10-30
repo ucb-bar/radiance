@@ -52,8 +52,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     validTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
 
-    printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
-    printTable
+    if (muonParams.debug) {
+      printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
+      printTable
+    }
   }
 
   // check issue eligiblity
@@ -104,7 +106,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
 
     when (updated) {
       busyTable(i) := newBusys
-      printf(cf"RS: writeback to PC=0x${uop.pc}%x at row ${emptyRow}\n")
+      if (muonParams.debug) {
+        printf(cf"RS: writeback to PC=0x${uop.pc}%x at row ${emptyRow}\n")
+      }
     }
   }
 
@@ -126,7 +130,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
         val valids = validTable(i)
         val busys  = busyTable(i)
         val uop    = uopTable(i)
-        printf(cf"${i} | warp:${uop.wid} | pc:${uop.pc} | " +
+        printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
                cf"opvalid: (rs1:${valids(0)} rs2:${valids(1)} rs3:${valids(2)}) | " +
                cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)})\n")
       }
