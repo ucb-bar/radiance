@@ -14,13 +14,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     /** scoreboard interface */
-    val scb = new Bundle {
-      val update  = Flipped(scoreboardUpdateIO)
-      val readRs1 = Flipped(scoreboardReadIO)
-      val readRs2 = Flipped(scoreboardReadIO)
-      val readRs3 = Flipped(scoreboardReadIO)
-      val readRd  = Flipped(scoreboardReadIO)
-    }
+    val scb = Flipped(new ScoreboardIO)
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
     /** writeback interface from EX */
@@ -64,9 +58,11 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     rsEntry.valid(0) := !hasRs1
     rsEntry.valid(1) := !hasRs2
     rsEntry.valid(2) := !hasRs3
-    rsEntry.busy(0) := (io.scb.readRs1.pendingWrites =/= 0.U)
-    rsEntry.busy(1) := (io.scb.readRs2.pendingWrites =/= 0.U)
-    rsEntry.busy(2) := (io.scb.readRs3.pendingWrites =/= 0.U)
+    // TODO: if writeback happends to these rs's at the same cycle, busy should
+    // be set to false!
+    rsEntry.busy(0) := hasRs1 && (io.scb.readRs1.pendingWrites =/= 0.U)
+    rsEntry.busy(1) := hasRs2 && (io.scb.readRs2.pendingWrites =/= 0.U)
+    rsEntry.busy(2) := hasRs3 && (io.scb.readRs3.pendingWrites =/= 0.U)
 
     rsAdmit
   }
@@ -93,8 +89,6 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   (rsAdmitArbiter.io.in zip rsAdmitAllWarps).foreach { case (a, w) => a <> w }
   val rsAdmitChosen = rsAdmitArbiter.io.out
 
-  // TODO: consolidate writeback scoreboard update with RS admission update
-
   // update scoreboard upon RS admission
   // this must be done at the same cycle as scoreboard read, so that updated
   // values are immediately visible at the next cycle and never lost.
@@ -112,22 +106,22 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
                        chosenUop.inst(HasRs3).asBool)
     val rss      = Seq(chosenUop.inst.rs1, chosenUop.inst.rs2, chosenUop.inst.rs3)
 
-    io.scb.update.enable := hasRd || hasRss.reduce(_ || _)
-    io.scb.update.write.pReg := chosenUop.inst.rd
-    io.scb.update.write.incr := hasRd
-    io.scb.update.write.decr := false.B
-    (io.scb.update.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
+    io.scb.updateRS.enable := hasRd || hasRss.reduce(_ || _)
+    io.scb.updateRS.write.pReg := chosenUop.inst.rd
+    io.scb.updateRS.write.incr := hasRd
+    io.scb.updateRS.write.decr := false.B
+    (io.scb.updateRS.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
       read.pReg := rs
       read.incr := hasRs
       read.decr := false.B
     }
   }.otherwise {
     // due diligence to value-gate
-    io.scb.update.enable := false.B
-    io.scb.update.write.pReg := 0.U
-    io.scb.update.write.incr := false.B
-    io.scb.update.write.decr := false.B
-    io.scb.update.reads.foreach { read =>
+    io.scb.updateRS.enable := false.B
+    io.scb.updateRS.write.pReg := 0.U
+    io.scb.updateRS.write.incr := false.B
+    io.scb.updateRS.write.decr := false.B
+    io.scb.updateRS.reads.foreach { read =>
       read.pReg := 0.U
       read.incr := false.B
       read.decr := false.B
@@ -135,11 +129,22 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   }
 
   // gate RS entry if scoreboard update failed
-  io.rsAdmit.valid := rsAdmitChosen.valid && io.scb.update.success
-  rsAdmitChosen.ready := io.rsAdmit.ready && io.scb.update.success
+  io.rsAdmit.valid := rsAdmitChosen.valid && io.scb.updateRS.success
+  rsAdmitChosen.ready := io.rsAdmit.ready && io.scb.updateRS.success
   io.rsAdmit.bits  := rsAdmitChosen.bits
   // for good measure, assert scoreboard update has always succeeded upon RS
   // admission fire
-  assert(!io.rsAdmit.fire || (!io.scb.update.enable || io.scb.update.success),
+  assert(!io.rsAdmit.fire || (!io.scb.updateRS.enable || io.scb.updateRS.success),
          "uop entered RS without succeeding scoreboard update")
+
+  // update scoreboard upon writeback
+  io.scb.updateWB.enable := io.writeback.valid
+  io.scb.updateWB.write.pReg := Mux(io.writeback.valid, io.writeback.bits.rd, 0.U)
+  io.scb.updateWB.write.incr := false.B
+  io.scb.updateWB.write.decr := io.writeback.valid
+  io.scb.updateWB.reads.foreach { read =>
+    read.pReg := 0.U
+    read.incr := false.B
+    read.decr := false.B
+  }
 }

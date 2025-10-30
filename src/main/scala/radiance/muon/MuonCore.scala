@@ -82,6 +82,8 @@ case class MuonCoreParams(
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
   cacheLineBytes: Int = 32,
+  // debug bundles and prints
+  debug: Boolean = true
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
   val hartIdBits: Int = log2Ceil(numCores)
@@ -286,11 +288,6 @@ trait HasCoreBundles extends HasMuonCoreParameters {
       val uop = uopT
       val wid = widT
     })
-  }
-
-  def scoreboardUpdateIO = new ScoreboardUpdate
-  def scoreboardReadIO = {
-    new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   }
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
