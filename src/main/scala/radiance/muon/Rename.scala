@@ -67,8 +67,8 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     port.address := Cat(wid, addr.asTypeOf(aRegT))
   }
 
-  val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
-  val prWarpPrefix = (wid << prIdxWidth).asUInt
+  // val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
+  // val prWarpPrefix = (wid << prIdxWidth).asUInt
   val prAddr = rPorts.map(_.data)
 
   // update rd entry in table
@@ -91,8 +91,8 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
       0.U,
       Mux(
         RegNext(assigning) && (prevRead === prevWrite),
-        RegNext(prWarpPrefix | wPort.data),
-        RegNext(prWarpPrefix) | prs
+        RegNext(wPort.data),
+        prs
       )
     )
   }
@@ -120,11 +120,19 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
       reset = io.softReset,
     )._1
   }
-  wPort.address := Cat(wid, decoded.rd.asTypeOf(aRegT))
-  wPort.data := counters(wid).asTypeOf(pRegT)
+  val (globalCounter, globalOverSubscription) = Counter(
+    r = 1 until m.numPhysRegs,
+    enable = assigning,
+    reset = io.softReset)
 
-  // check for oversubscription
-  assert(!assigning || (wPort.data < maxPRUsage), cf"warp $wid oversubscribed PRs, capped to $maxPRUsage")
+  assert(!globalOverSubscription, "total register usage exceeded maximum number of physical registers")
+
+  wPort.address := Cat(wid, decoded.rd.asTypeOf(aRegT))
+  wPort.data := globalCounter
+  // wPort.data := counters(wid).asTypeOf(pRegT)
+
+  // check for warp level oversubscription
+  assert(!assigning || (counters(wid) < maxPRUsage), cf"warp $wid oversubscribed PRs, capped to $maxPRUsage")
 
   // reset assignment on kernel relaunch
   when (io.softReset) {
