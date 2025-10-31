@@ -13,21 +13,31 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val schedWb = Output(schedWritebackT)
   })
 
-  val hazard = Module(new Hazard)
-  hazard.io.ibuf <> io.ibuf
+  val bypass = false
 
-  val scoreboard = Module(new Scoreboard)
-  scoreboard.io <> hazard.io.scb
-  dontTouch(scoreboard.io)
+  val issued = if (bypass) {
+    val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
+    (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
+    issueArb.io.out
+  } else {
+    val hazard = Module(new Hazard)
+    hazard.io.ibuf <> io.ibuf
 
-  val reservStation = Module(new ReservationStation)
-  reservStation.io.admit <> hazard.io.rsAdmit
-  hazard.io.writeback <> reservStation.io.writebackHazard
+    val scoreboard = Module(new Scoreboard)
+    scoreboard.io <> hazard.io.scb
+    dontTouch(scoreboard.io)
 
-  // TODO bogus
-  val fakeExPipe = Module(new FakeWriteback)
-  fakeExPipe.io.issue <> reservStation.io.issue
-  reservStation.io.writeback <> fakeExPipe.io.writeback
+    val reservStation = Module(new ReservationStation)
+    reservStation.io.admit <> hazard.io.rsAdmit
+    hazard.io.writeback <> reservStation.io.writebackHazard
+
+    // TODO bogus
+    val fakeExPipe = Module(new FakeWriteback)
+    fakeExPipe.io.issue <> reservStation.io.issue
+    reservStation.io.writeback <> fakeExPipe.io.writeback
+
+    reservStation.io.issue
+  }
 
   // TODO: Collector
   // temporary placeholders to generate reg file banks for par
@@ -50,24 +60,23 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val dests = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
 
   (haves lazyZip dests lazyZip regs lazyZip rfBanks).foreach { case (has, dest, reg, banks) =>
-    val pr = reservStation.io.issue.bits.inst(reg)
+    val pr = issued.bits.inst(reg)
     val bankReads = VecInit(banks.map(_.readPorts.head))
     val bankId = prAddresses(pr)._1
 
     bankReads.foreach(_.address := prAddresses(pr)._2)
     bankReads.foreach(_.enable := false.B)
-    bankReads(bankId).enable := reservStation.io.issue.valid && reservStation.io.issue.bits.inst.b(has)
+    bankReads(bankId).enable := issued.valid && issued.bits.inst.b(has)
     dest := Mux(RegNext(pr === 0.U),
       VecInit.fill(numLanes)(0.U(archLen.W)),
       VecInit(bankReads.map(_.data))(RegNext(bankId)))
   }
 
-  executeIn.uop := RegNext(reservStation.io.issue.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
+  executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
 
   val execute = Module(new Execute())
-  execute.io.req.valid := RegNext(reservStation.io.issue.valid)
+  execute.io.req.valid := RegNext(issued.valid)
   execute.io.req.bits := executeIn
-  assert(!RegNext(execute.io.req.valid) || execute.io.req.ready)
 
   // handle execute writeback
   val exSchedWb = execute.io.resp.bits.sched.get
@@ -85,6 +94,19 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
       b.enable := false.B
     }
     bankWrites(prd._1).enable := execute.io.resp.fire && exRegWb.valid
+  }
+
+  if (bypass) {
+    val inFlight = RegInit(false.B)
+    when (issued.fire) {
+      inFlight := true.B
+    }
+    when (execute.io.resp.fire) {
+      inFlight := false.B
+    }
+
+    issued.ready := !inFlight
+    assert(RegNext(issued.fire) === execute.io.req.fire)
   }
 
 
