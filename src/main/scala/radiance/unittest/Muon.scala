@@ -6,6 +6,7 @@ package radiance.unittest
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
+import chisel3.experimental.VecLiterals._
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import org.chipsalliance.cde.config.Parameters
@@ -14,7 +15,7 @@ import radiance.cluster.FakeRadianceClusterTileParams
 import radiance.muon._
 import freechips.rocketchip.tilelink.{
   TLMasterPortParameters, TLClientParameters, TLClientNode, TLMasterParameters,
-  TLRAM, TLXbar
+  TLRAM, TLXbar, TLBuffer
 }
 import freechips.rocketchip.diplomacy.{
   IdRange, AddressSet
@@ -133,9 +134,11 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCorePara
     )
   }
 
-  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
-    Seq.tabulate(muonParams.lsu.numLsuLanes)(masterParams)
-  )))
+  val node = TLClientNode(Seq.tabulate(muonParams.lsu.numLsuLanes) { lane =>
+    TLMasterPortParameters.v1(
+      Seq(masterParams(lane))
+    )
+  })
 
   lazy val module = new LSUWrapperImpl
   class LSUWrapperImpl extends LazyModuleImp(this) {
@@ -206,7 +209,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     val operandsDelay: Long,
 
     val debugId: Long,
-    val expectedWriteback: Option[(Int, Seq[Bool], Seq[Long])] = None,
+    val expectedWriteback: Option[(Int, Seq[Boolean], Seq[Long])] = None,
   )
 
   def stimulus(seed: Int) = {
@@ -221,7 +224,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       var reservation = scala.util.Random.nextInt(15).toLong
       for (j <- 0 until 100) {
         // random memory operation: only loads / stores for now
-        val memOpNum = scala.util.Random.nextInt() % 8
+        val memOpNum = scala.util.Random.nextInt(8)
         val memOp = memOpNum match {
           case 0 => MemOp.loadByte
           case 1 => MemOp.loadByteUnsigned
@@ -260,7 +263,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         }
 
         val data = Seq.fill(muonParams.numLanes) {
-          scala.util.Random.nextInt().toLong
+          scala.util.Random.nextLong(Int.MaxValue.toLong + 1)
         }
 
         val expectedWriteback = memOpNum match {
@@ -274,7 +277,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
                 case b => b & 0xffL
               }
             })
-            val bools = tmask.map(b => b.B)
+            val bools = tmask
             Some((destReg, bools, data))
           }
           case 1 => {
@@ -284,7 +287,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
               val offset = (a & 0x3).toInt
               memoryState.getOrElse(word, 0L) >> (offset * 8) & 0xffL
             })
-            val bools = tmask.map(b => b.B)
+            val bools = tmask
             Some((destReg, bools, data))
           }
           case 2 => {
@@ -297,7 +300,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
                 case h => h & 0xffffL
               }
             })
-            val bools = tmask.map(b => b.B)
+            val bools = tmask
             Some((destReg, bools, data))
           }
           case 3 => {
@@ -307,13 +310,13 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
               val offset = (a & 0x2).toInt
               memoryState.getOrElse(word, 0L) >> (offset * 8) & 0xffffL
             })
-            val bools = tmask.map(b => b.B)
+            val bools = tmask
             Some((destReg, bools, data))
           }
           case 4 => {
             // LW
             val data = address.map(a => memoryState.getOrElse(a, 0L).toLong)
-            val bools = tmask.map(b => b.B)
+            val bools = tmask
             Some((destReg, bools, data))
           }
           case 5 => {
@@ -461,15 +464,31 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     }
     val expectedWritebackT = new ExpectedWritebackBundle
     val allMemoryOps = scalaStimulus.flatten.sortInPlaceBy(_.debugId).map(
-      op => expectedWritebackT.Lit(
-        _.warpId -> op.warpId.U,
-        _.destReg -> op.expectedWriteback.map(_._1.U).getOrElse(0.U),
-        _.tmask -> VecInit(op.expectedWriteback.map(_._2).getOrElse(0.U.asTypeOf(expectedWritebackT.tmask))),
-        _.data -> VecInit(op.expectedWriteback.map(_._3.map(_.U)).getOrElse(0.U.asTypeOf(expectedWritebackT.data)))
-      )
+      op => {
+        val (destReg, tmask, data) = op.expectedWriteback.getOrElse((
+          0,
+          Seq.fill(muonParams.numLanes)(false),
+          Seq.fill(muonParams.numLanes)(0L),
+        ))
+
+        val tmaskLit = tmask.map(_.B)
+        val dataLit = data.map(x => {
+          if (x < 0) {
+            x.S(muonParams.archLen.W).asUInt
+          } else {
+            x.U(muonParams.archLen.W)
+          }
+        })
+
+        expectedWritebackT.Lit(
+          _.warpId -> op.warpId.U,
+          _.destReg -> destReg.U,
+          _.tmask -> Vec.Lit(tmaskLit: _*), // cursed scala nonsense to splat a Seq into varargs
+          _.data -> Vec.Lit(dataLit: _*)
+        )
+      }
     )
     val responseROM = VecInit(allMemoryOps.toSeq)
-
     // collect packets together
     val recomposer = Module(new LaneRecomposer(
       inLanes = 1,
@@ -525,13 +544,35 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       }
     }
   }
+
+  val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModule]()
+  for (i <- 0 until muonParams.numWarps) {
+    val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModule(op)))
+    
+    val stimulusReservationArbiter = Module(new Arbiter(new LsuReservationReq, stimulusModules.length))
+    stimulusModules zip stimulusReservationArbiter.io.in foreach { case (sm, arbIn) =>
+      arbIn :<>= sm.io.coreReservationReq
+    }
+    io.coreReservations(i).req :<>= stimulusReservationArbiter.io.out
+
+    stimulusModules foreach { sm =>
+      sm.io.coreReservationResp := io.coreReservations(i).resp
+    }
+
+    allStimulusModules ++= stimulusModules
+  }
+
+  val stimulusReqArbiter = Module(new Arbiter(new LsuRequest, allStimulusModules.length))
+  allStimulusModules zip stimulusReqArbiter.io.in foreach { case (sm, arbIn) =>
+    arbIn :<>= sm.io.coreReq
+  }
+  io.coreReq :<>= stimulusReqArbiter.io.out
+
+  val responseChecker = Module(new ResponseChecker()(p))
+  responseChecker.io.coreResp :<>= io.coreResp
 }
 
-class MuonLSUTestbench(implicit p: Parameters) extends Module {
-  val io = IO(new Bundle {
-    val finished = Bool()
-  })
-  
+class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   val lsuWrapper = LazyModule(new LSUWrapper()(p))
   val xbar = TLXbar()
   val fakeGmem = TLRAM(
@@ -539,16 +580,25 @@ class MuonLSUTestbench(implicit p: Parameters) extends Module {
     beatBytes = p(MuonKey).archLen / 8
   )
   
-  xbar :=* lsuWrapper.node
+  // we need a buffer in between because lsu expects atomic (all-lanes-at-once) requests to
+  // downstream memory interface - checks all ready before setting valid; arbitration in xbar 
+  // leads to combinational loop if there is no buffer between
+  xbar :=* TLBuffer() :=* lsuWrapper.node
   fakeGmem := xbar
-
-  val lsuWrapperModule = Module(lsuWrapper.module)
-  val stimulus = Module(new SynthesizableStimulus()(p))
-
-  // connect stimulus to lsu wrapper
-  stimulus.io :<>= lsuWrapperModule.io
   
-  io.finished := false.B
+  lazy val module = new MuonLSUTestbenchImp
+  class MuonLSUTestbenchImp extends LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val finished = Bool()
+    })
+
+    val stimulus = Module(new SynthesizableStimulus()(p))
+
+    // connect stimulus to lsu wrapper
+    lsuWrapper.module.io <> stimulus.io
+
+    io.finished := false.B
+  }
 }
 
 /** Wraps Verilog shim to convert messy flattened 1-D arrays into
@@ -744,6 +794,7 @@ class MuonBackendTest(timeout: Int = 100000)(implicit p: Parameters) extends Uni
 }
 
 class MuonLSUTest(timeout: Int = 100000)(implicit p: Parameters) extends UnitTest(timeout) {
-  val dut = Module(new MuonLSUTestbench()(p))
+  val dutDiplomacy = LazyModule(new MuonLSUTestbench()(p))
+  val dut = Module(dutDiplomacy.module)
   io.finished := dut.io.finished
 }

@@ -82,8 +82,8 @@ object MuonMemTL {
   def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
                                 mresp: Vec[DecoupledIO[MemResponse[T]]],
                                 tl_client: TLClientNode) = {
-    require(mreq.length == tl_client.out.length)
-    require(mresp.length == tl_client.out.length)
+    require(mreq.length == tl_client.out.length, f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
+    require(mresp.length == tl_client.out.length, f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
     for ((req, resp, (tl_bundle, tl_edge)) <- mreq lazyZip mresp lazyZip tl_client.out) {
       connectTL(req, resp, tl_bundle, tl_edge)
     }

@@ -1305,11 +1305,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
     val io = IO(new Bundle {
         val lsu = new Bundle {
-            val globalMemReq = Decoupled(new LsuMemRequest)
-            val globalMemResp = Flipped(Decoupled(new LsuMemResponse))
+            val globalMemReq = Flipped(Decoupled(new LsuMemRequest))
+            val globalMemResp = Decoupled(new LsuMemResponse)
 
-            val shmemReq = Decoupled(new LsuMemRequest)
-            val shmemResp = Flipped(Decoupled(new LsuMemResponse))
+            val shmemReq = Flipped(Decoupled(new LsuMemRequest))
+            val shmemResp = Decoupled(new LsuMemResponse)
         }
 
         val core = new Bundle {
