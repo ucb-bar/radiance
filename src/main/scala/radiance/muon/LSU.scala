@@ -61,6 +61,9 @@ class LoadStoreUnitDerivedParams(
     // "request tag"
     val sourceIdBits = LsuQueueToken.width(muonParams) + packetBits
     val laneIdBits = log2Up(muonParams.lsu.numLsuLanes)
+
+    // debug id for testbench
+    val debugIdBits = Some(32) 
 }
 
 // Chisel type
@@ -133,6 +136,8 @@ class LSQReservationReq(implicit p: Parameters) extends CoreBundle {
 
     val addressIdx = UInt(muonParams.lsu.addressIdxBits.W)
     val storeDataIdx = UInt(muonParams.lsu.storeDataIdxBits.W)
+
+    val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
 class LSQReservationResp(implicit p: Parameters) extends CoreBundle {
@@ -194,6 +199,8 @@ class LSQMemUpdate(implicit p: Parameters) extends CoreBundle {
 class LSQWritebackReq(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
     val loadDataIdx = UInt(muonParams.lsu.loadDataIdxBits.W)
+
+    val debugId = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
 // @perf: memReq, writebackReq goes through numWarps * 4 radix arbiter
@@ -294,6 +301,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             val op = Input(MemOp())
             val addressIdx = Input(UInt(muonParams.lsu.addressIdxBits.W))
             val storeDataIdx = Input(UInt(muonParams.lsu.storeDataIdxBits.W))
+            val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => Input(UInt(bits.W)) }
 
             val receivedOperands = new Bundle {
                 val req = Flipped(Valid(new LSQOperandUpdateReq))
@@ -350,6 +358,10 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val loadPackets        = RegInit(VecInit.fill(entries)(0.U(lsuDerived.packetBits.W)))
         val done               = RegInit(VecInit.fill(entries)(false.B))
         val writeback          = RegInit(VecInit.fill(entries)(false.B))
+
+        val debugId = lsuDerived.debugIdBits.map { bits => 
+            RegInit(VecInit.fill(entries)(0.U(bits.W)))
+        }
         
         // allocation logic
         when (io.enqueue) {
@@ -365,6 +377,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             }
             loadPackets(idxBits(tail)) := 0.U(lsuDerived.packetBits.W)
             done(idxBits(tail)) := false.B
+            if (lsuDerived.debugIdBits.isDefined) {
+                debugId.get(idxBits(tail)) := io.debugId.get
+            }
 
             tail := tail + 1.U
         }
@@ -494,6 +509,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         io.writebackReq.valid := writeback.orR
         io.writebackReq.bits.token := makeToken(writebackIdx)
         io.writebackReq.bits.loadDataIdx := loadDataIdx(writebackIdx)
+        if (lsuDerived.debugIdBits.isDefined) {
+            io.writebackReq.bits.debugId.get := debugId.get(writebackIdx)
+        }
         when (io.writebackReq.fire) {
             writeback(writebackIdx) := false.B
             valid(writebackIdx) := false.B
@@ -589,6 +607,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             queue.io.op := lsuQueueReservation.req.bits.op
             queue.io.addressIdx := lsuQueueReservation.req.bits.addressIdx
             queue.io.storeDataIdx := lsuQueueReservation.req.bits.storeDataIdx
+            if (lsuDerived.debugIdBits.isDefined) {
+                queue.io.debugId.get := lsuQueueReservation.req.bits.debugId.get
+            }
         }
 
         // set flag if all queues for this warp are empty
@@ -661,6 +682,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 class LsuReservationReq(implicit p: Parameters) extends CoreBundle {
     val addressSpace = AddressSpace()
     val op = MemOp()
+
+    val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
 class LsuReservationResp(implicit p: Parameters) extends CoreBundle {
@@ -688,6 +711,8 @@ class LsuResponse(implicit p: Parameters) extends CoreBundle {
     val tmask = Vec(muonParams.numLanes, Bool())
     val destReg = UInt(muonParams.pRegBits.W)
     val writebackData = Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W))
+
+    val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
 /* 
@@ -874,6 +899,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
         queueReservation.req.bits.addressSpace := coreReservation.req.bits.addressSpace
         queueReservation.req.bits.op := coreReservation.req.bits.op
+        
+        if (lsuDerived.debugIdBits.isDefined) {
+            queueReservation.req.bits.debugId.get := coreReservation.req.bits.debugId.get
+        }
 
         coreReservation.resp := queueReservation.resp
     }
@@ -1242,6 +1271,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.coreResp.bits.destReg := s2_metadata.destReg
         io.coreResp.bits.warpId := s2_req.token.warpId
         io.coreResp.bits.packet := s2_packet
+        if (lsuDerived.debugIdBits.isDefined) {
+            io.coreResp.bits.debugId.get := s2_req.debugId.get
+        }
 
         for (i <- 0 until muonParams.numLanes) {
             val word = io.loadDataReadVal(i)

@@ -34,10 +34,11 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
         { c => () }
     }
 
-    def attemptReservation(dut: LoadStoreUnit, warp: Int, addressSpace: AddressSpace.Type, op: MemOp.Type): (Boolean, LsuQueueToken) = {
+    def attemptReservation(dut: LoadStoreUnit, warp: Int, addressSpace: AddressSpace.Type, op: MemOp.Type, debugId: Int = 0): (Boolean, LsuQueueToken) = {
         val reservation = dut.io.coreReservations(warp)
         reservation.req.bits.addressSpace.poke(addressSpace)
         reservation.req.bits.op.poke(op)
+        reservation.req.bits.debugId.get.poke(debugId)
         reservation.req.valid.poke(true)
 
         val fire = reservation.req.ready.peekBoolean()
