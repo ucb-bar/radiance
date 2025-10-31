@@ -146,19 +146,21 @@ trait HasMuonCoreParameters {
   val archLen = muonParams.archLen
   val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 
+  // compute "derived" LSU parameters
+  val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+
   val numLsqEntries = {
     muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
   }
   val addressBits = muonParams.archLen
-  val dmemTagBits  = log2Ceil(numLsqEntries)
+  val dmemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
   val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
-  val smemTagBits  = log2Ceil(numLsqEntries) // FIXME: separate lsq for gmem/smem?
+  val smemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
   val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
   val imemTagBits  = log2Ceil(muonParams.numWarps * muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 
-  // compute "derived" LSU parameters
-  val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
+  
 
   require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
   val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)

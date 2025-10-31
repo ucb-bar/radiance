@@ -66,12 +66,14 @@ class RadianceMuonConfig extends Config(
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new RadianceBaseConfig)
 
+/*
 class RadianceCyclotronConfig extends Config(
   new WithCyclotronCores(1) ++
   new WithCoalescer(nNewSrcIds = 16) ++
   new WithVortexL1Banks(nBanks = 8) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new RadianceBaseConfig)
+*/
 
 class RadianceTapeoutSimConfig extends Config(
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
