@@ -66,13 +66,17 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     req.bits.tag := tlIn.a.bits.source
     assert(req.bits.tag.getWidth >= tlIn.a.bits.source.getWidth,
       s"cache does not have enough tag bits: ${req.bits.tag.getWidth}<${tlIn.a.bits.source.getWidth}")
-    req.bits.size := tlIn.a.bits.size
+
+    // every read is cache line sized. this is because the output always starts at lsb
+    // regardless of address. i.e. this logic does not use active byte lanes that
+    // tilelink uses, so we have to either read the whole line, or re-shift the result.
+    req.bits.size := log2Ceil(outer.beatBytes).U // tlIn.a.bits.size
     req.bits.cmd := MuxCase(M_XRD, Seq(
       (tlIn.a.bits.opcode === TLMessages.Get) -> M_XRD,
       (tlIn.a.bits.opcode === TLMessages.PutFullData) -> M_XWR,
       (tlIn.a.bits.opcode === TLMessages.PutPartialData) -> M_XWR,
     )) // TODO: ability to flush
-    req.bits.addr := tlIn.a.bits.address
+    req.bits.addr := tlIn.a.bits.address & (-outer.beatBytes).S(tlIn.params.addressBits.W).asUInt
     req.bits.data := tlIn.a.bits.data
     req.bits.mask := tlIn.a.bits.mask
     req.bits.signed := false.B
@@ -82,7 +86,6 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     req.bits.no_resp := false.B
     req.bits.no_alloc := false.B // <- might be able to imp writethrough
     req.bits.no_xcpt := true.B // no vm/dp, so no page faults etc
-    // TODO: use tlIn.a.bits.user to carry pc/tmask etc
 
 //    when (req.fire) {
 //      when (req.bits.cmd === M_XRD) {
@@ -99,7 +102,7 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     assert(!resp.valid || tlIn.d.ready, "response must be ready!")
     tlIn.d.valid := resp.valid
     tlIn.d.bits.data := resp.bits.data
-    tlIn.d.bits.size := resp.bits.size
+    tlIn.d.bits.size := 3.U // resp.bits.size // TODO hardcode for now, fix later
     tlIn.d.bits.source := resp.bits.tag
     tlIn.d.bits.opcode := MuxCase(TLMessages.AccessAckData, Seq(
       (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,
