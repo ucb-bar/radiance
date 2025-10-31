@@ -13,7 +13,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val schedWb = Output(schedWritebackT)
   })
 
-  val bypass = false
+  val bypass = true
 
   val issued = if (bypass) {
     val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
@@ -101,11 +101,35 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     when (issued.fire) {
       inFlight := true.B
     }
+    when (execute.io.req.fire) {
+      val e = execute.io.req.bits
+      printf(cf"issued wid=${e.uop.wid} pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
+        cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
+        e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
+        "] rs2=[" +
+        e.rs2Data.get.map(x => cf"$x%x ").reduce(_ + _) +
+        cf"]\n")
+    }
     when (execute.io.resp.fire) {
       inFlight := false.B
+      val r = execute.io.resp.bits.reg.get.bits
+      val s = execute.io.resp.bits.sched.get.bits
+      printf(cf"writeback wid=${s.wid} pc=${s.pc}%x" +
+        cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
+        cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
+        cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
+        cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
+        cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} " +
+        cf"\n")
+      printf(cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
+        cf"rd=${r.rd} data=[" +
+        r.data.map(x => cf"$x%x ").reduce(_ + _) +
+        cf"] mask=${r.tmask}%b" +
+        cf"\n")
     }
 
     issued.ready := !inFlight
+    execute.io.req.valid := RegNext(issued.fire)
     assert(RegNext(issued.fire) === execute.io.req.fire)
   }
 
