@@ -7,7 +7,7 @@ import radiance.muon._
 
 // TODO: consolidate with below types
 class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
-  val rd = aRegT
+  val rd = pRegT
   val data = Vec(muonParams.numLanes, regDataT)
   val tmask = tmaskT
 }

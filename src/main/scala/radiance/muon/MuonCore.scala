@@ -321,5 +321,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
 
+  fe.io.commit := be.io.schedWb
+
   (be.io.ibuf zip fe.io.ibuf).foreach { case (b, f) => b <> f }
 }

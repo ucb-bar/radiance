@@ -10,6 +10,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
+    val schedWb = Output(schedWritebackT)
   })
 
   val hazard = Module(new Hazard)
@@ -30,39 +31,67 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   // TODO: Collector
   // temporary placeholders to generate reg file banks for par
-  val rfBanks = Seq.fill(muonParams.numRegBanks)(SRAM(
+  val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(
     size = muonParams.numPhysRegs / muonParams.numRegBanks,
-    tpe = UInt((muonParams.archLen * muonParams.numLanes).W),
+    tpe = Vec(numLanes, UInt(archLen.W)),
     numReadPorts = 1,
     numWritePorts = 1,
     numReadwritePorts = 0
-  ))
+  )))
 
-  rfBanks.foreach { b =>
-    b.readPorts.head.enable := false.B
-    b.readPorts.head.address := 0.U
-    b.writePorts.head.enable := false.B
-    b.writePorts.head.address := 0.U
-    b.writePorts.head.data := 0.U
-
-    dontTouch(b.readPorts.head)
-    dontTouch(b.writePorts.head)
+  // read registers for execute
+  def prAddresses(pr: UInt) = {
+    (pr(7, 6), pr(5, 0)) // im lazy TODO
   }
 
-  val execute = Module(new Execute())
-  execute.io.req.valid := false.B
-  execute.io.req.bits := DontCare // TODO
-  execute.io.resp.ready := true.B
-  dontTouch(execute.io.req)
-  dontTouch(execute.io.resp)
+  val executeIn = Wire(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true))
+  val haves = Seq(HasRs1, HasRs2, HasRs3)
+  val regs = Seq(Rs1, Rs2, Rs3)
+  val dests = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
 
-  // TODO: INT/SFU
-  // TODO: LSU
+  (haves lazyZip dests lazyZip regs lazyZip rfBanks).foreach { case (has, dest, reg, banks) =>
+    val pr = reservStation.io.issue.bits.inst(reg)
+    val bankReads = VecInit(banks.map(_.readPorts.head))
+    val bankId = prAddresses(pr)._1
+
+    bankReads.foreach(_.address := prAddresses(pr)._2)
+    bankReads.foreach(_.enable := false.B)
+    bankReads(bankId).enable := reservStation.io.issue.valid && reservStation.io.issue.bits.inst.b(has)
+    dest := Mux(RegNext(pr === 0.U),
+      VecInit.fill(numLanes)(0.U(archLen.W)),
+      VecInit(bankReads.map(_.data))(RegNext(bankId)))
+  }
+
+  executeIn.uop := RegNext(reservStation.io.issue.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
+
+  val execute = Module(new Execute())
+  execute.io.req.valid := RegNext(reservStation.io.issue.valid)
+  execute.io.req.bits := executeIn
+  assert(!RegNext(execute.io.req.valid) || execute.io.req.ready)
+
+  // handle execute writeback
+  val exSchedWb = execute.io.resp.bits.sched.get
+  io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
+  io.schedWb.bits := exSchedWb.bits
+  execute.io.resp.ready := true.B // scheduler writeback is valid only
+
+  val exRegWb = execute.io.resp.bits.reg.get
+  rfBanks.foreach { case (banks) =>
+    val prd = prAddresses(exRegWb.bits.rd)
+    val bankWrites = VecInit(banks.map(_.writePorts.head))
+    bankWrites.foreach { b =>
+      b.address := prd._2
+      b.data := exRegWb.bits.data
+      b.enable := false.B
+    }
+    bankWrites(prd._1).enable := execute.io.resp.fire && exRegWb.valid
+  }
+
+
   io.dmem.req.foreach(_.valid := false.B)
   io.dmem.req.foreach(_.bits := DontCare)
   io.dmem.resp.foreach(_.ready := false.B)
   io.smem.req.foreach(_.valid := false.B)
   io.smem.req.foreach(_.bits := DontCare)
   io.smem.resp.foreach(_.ready := false.B)
-  // TODO: Writeback
 }
