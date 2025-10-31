@@ -56,10 +56,9 @@ abstract class ExPipe(
 
   val respValid = RegInit(false.B)
 
-  // req fire has precedence
-  when (io.req.fire) {
+  when (io.req.fire && !io.resp.fire) {
     busy := true.B
-  }.elsewhen (io.resp.fire) {
+  }.elsewhen (!io.req.fire && io.resp.fire) {
     busy := false.B
-  }
+  } // otherwise busy stays as is
 }

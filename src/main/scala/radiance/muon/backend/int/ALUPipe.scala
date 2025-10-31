@@ -49,7 +49,7 @@ class ALUPipe(implicit p: Parameters)
     recomposer.get.io.in.bits.data(1)(i) := vecALU(i).io.cmp_out
   }
   recomposer.get.io.in.valid := decomposer.get.io.out.valid
-  recomposer.get.io.out.ready := busy
+  recomposer.get.io.out.ready := io.resp.ready
 
   io.resp.valid := respValid
   io.resp.bits.reg.get.valid := respValid && !reqInst.b(IsBranch) && !reqInst.b(IsJump)
@@ -70,6 +70,8 @@ class ALUPipe(implicit p: Parameters)
     PriorityMux(reqTmask, aluOut).asTypeOf(pcT))
   schedResp.bits.setTmask.valid := reqInst.b(IsBranch)
   schedResp.bits.setTmask.bits := branchTakenMask
+  schedResp.bits.pc := latchedUop.pc
+  schedResp.bits.wid := latchedUop.wid
 
   when (io.resp.fire) {
     respValid := false.B
