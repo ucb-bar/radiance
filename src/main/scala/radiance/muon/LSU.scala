@@ -60,6 +60,7 @@ class LoadStoreUnitDerivedParams(
 
     // "request tag"
     val sourceIdBits = LsuQueueToken.width(muonParams) + packetBits
+    val laneIdBits = log2Up(muonParams.lsu.numLsuLanes)
 }
 
 // Chisel type
@@ -92,6 +93,12 @@ object MemOp extends ChiselEnum {
     val isStore  = (x: MemOp.Type) => x.isOneOf(storeByte, storeHalf, storeWord)
     val isAtomic = (x: MemOp.Type) => x.isOneOf(amoSwap, amoAdd, amoAnd, amoOr, amoXor, amoMax, amoMin)
     val isFence  = (x: MemOp.Type) => x.isOneOf(fence)
+    val size     = (x: MemOp.Type) => {
+        MuxCase(2.U, Seq(
+            x.isOneOf(loadByte, loadByteUnsigned, storeByte) -> 0.U,
+            x.isOneOf(loadHalf, loadHalfUnsigned, storeHalf) -> 1.U
+        ))
+    }
 }
 
 // Uniquely identifies an entry in load/store queues (warpId, addressSpace, ldq, index)
@@ -778,7 +785,6 @@ object Utils {
 }
 
 class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
-
     val io = IO(new Bundle {
         val coreReservations = Vec(muonParams.numWarps, new Bundle {
             val req = Flipped(Decoupled(new LsuReservationReq))
@@ -1281,11 +1287,11 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
     })
 
     def lsuTagToCoreTag = (lsuTag: UInt, lane: Int) => {
-        lsuTag * muonParams.numLanes.U + lane.U
+        Cat(lane.U(lsuDerived.laneIdBits.W), lsuTag)
     }
 
     def coreTagToLsuTag = (coreTag: UInt) => {
-        coreTag >> log2Ceil(muonParams.numLanes).U
+        coreTag(lsuDerived.sourceIdBits-1, 0)
     }
 
     def connectReq = (lsuReq: DecoupledIO[LsuMemRequest], coreReq: Vec[DecoupledIO[MemRequest[Bundle]]]) => {
@@ -1296,9 +1302,9 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
             lane.bits.tag := lsuTagToCoreTag(lsuReq.bits.tag, laneId)
             lane.bits.address := lsuReq.bits.address(laneId)
             lane.bits.data := lsuReq.bits.data(laneId)
-            lane.bits.mask := ???
+            lane.bits.mask := lsuReq.bits.mask(laneId)
             lane.bits.metadata := DontCare
-            lane.bits.size := ???
+            lane.bits.size := MemOp.size(lsuReq.bits.op)
             lane.bits.store := MemOp.isStore(lsuReq.bits.op)
         }
         lsuReq.ready := allReady

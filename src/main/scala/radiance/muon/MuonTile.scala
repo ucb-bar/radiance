@@ -61,15 +61,32 @@ object MuonMemTL {
 
   def connectTL[T <: Bundle](mreq: DecoupledIO[MemRequest[T]],
                              mresp: DecoupledIO[MemResponse[T]],
-                             tl: TLClientNode) = {
-    val (in, ie) = tl.out.head
-    in.a.bits := MuonMemTL.toTLA(mreq.bits, ie)
-    in.a.valid := mreq.valid
-    mreq.ready := in.a.ready
+                             tl_bundle: TLBundle,
+                             tl_edge: TLEdgeOut): Unit = {
+    tl_bundle.a.bits := MuonMemTL.toTLA(mreq.bits, tl_edge)
+    tl_bundle.a.valid := mreq.valid
+    mreq.ready := tl_bundle.a.ready
 
-    mresp.valid := in.d.valid
-    mresp.bits := MuonMemTL.fromTLD(in.d.bits, mresp.bits)
-    in.d.ready := mresp.ready
+    mresp.valid := tl_bundle.d.valid
+    mresp.bits := MuonMemTL.fromTLD(tl_bundle.d.bits, mresp.bits)
+    tl_bundle.d.ready := mresp.ready
+  }
+
+  def connectTL[T <: Bundle](mreq: DecoupledIO[MemRequest[T]],
+                             mresp: DecoupledIO[MemResponse[T]],
+                             tl: TLClientNode): Unit = {
+    val (in, ie) = tl.out.head
+    connectTL(mreq, mresp, in, ie)
+  }
+
+  def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
+                                mresp: Vec[DecoupledIO[MemResponse[T]]],
+                                tl_client: TLClientNode) = {
+    require(mreq.length == tl_client.out.length)
+    require(mresp.length == tl_client.out.length)
+    for ((req, resp, (tl_bundle, tl_edge)) <- mreq lazyZip mresp lazyZip tl_client.out) {
+      connectTL(req, resp, tl_bundle, tl_edge)
+    }
   }
 }
 
