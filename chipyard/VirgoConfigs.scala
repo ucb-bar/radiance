@@ -9,7 +9,7 @@ import radiance.virgo._
 // ----------------
 // Virgo Configs
 // ----------------
-
+/*
 class VirgoConfig extends VirgoClusterConfig
 class VirgoFP16Config extends VirgoFP16ClusterConfig
 class VirgoHopperConfig extends Virgo4CFP16ClusterConfig
@@ -147,3 +147,4 @@ class VirgoFuzzerConfig extends Config(
   new WithSIMTConfig(numLsuLanes = 4, numSMEMInFlights = 2) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new chipyard.config.AbstractConfig)
+*/

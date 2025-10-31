@@ -5,20 +5,21 @@ package radiance.unittest
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.BundleLiterals._
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.cluster.FakeRadianceClusterTileParams
 import radiance.muon._
-import freechips.rocketchip.tilelink.TLMasterPortParameters
-import freechips.rocketchip.tilelink.TLClientParameters
-import freechips.rocketchip.tilelink.TLClientNode
-import freechips.rocketchip.tilelink.TLMasterParameters
-import freechips.rocketchip.diplomacy.IdRange
-import freechips.rocketchip.tilelink.TLRAM
-import freechips.rocketchip.diplomacy.AddressSet
-import freechips.rocketchip.tilelink.TLXbar
+import freechips.rocketchip.tilelink.{
+  TLMasterPortParameters, TLClientParameters, TLClientNode, TLMasterParameters,
+  TLRAM, TLXbar
+}
+import freechips.rocketchip.diplomacy.{
+  IdRange, AddressSet
+}
+import radiance.muon.backend.LaneRecomposer
 
 /** Testbench for Muon with the test signals */
 class MuonTestbench(implicit p: Parameters) extends Module {
@@ -193,6 +194,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
   })
 
   case class MemoryOperation(
+    val warpId: Int,
     val memOp: MemOp.Type,
     val address: Seq[Long],
     val imm: Long,
@@ -203,6 +205,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     val reservationAt: Long,
     val operandsDelay: Long,
 
+    val debugId: Long,
     val expectedWriteback: Option[(Int, Seq[Bool], Seq[Long])] = None,
   )
 
@@ -211,6 +214,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
 
     // Generate "program-order" sequence of memory operations
     val memOpsPerWarp = scala.collection.mutable.ArrayBuffer[Seq[MemoryOperation]]()
+    var debugId = 0
     for (i <- 0 until muonParams.numWarps) {
       val memOps = scala.collection.mutable.ArrayBuffer[MemoryOperation]()
       val memoryState = scala.collection.mutable.Map[Long, Long]()
@@ -357,17 +361,20 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         val imm = 0L // unused for now
         
         memOps += MemoryOperation(
+          warpId = i,
           memOp, 
           address, 
           imm, 
           data, 
           tmask,
           destReg,
+          debugId = debugId,
           reservationAt = reservation,
           operandsDelay = scala.util.Random.nextInt(10).toLong,
           expectedWriteback = expectedWriteback
         )
 
+        debugId += 1
         reservation += scala.util.Random.nextInt(5).toLong
       }
       memOpsPerWarp += memOps.toSeq
@@ -386,14 +393,12 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       val coreReservationResp = Flipped(Valid(new LsuReservationResp))
       
       val coreReq = Decoupled(new LsuRequest)
-      val coreResp = Flipped(Decoupled(new LsuResponse))
     })
 
-    val s_idle :: s_reserve :: s_operandsDelay :: s_issueReq :: s_waitResp :: s_done :: Nil = Enum(7)
+    val s_idle :: s_reserve :: s_operandsDelay :: s_issueReq :: s_done :: Nil = Enum(5)
     val state = RegInit(s_idle)
     val token = RegInit(0.U.asTypeOf(new LsuQueueToken))
     val (cycleCounter, _) = Counter(true.B, Int.MaxValue)
-
 
     io.coreReservationReq.valid := false.B
     io.coreReservationReq.bits := DontCare
@@ -412,6 +417,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         io.coreReservationReq.valid := true.B
         io.coreReservationReq.bits.addressSpace := AddressSpace.globalMemory
         io.coreReservationReq.bits.op := memoryOp.memOp
+        io.coreReservationReq.bits.debugId.get := 0.U
         when (io.coreReservationReq.fire) {
           token := io.coreReservationResp.bits.token
           state := s_operandsDelay
@@ -434,20 +440,91 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         io.coreReq.bits.token := token
 
         when (io.coreReq.fire) {
-          state := s_waitResp
-        }
-      }
-
-      is (s_waitResp) {
-        when (io.coreResp.valid) {
           state := s_done
         }
       }
+
+      is(s_done) {/* nop */}
     }
   }
 
+  class ResponseChecker(implicit p: Parameters) extends CoreModule {
+    val io = IO(new Bundle {
+      val coreResp = Flipped(Decoupled(new LsuResponse))
+    })
 
-  
+    class ExpectedWritebackBundle extends Bundle {
+      val warpId = UInt(muonParams.warpIdBits.W)
+      val destReg = UInt(muonParams.pRegBits.W)
+      val tmask = Vec(muonParams.numLanes, Bool())
+      val data = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+    }
+    val expectedWritebackT = new ExpectedWritebackBundle
+    val allMemoryOps = scalaStimulus.flatten.sortInPlaceBy(_.debugId).map(
+      op => expectedWritebackT.Lit(
+        _.warpId -> op.warpId.U,
+        _.destReg -> op.expectedWriteback.map(_._1.U).getOrElse(0.U),
+        _.tmask -> VecInit(op.expectedWriteback.map(_._2).getOrElse(0.U.asTypeOf(expectedWritebackT.tmask))),
+        _.data -> VecInit(op.expectedWriteback.map(_._3.map(_.U)).getOrElse(0.U.asTypeOf(expectedWritebackT.data)))
+      )
+    )
+    val responseROM = VecInit(allMemoryOps.toSeq)
+
+    // collect packets together
+    val recomposer = Module(new LaneRecomposer(
+      inLanes = 1,
+      outLanes = muonParams.numLanes / muonParams.lsu.numLsuLanes,
+      elemTypes = Seq(new LsuResponse)
+    ))
+
+    io.coreResp.ready := recomposer.io.out.ready
+    recomposer.io.in.valid := io.coreResp.valid
+
+    recomposer.io.in.bits.data(0)(0) := io.coreResp.bits
+
+    recomposer.io.out.ready := true.B
+    val packets = RegInit(0.U.asTypeOf(recomposer.io.out.bits.data(0)))
+    val firePrev = RegNext(recomposer.io.out.fire, false.B)
+    when (recomposer.io.out.fire) {
+      packets := recomposer.io.out.bits.data(0)
+    }
+
+    when (firePrev) {
+      val typedPackets = packets.map(x => x.asTypeOf(new LsuResponse))
+      
+      // 1. check that debugId, warpId, destReg, tmask are all matching
+      typedPackets.reduce( (a, b) => {
+        assert(a.debugId.get === b.debugId.get, "Mismatched debugId in recomposed LSU response")
+        assert(a.warpId === b.warpId, "Mismatched warpId in recomposed LSU response")
+        assert(a.destReg === b.destReg, "Mismatched destReg in recomposed LSU response")
+        assert(a.tmask === b.tmask, "Mismatched tmask in recomposed LSU response") // TODO: should tmask be numLsuLanes wide?
+        a
+      })
+
+      // 2. check that packets are in order
+      for (i <- 1 until typedPackets.length) {
+        assert(typedPackets(i).packet === i.U, "Out-of-order packets in recomposed LSU response")
+      }
+
+      // 3. check data against expected writeback
+      val debugId = typedPackets(0).debugId.get
+      val expected = responseROM(debugId)
+      
+      val warpId = typedPackets(0).warpId
+      assert(warpId === expected.warpId, cf"Mismatched warpId in LSU response ($warpId) vs expected (${expected.warpId})")
+
+      val destReg = typedPackets(0).destReg
+      assert(destReg === expected.destReg, cf"Mismatched destReg in LSU response ($destReg) vs expected (${expected.destReg})")
+
+      val tmask = typedPackets(0).tmask
+      assert(tmask === expected.tmask, cf"Mismatched tmask in LSU response ($tmask) vs expected (${expected.tmask})")
+
+      val dataConcat = typedPackets.flatMap(_.writebackData)
+      for (i <- 0 until muonParams.numLanes) {
+        assert(dataConcat(i) === expected.data(i), cf"Mismatched writeback data lane $i in LSU response (${dataConcat(i)}) vs expected ${expected.data(i)})")
+      }
+    }
+  }
 }
 
 class MuonLSUTestbench(implicit p: Parameters) extends Module {
