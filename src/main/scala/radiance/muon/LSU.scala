@@ -803,14 +803,19 @@ class FreeListAllocator(entries: Int) extends Module {
         val allocatedIndex = Output(UInt(log2Up(entries).W))
         val allocationValid = Output(Bool())
     })
+
+    require((1 << entries.log2) == entries, "FreeListAllocator entries must be a power of 2")
+    val indexBits = log2Up(entries)
+    val circIndexBits = indexBits + 1
+
+    val freeList = RegInit(VecInit.tabulate(entries)(i => i.U(indexBits.W)))
+    val allocateHead = RegInit(0.U(circIndexBits.W))
+    val deallocateTail = RegInit(0.U(circIndexBits.W) | (1 << indexBits).U(circIndexBits.W))
+
+    val getIndexBits = (x: UInt) => x(indexBits-1, 0)
     
-    val freeList = RegInit(VecInit.tabulate(entries)(i => i.U(log2Up(entries).W)))
-    val freeHead = RegInit(0.U(log2Up(entries).W))
-    val freeTail = RegInit((entries - 1).U(log2Up(entries).W))
-    val allocated = RegInit(VecInit.fill(entries)(false.B))
-    
-    val hasFree = freeHead =/= freeTail
-    val allocIndex = freeList(freeHead)
+    val hasFree = allocateHead =/= deallocateTail
+    val allocIndex = freeList(getIndexBits(allocateHead))
     
     io.hasFree := hasFree
     io.allocatedIndex := allocIndex
@@ -818,15 +823,13 @@ class FreeListAllocator(entries: Int) extends Module {
     
     // Allocation
     when (io.allocate && hasFree) {
-        allocated(allocIndex) := true.B
-        freeHead := freeHead + 1.U
+        allocateHead := allocateHead + 1.U
     }
     
     // Deallocation
     when (io.deallocate) {
-        allocated(io.deallocateIndex) := false.B
-        freeList(freeTail) := io.deallocateIndex
-        freeTail := freeTail + 1.U
+        freeList(getIndexBits(deallocateTail)) := io.deallocateIndex
+        deallocateTail := deallocateTail + 1.U
     }
 }
 
@@ -864,6 +867,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     // instantiate lsu queues
     val loadStoreQueues = Module(new LoadStoreQueue)
     io.empty := loadStoreQueues.io.queuesEmpty
+    dontTouch(io.empty)
 
     // Dynamic allocation system using free list allocators
     // addressTmask and storeData indices are allocated at queue entry reservation time
@@ -968,18 +972,20 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 queueReservation.req.bits.addressIdx := DontCare
                 queueReservation.req.bits.storeDataIdx := DontCare
             }.elsewhen(MemOp.isStore(coreReservation.req.bits.op) || MemOp.isAtomic(coreReservation.req.bits.op)) {
-                addressTmaskAllocator.io.allocate := true.B
-                storeDataAllocator.io.allocate := true.B
-                coreReservation.req.ready := addressTmaskAllocator.io.allocationValid && storeDataAllocator.io.allocationValid
+                val canAllocate = addressTmaskAllocator.io.hasFree && storeDataAllocator.io.hasFree
+                addressTmaskAllocator.io.allocate := canAllocate
+                storeDataAllocator.io.allocate := canAllocate
+                coreReservation.req.ready := canAllocate
 
-                queueReservation.req.valid := addressTmaskAllocator.io.allocationValid && storeDataAllocator.io.allocationValid
+                queueReservation.req.valid := canAllocate
                 queueReservation.req.bits.addressIdx := addressTmaskAllocator.io.allocatedIndex
                 queueReservation.req.bits.storeDataIdx := storeDataAllocator.io.allocatedIndex
             }.otherwise {
-                addressTmaskAllocator.io.allocate := true.B
-                coreReservation.req.ready := addressTmaskAllocator.io.allocationValid
+                val canAllocate = addressTmaskAllocator.io.hasFree
+                addressTmaskAllocator.io.allocate := canAllocate
+                coreReservation.req.ready := canAllocate
 
-                queueReservation.req.valid := addressTmaskAllocator.io.allocationValid
+                queueReservation.req.valid := canAllocate
                 queueReservation.req.bits.addressIdx := addressTmaskAllocator.io.allocatedIndex
                 queueReservation.req.bits.storeDataIdx := DontCare
             }

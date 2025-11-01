@@ -228,7 +228,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       for (j <- 0 until 100) {
         // random memory operation: only word-sized loads / stores for now
         val r = scala.util.Random.nextDouble()
-        val (memOp, memOpNum) = if (r < 0.5) {
+        val (memOp, memOpNum) = if (r < 0.5 && memoryState.nonEmpty) {
           (MemOp.loadWord, 4)
         }
         else {
@@ -251,7 +251,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         }*/
 
         val address = Seq.fill(muonParams.numLanes) {
-          if (scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
+          if (memOpNum == 4 || scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
             // 30% chance to repeat an address we've looked at before
             val keys = memoryState.keys.toSeq
             val randomOffset = memOpNum match {
@@ -441,7 +441,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     perWarpStimulus
   }
 
-  val scalaStimulus = manualStimulus
+  val scalaStimulus = stimulus(0)
 
   // convert it down into 1 module per memory operation
   // this is "synthesizable" in some sense :)
@@ -608,7 +608,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
 
       val dataConcat = typedPackets.flatMap(_.writebackData)
       for (i <- 0 until muonParams.numLanes) {
-        assert(dataConcat(i) === expected.data(i), cf"Mismatched writeback data lane $i in LSU response (${dataConcat(i)}) vs expected ${expected.data(i)})")
+        assert(!tmask(i) || dataConcat(i) === expected.data(i), cf"Mismatched writeback data lane $i in LSU response (${dataConcat(i)}) vs expected ${expected.data(i)})")
       }
 
       gotResponse(debugId) := true.B
