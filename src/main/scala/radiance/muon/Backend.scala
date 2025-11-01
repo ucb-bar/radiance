@@ -114,7 +114,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
       inFlight := false.B
       val r = execute.io.resp.bits.reg.get.bits
       val s = execute.io.resp.bits.sched.get.bits
-      printf(cf"writeback wid=${s.wid} pc=${s.pc}%x" +
+      printf(cf"writeback wid=${s.wid} pc=${s.pc}%x " +
         cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
         cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
         cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +

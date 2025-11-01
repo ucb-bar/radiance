@@ -48,8 +48,8 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   val respArbiter = Module(new RRArbiter(writebackT(), pipes.length))
   (respArbiter.io.in zip pipes).foreach { case (arbIn, pipe) =>
-    arbIn.bits.sched.get := pipe.io.resp.bits.sched.getOrElse(DontCare)
-    arbIn.bits.reg.get := pipe.io.resp.bits.reg.getOrElse(DontCare)
+    arbIn.bits.sched.get := pipe.io.resp.bits.sched.getOrElse(0.U.asTypeOf(schedWritebackT))
+    arbIn.bits.reg.get := pipe.io.resp.bits.reg.getOrElse(0.U.asTypeOf(regWritebackT))
     arbIn.valid := pipe.io.resp.valid
     pipe.io.resp.ready := arbIn.ready
   }

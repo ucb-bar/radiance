@@ -54,7 +54,7 @@ case class MuonCoreParams(
   mtvecInit: Option[BigInt] = Some(BigInt(0)),
   mtvecWritable: Boolean = false,
   traceHasWdata: Boolean = false,
-  xLen: Int = 64,
+  xLen: Int = 32,
   archLen: Int = 32,
   pgLevels: Int = 2,
   lrscCycles: Int = 0,

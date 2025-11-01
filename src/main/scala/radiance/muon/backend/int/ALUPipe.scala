@@ -3,6 +3,7 @@ package radiance.muon.backend.int
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.ALU
+import freechips.rocketchip.tile.HasNonDiplomaticTileParameters
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
@@ -12,7 +13,10 @@ class ALUPipe(implicit p: Parameters)
     decomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), UInt(p(MuonKey).archLen.W))),
     recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), Bool())),
     outLanes = Some(p(MuonKey).intPipe.numALULanes),
-    writebackSched = true, writebackReg = true) with HasIntPipeParams with HasCoreBundles {
+    writebackSched = true, writebackReg = true)
+    with HasIntPipeParams with HasCoreBundles with HasNonDiplomaticTileParameters {
+
+  assert(xLen == 32, "alu requires 32 bit xlen")
 
   val vecALU = Seq.fill(numALULanes)(Module(new ALU))
   vecALU.foreach(alu => alu.io.dw := archLen.U)
@@ -60,16 +64,16 @@ class ALUPipe(implicit p: Parameters)
   val schedResp = io.resp.bits.sched.get
   schedResp := 0.U.asTypeOf(schedResp)
 
+  val isBranch = WireInit(reqInst.b(IsBranch))
+  dontTouch(isBranch)
   val branchTakenMask = reqTmask & cmpOut.asUInt
   val setPcValid = reqInst.b(IsJump) || (reqInst.b(IsBranch) && branchTakenMask.orR)
 
-  schedResp.valid := respValid && setPcValid
+  schedResp.valid := respValid
   schedResp.bits.setPC.valid := setPcValid
   schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch),
     (reqPC + reqInst(Imm32)).asTypeOf(pcT), // to shashank: cannot add at req fire, that causes race for reqPC value
     PriorityMux(reqTmask, aluOut).asTypeOf(pcT))
-  schedResp.bits.setTmask.valid := reqInst.b(IsBranch)
-  schedResp.bits.setTmask.bits := branchTakenMask
   schedResp.bits.pc := latchedUop.pc
   schedResp.bits.wid := latchedUop.wid
 
