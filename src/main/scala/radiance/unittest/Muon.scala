@@ -250,26 +250,38 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           case 4 | 5 | 6 | 7 => MemOp.storeWord
         }*/
 
-        val address = Seq.fill(muonParams.numLanes) {
-          if (memOpNum == 4 || scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
-            // 30% chance to repeat an address we've looked at before
-            val keys = memoryState.keys.toSeq
-            val randomOffset = memOpNum match {
-              case 0 | 1 | 5 => scala.util.Random.nextInt(4)
-              case 2 | 3 | 6 => scala.util.Random.nextInt(2) * 2
-              case 4 | 7     => 0
+        val generateAddresses = () => {
+          Seq.fill(muonParams.numLanes) {
+            if (memOpNum == 4 || scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
+              // 30% chance to repeat an address we've looked at before
+              val keys = memoryState.keys.toSeq
+              val randomOffset = memOpNum match {
+                case 0 | 1 | 5 => scala.util.Random.nextInt(4)
+                case 2 | 3 | 6 => scala.util.Random.nextInt(2) * 2
+                case 4 | 7     => 0
+              }
+              val addr = keys(scala.util.Random.nextInt(keys.length)) + randomOffset
+              println(f"addr: $addr, memOpNum: $memOpNum")
+              addr
+            } else {
+              // random aligned address in 1MB range
+              val addr = 1024 * 1024 * i + scala.util.Random.nextInt(1024 * 1024)
+              println(f"addr: $addr, aligned: ${addr & ~0x3}, memOpNum: $memOpNum")
+              (memOpNum match {
+                case 2 | 3 | 6 => addr & ~0x1
+                case 4 | 7     => addr & ~0x3
+                case _ => addr
+              }).toLong
             }
-            keys(scala.util.Random.nextInt(keys.length)) + randomOffset
-          } else {
-            // random aligned address in 1MB range
-            val addr = 1024 * 1024 * i + scala.util.Random.nextInt(1024 * 1024)
-            println(f"addr: $addr, aligned: ${addr & ~0x3}, memOpNum: $memOpNum")
-            (memOpNum match {
-              case 2 | 3 | 6 => addr & ~0x1
-              case 4 | 7     => addr & ~0x3
-              case _ => addr
-            }).toLong
           }
+        }
+
+        var address = generateAddresses()
+        val isStore = memOpNum >= 5 && memOpNum <= 7
+        // stores should have unique addresses, otherwise there is nondeterminism
+        // which is hard to test
+        while (isStore && address.toSet.size != muonParams.numLanes) {
+          address = generateAddresses()
         }
 
         val destReg = scala.util.Random.nextInt(muonParams.numArchRegs)
@@ -656,7 +668,7 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   val lsuWrapper = LazyModule(new LSUWrapper()(p))
   val xbar = TLXbar()
   val fakeGmem = TLRAM(
-    address = AddressSet(0x0, 0xfffff),
+    address = AddressSet(0x0, 1024*1024*16-1), // TODO: don't hardcode; 1MB region for each warp
     beatBytes = p(MuonKey).archLen / 8
   )
   

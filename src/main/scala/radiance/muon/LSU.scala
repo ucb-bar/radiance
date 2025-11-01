@@ -1033,7 +1033,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             metadata.mask(i) := address(i)(lsuDerived.smallPerLaneMaskBits-1, 0)
         }
 
-        printf(cf"[LSU] Write metadata: token = ${io.coreReq.bits.token}, destReg = ${io.coreReq.bits.destReg}, tmask = ${io.coreReq.bits.tmask}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
+        printf(cf"[LSU] Operands update: token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), address = ${address}, tmask = ${io.coreReq.bits.tmask}, storeData = ${io.coreReq.bits.storeData}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
+        printf(cf"[LSU] Write metadata: token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), destReg = ${io.coreReq.bits.destReg}, tmask = ${io.coreReq.bits.tmask}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
         
         metadataMem.write(metadataWriteIdx, metadata)
     }
@@ -1234,7 +1235,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         ))
 
         when (receivedResp) {
-            printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}, data = ${loadDataWriteVal}\n")
+            printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.token.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}, data = ${loadDataWriteVal}\n")
             
             when (shouldWriteLoadData) {
                 printf(p"[LSU] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
@@ -1411,9 +1412,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             }
         }
 
-        for (i <- 0 until muonParams.numLanes) {
+        val s2_packet_mask = Utils.selectPacket(s2_metadata.mask, s2_packet)(this)
+        for (i <- 0 until muonParams.lsu.numLsuLanes) {
             val word = io.loadDataReadVal(i)
-            val mask = s2_metadata.mask(i)
+            val mask = s2_packet_mask(i)
             io.coreResp.bits.writebackData(i) := MuxCase(0.U, Seq(
                 (s2_metadata.op === MemOp.loadByte) -> ((word >> (mask * 8.U))(7, 0)).sextTo(muonParams.archLen),
                 (s2_metadata.op === MemOp.loadByteUnsigned) -> (word >> (mask * 8.U)),
