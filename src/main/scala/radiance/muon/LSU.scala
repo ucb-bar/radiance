@@ -396,6 +396,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
                 debugId.get(idxBits(tail)) := io.debugId.get
             }
 
+            printf(cf"[LSU] Enqueue: warp = ${warpId}, index = ${idxBits(tail)}, otherTail = ${io.otherTail}, debugId = ${io.debugId.get}\n")
+
             tail := tail + 1.U
         }
         
@@ -419,7 +421,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             val tmask = io.receivedOperands.req.bits.tmask
             
             val emptyPackets = tmask.grouped(muonParams.lsu.numLsuLanes).map(
-                pkt => !pkt.reduce(_ && _)
+                pkt => !pkt.reduce(_ || _)
             )
 
             val emptyPacketCount = PopCount(emptyPackets.toSeq)
@@ -921,6 +923,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         Vec(muonParams.numLanes, Bool()),
         SyncReadMem.WriteFirst
     )
+    val packetValidValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
 
     // -- Handle reservations from core --
 
@@ -1010,7 +1013,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         addressTmask.tmask := io.coreReq.bits.tmask
 
         addressTmaskMem.write(queueReceivedOperands.resp.bits.addressIdx, addressTmask)
-        storeDataMem.write(queueReceivedOperands.resp.bits.storeDataIdx, io.coreReq.bits.storeData)
+        when (MemOp.isStore(io.coreReq.bits.op) || MemOp.isAtomic(io.coreReq.bits.op)) {
+            storeDataMem.write(queueReceivedOperands.resp.bits.storeDataIdx, io.coreReq.bits.storeData)
+        }
 
         val metadataWriteIdx = tokenToMetadataIndex(io.coreReq.bits.token)
         val metadata = Wire(new Metadata)
@@ -1021,6 +1026,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         for (i <- 0 until muonParams.numLanes) {
             metadata.mask(i) := address(i)(lsuDerived.smallPerLaneMaskBits-1, 0)
         }
+
+        printf(cf"[LSU] Write metadata: token = ${io.coreReq.bits.token}, destReg = ${io.coreReq.bits.destReg}, tmask = ${io.coreReq.bits.tmask}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
         
         metadataMem.write(metadataWriteIdx, metadata)
     }
@@ -1142,9 +1149,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.memRequest.bits.tag := tag.asUInt
 
         io.addressSpace := token.addressSpace
-        
+
         when (io.memRequest.fire) {
-            printf(p"[LSU] Mem request sent: tag=0x${Hexadecimal(tag.asUInt)}, packet=${packet}, tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, op=${op.asUInt}\n")
+            printf(p"[LSU] Mem request sent: tag=0x${Hexadecimal(tag.asUInt)}, packet=${packet}, tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, op=${op.asUInt}, data = ${io.memRequest.bits.data}, address = ${io.memRequest.bits.address}\n")
         }
     }
 
@@ -1221,10 +1228,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         ))
 
         when (receivedResp) {
-            printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}")
+            printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}, data = ${loadDataWriteVal}\n")
             
             when (shouldWriteLoadData) {
-                printf(p"[LSU] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}")
+                printf(p"[LSU] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
             
                 loadDataMem.write(loadDataWriteIdx, loadDataWriteVal, respValidsVec)
             }
@@ -1241,22 +1248,57 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val respValidsVec_d1 = RegNext(respValidsVec, 0.U.asTypeOf(respValidsVec))
         val metadataIdx_d1 = RegNext(metadataIdx, 0.U)
         val respTag_d1 = RegNext(respTag, 0.U.asTypeOf(respTag))
+        val packetValidValid_d1 = RegNext(packetValidValid(metadataIdx), false.B)
+
+        when (receivedResp) { packetValidValid(metadataIdx) := true.B }
         
         val allRequestedLanesReceived_d1 = Wire(Bool())
         allRequestedLanesReceived_d1 := false.B
 
         when (receivedResp_d1) {
-            val newPacketValid = 
-                VecInit(packetValid_d1 | ((Cat(respValidsVec.reverse)) << (respTag_d1.packet * muonParams.lsu.numLsuLanes.U)).asBools)
+            // Extract packet-specific tmask (which lanes were requested for this packet)
+            val packetTmask = Utils.selectPacket(respMetadata_d1.tmask, respTag_d1.packet)(this)
 
-            when (newPacketValid === respMetadata_d1.tmask) {
-                packetValid.write(metadataIdx_d1, VecInit(Seq.fill(muonParams.lsu.numLsuLanes)(false.B)))
+            val packetValid_d1_masked = Mux(packetValidValid_d1, packetValid_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
+            
+            // Place respValidsVec_d1 at the correct position in the full packetValid vector
+            val newPacketValid = Wire(Vec(muonParams.numLanes, Bool()))
+            for (i <- 0 until muonParams.numLanes) {
+                val packetNum = i / muonParams.lsu.numLsuLanes
+                val laneInPacket = i % muonParams.lsu.numLsuLanes
+                val isThisPacket = respTag_d1.packet === packetNum.U
+                newPacketValid(i) := Mux(isThisPacket, 
+                    packetValid_d1_masked(i) || respValidsVec_d1(laneInPacket),
+                    packetValid_d1_masked(i)
+                )
+            }
+            
+            // Extract the packet-specific valid bits and check completion
+            val packetValidBits = Wire(Vec(muonParams.lsu.numLsuLanes, Bool()))
+            for (i <- 0 until muonParams.lsu.numLsuLanes) {
+                val globalIdx = respTag_d1.packet * muonParams.lsu.numLsuLanes.U + i.U
+                packetValidBits(i) := newPacketValid(globalIdx)
+            }
+            
+            // Check if all requested lanes for THIS PACKET have been received
+            // Only check the lanes that were requested (packetTmask)
+            val packetValidUInt = packetValidBits.asUInt
+            val packetTmaskUInt = packetTmask.asUInt
+            val allPacketLanesReceived = (packetValidUInt & packetTmaskUInt) === packetTmaskUInt
+            
+            when (allPacketLanesReceived) {
+                when (newPacketValid === respMetadata_d1.tmask) {
+                    packetValid.write(metadataIdx_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
+                }.otherwise {
+                    packetValid.write(metadataIdx_d1, newPacketValid)
+                }
+                
                 allRequestedLanesReceived_d1 := true.B
             }.otherwise {
                 packetValid.write(metadataIdx_d1, newPacketValid)
             }
             
-            printf(cf"[LSU] packetValid updated: new valids=${newPacketValid}, prev valids=${packetValid_d1}\n")
+            printf(cf"[LSU] packetValid updated: packet=${respTag_d1.packet}, new valids=${newPacketValid}, prev valids=${packetValid_d1}, packet tmask=${packetTmask}, all received=${allPacketLanesReceived}\n")
         }
 
         // Notify queue when all requested lanes for this packet are received
@@ -1295,7 +1337,21 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val s2_ready = Wire(Bool())
         val s2_req = RegInit(0.U.asTypeOf(new LSQWritebackReq))
         val s2_packet = RegInit(0.U(lsuDerived.packetBits.W))
-        val s2_metadata = RegInit(0.U.asTypeOf(new Metadata))
+        val s2_fire_prev = RegNext(s1_valid && s2_ready, false.B)
+        val s2_metadata = Mux(
+            s2_fire_prev,
+            io.metadataReadVal,
+            RegEnable(io.metadataReadVal, 0.U.asTypeOf(new Metadata), s2_fire_prev)
+        )
+        
+        // Ensure debugId is not optimized away
+        if (lsuDerived.debugIdBits.isDefined) {
+            dontTouch(io.writebackReq.bits.debugId.get)
+            dontTouch(s1_req.debugId.get)
+            dontTouch(s2_req.debugId.get)
+            dontTouch(io.coreResp.bits.debugId.get)
+        }
+        
         val finalPacket = Wire(Bool())
         finalPacket := (s2_packet + 1.U) === lsuDerived.numPackets.U
 
@@ -1335,7 +1391,6 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             s2_valid := true.B
             s2_req := s1_req
             s2_packet := 0.U
-            s2_metadata := io.metadataReadVal
         }
 
         io.coreResp.valid := s2_valid
@@ -1345,6 +1400,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.coreResp.bits.packet := s2_packet
         if (lsuDerived.debugIdBits.isDefined) {
             io.coreResp.bits.debugId.get := s2_req.debugId.get
+            when (io.coreResp.fire) {
+                printf(cf"[Writeback] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
+            }
         }
 
         for (i <- 0 until muonParams.numLanes) {
@@ -1357,6 +1415,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 (s2_metadata.op === MemOp.loadHalfUnsigned) -> (word >> (mask * 16.U)),
                 (s2_metadata.op === MemOp.loadWord) -> word,
             ))
+        }
+
+        when (io.coreResp.fire) {
+            printf(cf"[Writeback] coreResp fire: debugId = ${io.coreResp.bits.debugId.get}, tmask = ${io.coreResp.bits.tmask}, writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n")
         }
     }
 
@@ -1416,7 +1478,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         lsuReq.ready := allReady
         
         when (lsuReq.fire) {
-            printf(p"[LSUCoreAdapter] Core request sent: tag=0x${Hexadecimal(lsuReq.bits.tag)}, tmask=${Binary(lsuReq.bits.tmask.asUInt)}, lane valids=${Binary(Cat(laneValids.reverse))}\n")
+            printf(p"[LSUCoreAdapter] Core request sent: tag=0x${Hexadecimal(lsuReq.bits.tag)}, tmask=${Binary(lsuReq.bits.tmask.asUInt)}, lane valids=${Binary(Cat(laneValids.reverse))}, data = ${lsuReq.bits.data}, address = ${lsuReq.bits.address}, op = ${lsuReq.bits.op}\n")
         }
     }
 
