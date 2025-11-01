@@ -223,9 +223,17 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       val memoryState = scala.collection.mutable.Map[Long, Long]()
       var reservation = scala.util.Random.nextInt(15).toLong
       for (j <- 0 until 100) {
-        // random memory operation: only loads / stores for now
-        val memOpNum = scala.util.Random.nextInt(8)
-        val memOp = memOpNum match {
+        // random memory operation: only word-sized loads / stores for now
+        val r = scala.util.Random.nextDouble()
+        val (memOp, memOpNum) = if (r < 0.5) {
+          (MemOp.loadWord, 4)
+        }
+        else {
+          (MemOp.storeWord, 7)
+        }
+        // val memOpNum = scala.util.Random.nextInt(8)
+        /*val memOp = memOpNum match {
+          /*
           case 0 => MemOp.loadByte
           case 1 => MemOp.loadByteUnsigned
           case 2 => MemOp.loadHalf
@@ -234,7 +242,10 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           case 5 => MemOp.storeByte
           case 6 => MemOp.storeHalf
           case 7 => MemOp.storeWord
-        }
+          */
+          case 0 | 1 | 2 | 3 => MemOp.loadWord
+          case 4 | 5 | 6 | 7 => MemOp.storeWord
+        }*/
 
         val address = Seq.fill(muonParams.numLanes) {
           if (scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
@@ -249,6 +260,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           } else {
             // random aligned address in 1MB range
             val addr = 1024 * 1024 * i + scala.util.Random.nextInt(1024 * 1024)
+            println(f"addr: $addr, aligned: ${addr & ~0x3}, memOpNum: $memOpNum")
             (memOpNum match {
               case 2 | 3 | 6 => addr & ~0x1
               case 4 | 7     => addr & ~0x3
@@ -376,6 +388,8 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           operandsDelay = scala.util.Random.nextInt(10).toLong,
           expectedWriteback = expectedWriteback
         )
+
+        println(memOps.last)
 
         debugId += 1
         reservation += scala.util.Random.nextInt(5).toLong
@@ -582,7 +596,9 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   
   // we need a buffer in between because lsu expects atomic (all-lanes-at-once) requests to
   // downstream memory interface - checks all ready before setting valid; arbitration in xbar 
-  // leads to combinational loop if there is no buffer between
+  // leads to combinational loop if there is no buffer between. this is not compliant
+  // with TL standard (which states valid should never depend on ready), but should probably
+  // be safe.
   xbar :=* TLBuffer() :=* lsuWrapper.node
   fakeGmem := xbar
   

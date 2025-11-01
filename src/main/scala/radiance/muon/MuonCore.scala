@@ -154,9 +154,9 @@ trait HasMuonCoreParameters {
   }
   val addressBits = muonParams.archLen
   val dmemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
-  val dmemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes // FIXME: needs to be cache line
+  val dmemDataBits = muonParams.archLen // FIXME: needs to be cache line
   val smemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
-  val smemDataBits = muonParams.archLen * muonParams.lsu.numLsuLanes
+  val smemDataBits = muonParams.archLen
   val imemTagBits  = log2Ceil(muonParams.numWarps * muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 

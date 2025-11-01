@@ -42,13 +42,16 @@ case class MuonTileParams(
 }
 
 object MuonMemTL {
-  def toTLA[T <: Bundle](m: MemRequest[T], edge: TLEdgeOut): TLBundleA = {
+  def toTLA[T <: Bundle](m: MemRequest[T], valid: Bool, edge: TLEdgeOut): TLBundleA = {
     val tla = Mux(m.store,
       edge.Put(m.tag, m.address, m.size, m.data, m.mask)._2,
       edge.Get(m.tag, m.address, m.size)._2
     )
-    assert(m.mask === ((1.U << (1.U << m.size).asUInt).asUInt - 1.U),
-      "full mask required for now")
+    
+    // don't check full mask when valid is low
+    assert(!valid || m.mask === ((1.U << (1.U << m.size).asUInt).asUInt - 1.U),
+     cf"full mask required for now (mask = ${m.mask}, size = ${m.size})")
+    
     tla
   }
 
@@ -63,7 +66,7 @@ object MuonMemTL {
                              mresp: DecoupledIO[MemResponse[T]],
                              tl_bundle: TLBundle,
                              tl_edge: TLEdgeOut): Unit = {
-    tl_bundle.a.bits := MuonMemTL.toTLA(mreq.bits, tl_edge)
+    tl_bundle.a.bits := MuonMemTL.toTLA(mreq.bits, mreq.valid, tl_edge)
     tl_bundle.a.valid := mreq.valid
     mreq.ready := tl_bundle.a.ready
 
