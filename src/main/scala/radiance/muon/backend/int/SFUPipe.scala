@@ -83,5 +83,4 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
   io.req.ready := !busy || io.resp.fire
   io.resp.valid := busy
   io.resp.bits.sched.get := RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire)
-  writeback.valid := busy
 }

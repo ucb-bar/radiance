@@ -136,7 +136,7 @@ class RadianceCluster (
 //  val l1InNodes = muonTiles.map(_.dcacheNode)
   val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
   val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
-  l1cache.inNode := l1InXbar
+  l1cache.inNode := TLFIFOFixer() := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
 
   override lazy val module = new RadianceClusterModuleImp(this)
