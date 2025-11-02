@@ -53,7 +53,6 @@ case class CoalescerConfig(
   enable: Boolean,        // globally enable or disable coalescing
   numLanes: Int,          // number of lanes (or threads) in a warp
   reqQueueDepth: Int,     // request window per lane
-  waitTimeout: Int,       // max cycles to wait before forced fifo dequeue, per lane
   addressWidth: Int,      // assume <= 32
   dataBusWidth: Int,      // memory-side downstream TileLink data bus size.  Nominally, this has
                           // to be the coalLogSize.
@@ -71,9 +70,6 @@ case class CoalescerConfig(
   respQueueDepth: Int,    // depth of the response fifo queues
   sizeEnum: InFlightTableSizeEnum,
   numCoalReqs: Int,       // total number of coalesced requests we can generate in one cycle
-  numArbiterOutputPorts: Int, // total of output ports the arbiter will arbitrate into.
-                              // this has to match downstream cache's configuration
-  bankStrideInBytes: Int,  // cache line strides across the different banks
 ) {
   // maximum coalesced size
   def maxCoalLogSize: Int = {
@@ -104,7 +100,6 @@ object DefaultCoalescerConfig extends CoalescerConfig(
   enable = true,
   numLanes = 4,
   reqQueueDepth = 2,
-  waitTimeout = 8,
   addressWidth = 24,
   dataBusWidth = 4,      // if "4": 2^4=16 bytes, 128 bit bus
   coalLogSize = 4, // if "4": 2^4=16 bytes, 128 bit bus
@@ -116,8 +111,6 @@ object DefaultCoalescerConfig extends CoalescerConfig(
   respQueueDepth = 4,
   sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
-  numArbiterOutputPorts = 4,
-  bankStrideInBytes = 64 // Current L2 is strided by 512 bits
 )
 
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
@@ -372,10 +365,6 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
     val windowElts = Output(Vec(config.numLanes, Vec(1, gen)))
   })
 
-//  val eltPrototype = Wire(Valid(gen))
-//  eltPrototype.bits := DontCare
-//  eltPrototype.valid := false.B
-
   val elts = RegInit(0.U.asTypeOf(Vec(config.numLanes, Vec(entries, Valid(gen)))))
   val writePtr = RegInit(
     VecInit(Seq.fill(config.numLanes)(0.asUInt(log2Ceil(entries + 1).W)))
@@ -392,14 +381,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
   // incrementally as time goes on.  Therefore, when io.coalescable is all
   // turned off, that means we have processed all coalescable chunks at the
   // current cycle.
-  //
-  // shift hint is when the heads have no more coalescable left this or next cycle
-  val shiftHint = !(io.coalescable zip io.invalidate.bits.map(_(0)))
-    .map { case (c, inv) =>
-      c && !(io.invalidate.valid && inv)
-    }
-    .reduce(_ || _)
-  dontTouch(shiftHint)
+
   val syncedEnqValid = io.queue.enq.map(_.valid).reduce(_ || _)
   // valid && !ready means we enable enqueueing to a full queue, provided the
   // arbiter is taking away all remaining valid queue heads in the next cycle so
@@ -415,7 +397,7 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
     ctrl.full := writePtr(i) === entries.U
     ctrl.empty := writePtr(i) === 0.U
     // shift when no outstanding dequeue, no more coalescable chunks, and not empty
-    ctrl.shift := !syncedDeqValidNextCycle && shiftHint && !ctrl.empty
+    ctrl.shift := !syncedDeqValidNextCycle && !ctrl.empty
 
     // dequeue is valid when:
     // head entry is valid, has not been processed by downstream, and is not coalescable
@@ -427,20 +409,12 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
 
     when(ctrl.shift) {
       // shift, invalidate tail, invalidate coalesced requests
-      elts(i).zipWithIndex.foreach { case (elt, j) =>
-        if (j == entries - 1) { // tail
-          elt.valid := false.B
-        } else {
-          elt.bits := elts(i)(j + 1).bits
-          if (j == 0) { // tail of time window
-            elt.valid := elts(i)(j + 1).valid
-          } else {
-            elt.valid := elts(i)(
-              j + 1
-            ).valid && !(io.invalidate.valid && io.invalidate.bits(i)(j + 1))
-          }
-        }
+      for (j <- 0 until entries - 1) {
+        elts(i)(j).bits := elts(i)(j + 1).bits
+        elts(i)(j).valid := elts(i)(j + 1).valid
       }
+      // Clear the tail
+      elts(i)(entries - 1).valid := false.B
       // reset dequeue mask when new entries are shifted in
       deqDone(i) := false.B
       // enqueue
@@ -475,8 +449,8 @@ class CoalShiftQueue[T <: Data](gen: T, entries: Int, config: CoalescerConfig)
       writePtr.map(_ === writePtr.head).reduce(_ && _)
   assert(queueInSync, "shift queue lanes are not in sync")
 
-  io.mask := elts.map(lane => VecInit(lane.map(_.valid).slice(0, 1)).asUInt)
-  io.windowElts := elts.map(lane => VecInit(lane.map(_.bits).slice(0, 1)))
+  io.mask := elts.map(lane => lane.head.valid.asUInt)
+  io.windowElts := elts.map(lane => VecInit(Seq(lane.head.bits)))
 }
 
 // Main coalescing logic that finds which lanes with valid requests can be coalesced
@@ -495,7 +469,7 @@ class MonoCoalescer(
     val results = Output(new Bundle {
       val leaderIdx = Output(UInt(log2Ceil(config.numLanes).W))
       val baseAddr = Output(UInt(config.addressWidth.W))
-      val matchOH = Output(Vec(config.numLanes, UInt(1.W)))
+      val matchOH = Output(Vec(config.numLanes, Bool()))
       // number of entries matched with this leader lane's head.
       // maximum is numLanes * queueDepth
       val matchCount =
@@ -513,20 +487,6 @@ class MonoCoalescer(
   // follower lanes.
   val leaders = io.window.windowElts.map(_.head)
   val leadersValid = io.window.mask.map(_.asBools.head)
-
-  def printQueueHeads = {
-    leaders.zipWithIndex.foreach { case (head, i) =>
-      printf(
-        s"ReqQueueEntry[${i}].head = v:%d, source:%d, addr:%x\n",
-        leadersValid(i),
-        head.source,
-        head.address
-      )
-    }
-  }
-  // when (leadersValid.reduce(_ || _)) {
-  //   printQueueHeads
-  // }
 
   val size = coalLogSize
   // NOTE: be careful with Scala integer overflow when addressWidth >= 32
@@ -607,24 +567,6 @@ class MonoCoalescer(
       .map { case (offset, valid) => valid && (offset === target.U) }
       .reduce(_ || _)
   }
-
-  // debug prints
-  /*
-  when(leadersValid.reduce(_ || _)) {
-    matchCounts.zipWithIndex.foreach { case (count, i) =>
-      printf(s"lane[${i}] matchCount = %d\n", count);
-    }
-    printf("chosenLeader = lane %d\n", chosenLeaderIdx)
-    printf("chosenLeader matches = [ ")
-    chosenMatches.foreach { m => printf("%d ", m) }
-    printf("]\n")
-    printf("chosenMatchCount = %d\n", chosenMatchCount)
-
-    printf("hits = [ ")
-    hits.foreach { m => printf("%d ", m) }
-    printf("]\n")
-  }
-  */
 
   io.results.leaderIdx := chosenLeaderIdx
   io.results.baseAddr := chosenLeader.address & addrMask
@@ -868,28 +810,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       when(tlOut.a.fire) {
         assert(legal, "unhandled illegal TL req gen")
       }
-
-    // debug
-    // when (tlIn.a.valid) {
-    //   TLPrintf(s"tlIn(${lane}).a",
-    //     tlIn.a.bits.address,
-    //     tlIn.a.bits.size,
-    //     tlIn.a.bits.mask,
-    //     TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode),
-    //     tlIn.a.bits.data,
-    //     0.U
-    //   )
-    // }
-    // when (tlOut.a.valid) {
-    //   TLPrintf(s"tlOut(${lane}).a",
-    //     tlOut.a.bits.address,
-    //     tlOut.a.bits.size,
-    //     tlOut.a.bits.mask,
-    //     TLUtils.AOpcodeIsStore(tlOut.a.bits.opcode),
-    //     tlOut.a.bits.data,
-    //     0.U
-    //   )
-    // }
   }
 
   val (tlCoal, edgeCoal) = outer.coalescerNode.out.head
