@@ -42,7 +42,9 @@ class WarpScheduler(implicit p: Parameters)
   }
   val icacheInFlights = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(ibufIdxT)))
   val icacheInFlightsReg = RegNext(icacheInFlights, 0.U.asTypeOf(icacheInFlights.cloneType))
-  val discardTillPC = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(pcT))))
+  val discardValid = RegInit(VecInit.fill(m.numWarps)(false.B))
+  val discardTillPC = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(pcT)))
+  val latestFetchPC = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(pcT)))
   // TODO: do we want to discard when wspawn happens? what happens if there are
   // two consecutive wspawns from other warps?
   // val spawning = WireInit(VecInit.fill(m.numWarps)(false.B))
@@ -123,19 +125,26 @@ class WarpScheduler(implicit p: Parameters)
       // if this warp is being issued, we also override it
     }
 
+    latestFetchPC(wid) := RegNext(latestFetchPC(wid))
     when (fetchWid === wid.U) {
       val currPC = Mux(joinPC.valid, joinPC.bits, entry.bits)
       io.icache.in.bits.pc := currPC
       io.icache.in.bits.wid := wid.U
       assert((entry.valid && (!stallTracker.isStalled(wid.U)._1 || joinPC.valid)) || !io.icache.in.valid)
       // when the request fires, we increment
-      when (io.icache.in.fire) {
-        discardTillPC(wid).bits := currPC
+      when(io.icache.in.fire) {
+        latestFetchPC(wid) := currPC // combinational override
         entry.bits := currPC + 8.U
       }
     }
 
     assert(!entry.valid || threadMasks(wid).orR, s"pc tracker warp ${wid} valid but thread masks all 0")
+  }
+
+  // make discardTillPC track fetchPC when we're not discarding
+  (discardTillPC lazyZip discardValid lazyZip latestFetchPC).foreach { case (d, dv, f) =>
+    val latchedDiscardBits = RegNext(d, 0.U.asTypeOf(d))
+    d := Mux(dv, latchedDiscardBits, f)
   }
 
   // assign outputs to rename
@@ -150,21 +159,18 @@ class WarpScheduler(implicit p: Parameters)
   // handle i$ response, predecode
   io.rename.valid := false.B
   when(io.icache.out.fire) {
-    val discardEntry = discardTillPC(iresp.wid)
-
-    when(discardEntry.valid) {
+    when(discardValid(iresp.wid)) {
       // we are currently in discard mode, check if we can exit
-      when(iresp.pc === discardEntry.bits) {
+      when(iresp.pc === discardTillPC(iresp.wid)) {
         // exit discard mode
-        discardEntry.valid := false.B
-
+        discardValid(iresp.wid) := false.B
       }
     }.otherwise {
       // not currently in discard mode, might enter if instruction is stalling
       val (stalls, joins) = Predecoder.decode(iresp.inst)
       // we discard in flights - unless there are no in flights!
       val latestPC = Mux(fetchWid === iresp.wid && io.icache.in.fire,
-        io.icache.in.bits.pc, discardTillPC(iresp.wid).bits)
+        io.icache.in.bits.pc, discardTillPC(iresp.wid))
       val stallingPCIsLatestPC = iresp.pc === latestPC
       when (stalls) {
         // non join hazards stall
@@ -178,7 +184,7 @@ class WarpScheduler(implicit p: Parameters)
         }
       }
       // joins still enables discard, but does not stall
-      discardEntry.valid := (stalls || joins) && !stallingPCIsLatestPC
+      discardValid(iresp.wid) := (stalls || joins) && !stallingPCIsLatestPC
       // discardEntry.valid := stalls && !stallingPCIsLatestPC
       // discardEntry.bits is being set to the latest issued pc when we fetch
 
