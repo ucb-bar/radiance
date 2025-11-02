@@ -11,6 +11,9 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val smem = new SharedMemIO
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     val schedWb = Output(schedWritebackT)
+
+    val clusterId = Input(UInt(muonParams.clusterIdBits.W))
+    val coreId = Input(UInt(muonParams.coreIdBits.W))
   })
 
   val bypass = true
@@ -103,7 +106,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     }
     when (execute.io.req.fire) {
       val e = execute.io.req.bits
-      printf(cf"issued wid=${e.uop.wid} pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
+      printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
+        cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
         cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
         e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
         "] rs2=[" +
@@ -114,7 +118,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
       inFlight := false.B
       val r = execute.io.resp.bits.reg.get.bits
       val s = execute.io.resp.bits.sched.get.bits
-      printf(cf"writeback wid=${s.wid} pc=${s.pc}%x " +
+      printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} pc=${s.pc}%x " +
         cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
         cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
         cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +

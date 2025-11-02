@@ -59,6 +59,7 @@ case class MuonCoreParams(
   pgLevels: Int = 2,
   lrscCycles: Int = 0,
   // end boilerplate
+  numClusters: Int = 2,
   numCores: Int = 2,
   numWarps: Int = 8,
   numLanes: Int = 16,
@@ -86,7 +87,8 @@ case class MuonCoreParams(
   debug: Boolean = true
 ) extends CoreParams {
   val warpIdBits = log2Up(numWarps)
-  val hartIdBits: Int = log2Ceil(numCores)
+  val coreIdBits: Int = log2Ceil(numCores)
+  val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
   override def dcacheReqTagBits: Int = {
     val instVsData = 1
@@ -305,7 +307,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val imem = new InstMemIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
-    val hartId = Input(UInt(muonParams.hartIdBits.W))
+    val coreId = Input(UInt(muonParams.coreIdBits.W))
+    val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
@@ -317,11 +320,13 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.imem <> io.imem
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
   fe.io.commit := 0.U.asTypeOf(fe.io.commit)
-  fe.io.hartId := io.hartId
+  fe.io.hartId := io.coreId
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
+  be.io.coreId := io.coreId
+  be.io.clusterId := io.clusterId
 
   fe.io.commit := be.io.schedWb
 

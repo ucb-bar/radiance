@@ -70,6 +70,7 @@ class WithMuonCores(
       numWarps = up(SIMTCoreKey).get.numWarps,
       numLanes = up(SIMTCoreKey).get.numLanes,
       numCores = n,
+      numClusters = 2, // TODO: magic number
       logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
 
       lsu = LoadStoreUnitParams(
@@ -101,6 +102,7 @@ class WithMuonCores(
         muon.copy(
           tileId = i + idOffset,
           coreId = i + coreIdOffset,
+          clusterId = clusterParams.clusterId,
         ),
         crossing
       )) ++ prev
