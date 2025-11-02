@@ -22,6 +22,7 @@ case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
   tileId: Int = 0,
   coreId: Int = 0,
+  clusterId: Int = 0,
   icache: Option[ICacheParams] = None,
   dcache: Option[DCacheParams] = None,
   btb: Option[BTBParams] = None,
@@ -38,7 +39,7 @@ case class MuonTileParams(
     new MuonTile(this, crossing, lookup)
   }
   val baseName = "muon_tile"
-  val uniqueName = s"${baseName}_$coreId"
+  val uniqueName = s"${baseName}_${clusterId}_$coreId"
 }
 
 object MuonMemTL {
@@ -166,6 +167,7 @@ class MuonTile(
   val icacheNode = TLIdentityNode()
   icacheNode :=
     TLWidthWidget(muonParams.core.instBytes) :=
+    ResponseFIFOFixer() :=
     icacheWordNode
 
   // TODO: source id bits is actually determined by the coalescer
@@ -235,7 +237,8 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 //  muon.io.imem.req
   muon.io.dmem <> DontCare
   muon.io.smem <> DontCare
-  muon.io.hartId := outer.muonParams.coreId.U
+  muon.io.coreId := outer.muonParams.coreId.U
+  muon.io.clusterId := outer.muonParams.clusterId.U
   outer.reportCease(None)
   outer.reportWFI(None)
 }

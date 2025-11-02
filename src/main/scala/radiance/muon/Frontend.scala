@@ -18,7 +18,7 @@ class Frontend(implicit p: Parameters)
 //    val issue = issueIO
     val csr = csrIO
     val cmdProc: Option[Bundle] = None
-    val hartId = Input(UInt(muonParams.hartIdBits.W))
+    val hartId = Input(UInt(muonParams.coreIdBits.W))
   })
 
   val warpScheduler = Module(new WarpScheduler)
