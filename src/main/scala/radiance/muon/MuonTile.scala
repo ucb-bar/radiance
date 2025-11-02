@@ -163,6 +163,7 @@ class MuonTile(
   val icacheNode = TLIdentityNode()
   icacheNode :=
     TLWidthWidget(muonParams.core.instBytes) :=
+    ResponseFIFOFixer() :=
     icacheWordNode
 
   // TODO: fix source id bits
