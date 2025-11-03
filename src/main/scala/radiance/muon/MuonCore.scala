@@ -307,8 +307,10 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val imem = new InstMemIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
+    val softReset = Input(Bool())
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
+    val finished = Output(Bool())
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
 
@@ -319,8 +321,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
-  fe.io.commit := 0.U.asTypeOf(fe.io.commit)
-  fe.io.hartId := io.coreId
+  fe.io.softReset := io.softReset
+  io.finished := fe.io.finished
 
   val be = Module(new Backend)
   be.io.dmem <> io.dmem

@@ -18,7 +18,8 @@ class Frontend(implicit p: Parameters)
 //    val issue = issueIO
     val csr = csrIO
     val cmdProc: Option[Bundle] = None
-    val hartId = Input(UInt(muonParams.coreIdBits.W))
+    val softReset = Input(Bool())
+    val finished = Output(Bool())
   })
 
   val warpScheduler = Module(new WarpScheduler)
@@ -78,14 +79,16 @@ class Frontend(implicit p: Parameters)
 
     // other stuff
     warpScheduler.io.ibuf.count := ibuffer.io.enq.count
+    warpScheduler.io.softReset := io.softReset
+    io.finished := warpScheduler.io.finished
   }
 
   { // rename
-    renamer.io.softReset := false.B // TODO
     renamer.io.rename := warpScheduler.io.rename
     ibuffer.io.enq.entry.bits := renamer.io.ibuf.entry.bits
     ibuffer.io.enq.entry.valid := renamer.io.ibuf.entry.valid
     renamer.io.ibuf.count := ibuffer.io.enq.count
+    renamer.io.softReset := io.softReset
   }
 
   { // ibuffer

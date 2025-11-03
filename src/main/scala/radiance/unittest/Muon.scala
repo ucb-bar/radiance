@@ -60,7 +60,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 
   // fe csr, hartid
   fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
-  fe.io.hartId := 0.U
+  fe.io.softReset := false.B
 
   // fe decode -> cyclotron back end
   // note issue logic is simple pass-through of decode

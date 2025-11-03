@@ -29,6 +29,9 @@ class WarpScheduler(implicit p: Parameters)
     val rename = renameIO
     val ibuf = ibufEnqIO
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
+
+    val softReset = Input(Bool())
+    val finished = Output(Bool())
   })
 
   val threadMasks = RegInit(VecInit.tabulate(m.numWarps) { wid =>
@@ -263,10 +266,7 @@ class WarpScheduler(implicit p: Parameters)
     }
   }
 
-  val allFinished = VecInit(pcTracker.map(!_.valid)).asUInt.andR
-  when (allFinished) {
-    printf("no more active warps\n")
-  }
+  io.finished := VecInit(pcTracker.map(!_.valid)).asUInt.andR
 
   // select warp for fetch
   fetchArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>
@@ -300,6 +300,16 @@ class WarpScheduler(implicit p: Parameters)
       )
     )
     io.csr.resp := RegNext(csrData)
+  }
+
+  // soft reset procedure
+  when (io.softReset) {
+    // TODO
+    // enable one warp only
+    // reset thread masks
+    // clear discards and stalls
+    // clear ipdom stacks
+    // clear all registers (e.g. joins)
   }
 
   // misc

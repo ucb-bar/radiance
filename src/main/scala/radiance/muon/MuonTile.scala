@@ -239,4 +239,14 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.clusterId := outer.muonParams.clusterId.U
   outer.reportCease(None)
   outer.reportWFI(None)
+
+  muon.io.softReset := false.B // TODO: hook up to MMIO
+
+  val finished = IO(Output(Bool()))
+  finished := muon.io.finished
+
+  val (_, stopSim) = Counter(0 until 32768, finished, !finished)
+  when (stopSim) {
+    stop("no more active warps for 32k cycles\n")
+  }
 }
