@@ -92,8 +92,11 @@ case class MuonCoreParams(
   val pRegBits = log2Up(numPhysRegs)
   override def dcacheReqTagBits: Int = {
     val instVsData = 1
-    val maxInFlight = log2Ceil(ibufDepth) max lsu.queueIndexBits // TODO: is this right joshua?
+    val packetBits = log2Up(numLanes / lsu.numLsuLanes) // from lsu derived params
+    val sourceIdBits = LsuQueueToken.width(this) + packetBits
+    val maxInFlight = log2Ceil(ibufDepth) max sourceIdBits
     val coreBits = log2Ceil(numCores)
+    println(s"source req tag components $instVsData + $maxInFlight + $coreBits + $warpIdBits")
     instVsData + maxInFlight + coreBits + warpIdBits + 2
   }
   override val useVector: Boolean = true // for cache line size

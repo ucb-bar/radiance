@@ -159,9 +159,9 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
 
   // TODO: do we want to aggregate across all clusters
   val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.orR
-  val (_, stopSim) = Counter(0 until 32768, finished, !finished)
+  val (_, stopSim) = Counter(0 until 8192, finished, !finished)
   when (stopSim) {
-    stop("no more active warps for 32k cycles\n")
+    stop("no more active warps for 8k cycles\n")
   }
 
   outer.softResetFinishMasters.foreach(_.out.head._1.softReset := false.B) // TODO: MMIO
