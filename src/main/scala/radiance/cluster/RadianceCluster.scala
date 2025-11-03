@@ -139,6 +139,12 @@ class RadianceCluster (
   l1cache.inNode := TLFIFOFixer() := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
 
+  val softResetFinishMasters = muonTiles.map { m =>
+    val master = SoftResetFinishNode.Master()
+    m.softResetFinishSlave := master
+    master
+  }
+
   override lazy val module = new RadianceClusterModuleImp(this)
 }
 
@@ -150,6 +156,15 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
 
   println(outer.gemminiTiles.head.resetVectorNode)
   println(outer.muonTiles.head.resetVectorNode)
+
+  // TODO: do we want to aggregate across all clusters
+  val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.orR
+  val (_, stopSim) = Counter(0 until 32768, finished, !finished)
+  when (stopSim) {
+    stop("no more active warps for 32k cycles\n")
+  }
+
+  outer.softResetFinishMasters.foreach(_.out.head._1.softReset := false.B) // TODO: MMIO
 
 //  dontTouch(outer.l1cache.module.cacheIO)
 

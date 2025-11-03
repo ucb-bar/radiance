@@ -50,10 +50,10 @@ class VirgoCluster (
   // direct core-accelerator connections
   val smemKey = p(RadianceSharedMemKey).get
   val numCoresInCluster = vortexTiles.length
-  val vortexAccSlaveNodes = Seq.fill(numCoresInCluster)(AccSlaveNode())
+  val vortexAccSlaveNodes = Seq.fill(numCoresInCluster)(AccNode.Slave())
   (vortexAccSlaveNodes zip vortexTiles).foreach { case (a, v) => a := v.accMasterNode }
   val gemminiAccMasterNodes = gemminiTiles.map { tile =>
-    val masterNode = AccMasterNode()
+    val masterNode = AccNode.Master()
     tile.accSlaveNode.get := masterNode
     masterNode
   }

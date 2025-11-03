@@ -128,7 +128,7 @@ class GemminiTile private (
   val masterNode = visibilityNode
   // val statusNode = BundleBridgeSource(() => new GroundTestStatus)
 
-  val accSlaveNode = Option.when(gemminiParams.hasAccSlave)(AccSlaveNode())
+  val accSlaveNode = Option.when(gemminiParams.hasAccSlave)(AccNode.Slave())
 
   tlOtherMastersNode := tlMasterXbar.node
   masterNode :=* tlOtherMastersNode

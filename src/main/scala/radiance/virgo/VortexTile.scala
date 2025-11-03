@@ -17,7 +17,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
-import radiance.cluster.{AccMasterNode, BarrierMasterNode}
+import radiance.cluster.{AccNode, BarrierMasterNode}
 import radiance.memory._
 import radiance.subsystem._
 
@@ -371,7 +371,7 @@ class VortexTile private(
   def barrierIdBits = log2Ceil(numBarriers)
   val barrierMasterNode = BarrierMasterNode(barrierIdBits)
 
-  val accMasterNode = AccMasterNode()
+  val accMasterNode = AccNode.Master()
 
   val base = p(GPUMemory) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr

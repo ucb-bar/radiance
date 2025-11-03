@@ -13,6 +13,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.cluster.SoftResetFinishNode
 import radiance.memory._
 import radiance.subsystem._
 
@@ -183,6 +184,8 @@ class MuonTile(
   val dcacheNode = visibilityNode
   dcacheNode := dcacheNode_
 
+  val softResetFinishSlave = SoftResetFinishNode.Slave()
+
   override protected def visibleManagers = Seq()
   // this overrides the reset vector nexus node to be consistent with the other tiles (gemmini tile)
   // otherwise it results in a really obscure diplomacy error
@@ -240,13 +243,6 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   outer.reportCease(None)
   outer.reportWFI(None)
 
-  muon.io.softReset := false.B // TODO: hook up to MMIO
-
-  val finished = IO(Output(Bool()))
-  finished := muon.io.finished
-
-  val (_, stopSim) = Counter(0 until 32768, finished, !finished)
-  when (stopSim) {
-    stop("no more active warps for 32k cycles\n")
-  }
+  muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
+  outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 }

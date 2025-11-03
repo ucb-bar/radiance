@@ -70,9 +70,9 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
   when (io.req.fire) {
     when (inst.b(IsToHost)) {
       when (firstRs1 === 0.U) {
-        printf("test passed!\n")
+        printf("TEST PASSED!\n")
       }.otherwise {
-        printf("test failed with tohost=%d\n", firstRs1)
+        assert(false.B, cf"TEST FAILED with tohost=${firstRs1}%d\n")
       }
       writeback.bits.setTmask.bits := 0.U
       // stop()
