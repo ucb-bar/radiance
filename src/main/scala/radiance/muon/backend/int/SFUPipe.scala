@@ -72,6 +72,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
       when (firstRs1 === 0.U) {
         printf("TEST PASSED!\n")
       }.otherwise {
+        printf(cf"TEST FAILED with tohost=${firstRs1}%d\n")
         assert(false.B, cf"TEST FAILED with tohost=${firstRs1}%d\n")
       }
       writeback.bits.setTmask.bits := 0.U

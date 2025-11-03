@@ -5,7 +5,7 @@ package radiance.cluster
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.rocket.{BTBParams, DCacheParams, ICacheParams, NonBlockingDCache}
 import freechips.rocketchip.subsystem._
@@ -89,6 +89,18 @@ class RadianceCluster (
   // clcbus -> gemmini mmio
   gemminiTiles.foreach(_.slaveNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode)
 
+  if (gemminiTiles.isEmpty) {
+    // make sure even without a gemmini in the cluster, clc node still finds a manager
+    val dummySinkNode = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v2(
+      address = Seq(AddressSet(thisClusterParams.baseAddr + thisClusterParams.smemConfig.size, 0xff)),
+      supports = TLMasterToSlaveTransferSizes(
+        get = TransferSizes(1, 4),
+        putFull = TransferSizes(1, 4)),
+      fifoId = Some(0),
+    )), beatBytes = 4)))
+    dummySinkNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode
+  }
+
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
   // cbus -> clcbus/smem
@@ -153,9 +165,6 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   println(s"======= RadianceCluster: clcbus name = ${outer.clcbus.busName}")
   println(s"======= RadianceCluster: csbus outward edges = ${outer.csbus.outwardNode.outward.outputs.length}")
   println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
-
-  println(outer.gemminiTiles.head.resetVectorNode)
-  println(outer.muonTiles.head.resetVectorNode)
 
   // TODO: do we want to aggregate across all clusters
   val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.orR

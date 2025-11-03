@@ -56,9 +56,11 @@ class ALUPipe(implicit p: Parameters)
   recomposer.get.io.out.ready := io.resp.ready
 
   io.resp.valid := respValid
-  io.resp.bits.reg.get.valid := respValid && !reqInst.b(IsBranch) && !reqInst.b(IsJump)
+  io.resp.bits.reg.get.valid := respValid && reqInst.b(HasRd)
   io.resp.bits.reg.get.bits.rd := reqRd
-  io.resp.bits.reg.get.bits.data := Mux(reqInst.b(IsBranch), VecInit(Seq.fill(numLanes)(reqPC)), aluOut)
+  io.resp.bits.reg.get.bits.data := Mux(reqInst.b(IsJump),
+    VecInit(Seq.fill(numLanes)(reqPC + m.instBytes.U)),
+    aluOut)
   io.resp.bits.reg.get.bits.tmask := Mux(reqInst.b(IsBranch), cmpOut.asUInt, reqTmask)
 
   val schedResp = io.resp.bits.sched.get
