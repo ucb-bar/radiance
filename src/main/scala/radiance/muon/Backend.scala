@@ -11,7 +11,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val smem = new SharedMemIO
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     val schedWb = Output(schedWritebackT)
-
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
   })
