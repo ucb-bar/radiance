@@ -171,12 +171,14 @@ class MuonTile(
     ResponseFIFOFixer() :=
     icacheWordNode
 
-  // TODO: fix source id bits
+  // TODO: source id bits is actually determined by the coalescer
+  val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
+  val sourceIdBits = lsuDerived.sourceIdBits
   val dcacheNode_ = muonParams.dcache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
         Seq(TLMasterParameters.v1(
           name = s"muon_tile${muonParams.coreId}_l0d",
-          sourceId = IdRange(0, muonParams.core.numWarps * 16) // <- joshua what is the depth here
+          sourceId = IdRange(0, 1 << sourceIdBits)
         )),
     )))
   }
