@@ -21,9 +21,6 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     val writeback = Flipped(regWritebackT)
   })
 
-  // TODO: bogus
-  io.ibuf.foreach(_.ready := true.B)
-
   def tryWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
     val uopValid = ibufPort.valid
     val hasRd    = ibufPort.bits.inst(HasRd) .asBool
@@ -54,10 +51,10 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
     val rsEntry = rsAdmit.bits
     rsEntry.uop := ibufPort.bits
-    // TODO connect collector
-    rsEntry.valid(0) := !hasRs1
-    rsEntry.valid(1) := !hasRs2
-    rsEntry.valid(2) := !hasRs3
+    // shortcut: mark operand as valid if x0; reduces collector contention
+    rsEntry.valid(0) := !hasRs1 || (ibufPort.bits.inst.rs1 === 0.U)
+    rsEntry.valid(1) := !hasRs2 || (ibufPort.bits.inst.rs2 === 0.U)
+    rsEntry.valid(2) := !hasRs3 || (ibufPort.bits.inst.rs3 === 0.U)
     // TODO: if writeback happends to these rs's at the same cycle, busy should
     // be set to false!
     rsEntry.busy(0) := hasRs1 && (io.scb.readRs1.pendingWrites =/= 0.U)
@@ -78,6 +75,10 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
         rsAdmit
       }
     }
+  }
+  // dequeue from IBUF
+  (io.ibuf zip rsAdmitAllWarps).foreach { case (ib, rs) =>
+    ib.ready := rs.fire // since ib.valid != rs.valid
   }
 
   // arbitrates multiple RS enqueue signals into the single write port for each

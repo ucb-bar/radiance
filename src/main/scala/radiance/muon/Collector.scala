@@ -4,26 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-/** Collector receives an entire rs1/2/3 combination of a single uop at a time.
- *  TODO: dedup with response
- */
-class CollectorRequest(
-  val numPorts: Int,
-  val hasData: Boolean
-)(implicit p: Parameters) extends CoreBundle()(p) {
-  /* rs1/rs2/rs3/rd */
-  val ports = Vec(numPorts, Flipped(Decoupled(new Bundle {
-    val pReg = pRegT
-    val data = Option.when(hasData)(Vec(numLanes, regDataT))
-    // TODO: tmask
-  })))
-}
-
-/** Collector serves rs1/2/3 requests individually, potentially at different cycles.
- *  It guarantees requests to the same pReg to be served in-order, so the
- *  bundle does not need a separate tag ID.
- */
-class CollectorResponse(
+class CollectorBundle(
   val numPorts: Int,
   val hasData: Boolean
 )(implicit p: Parameters) extends CoreBundle()(p) {
@@ -40,10 +21,15 @@ class CollectorResponse(
  */
 class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
-    val readReq  = new CollectorRequest(Isa.maxNumRegs, hasData = false)
-    val readResp = new CollectorResponse(Isa.maxNumRegs, hasData = true)
-    val writeReq  = new CollectorRequest(1, hasData = true)
-    val writeResp = new CollectorResponse(1, hasData = false)
+    /** Collector receives an entire uop with rs1/2/3 combination as a request. */
+    val readReq  = Flipped(new CollectorBundle(Isa.maxNumRegs, hasData = false))
+    /** Collector serves rs1/2/3 requests individually, potentially at different cycles.
+     *  The response port width is the same as request to keep throughput.
+     *  Requests to the same pReg are guaranteed to be served in-order. */
+    val readResp = new CollectorBundle(Isa.maxNumRegs, hasData = true)
+    /** Writebacks are served one dest register at a time. */
+    val writeReq  = Flipped(new CollectorBundle(1, hasData = true))
+    val writeResp = new CollectorBundle(1, hasData = false)
   })
 
   val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(

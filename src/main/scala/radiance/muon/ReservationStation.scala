@@ -32,24 +32,24 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   })
 
   val numEntries = muonParams.numIssueQueueEntries
-  val rowValidTable = Mem(numEntries, Bool())
+  val validTable = Mem(numEntries, Bool())
   // TODO: optimize; storing all of Decode fields in RS gets expensive
   val uopTable      = Mem(numEntries, uopT)
-  val validTable    = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val opValidTable  = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   val busyTable     = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
 
   // enqueue
-  val rowEmptyVec = VecInit((0 until numEntries).map(!rowValidTable(_)))
+  val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
   dontTouch(rowEmptyVec)
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
   when (io.admit.fire) {
-    assert(!rowValidTable(emptyRow))
-    rowValidTable(emptyRow) := true.B
+    assert(!validTable(emptyRow))
+    validTable(emptyRow) := true.B
     uopTable(emptyRow)   := io.admit.bits.uop
-    validTable(emptyRow) := io.admit.bits.valid
+    opValidTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
 
     if (muonParams.debug) {
@@ -60,10 +60,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
 
   // check issue eligiblity
   val eligibles = VecInit((0 until numEntries).map { i =>
-    val rowValid = rowValidTable(i)
-    val valids = validTable(i)
-    val busys  = busyTable(i)
-    val allCollected = valids.reduce(_ && _)
+    val rowValid = validTable(i)
+    val opValids = opValidTable(i)
+    val busys = busyTable(i)
+    val allCollected = opValids.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
 
     assert(!rowValid || !allCollected || noneBusy, "operand collected but still marked busy?")
@@ -74,7 +74,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
 
     // deregister upon issue
     when (e.fire) {
-      rowValidTable(i) := false.B
+      validTable(i) := false.B
     }
 
     e
@@ -98,7 +98,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
                      uop.inst(HasRs3).asBool)
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
 
-    val rowValid = rowValidTable(i)
+    val rowValid = validTable(i)
     val busys = busyTable(i)
     val newBusys = WireDefault(busys)
     val rdWriteback = io.writeback.bits.rd
@@ -125,7 +125,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
 
   // reset
   when (reset.asBool) {
-    (0 until numEntries).foreach { i => rowValidTable(i) := false.B }
+    (0 until numEntries).foreach { i => validTable(i) := false.B }
     // @synthesis: do other entries need to be reset?
   }
 
@@ -133,13 +133,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   def printTable = {
     printf("=" * 40 + " ReservationStation " + "=" * 40 + "\n")
     for (i <- 0 until numEntries) {
-      val rowValid = rowValidTable(i)
+      val rowValid = validTable(i)
       when (rowValid) {
-        val valids = validTable(i)
-        val busys  = busyTable(i)
-        val uop    = uopTable(i)
+        val opValids = opValidTable(i)
+        val busys    = busyTable(i)
+        val uop      = uopTable(i)
         printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
-               cf"opvalid: (rs1:${valids(0)} rs2:${valids(1)} rs3:${valids(2)}) | " +
+               cf"opvalid: (rs1:${opValids(0)} rs2:${opValids(1)} rs3:${opValids(2)}) | " +
                cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)}) | " +
                cf"regs: (rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3})\n")
       }
