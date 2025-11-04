@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
-  /** Uop being admitted to the reservation station. */
+  /** uop being admitted to the reservation station. */
   val uop = uopT
   /** Indicates whether each operand reg (rs1/2/3) has been collected.
    *  If the uop does not use the operand field, sets to 1.
@@ -25,7 +25,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val admit = Flipped(Decoupled(new ReservationStationEntry))
     /** uop issued (dispatched) to the downstream EX pipe */
     val issue = Decoupled(uopT)
-    /** uop written-back from the downstream EX pipe */
+    /** writeback from the downstream EX pipe */
     val writeback = Flipped(regWritebackT)
     /** writeback pass-through to the hazard module */
     val writebackHazard = regWritebackT
