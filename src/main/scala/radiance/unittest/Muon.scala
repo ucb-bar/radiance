@@ -116,8 +116,9 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   }
   dontTouch(be.io)
 
-  // TODO: connect finished from the backend
-  io.finished := cfe.io.finished
+  // run until all ibufs dry up
+  val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
+  io.finished := cfe.io.finished && ibufDry
 }
 
 /** Testbench for Muon backend LSU pipe */
@@ -733,21 +734,21 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   cfbox.io.ibuf.ready := VecInit(io.ibuf.map(_.ready)).asUInt
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
     ib.valid := cfbox.io.ibuf.valid(i)
-    connectSplit(ib.bits.pc, cfbox.io.ibuf.pc, i)
-    connectSplit(ib.bits.wid, cfbox.io.ibuf.wid, i)
-    connectSplit(ib.bits.op, cfbox.io.ibuf.op, i)
-    connectSplit(ib.bits.rd, cfbox.io.ibuf.rd, i)
-    connectSplit(ib.bits.rs1, cfbox.io.ibuf.rs1, i)
-    connectSplit(ib.bits.rs2, cfbox.io.ibuf.rs2, i)
-    connectSplit(ib.bits.rs3, cfbox.io.ibuf.rs3, i)
-    connectSplit(ib.bits.imm32, cfbox.io.ibuf.imm32, i)
-    connectSplit(ib.bits.imm24, cfbox.io.ibuf.imm24, i)
+    connectSplit(ib.bits.pc,     cfbox.io.ibuf.pc, i)
+    connectSplit(ib.bits.wid,    cfbox.io.ibuf.wid, i)
+    connectSplit(ib.bits.op,     cfbox.io.ibuf.op, i)
+    connectSplit(ib.bits.rd,     cfbox.io.ibuf.rd, i)
+    connectSplit(ib.bits.rs1,    cfbox.io.ibuf.rs1, i)
+    connectSplit(ib.bits.rs2,    cfbox.io.ibuf.rs2, i)
+    connectSplit(ib.bits.rs3,    cfbox.io.ibuf.rs3, i)
+    connectSplit(ib.bits.imm32,  cfbox.io.ibuf.imm32, i)
+    connectSplit(ib.bits.imm24,  cfbox.io.ibuf.imm24, i)
     connectSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
-    connectSplit(ib.bits.f3, cfbox.io.ibuf.f3, i)
-    connectSplit(ib.bits.f7, cfbox.io.ibuf.f7, i)
-    connectSplit(ib.bits.pred, cfbox.io.ibuf.pred, i)
-    connectSplit(ib.bits.tmask, cfbox.io.ibuf.tmask, i)
-    connectSplit(ib.bits.raw, cfbox.io.ibuf.raw, i)
+    connectSplit(ib.bits.f3,     cfbox.io.ibuf.f3, i)
+    connectSplit(ib.bits.f7,     cfbox.io.ibuf.f7, i)
+    connectSplit(ib.bits.pred,   cfbox.io.ibuf.pred, i)
+    connectSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
+    connectSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
   }
 
   io.finished := cfbox.io.finished
