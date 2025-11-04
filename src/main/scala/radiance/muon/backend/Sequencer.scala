@@ -105,41 +105,24 @@ class LaneRecomposer
   })
 
   val buffer_data = Reg(chiselTypeOf(io.out.bits.data))
-  val buffer_tmask = RegInit(0.U(inLanes.W))
   val packetIdx = RegInit(0.U(packetCtrBits.W))
-  val isLastPacket = packetIdx === (totalPackets - 1).U
   val sawLastPacket = packetIdx === totalPackets.U
-  val laneStartIdx = packetIdx * packetWidth.U
-  val lastSliceStartIdx = (totalPackets - 1) * packetWidth
-
-  val outBuf = WireInit(buffer_data)
+  val laneStartIdx = Mux(io.in.fire && io.out.fire, 0.U, packetIdx * packetWidth.U)
 
   when (io.in.fire) {
     packetIdx := packetIdx + 1.U
-    // gate reg write when same cycle bypass
-    when (!io.out.fire) {
-      for (i <- 0 until numInputs) {
-        for (j <- 0 until outLanes) {
-          buffer_data(i)(laneStartIdx + j.U) := io.in.bits.data(i)(j)
-        }
-      }
-    }
-    // same cycle out bypass
-    when (isLastPacket) {
-      for (i <- 0 until numInputs) {
-        for (j <- 0 until outLanes) {
-          outBuf(i)((lastSliceStartIdx + j)) := io.in.bits.data(i)(j)
-        }
+    for (i <- 0 until numInputs) {
+      for (j <- 0 until outLanes) {
+        buffer_data(i)(laneStartIdx + j.U) := io.in.bits.data(i)(j)
       }
     }
   }
 
   when (io.out.fire) {
-    packetIdx := 0.U
-    buffer_tmask := 0.U
+    packetIdx := Mux(io.in.fire, 1.U, 0.U)
   }
 
-  io.in.ready := packetIdx =/= totalPackets.U
-  io.out.valid := (io.in.fire && isLastPacket) || sawLastPacket
-  io.out.bits.data := outBuf
+  io.in.ready := packetIdx =/= totalPackets.U || (sawLastPacket && io.out.ready)
+  io.out.valid := sawLastPacket
+  io.out.bits.data := buffer_data
 }
