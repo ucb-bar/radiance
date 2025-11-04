@@ -11,7 +11,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val smem = new SharedMemIO
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     val schedWb = Output(schedWritebackT)
-
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
   })
@@ -42,62 +41,46 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     reservStation.io.issue
   }
 
-  // TODO: Collector
-  // temporary placeholders to generate reg file banks for par
-  val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(
-    size = muonParams.numPhysRegs / muonParams.numRegBanks,
-    tpe = Vec(numLanes, UInt(archLen.W)),
-    numReadPorts = 1,
-    numWritePorts = 1,
-    numReadwritePorts = 0
-  )))
-
-  // read registers for execute
-  def prAddresses(pr: UInt) = {
-    (pr(7, 6), pr(5, 0)) // im lazy TODO
-  }
-
+  val execute = Module(new Execute())
   val executeIn = Wire(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true))
+
   val haves = Seq(HasRs1, HasRs2, HasRs3)
   val regs = Seq(Rs1, Rs2, Rs3)
-  val dests = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
+  val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
 
-  (haves lazyZip dests lazyZip regs lazyZip rfBanks).foreach { case (has, dest, reg, banks) =>
-    val pr = issued.bits.inst(reg)
-    val bankReads = VecInit(banks.map(_.readPorts.head))
-    val bankId = prAddresses(pr)._1
-
-    bankReads.foreach(_.address := prAddresses(pr)._2)
-    bankReads.foreach(_.enable := false.B)
-    bankReads(bankId).enable := issued.valid && issued.bits.inst.b(has)
-    dest := Mux(RegNext(pr === 0.U),
-      VecInit.fill(numLanes)(0.U(archLen.W)),
-      VecInit(bankReads.map(_.data))(RegNext(bankId)))
+  val collector = Module(new DuplicatedCollector)
+  (haves lazyZip regs lazyZip collector.io.readReq.ports).foreach { case (has, reg, collReads) =>
+    val pReg = issued.bits.inst(reg)
+    collReads.valid := issued.valid && issued.bits.inst.b(has)
+    collReads.bits.pReg := pReg
+  }
+  // TODO: connect with executeIn ready
+  collector.io.readResp.ports.foreach(_.ready := true.B)
+  (operands lazyZip collector.io.readResp.ports).foreach { case (opnd, collReadResps) =>
+    opnd := collReadResps.bits.data.get
   }
 
-  executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
-
-  val execute = Module(new Execute())
+  // signal execute on collector finish
+  // TODO: relax 1-cycle delay
   execute.io.req.valid := RegNext(issued.valid)
   execute.io.req.bits := executeIn
+  executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
 
-  // handle execute writeback
+  // execute-to-collector writeback
+  val exRegWb = execute.io.resp.bits.reg.get
+  collector.io.writeReq.ports.head.valid := execute.io.resp.fire && exRegWb.valid
+  collector.io.writeReq.ports.head.bits.pReg := exRegWb.bits.rd
+  collector.io.writeReq.ports.head.bits.data.get := exRegWb.bits.data
+  // TODO: tmask
+  collector.io.writeResp.ports.foreach(_.ready := true.B)
+  dontTouch(collector.io)
+
+  // execute-to-schedule writeback
   val exSchedWb = execute.io.resp.bits.sched.get
   io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
   io.schedWb.bits := exSchedWb.bits
-  execute.io.resp.ready := true.B // scheduler writeback is valid only
-
-  val exRegWb = execute.io.resp.bits.reg.get
-  rfBanks.foreach { case (banks) =>
-    val prd = prAddresses(exRegWb.bits.rd)
-    val bankWrites = VecInit(banks.map(_.writePorts.head))
-    bankWrites.foreach { b =>
-      b.address := prd._2
-      b.data := exRegWb.bits.data
-      b.enable := false.B
-    }
-    bankWrites(prd._1).enable := execute.io.resp.fire && exRegWb.valid
-  }
+  // scheduler writeback is valid only; TODO: consider collector writeback ready
+  execute.io.resp.ready := true.B
 
   if (bypass) {
     val inFlight = RegInit(false.B)

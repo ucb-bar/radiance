@@ -97,6 +97,9 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.smem.resp.foreach(_.valid := false.B)
   be.io.smem.resp.foreach(_.bits := DontCare)
   be.io.smem.req.foreach(_.ready := false.B)
+  // single-core
+  be.io.clusterId := 0.U
+  be.io.coreId := 0.U
 
   val cfe = Module(new CyclotronFrontend()(p))
   // Imem in the ISA model is not used
