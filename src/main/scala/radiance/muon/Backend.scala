@@ -15,29 +15,28 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val coreId = Input(UInt(muonParams.coreIdBits.W))
   })
 
-  val bypass = true
+  val hazard = Module(new Hazard)
+  hazard.io.ibuf <> io.ibuf
 
+  val scoreboard = Module(new Scoreboard)
+  scoreboard.io <> hazard.io.scb
+  dontTouch(scoreboard.io)
+
+  val reservStation = Module(new ReservationStation)
+  reservStation.io.admit <> hazard.io.rsAdmit
+  hazard.io.writeback <> reservStation.io.writebackHazard
+
+  // TODO bogus
+  val fakeExPipe = Module(new FakeWriteback)
+  fakeExPipe.io.issue <> reservStation.io.issue
+  reservStation.io.writeback <> fakeExPipe.io.writeback
+
+  val bypass = false
   val issued = if (bypass) {
     val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
-    val hazard = Module(new Hazard)
-    hazard.io.ibuf <> io.ibuf
-
-    val scoreboard = Module(new Scoreboard)
-    scoreboard.io <> hazard.io.scb
-    dontTouch(scoreboard.io)
-
-    val reservStation = Module(new ReservationStation)
-    reservStation.io.admit <> hazard.io.rsAdmit
-    hazard.io.writeback <> reservStation.io.writebackHazard
-
-    // TODO bogus
-    val fakeExPipe = Module(new FakeWriteback)
-    fakeExPipe.io.issue <> reservStation.io.issue
-    reservStation.io.writeback <> fakeExPipe.io.writeback
-
     reservStation.io.issue
   }
 
@@ -66,7 +65,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   execute.io.req.bits := executeIn
   executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
 
-  // execute-to-collector writeback
+  // execute-to-issue writeback
   val exRegWb = execute.io.resp.bits.reg.get
   collector.io.writeReq.ports.head.valid := execute.io.resp.fire && exRegWb.valid
   collector.io.writeReq.ports.head.bits.pReg := exRegWb.bits.rd
@@ -75,6 +74,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   collector.io.writeResp.ports.foreach(_.ready := true.B)
   dontTouch(collector.io)
 
+  reservStation.io.writeback <> execute.io.resp.bits.reg.get
+
   // execute-to-schedule writeback
   val exSchedWb = execute.io.resp.bits.sched.get
   io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
@@ -82,44 +83,46 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   // scheduler writeback is valid only; TODO: consider collector writeback ready
   execute.io.resp.ready := true.B
 
+  // Fallback: stall every instruction until writeback
   if (bypass) {
     val inFlight = RegInit(false.B)
     when (issued.fire) {
       inFlight := true.B
     }
-    when (execute.io.req.fire) {
-      val e = execute.io.req.bits
-      printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
-        cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
-        cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
-        e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
-        "] rs2=[" +
-        e.rs2Data.get.map(x => cf"$x%x ").reduce(_ + _) +
-        cf"]\n")
-    }
-    when (execute.io.resp.fire) {
-      inFlight := false.B
-      val r = execute.io.resp.bits.reg.get.bits
-      val s = execute.io.resp.bits.sched.get.bits
-      printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} pc=${s.pc}%x " +
-        cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
-        cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
-        cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
-        cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
-        cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} " +
-        cf"\n")
-      printf(cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
-        cf"rd=${r.rd} data=[" +
-        r.data.map(x => cf"$x%x ").reduce(_ + _) +
-        cf"] mask=${r.tmask}%b" +
-        cf"\n")
-    }
-
     issued.ready := !inFlight
     execute.io.req.valid := RegNext(issued.fire)
     assert(RegNext(issued.fire) === execute.io.req.fire)
+    when (execute.io.resp.fire) {
+      inFlight := false.B
+    }
   }
 
+  when (execute.io.req.fire) {
+    val e = execute.io.req.bits
+    printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
+      cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
+      cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
+      e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
+      "] rs2=[" +
+      e.rs2Data.get.map(x => cf"$x%x ").reduce(_ + _) +
+      cf"]\n")
+  }
+  when (execute.io.resp.fire) {
+    val r = execute.io.resp.bits.reg.get.bits
+    val s = execute.io.resp.bits.sched.get.bits
+    printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} pc=${s.pc}%x " +
+      cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
+      cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
+      cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
+      cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
+      cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} " +
+      cf"\n")
+    printf(cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
+      cf"rd=${r.rd} data=[" +
+      r.data.map(x => cf"$x%x ").reduce(_ + _) +
+      cf"] mask=${r.tmask}%b" +
+      cf"\n")
+  }
 
   io.dmem.req.foreach(_.valid := false.B)
   io.dmem.req.foreach(_.bits := DontCare)
