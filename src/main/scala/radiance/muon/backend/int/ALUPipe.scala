@@ -36,10 +36,12 @@ class ALUPipe(implicit p: Parameters)
       inst.b(Rs1IsZero) -> VecInit.fill(numLanes)(0.U(archLen.W)),
     )
   )
-  decomposer.get.io.in.bits.data(1) := Mux(
-    inst.b(Rs2IsImm),
-    VecInit.fill(numLanes)(inst(Imm32)),
-    io.req.bits.rs2Data.get
+  decomposer.get.io.in.bits.data(1) := MuxCase(
+    io.req.bits.rs2Data.get,
+    Seq(
+      inst.b(Rs2IsImm) -> VecInit.fill(numLanes)(inst(Imm32)),
+      inst.b(Rs1IsZero) -> VecInit.fill(numLanes)(inst(LuiImm)) // LUI
+    )
   )
   decomposer.get.io.out.ready := true.B
 
@@ -66,13 +68,9 @@ class ALUPipe(implicit p: Parameters)
   val schedResp = io.resp.bits.sched.get
   schedResp := 0.U.asTypeOf(schedResp)
 
-  val isBranch = WireInit(reqInst.b(IsBranch))
-  dontTouch(isBranch)
   val branchTakenMask = reqTmask & cmpOut.asUInt
-  val setPcValid = reqInst.b(IsJump) || (reqInst.b(IsBranch) && branchTakenMask.orR)
-
   schedResp.valid := respValid
-  schedResp.bits.setPC.valid := setPcValid
+  schedResp.bits.setPC.valid := reqInst.b(IsJump) || (reqInst.b(IsBranch) && branchTakenMask.orR)
   schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch),
     (reqPC + reqInst(Imm32)).asTypeOf(pcT), // to shashank: cannot add at req fire, that causes race for reqPC value
     PriorityMux(reqTmask, aluOut).asTypeOf(pcT))

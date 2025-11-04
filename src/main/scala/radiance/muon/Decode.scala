@@ -88,6 +88,7 @@ case object CsrAddr          extends DecodeField(32)
 case object CsrImm           extends DecodeField(8, true)
 case object ShAmt            extends DecodeField(7)
 case object ShOp             extends DecodeField(5)
+case object LuiImm           extends DecodeField(32)
 case object Raw              extends DecodeField(64)
 
 class Decoded(full: Boolean = true) extends Bundle {
@@ -120,6 +121,7 @@ class Decoded(full: Boolean = true) extends Bundle {
         case Imm32 => Cat(decode(ImmH8), decode(Imm24))
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
+        case LuiImm => (decode(Imm24) << 12.U)(31, 0)
         case UseMulDivPipe => (decode(Opcode) === MuOpcode.OP.U) && (decode(F7) === "b0000001".U)
         case UseFP32Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b00".U)
         case UseFP16Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b10".U)
@@ -214,7 +216,7 @@ object Decoder {
       UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
-      ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, Raw
+      ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, LuiImm, Raw
     )
   }
 
@@ -326,7 +328,7 @@ object Decoder {
           MuOpcode.AUIPC,
           // MuOpcode.BRANCH,
           MuOpcode.JAL,
-          MuOpcode.JALR,
+          // MuOpcode.JALR,
         ).contains(op))
       case Rs1IsZero => Some(op == MuOpcode.LUI)
       case Rs2IsImm =>
@@ -337,7 +339,7 @@ object Decoder {
           MuOpcode.JALR,
           MuOpcode.OP_IMM,
           MuOpcode.AUIPC,
-          MuOpcode.LUI,
+          // MuOpcode.LUI,
           // MuOpcode.BRANCH,
         ).contains(op))
       case IsBranch =>  Some(op == MuOpcode.BRANCH)

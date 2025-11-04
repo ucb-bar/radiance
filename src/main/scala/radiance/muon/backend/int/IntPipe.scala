@@ -37,8 +37,8 @@ object IntOpDecoder {
       (BitPat(MuOpcode.OP_IMM) ## BitPat("b110") ## BitPat("b???????")) -> BitPat(ALU.FN_OR.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.OP_IMM) ## BitPat("b111") ## BitPat("b???????")) -> BitPat(ALU.FN_AND.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.OP_IMM) ## BitPat("b001") ## BitPat("b???????")) -> BitPat(ALU.FN_SL.litValue.U(ALU.SZ_ALU_FN.W)),
-      (BitPat(MuOpcode.OP_IMM) ## BitPat("b101") ## BitPat("b0??????")) -> BitPat(ALU.FN_SR.litValue.U(ALU.SZ_ALU_FN.W)),
-      (BitPat(MuOpcode.OP_IMM) ## BitPat("b101") ## BitPat("b1??????")) -> BitPat(ALU.FN_SRA.litValue.U(ALU.SZ_ALU_FN.W)),
+      (BitPat(MuOpcode.OP_IMM) ## BitPat("b101") ## BitPat("b?0?????")) -> BitPat(ALU.FN_SR.litValue.U(ALU.SZ_ALU_FN.W)),
+      (BitPat(MuOpcode.OP_IMM) ## BitPat("b101") ## BitPat("b?1?????")) -> BitPat(ALU.FN_SRA.litValue.U(ALU.SZ_ALU_FN.W)),
 
       (BitPat(MuOpcode.LUI)    ## BitPat("b???") ## BitPat("b???????")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
       (BitPat(MuOpcode.AUIPC)  ## BitPat("b???") ## BitPat("b???????")) -> BitPat(ALU.FN_ADD.litValue.U(ALU.SZ_ALU_FN.W)),
