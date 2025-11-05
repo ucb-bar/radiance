@@ -24,8 +24,8 @@ class ALUPipe(implicit p: Parameters)
   val ioReqOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val reqOp = RegEnable(ioReqOp, 0.U.asTypeOf(aluOpT), io.req.fire)
 
-  val aluOut = Reg(Vec(numLanes, UInt(archLen.W)))
-  val cmpOut = Reg(Vec(numLanes, Bool()))
+  val aluOut = recomposer.get.io.out.bits.data(0)
+  val cmpOut = recomposer.get.io.out.bits.data(1)
 
   io.req.ready := !busy || io.resp.fire
   decomposer.get.io.in.valid := io.req.valid
@@ -57,8 +57,8 @@ class ALUPipe(implicit p: Parameters)
   recomposer.get.io.in.valid := decomposer.get.io.out.valid
   recomposer.get.io.out.ready := io.resp.ready
 
-  io.resp.valid := respValid
-  io.resp.bits.reg.get.valid := respValid && reqInst.b(HasRd)
+  io.resp.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid && reqInst.b(HasRd)
   io.resp.bits.reg.get.bits.rd := reqRd
   io.resp.bits.reg.get.bits.data := Mux(reqInst.b(IsJump),
     VecInit(Seq.fill(numLanes)(reqPC + m.instBytes.U)),
@@ -69,21 +69,11 @@ class ALUPipe(implicit p: Parameters)
   schedResp := 0.U.asTypeOf(schedResp)
 
   val branchTakenMask = reqTmask & cmpOut.asUInt
-  schedResp.valid := respValid
+  schedResp.valid := recomposer.get.io.out.valid
   schedResp.bits.setPC.valid := reqInst.b(IsJump) || (reqInst.b(IsBranch) && branchTakenMask.orR)
   schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch),
     (reqPC + reqInst(Imm32)).asTypeOf(pcT), // to shashank: cannot add at req fire, that causes race for reqPC value
     PriorityMux(reqTmask, aluOut).asTypeOf(pcT))
   schedResp.bits.pc := latchedUop.pc
   schedResp.bits.wid := latchedUop.wid
-
-  when (io.resp.fire) {
-    respValid := false.B
-  }
-
-  when (recomposer.get.io.out.fire) {
-    aluOut := recomposer.get.io.out.bits.data(0)
-    cmpOut := recomposer.get.io.out.bits.data(1)
-    respValid := true.B
-  }
 }

@@ -12,6 +12,8 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val resp = Decoupled(writebackT())
   })
 
+  val idIO = IO(clusterCoreIdT)
+
   val aluPipe = Module(new ALUPipe())
   // val fp32Pipe = Module(new FP32Pipe())
   // val fp16Pipe = Module(new FP16Pipe())
@@ -32,6 +34,8 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   fpu.io.resp.ready := false.B
   fpu.io.flush := false.B
   dontTouch(fpu.io)
+
+  sfuPipe.idIO := idIO
 
   val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, sfuPipe)
   val uses = Seq(UseALUPipe, UseFP32Pipe, UseFP16Pipe, UseMulDivPipe, UseLSUPipe, UseSFUPipe)

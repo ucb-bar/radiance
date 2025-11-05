@@ -297,6 +297,11 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     })
   }
 
+  def clusterCoreIdT = new Bundle {
+    val clusterId = Input(UInt(muonParams.clusterIdBits.W))
+    val coreId = Input(UInt(muonParams.coreIdBits.W))
+  }
+
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
   def aRegT = UInt(log2Ceil(m.numArchRegs).W)
   def regDataT = UInt(m.archLen.W)

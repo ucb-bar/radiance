@@ -223,6 +223,10 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
         }
 
+        c.io.out.valid.expect(false.B)
+        c.clock.step()
+        c.io.in.valid.poke(false.B)
+
         if (packet < totalPackets - 1) {
           c.io.out.valid.expect(false.B)
         } else {
@@ -231,11 +235,9 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
             c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
           }
         }
-
-        c.clock.step()
-        c.io.in.valid.poke(false.B)
       }
 
+      c.clock.step()
       c.io.out.valid.expect(false.B)
       c.io.in.ready.expect(true.B)
     }
@@ -265,6 +267,10 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.in.bits.data(2)(j).poke(boolValue(laneIdx))
         }
 
+        c.io.out.valid.expect(false.B)
+        c.clock.step()
+        c.io.in.valid.poke(false.B)
+
         if (packet < totalPackets - 1) {
           c.io.out.valid.expect(false.B)
         } else {
@@ -275,11 +281,9 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
             c.io.out.bits.data(2)(lane).expect(boolValue(lane))
           }
         }
-
-        c.clock.step()
-        c.io.in.valid.poke(false.B)
       }
 
+      c.clock.step()
       c.io.out.valid.expect(false.B)
       c.io.in.ready.expect(true.B)
     }
@@ -302,12 +306,16 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       }
       c.io.in.valid.poke(true.B)
 
+      c.io.out.valid.expect(false.B)
+      c.clock.step()
+      c.io.in.valid.poke(false.B)
+
       c.io.out.valid.expect(true.B)
       for (lane <- 0 until outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
       }
 
-      c.io.in.valid.poke(false.B)
+      c.io.out.ready.poke(true.B)
       c.clock.step()
       c.io.out.valid.expect(false.B)
       c.io.in.ready.expect(true.B)
@@ -334,9 +342,9 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
       }
       c.io.in.valid.poke(true.B)
       c.io.in.ready.expect(true.B)
-      c.io.out.valid.expect(false.B)
       c.clock.step()
       c.io.in.valid.poke(false.B)
+      c.io.out.valid.expect(false.B)
 
       // Final packet arrives while consumer back-pressures
       for (j <- 0 until outLanes; input <- 0 until numInputs) {
@@ -344,14 +352,18 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
         c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
       }
       c.io.in.valid.poke(true.B)
+
       c.io.in.ready.expect(true.B)
+      c.io.out.valid.expect(false.B)
+      c.clock.step()
+      c.io.in.valid.poke(false.B)
+
       c.io.out.valid.expect(true.B)
       for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
       }
 
       c.clock.step()
-      c.io.in.valid.poke(false.B)
       c.io.out.valid.expect(true.B)
       for (lane <- 0 until totalPackets * outLanes; input <- 0 until numInputs) {
         c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
@@ -384,6 +396,10 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.in.bits.data(input)(j).poke(laneValue(laneIdx, input))
         }
 
+        c.io.out.valid.expect(false.B)
+        c.clock.step()
+        c.io.in.valid.poke(false.B)
+
         if (packet < totalPackets - 1) {
           c.io.out.valid.expect(false.B)
         } else {
@@ -392,11 +408,9 @@ class SequencerTest extends AnyFlatSpec with ChiselScalatestTester {
             c.io.out.bits.data(input)(lane).expect(laneValue(lane, input))
           }
         }
-
-        c.clock.step()
-        c.io.in.valid.poke(false.B)
       }
 
+      c.clock.step()
       c.io.out.valid.expect(false.B)
       c.io.in.ready.expect(true.B)
     }

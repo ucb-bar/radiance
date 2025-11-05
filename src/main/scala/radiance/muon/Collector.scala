@@ -100,7 +100,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
       b.data := writeData
       b.enable := false.B
     }
-    bankWrites(regBankId(writePReg)).enable := writeEnable
+    bankWrites(regBankId(writePReg)).enable := writeEnable && (writePReg =/= 0.U)
   }
 
   io.writeResp.ports.head.valid := RegNext(writeEnable)
