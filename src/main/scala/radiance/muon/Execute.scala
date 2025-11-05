@@ -38,16 +38,21 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   sfuPipe.idIO := idIO
 
   val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, sfuPipe)
-  val uses = Seq(UseALUPipe, UseFP32Pipe, UseFP16Pipe, UseMulDivPipe, UseLSUPipe, UseSFUPipe)
+  val uses = Seq(inst.b(UseALUPipe) && !inst.b(UseMulDivPipe),
+                 inst.b(UseFP32Pipe),
+                 inst.b(UseFP16Pipe),
+                 inst.b(UseMulDivPipe),
+                 inst.b(UseLSUPipe),
+                 inst.b(UseSFUPipe))
 
   (pipes zip uses).foreach { case (pipe, use) =>
-    pipe.io.req.valid := io.req.valid && inst.b(use)
+    pipe.io.req.valid := io.req.valid && use
     pipe.io.req.bits.uop := io.req.bits.uop
     pipe.io.req.bits.rs1Data.foreach(_ := io.req.bits.rs1Data.get)
     pipe.io.req.bits.rs2Data.foreach(_ := io.req.bits.rs2Data.get)
     pipe.io.req.bits.rs3Data.foreach(_ := io.req.bits.rs3Data.get)
   }
-  io.req.ready := Mux1H(VecInit(uses.map(inst.b)), pipes.map(_.io.req.ready))
+  io.req.ready := Mux1H(VecInit(uses), pipes.map(_.io.req.ready))
 
   val respArbiter = Module(new RRArbiter(writebackT(), pipes.length))
   (respArbiter.io.in zip pipes).foreach { case (arbIn, pipe) =>
