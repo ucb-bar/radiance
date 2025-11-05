@@ -188,8 +188,7 @@ class FP16Pipe(implicit p: Parameters)
 }
 
 class FPPipe(implicit p: Parameters)
-  extends CoreModule with HasFPPipeParams {
-  val io = IO(new ExIOBundle)
+  extends ExPipe(false, true) with HasFPPipeParams {
 
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)

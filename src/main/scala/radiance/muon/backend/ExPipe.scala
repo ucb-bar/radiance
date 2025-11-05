@@ -5,16 +5,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 
-class ExIOBundle(
-  writebackSched: Boolean = true,
-  writebackReg: Boolean = true,
-  requiresRs3: Boolean = false
-)(implicit val p: Parameters)
-  extends Bundle with HasCoreBundles {
-  val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = requiresRs3)))
-  val resp = Decoupled(writebackT(writebackSched, writebackReg))
-}
-
 abstract class ExPipe(
   writebackSched: Boolean = true,
   writebackReg: Boolean = true,
@@ -23,7 +13,10 @@ abstract class ExPipe(
   outLanes: Option[Int] = None,
   requiresRs3: Boolean = false,
 )(implicit p: Parameters) extends CoreModule with HasCoreBundles {
-  val io = IO(new ExIOBundle(writebackSched, writebackReg, requiresRs3))
+  val io = IO(new Bundle {
+    val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = requiresRs3)))
+    val resp = Decoupled(writebackT(writebackSched, writebackReg))
+  })
 
   val decomposer = decomposerTypes.map { et =>
     Module(new LaneDecomposer(
@@ -53,7 +46,7 @@ abstract class ExPipe(
   def reqTmask = latchedUop.tmask
   def reqWid = latchedUop.wid
   def reqRd = reqInst(Rd)
-  
+
   when (io.req.fire && !io.resp.fire) {
     busy := true.B
   }.elsewhen (!io.req.fire && io.resp.fire) {
