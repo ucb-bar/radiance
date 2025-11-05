@@ -142,11 +142,11 @@ class FP16Pipe(implicit p: Parameters)
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0)
 
-  val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP16
+  val ioIsFP16 = ioFpOp.dstFmt === FPFormat.FP16
   val expandedLaneMask = decomposer.get.io.out.bits.data(3).asUInt
 
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready && ioIsFP32
-  decomposer.get.io.in.valid := io.req.valid && ioIsFP32
+  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready && ioIsFP16
+  decomposer.get.io.in.valid := io.req.valid && ioIsFP16
   decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
   decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
   decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
