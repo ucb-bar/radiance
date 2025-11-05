@@ -60,6 +60,7 @@ module CyclotronFrontendBlackBox #(
     input  bit     ready[NUM_WARPS],
     output bit     valid[NUM_WARPS],
     output int     pc[NUM_WARPS],
+    output byte    wid[NUM_WARPS],
     output byte    op[NUM_WARPS],
     output byte    opext[NUM_WARPS],
     output byte    f3[NUM_WARPS],
@@ -199,8 +200,8 @@ module CyclotronFrontendBlackBox #(
   always @(posedge clock) begin
     if (reset) begin
       for (integer g = 0; g < NUM_WARPS; g = g + 1) begin
-        __in_ibuf_wid[g] = '0;
         __in_ibuf_pc[g] = '0;
+        __in_ibuf_wid[g] = '0;
         __in_ibuf_op[g] = '0;
         __in_ibuf_rd[g] = '0;
         __in_ibuf_rs1[g] = '0;
@@ -221,6 +222,7 @@ module CyclotronFrontendBlackBox #(
         __out_ibuf_ready,
         __in_ibuf_valid,
         __in_ibuf_pc,
+        __in_ibuf_wid,
         __in_ibuf_op,
         __in_ibuf_opext,
         __in_ibuf_f3,

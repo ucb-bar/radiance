@@ -66,15 +66,22 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val allCollected = valids.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
 
-    assert(!rowValid || !allCollected || noneBusy, "operand valid but still marked busy?")
+    assert(!rowValid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
-    val out = Wire(Decoupled(uopT))
-    out.valid := rowValid && allCollected
-    out.bits := uopTable(i)
-    out
+    val e = Wire(Decoupled(uopT))
+    e.valid := rowValid && allCollected
+    e.bits := uopTable(i)
+
+    // deregister upon issue
+    when (e.fire) {
+      rowValidTable(i) := false.B
+    }
+
+    e
   })
   dontTouch(eligibles)
 
+  // schedule issue out of eligibles
   // TODO: warp-aware issue scheduling
   val issueScheduler = Module(
     new RRArbiter(chiselTypeOf(eligibles.head.bits), eligibles.length)
@@ -97,8 +104,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val rdWriteback = io.writeback.bits.rd
     val updated = WireDefault(false.B)
     (hasRss zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
-      when (io.writeback.fire && rowValid && hasRs && (rs === rdWriteback)) {
-        assert(newBusys(rsi), "RS: busy was already low before writeback")
+      when (io.writeback.fire && rowValid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
+        assert(newBusys(rsi),
+          cf"RS: busy was already low when writeback arrived (pc:${uop.pc}%x, rd:${rdWriteback})")
         newBusys(rsi) := false.B
         updated := true.B
       }
@@ -132,7 +140,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
         val uop    = uopTable(i)
         printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
                cf"opvalid: (rs1:${valids(0)} rs2:${valids(1)} rs3:${valids(2)}) | " +
-               cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)})\n")
+               cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)}) | " +
+               cf"regs: (rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3})\n")
       }
     }
     printf("=" * 100 + "\n")
