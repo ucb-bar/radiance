@@ -191,6 +191,17 @@ class FPPipe(implicit p: Parameters)
   extends ExPipe(writebackSched = false, writebackReg = true, requiresRs3 = true)
     with HasFPPipeParams {
 
+  val fCSRIO = IO(new Bundle {
+    val regData = csrDataT
+    val regWrite = Valid(csrDataT)
+  })
+  val fCSR = RegInit(csrDataT)
+  fCSRIO.regData := fCSR
+
+  when (fCSRIO.regWrite.valid) {
+    fCSR := fCSRIO.regWrite.valid
+  }
+
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)
   val CVFPU = Module(new CVFPU(numFp16Lanes = numFP32Lanes * 2, tagWidth = Isa.regBits))
