@@ -38,12 +38,15 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   sfuPipe.idIO := idIO
 
   val pipes = Seq(aluPipe, fp32Pipe, fp16Pipe, mulDivPipe, lsuPipe, sfuPipe)
-  val uses = Seq(inst.b(UseALUPipe) && !inst.b(UseMulDivPipe),
+  val uses = Seq(inst.b(UseALUPipe),
                  inst.b(UseFP32Pipe),
                  inst.b(UseFP16Pipe),
                  inst.b(UseMulDivPipe),
                  inst.b(UseLSUPipe),
                  inst.b(UseSFUPipe))
+
+  assert(!io.req.valid || uses.map(_.asUInt).reduce(_ +& _) === 1.U,
+    cf"pipeline selection should be one hot, but got ${VecInit(uses).asUInt}%b")
 
   (pipes zip uses).foreach { case (pipe, use) =>
     pipe.io.req.valid := io.req.valid && use

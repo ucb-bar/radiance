@@ -122,13 +122,12 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case LuiImm => (decode(Imm24) << 12.U)(31, 0)
-        case UseMulDivPipe => (decode(Opcode) === MuOpcode.OP.U) && (decode(F7) === "b0000001".U)
         case UseFP32Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b00".U)
         case UseFP16Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b10".U)
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
-            Cat(decode(Opcode), decode(F3)),
+            Cat(decode(Opcode), decode(F3), decode(F7)),
             Decoder.table
           )(Decoder.tableIndices(field))
       }
@@ -228,8 +227,9 @@ object Decoder {
     allDecodeFields.filter(!_.essential)
   }
 
-  def staticDecode(field: DecodeField, op: String, f3: => Int): Option[Boolean] = {
-    def sd(f: DecodeField) = staticDecode(f, op, f3).get
+  def staticDecode(field: DecodeField, op: String,
+                   f3: LazyField, f7: LazyField): Option[Boolean] = {
+    def sd(f: DecodeField) = staticDecode(f, op, f3, f7).get
     field match {
       case IsRType =>
         Some(Seq(
@@ -273,7 +273,11 @@ object Decoder {
           MuOpcode.LUI,
           MuOpcode.JALR,
           MuOpcode.JAL,
-        ).contains(op))
+        ).contains(op) &&
+          ((op != MuOpcode.OP) || (f7 == "??????0")) // mul/div
+        )
+      case UseMulDivPipe =>
+        Some((op == MuOpcode.OP) && (f7 == "??????1"))
       case UseFPPipe =>
         Some(Seq(
           MuOpcode.OP_FP,
@@ -351,34 +355,93 @@ object Decoder {
       case IsJoin =>    Some(op == MuOpcode.CUSTOM0 && f3 == 3)
       case IsBar =>     Some(op == MuOpcode.CUSTOM0 && f3 == 4)
       case IsPred =>    Some(op == MuOpcode.CUSTOM0 && f3 == 5)
-      case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == 0)
-      case IsCSR =>     Some(op == MuOpcode.SYSTEM  && f3 != 0)
+      case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == "??0")
+      case IsCSR =>     Some(op == MuOpcode.SYSTEM  && f3 == "??1")
       case _ => None
     }
   }
 
+  class LazyField(val value: Int, val width: Int = 3) {
+    require(width < 32)
+
+    private val checked = scala.collection.mutable.Set[BitPat]()
+
+    def ==(pat: BitPat): Boolean = {
+      checked.add(pat)
+      (value & pat.mask) == pat.value
+    }
+
+    def ==(other: Int): Boolean = {
+      this.==(BitPat(other.asUInt(width.W)))
+    }
+
+    def ==(other: String): Boolean = {
+      this.==(BitPat("b" + other))
+    }
+
+    // TODO: add warnings for != ops
+
+    // generate a minimal sequence of matching bitpat and concrete values
+    def genBitPats: Seq[(BitPat, Int)] = {
+      if (checked.isEmpty) {
+        Seq((BitPat.dontCare(width), 0))
+      } else {
+        val mask = checked.map(_.mask).reduce(_ | _)
+        val tests = (0 until (1 << width)).filter(n => (n & ~mask) == 0)
+        tests.map(x => (new BitPat(x, mask, width), x))
+      }
+      // // if nothing is checked or if whitelist is exhaustive: generate ???;
+      // // follow with union (whitelist, blacklist) checks
+      // ((if (checked.isEmpty || (checked.size >= (1 << width))) {
+      //   Seq(("?" * width, dontCareValue))
+      // } else {
+      //   Seq()
+      // }) ++ checked.union(reverseChecked).map { x =>
+      //   (("0" * width + x.toBinaryString) takeRight width, x) // left pad 0
+      // }).map(x => (BitPat("b" + x._1), x._2))
+    }
+  }
+
+  implicit class LiteralLazyField(value: UInt) extends LazyField(value.litValue.toInt, value.getWidth) {
+    override def ==(pat: BitPat): Boolean = (value.litValue & pat.mask) == pat.value
+  }
+
   // this converts field to the index in the bitpat
-  val tableIndices = allDecodeFields.flatMap(f => staticDecode(f, "", 0).map(_ => f)).zipWithIndex.toMap
+  val tableIndices = allDecodeFields
+    .flatMap(f => staticDecode(f, "", 0.U(3.W), 0.U(7.W)).map(_ => f)).zipWithIndex.toMap
+
+  val _tableData = allOpcodes.flatMap { op =>
+    // for every field, there's always a 2-step process:
+    // 1. symbolic evaluation for usage, 2. concrete (+recursive) evaluation for signals
+    val f3 = new LazyField(0, 3)
+    allDecodeFields.foreach(staticDecode(_, op, f3, 0.U(7.W)))
+    f3.genBitPats.flatMap { case (bp3, val3) =>
+      val f7 = new LazyField(0, 7)
+      allDecodeFields.foreach(staticDecode(_, op, val3.U(3.W), f7))
+      f7.genBitPats.map { case (bp7, val7) =>
+        val signals = allDecodeFields.flatMap(staticDecode(_, op, val3.U(3.W), val7.U(7.W)))
+        val sigStr = signals.map(b => if (b) '1' else '0').mkString.reverse // str is big endian
+        (BitPat(op) ## bp3 ## bp7, BitPat("b" + sigStr))
+      }
+    }
+  }
+  _tableData.foreach(println)
 
   val table = TruthTable(
-    table = allOpcodes.flatMap { op =>
-      var f3Used = false
-
-      def getBitPat(f3: => Int) = {
-        BitPat("b" + allDecodeFields.flatMap {
-          staticDecode(_, op, f3)
-        }.map(b => if (b) '1' else '0').mkString.reverse) // string is big endian
-      }
-
-      val f0Signals = getBitPat({f3Used = true; 0})
-      if (f3Used) {
-        Seq.tabulate(8) { f3 =>
-          (BitPat(op + (("000" + f3.toBinaryString) takeRight 3)), getBitPat(f3))
-        }
-      } else {
-        Seq((BitPat(op + "???"), f0Signals))
-      }
-    },
+    table = _tableData,
+      // def getBitPat(f3: => Int, f7: => Int) = {
+      //   BitPat("b" + allDecodeFields.flatMap {
+      //     staticDecode(_, op, f3)
+      //   }.map(b => if (b) '1' else '0').mkString.reverse) // string is big endian
+      // }
+      // val f0Signals = getBitPat({ f3Used = true; 0 }, { f7Used = true; 0 })
+      // if (f3Used) {
+      //   Seq.tabulate(8) { f3 =>
+      //     (BitPat(op + (("000" + f3.toBinaryString) takeRight 3)), getBitPat(f3))
+      //   }
+      // } else {
+      //   Seq((BitPat(op + "???"), f0Signals))
+      // }
     default = BitPat.dontCare(tableIndices.size)
   )
 
