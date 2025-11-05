@@ -156,6 +156,7 @@ class LSQOperandUpdateReq(implicit p: Parameters) extends CoreBundle {
 class LSQOperandUpdateResp(implicit p: Parameters) extends CoreBundle {
     val addressIdx = UInt(muonParams.lsu.addressIdxBits.W)
     val storeDataIdx = UInt(muonParams.lsu.storeDataIdxBits.W)
+    val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
 // Each load and store queue attempts to issue requests back to LSU in a correct order once 
@@ -414,6 +415,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         io.receivedOperands.resp.bits.addressIdx := addressIdx(receivedOperandsIndex)
         io.receivedOperands.resp.bits.storeDataIdx := {
             if (loadQueue) { DontCare } else { storeDataIdx(receivedOperandsIndex) }
+        }
+        if (lsuDerived.debugIdBits.isDefined) {
+            io.receivedOperands.resp.bits.debugId.get := debugId.get(receivedOperandsIndex)
         }
 
         when (io.receivedOperands.req.valid) {
@@ -1033,8 +1037,15 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             metadata.mask(i) := address(i)(lsuDerived.smallPerLaneMaskBits-1, 0)
         }
 
-        printf(cf"[LSU] Operands update: token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), address = ${address}, tmask = ${io.coreReq.bits.tmask}, storeData = ${io.coreReq.bits.storeData}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
-        printf(cf"[LSU] Write metadata: token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), destReg = ${io.coreReq.bits.destReg}, tmask = ${io.coreReq.bits.tmask}, op = ${io.coreReq.bits.op}, mask = ${metadata.mask}\n")
+        printf(cf"[LSU] Operands / metadata update: " +
+          cf"token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), " +
+          cf"address = ${address}, " +
+          cf"destReg = ${io.coreReq.bits.destReg}, " +
+          cf"tmask = ${io.coreReq.bits.tmask}, " +
+          cf"storeData = ${io.coreReq.bits.storeData}, " +
+          cf"op = ${io.coreReq.bits.op}, " +
+          cf"mask = ${metadata.mask}\n"
+        )
         
         metadataMem.write(metadataWriteIdx, metadata)
     }
@@ -1118,6 +1129,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val addressTmask = RegInit(0.U.asTypeOf(new AddressTmask))
         val storeData = RegInit(VecInit.fill(muonParams.numLanes)(0.U(muonParams.archLen.W)))
         
+        val shiftedData = Wire(Vec(muonParams.numLanes, UInt(muonParams.archLen.W)))
         val mask = Wire(Vec(muonParams.numLanes, UInt(lsuDerived.perLaneMaskBits.W)))
         for (i <- 0 until muonParams.numLanes) {
             val address = Mux(
@@ -1125,11 +1137,19 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 io.addressTmask.address(i),
                 addressTmask.address(i),
             )
+
+            val laneData = Mux(
+                queueRequestFirePrev,
+                io.storeData(i),
+                storeData(i)
+            )
             
             mask(i) := MuxCase((-1).S(lsuDerived.perLaneMaskBits.W).asUInt, Seq(
                 (op.isOneOf(MemOp.loadByte, MemOp.loadByteUnsigned, MemOp.storeByte)) -> ("b1".U << address(1, 0)),
                 (op.isOneOf(MemOp.loadHalf, MemOp.loadHalfUnsigned, MemOp.storeHalf)) -> ("b11".U << address(1, 0)),
             ))
+
+            shiftedData(i) := laneData << (address(1, 0) * 8.U)
         }
 
         when (queueRequestFirePrev) {
@@ -1137,12 +1157,12 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             storeData := io.storeData
 
             io.memRequest.bits.address := Utils.selectPacket(io.addressTmask.address, packet)(this)
-            io.memRequest.bits.data := Utils.selectPacket(io.storeData, packet)(this)
+            io.memRequest.bits.data := Utils.selectPacket(shiftedData, packet)(this)
             io.memRequest.bits.tmask := Utils.selectPacket(io.addressTmask.tmask, packet)(this)
             io.memRequest.bits.mask := Utils.selectPacket(mask, packet)(this)
         }.otherwise {
             io.memRequest.bits.address := Utils.selectPacket(addressTmask.address, packet)(this)
-            io.memRequest.bits.data := Utils.selectPacket(storeData, packet)(this)
+            io.memRequest.bits.data := Utils.selectPacket(shiftedData, packet)(this)
             io.memRequest.bits.tmask := Utils.selectPacket(addressTmask.tmask, packet)(this)
             io.memRequest.bits.mask := Utils.selectPacket(mask, packet)(this)
         }
@@ -1158,7 +1178,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.addressSpace := token.addressSpace
 
         when (io.memRequest.fire) {
-            printf(p"[LSU] Mem request sent: tag=0x${Hexadecimal(tag.asUInt)}, packet=${packet}, tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, op=${op.asUInt}, data = ${io.memRequest.bits.data}, address = ${io.memRequest.bits.address}\n")
+            printf(p"[LSU] Mem request sent: tag=0x${Hexadecimal(tag.token.asUInt)}, packet=${packet}, tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, op=${op.asUInt}, data = ${io.memRequest.bits.data}, address = ${io.memRequest.bits.address}\n")
         }
     }
 
@@ -1418,9 +1438,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             val mask = s2_packet_mask(i)
             io.coreResp.bits.writebackData(i) := MuxCase(0.U, Seq(
                 (s2_metadata.op === MemOp.loadByte) -> ((word >> (mask * 8.U))(7, 0)).sextTo(muonParams.archLen),
-                (s2_metadata.op === MemOp.loadByteUnsigned) -> (word >> (mask * 8.U)),
-                (s2_metadata.op === MemOp.loadHalf) -> ((word >> (mask * 16.U))(15, 0)).sextTo(muonParams.archLen),
-                (s2_metadata.op === MemOp.loadHalfUnsigned) -> (word >> (mask * 16.U)),
+                (s2_metadata.op === MemOp.loadByteUnsigned) -> (word >> (mask * 8.U))(7, 0),
+                (s2_metadata.op === MemOp.loadHalf) -> ((word >> (mask * 8.U))(15, 0)).sextTo(muonParams.archLen),
+                (s2_metadata.op === MemOp.loadHalfUnsigned) -> (word >> (mask * 8.U))(15, 0),
                 (s2_metadata.op === MemOp.loadWord) -> word,
             ))
         }

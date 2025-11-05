@@ -50,9 +50,11 @@ object MuonMemTL {
       edge.Get(m.tag, m.address, m.size)._2
     )
     
-    // don't check full mask when valid is low
-    assert(!valid || m.mask === ((1.U << (1.U << m.size).asUInt).asUInt - 1.U),
-     cf"full mask required for now (mask = ${m.mask}, size = ${m.size})")
+    // don't check full mask when valid is low. 
+    // TODO: fix this (e.g. address is 0x02, size is 1, mask is 0b1100)
+    // val fullMaskUnshifted = ((1.U << (1.U << m.size).asUInt).asUInt - 1.U)
+    // assert(!valid || m.mask === fullMaskUnshifted,
+    //  cf"full mask required for now (mask = ${m.mask}, size = ${m.size})")
     
     tla
   }

@@ -228,18 +228,24 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
       val memOps = scala.collection.mutable.ArrayBuffer[MemoryOperation]()
       val memoryState = scala.collection.mutable.Map[Long, Long]()
       var reservation = scala.util.Random.nextInt(15).toLong
-      for (j <- 0 until 100) {
-        // random memory operation: only word-sized loads / stores for now
-        val r = scala.util.Random.nextDouble()
-        val (memOp, memOpNum) = if (r < 0.5 && memoryState.nonEmpty) {
-          (MemOp.loadWord, 4)
+      for (j <- 0 until 500) {
+        // random memory operation
+        // val r = scala.util.Random.nextDouble()
+        // val (memOp, memOpNum) = if (r < 0.5 && memoryState.nonEmpty) {
+        //   (MemOp.loadWord, 4)
+        // }
+        // else {
+        //   (MemOp.storeWord, 7)
+        // }
+
+        val memOpNum = if (memoryState.isEmpty) {
+          7
         }
         else {
-          (MemOp.storeWord, 7)
+          scala.util.Random.nextInt(8)
         }
-        // val memOpNum = scala.util.Random.nextInt(8)
-        /*val memOp = memOpNum match {
-          /*
+        
+        val memOp = memOpNum match {
           case 0 => MemOp.loadByte
           case 1 => MemOp.loadByteUnsigned
           case 2 => MemOp.loadHalf
@@ -248,15 +254,17 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           case 5 => MemOp.storeByte
           case 6 => MemOp.storeHalf
           case 7 => MemOp.storeWord
-          */
-          case 0 | 1 | 2 | 3 => MemOp.loadWord
-          case 4 | 5 | 6 | 7 => MemOp.storeWord
-        }*/
+        }
+
+        val isLoad = memOpNum >= 0 && memOpNum < 5
+        val isStore = memOpNum >= 5 && memOpNum < 8
 
         val generateAddresses = () => {
           Seq.fill(muonParams.numLanes) {
-            if (memOpNum == 4 || scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
-              // 30% chance to repeat an address we've looked at before
+            if (isLoad || scala.util.Random.nextDouble() < 0.3 && memoryState.nonEmpty) {
+              // 30% chance to repeat an address we've looked at before for stores
+              // if it's a load, we require it to be an address we've touched before
+              // (otherwise result of reading is totally undefined)
               val keys = memoryState.keys.toSeq
               val randomOffset = memOpNum match {
                 case 0 | 1 | 5 => scala.util.Random.nextInt(4)
@@ -264,12 +272,10 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
                 case 4 | 7     => 0
               }
               val addr = keys(scala.util.Random.nextInt(keys.length)) + randomOffset
-              println(f"addr: $addr, memOpNum: $memOpNum")
               addr
             } else {
               // random aligned address in 1MB range
               val addr = 1024 * 1024 * i + scala.util.Random.nextInt(1024 * 1024)
-              println(f"addr: $addr, aligned: ${addr & ~0x3}, memOpNum: $memOpNum")
               (memOpNum match {
                 case 2 | 3 | 6 => addr & ~0x1
                 case 4 | 7     => addr & ~0x3
@@ -280,7 +286,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
         }
 
         var address = generateAddresses()
-        val isStore = memOpNum >= 5 && memOpNum <= 7
+        
         // stores should have unique addresses, otherwise there is nondeterminism
         // which is hard to test
         while (isStore && address.toSet.size != muonParams.numLanes) {
@@ -302,9 +308,10 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
             val data = address.map(a => {
               val word = a & ~0x3
               val offset = (a & 0x3).toInt
-              memoryState.getOrElse(word, 0L) >> (offset * 8) match {
+              val raw = (memoryState.getOrElse(word, 0L) >> (offset * 8)) & 0xffL
+              raw match {
                 case b if (b & 0x80) != 0 => (b - 256)
-                case b => b & 0xffL
+                case b => b
               }
             })
             val bools = tmask
@@ -315,7 +322,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
             val data = address.map(a => {
               val word = a & ~0x3
               val offset = (a & 0x3).toInt
-              memoryState.getOrElse(word, 0L) >> (offset * 8) & 0xffL
+              (memoryState.getOrElse(word, 0L) >> (offset * 8)) & 0xffL
             })
             val bools = tmask
             Some((destReg, bools, data))
@@ -325,9 +332,10 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
             val data = address.map(a => {
               val word = a & ~0x3
               val offset = (a & 0x2).toInt
-              memoryState.getOrElse(word, 0L) >> (offset * 8) match {
+              val raw = (memoryState.getOrElse(word, 0L) >> (offset * 8)) & 0xffffL
+              raw match {
                 case h if (h & 0x8000) != 0 => (h - 65536)
-                case h => h & 0xffffL
+                case h => h
               }
             })
             val bools = tmask
@@ -338,7 +346,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
             val data = address.map(a => {
               val word = a & ~0x3
               val offset = (a & 0x2).toInt
-              memoryState.getOrElse(word, 0L) >> (offset * 8) & 0xffffL
+              (memoryState.getOrElse(word, 0L) >> (offset * 8)) & 0xffffL
             })
             val bools = tmask
             Some((destReg, bools, data))
@@ -355,11 +363,15 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
               if (tmask(lane)) {
                 val word = address(lane) & ~0x3
                 val offset = (address(lane) & 0x3).toInt
-                val oldValue = memoryState.getOrElse(word, 0L)
-                
-                val newByte = oldValue & ~(0xffL << (offset * 8)) | 
-                  (data(lane).toLong & 0xffL) << (offset * 8)
-                memoryState(word) = newByte
+                // don't mark it in memoryState unless it was already written to by a sw,
+                // as the other bits are indeterminate
+                if (memoryState.contains(word)) {                  
+                  val oldValue = memoryState(word)
+                  
+                  val newByte = oldValue & ~(0xffL << (offset * 8)) | 
+                    (data(lane).toLong & 0xffL) << (offset * 8)
+                  memoryState(word) = newByte
+                }
               }
             }
             None
@@ -370,11 +382,13 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
               if (tmask(lane)) {
                 val word = address(lane) & ~0x3
                 val offset = (address(lane) & 0x2).toInt
-                val oldValue = memoryState.getOrElse(word, 0L)
-                
-                val newHalf = oldValue & ~(0xffffL << (offset * 8)) | 
-                  (data(lane).toLong & 0xffffL) << (offset * 8)
-                memoryState(word) = newHalf
+                if (memoryState.contains(word)) {
+                  val oldValue = memoryState(word)
+                  
+                  val newHalf = oldValue & ~(0xffffL << (offset * 8)) | 
+                    (data(lane).toLong & 0xffffL) << (offset * 8)
+                  memoryState(word) = newHalf
+                }
               }
             }
             None
@@ -403,11 +417,9 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
           destReg,
           debugId = debugId,
           reservationAt = reservation,
-          operandsDelay = scala.util.Random.nextInt(10).toLong,
+          operandsDelay = scala.util.Random.nextInt(15).toLong,
           expectedWriteback = expectedWriteback
         )
-
-        println(memOps.last)
 
         debugId += 1
         reservation += scala.util.Random.nextInt(5).toLong
