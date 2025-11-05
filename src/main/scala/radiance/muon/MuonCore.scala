@@ -307,6 +307,8 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def regDataT = UInt(m.archLen.W)
 
   def aluOpT = UInt(ALU.SZ_ALU_FN.W)
+
+  def csrDataT = UInt(32.W)
 }
 
 /** Muon core and core-private L0 caches */

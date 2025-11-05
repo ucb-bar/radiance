@@ -117,7 +117,8 @@ class CSRFile(
   warpId: UInt,
   coreId: UInt,
   clusterId: UInt,
-)(implicit m: MuonCoreParams) {
+)(implicit m: MuonCoreParams, implicit val p: Parameters)
+  extends HasCoreBundles {
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
   case object MArchId    extends MuonCSR(CSRs.marchid, 0x6D756F6E.U)
   case object MImpId     extends MuonCSR(CSRs.mimpid, 0x20260402.U) // 🙏
@@ -160,8 +161,6 @@ class CSRFile(
   val csrData = RegInit(MixedVecInit(
     allStoredCSRs.map(csr => csr.defaultValue.asTypeOf(UInt(csr.width.W)))
   ))
-
-  val csrDataT = UInt(32.W)
 
   def _check(addr: UInt) = {
     assert(addr.isOneOf(allCSRs.map(_.address.U)), "illegal csr address")
