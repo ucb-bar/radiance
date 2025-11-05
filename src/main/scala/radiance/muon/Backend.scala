@@ -33,6 +33,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   val bypass = false
   val issued = if (bypass) {
+    hazard.reset := true.B
+    scoreboard.reset := true.B
+    reservStation.reset := true.B
+    fakeExPipe.reset := true.B
+
     val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
@@ -98,6 +103,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     when (execute.io.resp.fire) {
       inFlight := false.B
     }
+
+    collector.reset := true.B
   }
 
   when (execute.io.req.fire) {
