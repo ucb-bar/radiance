@@ -59,7 +59,6 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   cbe.io.reset := reset.asBool
 
   // fe csr, hartid
-  fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
   fe.io.softReset := false.B
 
   // fe decode -> cyclotron back end
@@ -100,6 +99,8 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   // single-core
   be.io.clusterId := 0.U
   be.io.coreId := 0.U
+  be.io.softReset := false.B
+  be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
 
   val cfe = Module(new CyclotronFrontend()(p))
   // Imem in the ISA model is not used

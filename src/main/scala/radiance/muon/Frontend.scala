@@ -16,7 +16,7 @@ class Frontend(implicit p: Parameters)
     // TODO: writeback
     val commit = Flipped(schedWritebackT)
 //    val issue = issueIO
-    val csr = csrIO
+    val csr = feCSRIO
     val cmdProc: Option[Bundle] = None
     val softReset = Input(Bool())
     val finished = Output(Bool())

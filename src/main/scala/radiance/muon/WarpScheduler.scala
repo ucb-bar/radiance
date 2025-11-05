@@ -25,7 +25,7 @@ class WarpScheduler(implicit p: Parameters)
     val commit = Flipped(schedWritebackT)
     val icache = icacheIO
     val issue = issueIO
-    val csr = csrIO
+    val csr = feCSRIO
     val rename = renameIO
     val ibuf = ibufEnqIO
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
@@ -287,24 +287,27 @@ class WarpScheduler(implicit p: Parameters)
     "issue arbiter out not valid when inputs are valid")
 
   // handle csr reads
-  io.csr.resp := DontCare
-  when (io.csr.read.fire) {
-    val req = io.csr.read.bits
-    val csrData = MuxCase(
-      DontCare,
-      Seq(
-        (req.addr === 0xcc3.U) -> VecInit(pcTracker.map(_.valid)).asUInt, // warp mask
-        (req.addr === 0xcc4.U) -> threadMasks(req.wid) // thread mask
-        // TODO: b00 mcycle, b80 mcycle_h
-        // TODO: b02 minstret, b82 minstret_h
-      )
-    )
-    io.csr.resp := RegNext(csrData)
-  }
+
+  io.csr.wmask := VecInit(pcTracker.map(_.valid)).asUInt
+  // io.csr.resp := DontCare
+  // when (io.csr.read.fire) {
+  //   val req = io.csr.read.bits
+  //   val csrData = MuxCase(
+  //     DontCare,
+  //     Seq(
+  //       (req.addr === 0xcc3.U) -> VecInit(pcTracker.map(_.valid)).asUInt, // warp mask
+  //       (req.addr === 0xcc4.U) -> threadMasks(req.wid) // thread mask
+  //       // TODO: b00 mcycle, b80 mcycle_h
+  //       // TODO: b02 minstret, b82 minstret_h
+  //     )
+  //   )
+  //   io.csr.resp := RegNext(csrData)
+  // }
 
   // soft reset procedure
   when (io.softReset) {
     // TODO
+    // reset pc
     // enable one warp only
     // reset thread masks
     // clear discards and stalls

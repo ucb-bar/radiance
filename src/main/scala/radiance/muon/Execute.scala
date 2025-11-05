@@ -10,9 +10,10 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
     val resp = Decoupled(writebackT())
+    val id = clusterCoreIdT
+    val feCSR = Flipped(feCSRIO)
+    val softReset = Input(Bool())
   })
-
-  val idIO = IO(clusterCoreIdT)
 
   val aluPipe = Module(new ALUPipe())
   // val fp32Pipe = Module(new FP32Pipe())
@@ -24,7 +25,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   val inst = io.req.bits.uop.inst
 
-  sfuPipe.idIO := idIO
+  sfuPipe.idIO := io.id
 
   val pipes = Seq(aluPipe, fpPipe, mulDivPipe, lsuPipe, sfuPipe)
   val uses = Seq(inst.b(UseALUPipe),
@@ -53,4 +54,16 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     pipe.io.resp.ready := arbIn.ready
   }
   io.resp :<>= respArbiter.io.out
+
+  val mcycle = Wire(UInt(64.W))
+  val mcycleReg = RegEnable(mcycle, 0.U(64.W), true.B)
+  mcycle := Mux(io.softReset, 0.U(64.W), mcycleReg + 1.U)
+
+  val minstret = Wire(UInt(64.W))
+  val minstretReg = RegEnable(minstret, 0.U(64.W), io.resp.fire)
+  minstret := Mux(io.softReset, 0.U(64.W), minstretReg + 1.U)
+
+  sfuPipe.csrIO.mcycle := mcycleReg
+  sfuPipe.csrIO.minstret := minstretReg
+  sfuPipe.csrIO.fe := io.feCSR
 }

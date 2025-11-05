@@ -267,13 +267,9 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     val issued = Output(widT) // comb
   }
 
-  def csrIO = new Bundle {
-    val read = Flipped(Valid(new Bundle {
-      val addr = UInt(m.csrAddrBits.W)
-      val wid = widT
-    })) // reads only
-    val resp = Output(regDataT) // next cycle
-  }
+  def feCSRIO = Output(new Bundle {
+    val wmask = wmaskT
+  })
 
   def cmdProcIO = Flipped(Valid(new Bundle {
     val schedule = pcT
@@ -328,7 +324,6 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
 
   val fe = Module(new Frontend)
   fe.io.imem <> io.imem
-  fe.io.csr.read := 0.U.asTypeOf(fe.io.csr.read)
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
@@ -337,6 +332,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.smem <> io.smem
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
+  be.io.softReset := io.softReset
+  be.io.feCSR := fe.io.csr
 
   fe.io.commit := be.io.schedWb
 

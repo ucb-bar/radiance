@@ -9,10 +9,12 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
+    val feCSR = Flipped(feCSRIO)
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
+    val softReset = Input(Bool())
   })
 
   val hazard = Module(new Hazard)
@@ -31,7 +33,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   fakeExPipe.io.issue <> reservStation.io.issue
   reservStation.io.writeback <> fakeExPipe.io.writeback
 
-  val bypass = false
+  val bypass = true
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
@@ -46,8 +48,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   }
 
   val execute = Module(new Execute())
-  execute.idIO.clusterId := io.clusterId
-  execute.idIO.coreId := io.coreId
+  execute.io.id.clusterId := io.clusterId
+  execute.io.id.coreId := io.coreId
+  execute.io.softReset := io.softReset
+  execute.io.feCSR := io.feCSR
 
   val executeIn = Wire(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true))
 
