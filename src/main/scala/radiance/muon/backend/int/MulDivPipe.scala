@@ -22,7 +22,6 @@ class MulDivPipe(implicit p: Parameters)
   val ioReqOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))
   val reqOp = RegEnable(ioReqOp, 0.U.asTypeOf(aluOpT), io.req.fire)
 
-  val mulOut = Reg(Vec(numLanes, UInt(archLen.W)))
   val sliceTMask = Reg(UInt(numMulDivLanes.W))
   val vecMulDivRespValid = vecMulDiv.map(_.io.resp.valid).asUInt
   val unmaskedMulDivsDone = (vecMulDivRespValid & sliceTMask) === sliceTMask
@@ -49,25 +48,16 @@ class MulDivPipe(implicit p: Parameters)
   }
   // signal should not go high when pipe is idle, if tmask=zeroes, immediately enqueue to recomposer
   recomposer.get.io.in.valid := unmaskedMulDivsDone && busy
-  recomposer.get.io.out.ready := busy
+  recomposer.get.io.out.ready := io.resp.ready
 
-  io.resp.valid := respValid
-  io.resp.bits.reg.get.valid := respValid
+  io.resp.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
   io.resp.bits.reg.get.bits.rd := reqRd
-  io.resp.bits.reg.get.bits.data := mulOut
+  io.resp.bits.reg.get.bits.data := recomposer.get.io.out.bits.data(0)
   io.resp.bits.reg.get.bits.tmask := reqTmask
-
-  when (io.resp.fire) {
-    respValid := false.B
-  }
 
   when (decomposer.get.io.out.fire) {
     // assumes 1 cycle minimum muldiv latency
     sliceTMask := decomposer.get.io.out.bits.data(2).asUInt
-  }
-
-  when (recomposer.get.io.out.fire) {
-    mulOut := recomposer.get.io.out.bits.data(0)
-    respValid := true.B
   }
 }
