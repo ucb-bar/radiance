@@ -92,7 +92,7 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 class FP32Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.FP32, p(MuonKey).fpPipe.numFP32Lanes) {
   // assume same fpconv across all lanes
-  val fpu_out = Reg(UInt((numFP32Lanes * archLen).W))
+  val fpu_out = recomposer.get.io.out.bits.data(0).asUInt
 
   val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP32
   val expandedLaneMask = Cat(decomposer.get.io.out.bits.data(3).reverse.map(b => Fill(2, b.asUInt)))
@@ -124,10 +124,10 @@ class FP32Pipe(implicit p: Parameters)
   val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp32
   recomposer.get.io.in.bits.data(0) := cvFPUIF.resp.bits.result.asTypeOf(recomposer.get.io.in.bits.data(0))
-  recomposer.get.io.out.ready := busy
+  recomposer.get.io.out.ready := io.resp.ready
 
-  io.resp.valid := respValid
-  io.resp.bits.reg.get.valid := respValid
+  io.resp.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
   io.resp.bits.reg.get.bits.rd := reqRd
   io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
   io.resp.bits.reg.get.bits.tmask := reqTmask
@@ -135,21 +135,12 @@ class FP32Pipe(implicit p: Parameters)
   when (io.req.fire) {
     cvFPUReq := ioFpOp
   }
-
-  when (io.resp.fire) {
-    respValid := false.B
-  }
-
-  when (recomposer.get.io.out.fire) {
-    fpu_out := recomposer.get.io.out.bits.data(0).asUInt
-    respValid := true.B
-  }
 }
 
 class FP16Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.FP16, p(MuonKey).fpPipe.numFP32Lanes * 2) {
   // assume same fpconv across all lanes
-  val fpu_out = Reg(Vec(numLanes, UInt(archLen.W)))
+  val fpu_out = recomposer.get.io.out.bits.data(0)
 
   val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP16
   val expandedLaneMask = decomposer.get.io.out.bits.data(3).asUInt
@@ -183,25 +174,16 @@ class FP16Pipe(implicit p: Parameters)
   val chunks = VecInit.tabulate(numFP32Lanes * 2)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
   val zeroExtcvFPURes = Cat(chunks.map(reg => Cat(0.U(16.W), reg)).reverse)
   recomposer.get.io.in.bits.data(0) := zeroExtcvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
-  recomposer.get.io.out.ready := busy
+  recomposer.get.io.out.ready := io.resp.ready
 
-  io.resp.valid := respValid
-  io.resp.bits.reg.get.valid := respValid
+  io.resp.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
   io.resp.bits.reg.get.bits.rd := reqRd
   io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
   io.resp.bits.reg.get.bits.tmask := reqTmask
 
   when (io.req.fire) {
     cvFPUReq := ioFpOp
-  }
-
-  when (io.resp.fire) {
-    respValid := false.B
-  }
-
-  when (recomposer.get.io.out.fire) {
-    fpu_out := recomposer.get.io.out.bits.data(0)
-    respValid := true.B
   }
 }
 
