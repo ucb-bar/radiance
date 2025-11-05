@@ -69,7 +69,7 @@ class ALUPipe(implicit p: Parameters)
   schedResp := 0.U.asTypeOf(schedResp)
 
   val branchTakenMask = reqTmask & cmpOut.asUInt
-  schedResp.valid := recomposer.get.io.out.valid
+  schedResp.valid := reqInst.b(IsJump) || reqInst.b(IsBranch)
   schedResp.bits.setPC.valid := reqInst.b(IsJump) || (reqInst.b(IsBranch) && branchTakenMask.orR)
   schedResp.bits.setPC.bits := Mux(reqInst.b(IsBranch),
     (reqPC + reqInst(Imm32)).asTypeOf(pcT), // to shashank: cannot add at req fire, that causes race for reqPC value

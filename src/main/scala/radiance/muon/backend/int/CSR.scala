@@ -5,6 +5,7 @@ import chisel3.util._
 import radiance.muon._
 import freechips.rocketchip.rocket.CSRs
 import freechips.rocketchip.util.UIntIsOneOf
+import org.chipsalliance.cde.config.Parameters
 
 abstract class MuonCSR(
   val address: Int,
@@ -28,7 +29,7 @@ class CSRFile(
   fflags: UInt,
   frm: UInt,
   fcsr: UInt,
-)(implicit m: MuonCoreParams) {
+)(implicit m: MuonCoreParams, implicit val p: Parameters) extends HasCoreBundles {
   def wrap(x: UInt) = Some(() => x)
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
   case object MArchId    extends MuonCSR(CSRs.marchid, 0x6D756F6E.U)
@@ -81,8 +82,6 @@ class CSRFile(
   val csrData = RegInit(MixedVecInit(
     allStoredCSRs.map(csr => csr.defaultValue.asTypeOf(UInt(csr.width.W)))
   ))
-
-  val csrDataT = UInt(32.W)
 
   def _check(addr: UInt) = {
     assert(addr.isOneOf(allCSRs.map(_.address.U)), "illegal csr address")
