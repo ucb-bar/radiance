@@ -42,6 +42,9 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   }
 
   val execute = Module(new Execute())
+  execute.idIO.clusterId := io.clusterId
+  execute.idIO.coreId := io.coreId
+
   val executeIn = Wire(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true))
 
   val haves = Seq(HasRs1, HasRs2, HasRs3)
