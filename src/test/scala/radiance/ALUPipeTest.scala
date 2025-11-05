@@ -76,6 +76,9 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  private val opcodeWritesRdBlacklist: Set[BigInt] =
+    Set(MuOpcode.BRANCH).map(bits => BigInt(bits.stripPrefix("b"), 2))
+
   private def driveRequest(
       c: ALUPipe,
       op: UInt,
@@ -94,7 +97,9 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     pokeDecoded(c.io.req.bits.uop.inst, F3, f3.litValue)
     pokeDecoded(c.io.req.bits.uop.inst, F7, f7.litValue)
     pokeDecoded(c.io.req.bits.uop.inst, Rd, rd)
-    pokeDecoded(c.io.req.bits.uop.inst, HasRd, if (rd != 0) 1 else 0)
+    val opcodeValue = op.litValue
+    val hasRd = rd != 0 && !opcodeWritesRdBlacklist.contains(opcodeValue)
+    pokeDecoded(c.io.req.bits.uop.inst, HasRd, if (hasRd) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs1, if (in1.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs2, if (in2.nonEmpty) 1 else 0)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs3, 0)
@@ -429,6 +434,8 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val jalIn1 = Seq(BigInt(50), BigInt(60), BigInt(70), BigInt(80))
       val jalIn2 = Seq(BigInt(5), BigInt(6), BigInt(7), BigInt(8))
       val jalExpected = jalIn1.zip(jalIn2).map { case (a, b) => (a + b) & mask }
+      val jalLinkValue = BigInt(p(MuonKey).instBits / 8) & mask
+      val jalLink = Seq.fill(numLanes)(jalLinkValue)
 
       val jalOp = PipeOp(
         name = "jal",
@@ -440,10 +447,10 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         in2 = jalIn2,
         pc = 0,
         reqMask = fullTmask,
-        expectedData = jalExpected,
+        expectedData = jalLink,
         dataCheckMask = fullTmask,
-        expectedRespMask = BigInt(0),
-        expectedRegValid = false,
+        expectedRespMask = fullTmask,
+        expectedRegValid = true,
         expectedSetPcValid = true,
         expectedSetPcValue = Some(jalExpected.head),
         holdCycles = 0
@@ -453,6 +460,7 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val jalrMask = BigInt("0101", 2)
       val jalrExpected = jalrIn1.zip(jalrIn2).map { case (a, b) => (a + b) & mask }
       val jalrRd = 10
+      val jalrLink = Seq.fill(numLanes)(jalLinkValue)
 
       val jalrOp = PipeOp(
         name = "jalr",
@@ -464,10 +472,10 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         in2 = jalrIn2,
         pc = 0,
         reqMask = jalrMask,
-        expectedData = jalrExpected,
+        expectedData = jalrLink,
         dataCheckMask = jalrMask,
-        expectedRespMask = BigInt(0),
-        expectedRegValid = false,
+        expectedRespMask = jalrMask,
+        expectedRegValid = true,
         expectedSetPcValid = true,
         expectedSetPcValue = Some(jalrExpected.head),
         holdCycles = 0
@@ -509,11 +517,13 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       val mask = (BigInt(1) << archLen) - 1
       val fullTmask = (BigInt(1) << numLanes) - 1
       val totalPackets = numLanes / numAluLanes
+      val instBytes = p(MuonKey).instBits / 8
 
       val beqMaskBools = Seq(true, false, true, false)
       val beqRespMask = maskFrom(beqMaskBools)
 
       val jalBackpressureData = Seq(BigInt(20), BigInt(36), BigInt(52), BigInt(68)).map(_ & mask)
+      def linkValue(pc: BigInt) = (pc + BigInt(instBytes)) & mask
 
       val ops = Seq(
         PipeOp(
@@ -598,10 +608,10 @@ class ALUPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           in2 = Seq(BigInt(4), BigInt(4), BigInt(4), BigInt(4)),
           pc = BigInt(0x800),
           reqMask = BigInt("1110", 2),
-          expectedData = jalBackpressureData,
+          expectedData = Seq.fill(numLanes)(linkValue(BigInt(0x800))),
           dataCheckMask = BigInt("1110", 2),
-          expectedRespMask = BigInt(0),
-          expectedRegValid = false,
+          expectedRespMask = BigInt("1110", 2),
+          expectedRegValid = true,
           expectedSetPcValid = true,
           expectedSetPcValue = Some(jalBackpressureData(1)),
           holdCycles = 2
