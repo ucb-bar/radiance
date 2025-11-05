@@ -53,9 +53,7 @@ abstract class ExPipe(
   def reqTmask = latchedUop.tmask
   def reqWid = latchedUop.wid
   def reqRd = reqInst(Rd)
-
-  val respValid = RegInit(false.B)
-
+  
   when (io.req.fire && !io.resp.fire) {
     busy := true.B
   }.elsewhen (!io.req.fire && io.resp.fire) {
