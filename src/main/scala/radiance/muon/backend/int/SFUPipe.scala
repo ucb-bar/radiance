@@ -2,6 +2,7 @@ package radiance.muon.backend.int
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
@@ -12,10 +13,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
     val fe = Flipped(feCSRIO)
     val mcycle = Input(UInt(64.W))
     val minstret = Input(UInt(64.W))
-    val fcsr = IO(new Bundle {
+    val fcsr = new Bundle {
       val regData = Input(csrDataT)
       val regWrite = Valid(csrDataT)
-    })
+    }
   })
 
   val firstLidOH = PriorityEncoderOH(uop.tmask)
@@ -81,6 +82,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
   val clusterOffset = coreOffset + log2Ceil(m.numCores)
 
   csrIO.fcsr.regWrite.valid := false.B
+  csrIO.fcsr.regWrite.bits := DontCare
 
   val csrFile = new CSRFile(
     mhartId   = (idIO.clusterId << clusterOffset).asUInt |
@@ -113,7 +115,26 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
       }
       writeback.bits.setTmask.bits := 0.U
     }.elsewhen (inst.b(IsCSR)) {
-      assert(false.B, "i dont have csrs yet")
+      val csrDataRaw = Mux1H(Seq(
+        (inst.b(IsCSRRW) || inst.b(IsCSRRS) || inst.b(IsCSRRC), firstRs1),
+        (inst.b(IsCSRRWI) || inst.b(IsCSRRSI) || inst.b(IsCSRRCI), inst(CsrImm))
+      ))
+      val csrAddr = inst(Imm32)
+      val currentValue = csrFile(csrAddr)
+      val newValue = Mux1H(Seq(
+        (inst.b(IsCSRRC) || inst.b(IsCSRRCI), currentValue & (~csrDataRaw).asUInt),
+        (inst.b(IsCSRRS) || inst.b(IsCSRRSI), currentValue | csrDataRaw),
+        (inst.b(IsCSRRW) || inst.b(IsCSRRWI), csrDataRaw)
+      ))
+      val currentFCSR = csrFile(csrFile.FCSR)
+      val newNewValue = MuxCase(newValue, Seq(
+        (csrAddr === CSRs.fflags.U) -> ((currentFCSR & 0xe0.U(32.W)) | (newValue & 0x1f.U(32.W))),
+        (csrAddr === CSRs.frm.U) -> ((currentFCSR & 0x1f.U(32.W)) | ((newValue & 0x7.U(32.W)) << 5).asUInt),
+        (csrAddr === CSRs.fcsr.U) -> (currentFCSR & 0xff.U(32.W))
+      ))
+      when (currentValue =/= newNewValue) {
+        csrFile.write(csrAddr, newNewValue)
+      }
     }
   }
 

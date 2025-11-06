@@ -192,15 +192,11 @@ class FPPipe(implicit p: Parameters)
     with HasFPPipeParams {
 
   val fCSRIO = IO(new Bundle {
-    val regData = csrDataT
-    val regWrite = Valid(csrDataT)
+    val regData = Output(csrDataT)
+    val regWrite = Flipped(Valid(csrDataT))
   })
-  val fCSR = RegInit(csrDataT)
+  val fCSR = RegEnable(fCSRIO.regWrite.bits, 0.U.asTypeOf(csrDataT), fCSRIO.regWrite.valid)
   fCSRIO.regData := fCSR
-
-  when (fCSRIO.regWrite.valid) {
-    fCSR := fCSRIO.regWrite.valid
-  }
 
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)

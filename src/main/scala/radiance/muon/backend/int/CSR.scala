@@ -75,6 +75,9 @@ class CSRFile(
     NumLanes, NumWarps, NumCores,
     BlockIdxX, BlockIdxY, BlockIdxZ,
     ThreadIdxX, ThreadIdxY, ThreadIdxZ,
+    WarpMask, ThreadMask,
+    MCycle, MCycleH, MInstRet, MInstRetH,
+    FFlags, FRM, FCSR
   )
 
   def allStoredCSRs: Seq[MuonCSR] = allCSRs.filter(_.accessor.isEmpty)

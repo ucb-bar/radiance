@@ -25,6 +25,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   val inst = io.req.bits.uop.inst
 
+  sfuPipe.csrIO.fcsr <> fpPipe.fCSRIO
   sfuPipe.idIO := io.id
 
   val pipes = Seq(aluPipe, fpPipe, mulDivPipe, lsuPipe, sfuPipe)
