@@ -29,6 +29,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   hazard.io.writeback <> reservStation.io.writebackHazard
 
   // TODO bogus
+  reservStation.io.collector.readReq.ready := false.B
+  reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
+  reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
+
   val fakeExPipe = Module(new FakeWriteback)
   fakeExPipe.io.issue <> reservStation.io.issue
   reservStation.io.writeback <> fakeExPipe.io.writeback
@@ -53,21 +57,23 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
 
-  val executeIn = Wire(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true))
+  val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
 
   val haves = Seq(HasRs1, HasRs2, HasRs3)
   val regs = Seq(Rs1, Rs2, Rs3)
   val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
 
   val collector = Module(new DuplicatedCollector)
-  (haves lazyZip regs lazyZip collector.io.readReq.ports).foreach { case (has, reg, collReq) =>
+  (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
     val pReg = issued.bits.inst(reg)
-    collReq.valid := issued.valid && issued.bits.inst.b(has)
-    collReq.bits.pReg := pReg
+    collReq.enable := issued.valid && issued.bits.inst.b(has)
+    collReq.pReg := pReg
   }
+  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
+
   // TODO: connect with executeIn ready
   collector.io.readResp.ports.foreach(_.ready := true.B)
-  (operands lazyZip collector.io.readResp.ports).foreach { case (opnd, collResp) =>
+  (operands zip collector.io.readResp.ports).foreach { case (opnd, collResp) =>
     opnd := collResp.bits.data.get
   }
 
@@ -79,9 +85,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   // execute-to-issue writeback
   val exRegWb = execute.io.resp.bits.reg.get
-  collector.io.writeReq.ports.head.valid := execute.io.resp.fire && exRegWb.valid
-  collector.io.writeReq.ports.head.bits.pReg := exRegWb.bits.rd
-  collector.io.writeReq.ports.head.bits.data.get := exRegWb.bits.data
+  collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
+  collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
+  collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
+  collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
   collector.io.writeResp.ports.foreach(_.ready := true.B)
   dontTouch(collector.io)

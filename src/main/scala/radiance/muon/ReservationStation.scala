@@ -29,20 +29,31 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val writeback = Flipped(regWritebackT)
     /** writeback pass-through to the hazard module */
     val writebackHazard = regWritebackT
+    /** collector request/response; RS keeps track of operand validity */
+    val collector = new Bundle {
+      val readReq  = Flipped(CollectorRequest(Isa.maxNumRegs, isWrite = false))
+      val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
+    }
   })
 
   val numEntries = muonParams.numIssueQueueEntries
+  val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val validTable = Mem(numEntries, Bool())
   // TODO: optimize; storing all of Decode fields in RS gets expensive
-  val uopTable      = Mem(numEntries, uopT)
-  val opValidTable  = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
-  val busyTable     = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val uopTable       = Mem(numEntries, uopT)
+  val opValidTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  // marks whether the operand is currently being collected
+  // different than opValidTable, because not all of invalid operands will be
+  // served by the collector at once
+  val collValidTable = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  // marks where the operand lives in the collector banks
+  val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
 
   // enqueue
   val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
-  dontTouch(rowEmptyVec)
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
   when (io.admit.fire) {
@@ -51,6 +62,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     uopTable(emptyRow)   := io.admit.bits.uop
     opValidTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
+    collValidTable(emptyRow) := VecInit(Seq(0.U, 0.U, 0.U))
+    collPtrTable(emptyRow) := VecInit(Seq(0.U, 0.U, 0.U))
 
     if (muonParams.debug) {
       printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
@@ -58,20 +71,67 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     }
   }
 
-  // check issue eligiblity
+  // trigger collector on an entry with incomplete opValids
+  val needCollects = (0 until numEntries).map { i =>
+    val valid = validTable(i)
+    val opValids = opValidTable(i)
+    val busys = busyTable(i)
+    val needCollectOps = VecInit((opValids zip busys)
+      .map { case (v, busy) => !v && !busy })
+    val needCollect = valid && needCollectOps.reduce(_ || _)
+    (needCollect, needCollectOps)
+  }
+  // select a single entry for collection
+  // TODO: @perf: currently a simple priority encoder; might introduce fairness
+  // problem
+  val collSelBitvec = VecInit(needCollects.map(_._1))
+  val collSelRow = PriorityEncoder(collSelBitvec)
+  val collSelOpValid = VecInit(needCollects.map(_._2))(collSelRow)
+  val collSelUop = uopTable(collSelRow)
+  val collSelRegs = Seq(collSelUop.inst.rs1, collSelUop.inst.rs2, collSelUop.inst.rs3)
+  io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
+  assert(collSelOpValid.length == io.collector.readReq.bits.regs.length)
+  assert(collSelRegs.length == io.collector.readReq.bits.regs.length)
+  (collSelOpValid lazyZip collSelRegs lazyZip io.collector.readReq.bits.regs)
+    .zipWithIndex.foreach { case ((cv, pReg, collPort), rsi) =>
+      assert(collPort.data.isEmpty)
+      collPort.enable := cv
+      collPort.pReg := Mux(cv, pReg, 0.U)
+      when (io.collector.readReq.fire && cv) {
+        collValidTable(collSelRow)(rsi) := true.B
+      }
+    }
+
+  // mark operand valid upon collector response
+  // collector wakeup should never block
+  io.collector.readResp.ports.foreach(_.ready := true.B)
+  (0 until numEntries).foreach { i =>
+    val valid = validTable(i)
+    val collValids = collValidTable(i)
+    val collPtrs = collPtrTable(i)
+    (collValids lazyZip collPtrs lazyZip io.collector.readResp.ports)
+      .zipWithIndex.foreach { case ((cv, cptr, port), rsi) =>
+        when (valid && cv && port.fire && (port.bits.collEntry === cptr)) {
+          collValidTable(i)(rsi) := false.B
+          assert(opValidTable(i)(rsi) === true.B)
+          opValidTable(i)(rsi) := false.B
+        }
+      }
+  }
+
+  // check issue eligiblity after collection finished & RAW settled
   val eligibles = VecInit((0 until numEntries).map { i =>
-    val rowValid = validTable(i)
+    val valid = validTable(i)
     val opValids = opValidTable(i)
     val busys = busyTable(i)
     val allCollected = opValids.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
 
-    assert(!rowValid || !allCollected || noneBusy, "operand collected but still marked busy?")
+    assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
     val e = Wire(Decoupled(uopT))
-    e.valid := rowValid && allCollected
+    e.valid := valid && allCollected
     e.bits := uopTable(i)
-
     // deregister upon issue
     when (e.fire) {
       validTable(i) := false.B
@@ -98,13 +158,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
                      uop.inst(HasRs3).asBool)
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
 
-    val rowValid = validTable(i)
+    val valid = validTable(i)
     val busys = busyTable(i)
     val newBusys = WireDefault(busys)
     val rdWriteback = io.writeback.bits.rd
     val updated = WireDefault(false.B)
     (hasRss zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
-      when (io.writeback.fire && rowValid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
+      when (io.writeback.fire && valid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
         assert(newBusys(rsi),
           cf"RS: busy was already low when writeback arrived (pc:${uop.pc}%x, rd:${rdWriteback})")
         newBusys(rsi) := false.B
@@ -133,8 +193,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   def printTable = {
     printf("=" * 40 + " ReservationStation " + "=" * 40 + "\n")
     for (i <- 0 until numEntries) {
-      val rowValid = validTable(i)
-      when (rowValid) {
+      val valid = validTable(i)
+      when (valid) {
         val opValids = opValidTable(i)
         val busys    = busyTable(i)
         val uop      = uopTable(i)

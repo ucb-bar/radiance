@@ -74,7 +74,7 @@ case class MuonCoreParams(
   numIssueQueueEntries: Int = 8,  // RS
   maxPendingReads: Int = 3,       // scoreboard
   numRegBanks: Int = 4,           // collector
-  numOpCollectorEntries: Int = 2, // collector
+  numCollectorEntries: Int = 1, // collector
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),

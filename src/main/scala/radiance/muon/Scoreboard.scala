@@ -184,6 +184,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
               // FIXME: this doesn't guard against partial writes of updateRS!!!
               updateRSSuccess := false.B
+              assert(false.B,
+                     cf"TODO: partial update rollback on counter overflow not handled " +
+                     cf"(pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCount})")
+
               dirty := (u.decr =/= 0.U)
               assert(currCount >= u.decr,
                      cf"scoreboard: ${countName} underflow at pReg=${u.pReg}" +
