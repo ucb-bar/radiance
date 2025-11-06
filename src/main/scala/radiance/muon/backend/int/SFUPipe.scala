@@ -12,6 +12,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
     val fe = Flipped(feCSRIO)
     val mcycle = Input(UInt(64.W))
     val minstret = Input(UInt(64.W))
+    val fcsr = IO(new Bundle {
+      val regData = Input(csrDataT)
+      val regWrite = Valid(csrDataT)
+    })
   })
 
   val firstLidOH = PriorityEncoderOH(uop.tmask)
@@ -76,6 +80,8 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
   val coreOffset = warpOffset + log2Ceil(m.numWarps)
   val clusterOffset = coreOffset + log2Ceil(m.numCores)
 
+  csrIO.fcsr.regWrite.valid := false.B
+
   val csrFile = new CSRFile(
     mhartId   = (idIO.clusterId << clusterOffset).asUInt |
                 (idIO.coreId << coreOffset).asUInt |
@@ -90,9 +96,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
     mcycle    = csrIO.mcycle,
     minstret  = csrIO.minstret,
 
-    fflags    = 0.U,
-    frm       = 0.U,
-    fcsr      = 0.U,
+    fcsr      = csrIO.fcsr.regData,
+    fcsrWrite = x => {
+      csrIO.fcsr.regWrite.valid := true.B
+      csrIO.fcsr.regWrite.bits := x
+    }
   )
 
   when (io.req.fire) {
@@ -105,8 +113,6 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
       }
       writeback.bits.setTmask.bits := 0.U
     }.elsewhen (inst.b(IsCSR)) {
-
-
       assert(false.B, "i dont have csrs yet")
     }
   }

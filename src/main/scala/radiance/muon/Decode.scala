@@ -59,6 +59,12 @@ case object IsBar            extends DecodeField
 case object IsPred           extends DecodeField
 case object IsToHost         extends DecodeField
 case object IsCSR            extends DecodeField(1, true)
+case object IsCSRRW          extends DecodeField
+case object IsCSRRS          extends DecodeField
+case object IsCSRRC          extends DecodeField
+case object IsCSRRWI         extends DecodeField
+case object IsCSRRSI         extends DecodeField
+case object IsCSRRCI         extends DecodeField
 case object IsRType          extends DecodeField(1, true)
 case object IsIType          extends DecodeField(1, true)
 case object IsSType          extends DecodeField(1, true)
@@ -211,6 +217,7 @@ object Decoder {
     Seq(
       Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
+      IsCSRRW, IsCSRRS, IsCSRRC, IsCSRRWI, IsCSRRSI, IsCSRRCI,
       IsRType, IsIType, IsSType, IsBType, IsUJType,
       UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
@@ -357,6 +364,12 @@ object Decoder {
       case IsPred =>    Some(op == MuOpcode.CUSTOM0 && f3 == 5)
       case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == "??0")
       case IsCSR =>     Some(op == MuOpcode.SYSTEM  && f3 == "??1")
+      case IsCSRRW =>   Some(op == MuOpcode.SYSTEM  && f3 == 1)
+      case IsCSRRS =>   Some(op == MuOpcode.SYSTEM  && f3 == 2)
+      case IsCSRRC =>   Some(op == MuOpcode.SYSTEM  && f3 == 3)
+      case IsCSRRWI =>  Some(op == MuOpcode.SYSTEM  && f3 == 5)
+      case IsCSRRSI =>  Some(op == MuOpcode.SYSTEM  && f3 == 6)
+      case IsCSRRCI =>  Some(op == MuOpcode.SYSTEM  && f3 == 7)
       case _ => None
     }
   }

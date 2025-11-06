@@ -12,6 +12,7 @@ abstract class MuonCSR(
   val defaultValue: UInt = 0.U,
   val width: Int = 32,
   val accessor: Option[() => UInt] = None,
+  val setter: Option[UInt => Unit] = None,
 )
 
 class CSRFile(
@@ -26,9 +27,8 @@ class CSRFile(
   mcycle: UInt,
   minstret: UInt,
 
-  fflags: UInt,
-  frm: UInt,
   fcsr: UInt,
+  fcsrWrite: UInt => Unit,
 )(implicit m: MuonCoreParams, implicit val p: Parameters) extends HasCoreBundles {
   def wrap(x: UInt) = Some(() => x)
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
@@ -64,9 +64,9 @@ class CSRFile(
   case object MCycleH    extends MuonCSR(CSRs.mcycleh,   accessor = wrap(mcycle(63, 32)))
   case object MInstRet   extends MuonCSR(CSRs.minstret,  accessor = wrap(minstret(31, 0)))
   case object MInstRetH  extends MuonCSR(CSRs.minstreth, accessor = wrap(minstret(63, 32)))
-  case object FFlags     extends MuonCSR(CSRs.fflags,    accessor = wrap(fflags))
-  case object FRM        extends MuonCSR(CSRs.frm,       accessor = wrap(frm))
-  case object FCSR       extends MuonCSR(CSRs.fcsr,      accessor = wrap(fcsr))
+  case object FFlags     extends MuonCSR(CSRs.fflags,    accessor = wrap(fcsr(4, 0)), setter = Some(fcsrWrite))
+  case object FRM        extends MuonCSR(CSRs.frm,       accessor = wrap(fcsr(7, 5)), setter = Some(fcsrWrite))
+  case object FCSR       extends MuonCSR(CSRs.fcsr,      accessor = wrap(fcsr),       setter = Some(fcsrWrite))
 
   val allCSRs = Seq(
     MVendorId, MArchId, MImpId, MISA, SATP, MStatus,
@@ -108,6 +108,11 @@ class CSRFile(
     (allStoredCSRs zip csrData).foreach { case (csr, reg) =>
       when (csrAddr === csr.address.U) {
         reg := writeData.asTypeOf(reg)
+      }
+    }
+    allCSRs.filter(_.setter.isDefined).foreach { csr =>
+      when (csrAddr === csr.address.U) {
+        csr.setter.get(writeData)
       }
     }
   }
