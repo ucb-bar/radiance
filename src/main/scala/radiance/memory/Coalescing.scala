@@ -1030,21 +1030,6 @@ class MemTraceLogger(
 ) extends LazyModule {
   val node = TLIdentityNode()
 
-  // val beatBytes = 8 // FIXME: hardcoded
-  // val node = TLManagerNode(Seq.tabulate(numLanes) { _ =>
-  //   TLSlavePortParameters.v1(
-  //     Seq(
-  //       TLSlaveParameters.v1(
-  //         address = List(AddressSet(0x0000, 0xffffff)), // FIXME: hardcoded
-  //         supportsGet = TransferSizes(1, beatBytes),
-  //         supportsPutPartial = TransferSizes(1, beatBytes),
-  //         supportsPutFull = TransferSizes(1, beatBytes)
-  //       )
-  //     ),
-  //     beatBytes = beatBytes
-  //   )
-  // })
-
   // Copied from freechips.rocketchip.trailingZeros which only supports Scala
   // integers
   def trailingZeros(x: UInt): UInt = {
@@ -1468,13 +1453,6 @@ class MemFuzzerImp(
       dontTouch(tlOut.a)
       dontTouch(tlOut.d)
   }
-
-  // when(traceFinished && allReqReclaimed && noValidReqs) {
-  //   assert(
-  //     false.B,
-  //     "\n\n\nsimulation Successfully finished\n\n\n (this assertion intentional fail upon MemTracer termination)"
-  //   )
-  // }
 }
 
 class SimMemFuzzer(numLanes: Int)
