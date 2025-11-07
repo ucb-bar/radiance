@@ -114,8 +114,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     when (execute.io.resp.fire) {
       inFlight := false.B
     }
-
-    collector.reset := true.B
   }
 
   when (execute.io.req.fire) {
