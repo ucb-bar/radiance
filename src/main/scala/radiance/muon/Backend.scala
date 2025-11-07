@@ -29,10 +29,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   hazard.io.writeback <> reservStation.io.writebackHazard
 
   // TODO bogus
-  reservStation.io.collector.readReq.ready := false.B
-  reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
-  reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
-
   val fakeExPipe = Module(new FakeWriteback)
   fakeExPipe.io.issue <> reservStation.io.issue
   reservStation.io.writeback <> fakeExPipe.io.writeback
@@ -66,17 +62,32 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
 
-  (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
-    val pReg = issued.bits.inst(reg)
-    collReq.enable := issued.valid && issued.bits.inst.b(has)
-    collReq.pReg := pReg
+  if (bypass) {
+    // on bypass, manage collector entirely after issue
+    (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
+      val pReg = issued.bits.inst(reg)
+      collReq.enable := issued.valid && issued.bits.inst.b(has)
+      collReq.pReg := pReg
+    }
+    collector.io.readData.regs.foreach(_.enable := true.B)
+    collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
+
+    reservStation.io.collector.readReq.ready := false.B
+    reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
+    reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
+    reservStation.io.collector.readData.regs.foreach(_.data := DontCare)
+  } else {
+    // RS manages collector
+    collector.io.readReq <> reservStation.io.collector.readReq
+    reservStation.io.collector.readResp <> collector.io.readResp
+    collector.io.readData <> reservStation.io.collector.readData
   }
 
+  // connect collector to EX operands
   // TODO: connect with executeIn ready
   collector.io.readResp.ports.foreach(_.ready := true.B)
-  collector.io.operands.collEntry.foreach(_ := 0.U) // DuplicatedCollector has 1 entry
-  (operands zip collector.io.operands.data).foreach { case (opnd, cData) =>
-    opnd := cData
+  (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
+    opnd := port.data
   }
 
   // signal execute on collector finish

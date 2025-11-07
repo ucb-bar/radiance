@@ -71,10 +71,10 @@ case class MuonCoreParams(
   ibufDepth: Int = 8,
   startAddress: BigInt = x"1000_0000",
   // issue
-  numIssueQueueEntries: Int = 8,  // RS
-  maxPendingReads: Int = 3,       // scoreboard
-  numRegBanks: Int = 4,           // collector
-  numCollectorEntries: Int = 1, // collector
+  numIssueQueueEntries: Int = 8, // RS
+  maxPendingReads: Int = 3,      // scoreboard
+  numRegBanks: Int = 4,          // collector
+  numCollectorEntries: Int = 1,  // collector
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),

@@ -49,8 +49,11 @@ object CollectorResponse {
 
 class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
-  val collEntry = Input(Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
-  val data = Output(Vec(Isa.maxNumRegs, Vec(numLanes, regDataT)))
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Input(Bool())
+    val collEntry = Input(UInt(collEntryWidth.W))
+    val data = Output(Vec(numLanes, regDataT))
+  })
 }
 
 /** Simple operand collector with duplicated register files for rs1/2/3.
@@ -59,19 +62,19 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
  */
 class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
-    /** Collector receives an entire uop with full rs1/2/3 combination at each
-     *  request. */
+    /** Request collection of a single uop with full rs1/2/3 combination. */
     val readReq  = CollectorRequest(Isa.maxNumRegs, isWrite = false)
-    /** Collector serves rs1/2/3 requests individually, potentially at different cycles.
-     *  The response port width is the same as request to keep throughput.
-     *  Requests to the same pReg are guaranteed to be served in-order. */
+    /** Response that indicates a register read has been collected.  The
+     *  rs1/2/3 registers of a single uop may potentially be responded to at
+     *  different cycles. Responses to the same pReg are guaranteed to be
+     *  served in the same order as the requests. */
     val readResp = CollectorResponse(Isa.maxNumRegs, isWrite = false)
     /** Writebacks are served one dest register at a time. */
     val writeReq  = CollectorRequest(1, isWrite = true)
     val writeResp = CollectorResponse(1, isWrite = true)
     /** Data read port for the operands readily collected & stored in the
      *  flip-flop banks.  Combinational-read. */
-    val operands = new CollectorOperandRead
+    val readData = new CollectorOperandRead
   })
 
   val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(
@@ -115,7 +118,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
       respPort.valid := RegNext(en, false.B)
       respPort.bits.collEntry := 0.U // duplicated collector has no collector entry
 
-      // data is served by io.operands
+      // data is served by io.readData
     }
 
   // write port
@@ -142,11 +145,12 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   // DuplicatedCollector doesn't have separate collector banks; SRAM output
   // ports directly drive the data.  The RS must ensure to align issue and SRAM
   // read.
-  (io.operands.data zip (rfBanks lazyZip respPRegs lazyZip respBankIds))
-    .foreach { case (data, (banks, pReg, bankId)) =>
+  (io.readData.regs zip (rfBanks lazyZip respPRegs lazyZip respBankIds))
+    .foreach { case (port, (banks, pReg, bankId)) =>
       val zeros = VecInit.fill(numLanes)(0.U.asTypeOf(regDataT))
       val bankReads = banks.map(_.readPorts.head)
       val bankOuts = VecInit(bankReads.map(_.data))(bankId)
-      data := Mux(pReg === 0.U, zeros, bankOuts)
+      val bankEnable = port.enable && (pReg =/= 0.U)
+      port.data := Mux(bankEnable, bankOuts, zeros)
     }
 }

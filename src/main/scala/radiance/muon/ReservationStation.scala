@@ -23,7 +23,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   val io = IO(new Bundle {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
-    /** uop issued (dispatched) to the downstream EX pipe */
+    /** uop issued to the downstream EX pipe */
     val issue = Decoupled(uopT)
     /** writeback from the downstream EX pipe */
     val writeback = Flipped(regWritebackT)
@@ -33,24 +33,42 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val collector = new Bundle {
       val readReq  = Flipped(CollectorRequest(Isa.maxNumRegs, isWrite = false))
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
+      val readData = Flipped(new CollectorOperandRead)
     }
   })
 
   val numEntries = muonParams.numIssueQueueEntries
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
-  val validTable = Mem(numEntries, Bool())
+
+  // whether this table row is valid
+  val validTable     = Mem(numEntries, Bool())
   // TODO: optimize; storing all of Decode fields in RS gets expensive
   val uopTable       = Mem(numEntries, uopT)
+  // whether the uop uses rs1/2/3
+  // not actually a state; combinationally computed from uops
+  val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))
+  // whether the used operands has been collected
   val opValidTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  // whether the operands are being written-to by in-flight uops in EX
   val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
-  // marks whether the operand is currently being collected
-  // different than opValidTable, because not all of invalid operands will be
-  // served by the collector at once
-  val collValidTable = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
-  // marks where the operand lives in the collector banks
+  // whether the operands are currently being collected
+  // a partial set of hasOpTable; not all of the operands can be collected at
+  // once
+  val collFiredTable = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
 
-  // enqueue
+  (0 until numEntries).map { i =>
+    val uop = uopTable(i)
+    hasOpTable(i) := VecInit(Seq(uop.inst(HasRs1).asBool,
+                                 uop.inst(HasRs2).asBool,
+                                 uop.inst(HasRs3).asBool))
+  }
+
+  // ---------
+  // admission
+  // ---------
+
   val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
@@ -62,14 +80,18 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     uopTable(emptyRow)   := io.admit.bits.uop
     opValidTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
-    collValidTable(emptyRow) := VecInit(Seq(0.U, 0.U, 0.U))
-    collPtrTable(emptyRow) := VecInit(Seq(0.U, 0.U, 0.U))
+    collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
+    collPtrTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(0.U)
 
     if (muonParams.debug) {
       printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
       printTable
     }
   }
+
+  // -----------------
+  // collector control
+  // -----------------
 
   // trigger collector on an entry with incomplete opValids
   val needCollects = (0 until numEntries).map { i =>
@@ -89,81 +111,105 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   val collSelOpValid = VecInit(needCollects.map(_._2))(collSelRow)
   val collSelUop = uopTable(collSelRow)
   val collSelRegs = Seq(collSelUop.inst.rs1, collSelUop.inst.rs2, collSelUop.inst.rs3)
-  io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
   assert(collSelOpValid.length == io.collector.readReq.bits.regs.length)
   assert(collSelRegs.length == io.collector.readReq.bits.regs.length)
   (collSelOpValid lazyZip collSelRegs lazyZip io.collector.readReq.bits.regs)
     .zipWithIndex.foreach { case ((cv, pReg, collPort), rsi) =>
       assert(collPort.data.isEmpty)
-      collPort.enable := cv
+      collPort.enable := cv && !collFiredTable(collSelRow)(rsi)
       collPort.pReg := Mux(cv, pReg, 0.U)
       when (io.collector.readReq.fire && cv) {
-        collValidTable(collSelRow)(rsi) := true.B
+        collFiredTable(collSelRow)(rsi) := true.B
+        // TODO: currently assumes DuplicatedCollector with only 1 entry
+        collPtrTable(collSelRow)(rsi) := 0.U
       }
     }
+  io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
 
   // mark operand valid upon collector response
   // collector wakeup should never block
   io.collector.readResp.ports.foreach(_.ready := true.B)
   (0 until numEntries).foreach { i =>
     val valid = validTable(i)
-    val collValids = collValidTable(i)
+    val collFired = collFiredTable(i)
     val collPtrs = collPtrTable(i)
-    (collValids lazyZip collPtrs lazyZip io.collector.readResp.ports)
+    (collFired lazyZip collPtrs lazyZip io.collector.readResp.ports)
       .zipWithIndex.foreach { case ((cv, cptr, cResp), rsi) =>
         when (valid && cv && cResp.fire && (cResp.bits.collEntry === cptr)) {
-          collValidTable(i)(rsi) := false.B
-          assert(opValidTable(i)(rsi) === true.B)
-          opValidTable(i)(rsi) := false.B
+          assert(opValidTable(i)(rsi) === false.B)
+          opValidTable(i)(rsi) := true.B
         }
       }
+  }
+
+  // -----
+  // issue
+  // -----
+
+  def issueArbBundleT = new Bundle {
+    val uop = uopT
+    val entryId = UInt(log2Ceil(numEntries).W)
   }
 
   // check issue eligiblity after collection finished & RAW settled
   val eligibles = VecInit((0 until numEntries).map { i =>
     val valid = validTable(i)
     val opValids = opValidTable(i)
+    val hasOps = hasOpTable(i)
     val busys = busyTable(i)
     val allCollected = opValids.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
 
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
-    val e = Wire(Decoupled(uopT))
-    e.valid := valid && allCollected
-    e.bits := uopTable(i)
+    val bundle = Wire(Decoupled(issueArbBundleT))
+    bundle.valid := valid && allCollected
+    bundle.bits.uop := uopTable(i)
+    bundle.bits.entryId := i.U
+
     // deregister upon issue
-    when (e.fire) {
+    when (bundle.fire) {
       validTable(i) := false.B
     }
 
-    e
+    bundle
   })
   dontTouch(eligibles)
 
-  // schedule issue out of eligibles
+  // schedule issue by arbitrating eligibles
   // TODO: warp-aware issue scheduling
   val issueScheduler = Module(
     new RRArbiter(chiselTypeOf(eligibles.head.bits), eligibles.length)
   )
   (issueScheduler.io.in zip eligibles).foreach { case (s, e) => s <> e }
-  io.issue <> issueScheduler.io.out
+  io.issue.valid := issueScheduler.io.out.valid
+  io.issue.bits := issueScheduler.io.out.bits.uop
+  issueScheduler.io.out.ready := io.issue.ready
 
+  // drive the operands port upon issue fire
+  val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
+  io.collector.readData.regs.zipWithIndex.foreach { case (port, rsi) =>
+    port.enable := hasOpTable(issuedId)(rsi)
+    port.collEntry := collPtrTable(issuedId)(rsi)
+    // port.data input is not used
+  }
+  dontTouch(issuedId)
+
+  // ---------
   // writeback
+  // ---------
+
   // CAM broadcast to wake-up entries
   (0 until numEntries).foreach { i =>
     val uop = uopTable(i)
-    val hasRss = Seq(uop.inst(HasRs1).asBool,
-                     uop.inst(HasRs2).asBool,
-                     uop.inst(HasRs3).asBool)
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
-
+    val hasOps = hasOpTable(i)
     val valid = validTable(i)
     val busys = busyTable(i)
     val newBusys = WireDefault(busys)
     val rdWriteback = io.writeback.bits.rd
     val updated = WireDefault(false.B)
-    (hasRss zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
+    (hasOps zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
       when (io.writeback.fire && valid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
         assert(newBusys(rsi),
           cf"RS: busy was already low when writeback arrived (pc:${uop.pc}%x, rd:${rdWriteback})")

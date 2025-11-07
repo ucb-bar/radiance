@@ -66,8 +66,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // @synthesis: unsure if this will generate expensive trees, revisit
   when (reset.asBool) {
     (0 until muonParams.numPhysRegs).foreach { pReg =>
-      readTable(pReg.U) := 0.U
-      writeTable(pReg.U) := 0.U
+      readTable(pReg) := 0.U
+      writeTable(pReg) := 0.U
     }
   }
 
@@ -186,7 +186,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
               updateRSSuccess := false.B
               assert(false.B,
                      cf"TODO: partial update rollback on counter overflow not handled " +
-                     cf"(pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCount})")
+                     cf"(${countName}, pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCount})")
 
               dirty := (u.decr =/= 0.U)
               assert(currCount >= u.decr,
