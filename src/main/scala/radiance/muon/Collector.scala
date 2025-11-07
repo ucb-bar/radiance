@@ -36,7 +36,6 @@ class CollectorResponse(
     /** pointer to the collector entry; RS uses this to know where to issue
      *  operands from */
     val collEntry = UInt(collEntryWidth.W)
-    val data = Option.when(!isWrite)(Vec(numLanes, regDataT))
     // TODO: tmask
   }))
 }
@@ -46,6 +45,12 @@ object CollectorResponse {
   : CollectorResponse = {
     new CollectorResponse(numPorts, isWrite)
   }
+}
+
+class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
+  val collEntryWidth = log2Up(muonParams.numCollectorEntries)
+  val collEntry = Input(Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
+  val data = Output(Vec(Isa.maxNumRegs, Vec(numLanes, regDataT)))
 }
 
 /** Simple operand collector with duplicated register files for rs1/2/3.
@@ -64,22 +69,29 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
     /** Writebacks are served one dest register at a time. */
     val writeReq  = CollectorRequest(1, isWrite = true)
     val writeResp = CollectorResponse(1, isWrite = true)
+    /** Data read port for the operands readily collected & stored in the
+     *  flip-flop banks.  Combinational-read. */
+    val operands = new CollectorOperandRead
   })
 
   val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(
     size = muonParams.numPhysRegs / muonParams.numRegBanks,
-    tpe = Vec(numLanes, UInt(archLen.W)),
+    tpe = Vec(numLanes, regDataT),
     numReadPorts = 1,
     numWritePorts = 1,
     numReadwritePorts = 0
   )))
   val regWidth = pRegT.getWidth
   val bankAddrWidth = rfBanks.head.head.readPorts.head.address.getWidth
+  val bankIdWidth = regWidth - bankAddrWidth
 
   def regBankAddr(r: UInt): UInt = r(bankAddrWidth - 1, 0)
   def regBankId(r: UInt): UInt   = r(r.getWidth - 1, bankAddrWidth)
 
-  val resps = io.readResp.ports
+  // PReg #s and bank IDs serving the current response.  Used at accessing
+  // collector banks at issue time.
+  val respBankIds = Seq.fill(3)(WireDefault(0.U(bankIdWidth.W)))
+  val respPRegs = Seq.fill(3)(WireDefault(0.U.asTypeOf(pRegT)))
 
   // read port
   // duplicated collector never locks up
@@ -87,8 +99,8 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   val readValid = io.readReq.valid
   val readEnables = io.readReq.bits.regs.map(_.enable)
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
-  (readEnables lazyZip readPRegs lazyZip resps lazyZip rfBanks)
-    .foreach { case (en, pReg, respPort, banks) =>
+  (readEnables lazyZip (readPRegs zip respPRegs) lazyZip io.readResp.ports lazyZip (rfBanks zip respBankIds))
+    .foreach { case (en, (pReg, respPReg), respPort, (banks, respBankId)) =>
       val bankReads = VecInit(banks.map(_.readPorts.head))
       val bankId = regBankId(pReg)
 
@@ -97,14 +109,13 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
       bankReads(bankId).enable := readValid && en
       bankReads.foreach(_.address := regBankAddr(pReg))
 
-      // response: 1 cycle later
-      val respEnable = RegNext(en)
-      val respPReg = RegNext(pReg)
-      respPort.valid := respEnable
+      // response: 1 cycle latency
+      respPReg := RegNext(pReg, 0.U)
+      respBankId := RegNext(bankId, 0.U)
+      respPort.valid := RegNext(en, false.B)
       respPort.bits.collEntry := 0.U // duplicated collector has no collector entry
-      val zeros = VecInit.fill(numLanes)(0.U(archLen.W))
-      val bankOuts = VecInit(bankReads.map(_.data))(RegNext(bankId))
-      respPort.bits.data.get := Mux(respPReg === 0.U, zeros, bankOuts)
+
+      // data is served by io.operands
     }
 
   // write port
@@ -125,5 +136,17 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
 
   io.writeResp.ports.head.valid := RegNext(writeEnable)
   io.writeResp.ports.head.bits.collEntry := 0.U // duplicated collector has no collector entry
-  require(io.writeResp.ports.head.bits.data.isEmpty)
+
+  // operand serve
+  //
+  // DuplicatedCollector doesn't have separate collector banks; SRAM output
+  // ports directly drive the data.  The RS must ensure to align issue and SRAM
+  // read.
+  (io.operands.data zip (rfBanks lazyZip respPRegs lazyZip respBankIds))
+    .foreach { case (data, (banks, pReg, bankId)) =>
+      val zeros = VecInit.fill(numLanes)(0.U.asTypeOf(regDataT))
+      val bankReads = banks.map(_.readPorts.head)
+      val bankOuts = VecInit(bankReads.map(_.data))(bankId)
+      data := Mux(pReg === 0.U, zeros, bankOuts)
+    }
 }

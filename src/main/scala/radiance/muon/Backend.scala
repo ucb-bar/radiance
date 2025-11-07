@@ -64,17 +64,19 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
 
   val collector = Module(new DuplicatedCollector)
+  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
+
   (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
     val pReg = issued.bits.inst(reg)
     collReq.enable := issued.valid && issued.bits.inst.b(has)
     collReq.pReg := pReg
   }
-  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
 
   // TODO: connect with executeIn ready
   collector.io.readResp.ports.foreach(_.ready := true.B)
-  (operands zip collector.io.readResp.ports).foreach { case (opnd, collResp) =>
-    opnd := collResp.bits.data.get
+  collector.io.operands.collEntry.foreach(_ := 0.U) // DuplicatedCollector has 1 entry
+  (operands zip collector.io.operands.data).foreach { case (opnd, cData) =>
+    opnd := cData
   }
 
   // signal execute on collector finish

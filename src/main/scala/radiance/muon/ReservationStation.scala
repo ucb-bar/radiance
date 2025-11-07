@@ -110,8 +110,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val collValids = collValidTable(i)
     val collPtrs = collPtrTable(i)
     (collValids lazyZip collPtrs lazyZip io.collector.readResp.ports)
-      .zipWithIndex.foreach { case ((cv, cptr, port), rsi) =>
-        when (valid && cv && port.fire && (port.bits.collEntry === cptr)) {
+      .zipWithIndex.foreach { case ((cv, cptr, cResp), rsi) =>
+        when (valid && cv && cResp.fire && (cResp.bits.collEntry === cptr)) {
           collValidTable(i)(rsi) := false.B
           assert(opValidTable(i)(rsi) === true.B)
           opValidTable(i)(rsi) := false.B
