@@ -6,7 +6,7 @@ package radiance.cluster
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources._
@@ -72,6 +72,7 @@ case class GemminiTileParams(
     gemminiConfig: GemminiArrayConfig[Float, Float, Float],
     tileSize: Either[(Int, Int, Int), Int] = Right(4),
     slaveAddress: BigInt,
+    scalingFactorMemoryBytes: Option[BigInt] = None,
     hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
@@ -156,11 +157,31 @@ class GemminiTile private (
     beatBytes = 4,
     concurrency = 1)
 
-  // this tells the atomic automata to back off for this register node
-  // bad things will happen however if we actually do amo on this region.
-  // also: fragmenter does not expand arithmetic/logical ops, so the hack node
-  // must be upwards of the fragmenter to hack in beat bytes = 8
-  regNode := slaveNode
+  regNode := TLFragmenter(4, 8) := slaveNode
+
+  val scalingFacNode = gemminiParams.scalingFactorMemoryBytes.map { memSize =>
+    // since gemmini slave address starts at 0x3000, +0x5000 means
+    // the scaling factor memory starts 0x8000 + shared mem size,
+    // which is usually 0x28000 after cluster base address. this address is
+    // 32K aligned (which matches with its typical size 32K).
+    val scalingFacBaseAddr = gemminiParams.slaveAddress + 0x5000
+    require(isPow2(memSize), "scaling fac memory size must be power of 2")
+    TLManagerNode(Seq(TLSlavePortParameters.v1(
+      managers = Seq(TLSlaveParameters.v2(
+        address = Seq(AddressSet(scalingFacBaseAddr, memSize - 1)),
+        fifoId = Some(0),
+        supports = TLMasterToSlaveTransferSizes(
+          // there's no get support because the scaling factor memory is
+          // write-only from the control bus
+          putFull = TransferSizes(1, 8),
+          putPartial = TransferSizes(1, 8),
+        )
+      )),
+      beatBytes = 8,
+    )))
+  }
+  // no fragmentation here, double bandwidth if writing from rocket
+  scalingFacNode.foreach(_ := slaveNode)
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 

@@ -72,7 +72,7 @@ class RadianceSharedMemComponents(
   val muonClcBusXbar = LazyModule(new TLXbar()).suggestName("muon_clc_xbar").node
   val muonClcBusClient = TLEphemeralNode()
   radianceSmemFanout.flatten.foreach(muonClcBusXbar := _)
-  muonClcBusClient := muonClcBusXbar
+  muonClcBusClient := TLFragmenter(8, 8) := TLWidthWidget(4) := muonClcBusXbar
 
   val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
 

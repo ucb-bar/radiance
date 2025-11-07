@@ -69,7 +69,8 @@ class RadianceCluster (
   val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
   val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
 
-  val extReqXbar = TLXbar()
+  val extReqXbar = TLXbar() // this is in 8 bytes
+  val extReqForSmem = connectOne(extReqXbar, () => TLWidthWidget(8))(p, false)
   val disableMonitors = true
 
   // TODO: new shared mem components gen
@@ -77,7 +78,7 @@ class RadianceCluster (
     thisClusterParams,
     gemminiTiles,
     muonTiles,
-    extClients = Seq(extReqXbar))
+    extClients = Seq(extReqForSmem))
 
   def radianceSharedMemComponentsImpGen(outer: RadianceSharedMemComponents) = new RadianceSharedMemComponentsImp(outer)
   LazyModule(new RadianceSharedMem(
@@ -87,25 +88,29 @@ class RadianceCluster (
     clcbus)).suggestName("shared_mem")
 
   // clcbus -> gemmini mmio
-  gemminiTiles.foreach(_.slaveNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode)
+  // this tells the atomic automata to back off for this register node
+  // bad things will happen however if we actually do amo on this region.
+  // also: fragmenter does not expand arithmetic/logical ops, so the hack node
+  // must be upwards of the fragmenter to hack in beat bytes = 8
+  gemminiTiles.foreach(_.slaveNode :*= HackAtomicNode(8) :*= clcbus.outwardNode)
 
   if (gemminiTiles.isEmpty) {
     // make sure even without a gemmini in the cluster, clc node still finds a manager
     val dummySinkNode = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v2(
       address = Seq(AddressSet(thisClusterParams.baseAddr + thisClusterParams.smemConfig.size, 0xff)),
       supports = TLMasterToSlaveTransferSizes(
-        get = TransferSizes(1, 4),
-        putFull = TransferSizes(1, 4)),
+        get = TransferSizes(1, 8),
+        putFull = TransferSizes(1, 8)),
       fifoId = Some(0),
-    )), beatBytes = 4)))
-    dummySinkNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode
+    )), beatBytes = 8)))
+    dummySinkNode := HackAtomicNode(8) := clcbus.outwardNode
   }
 
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
   // cbus -> clcbus/smem
-  clcbus.inwardNode := TLFragmenter(4, 128) := extReqXbar
-  extReqXbar :=  ccbus.outwardNode
+  clcbus.inwardNode := TLFragmenter(8, 128) := extReqXbar
+  extReqXbar := ccbus.outwardNode
   // ccbus is connected to cbus automatically
 
   // clsbus -> csbus -> sbus
