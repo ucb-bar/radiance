@@ -57,6 +57,20 @@ From/To Execute:
 To Issue:
 * Warp ID to be issued
 
+## Testing Edge Cases
+
+* Unstall happens very fast - stale instructions in cache pipeline
+* Icache returns out of order
+* Icache backpressures / Ibuffer backpressures / combination (test different
+  icache latencies!)
+* Spawning more warps than allowed
+* Warps dying
+
+
+
+
+
+
 ## Operation
 
 ![Block Diagram](./fig/warp_sched.svg)
@@ -158,6 +172,22 @@ stalling PC.
 This means that the I$ will carry the PC and the warp ID through the request and
 back with the response. TODO: can HellaCache support this user data field?
 
+### Dropping I$ responses
+
+Upon predecoding a hazard instruction, take note of the current most recently
+fetch-in-flight PC (might not be in the pc tracker that cycle!) for that warp.
+That is the last icache response to discard. If during that cycle, there is
+something going out (likely since the stall didn't kick in yet), that PC needs
+to be noted.
+
+We set the "discard mode" for that warp in this situation.
+
+Then, during discard mode, keep discarding. Upon conflict resolution, we will
+just unstall and start fetching again regardless of discard status.
+
+No hazards will be predecoded during discard mode. This should not be possible
+since all instructions during discard mode is being dropped and nothing is being
+discarded.
 
 ### Branch/jump/mask resolution
 
