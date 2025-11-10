@@ -165,8 +165,6 @@ trait HasMuonCoreParameters {
   val imemTagBits  = log2Ceil(muonParams.numWarps * muonParams.ibufDepth)
   val imemDataBits = muonParams.instBits
 
-  
-
   require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
   val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)
   val scoreboardWriteCountBits = 1 // 0 or 1

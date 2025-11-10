@@ -21,12 +21,18 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   hazard.io.ibuf <> io.ibuf
 
   val scoreboard = Module(new Scoreboard)
-  scoreboard.io <> hazard.io.scb
+  scoreboard.io.updateRS <> hazard.io.scb.updateRS
+  scoreboard.io.updateWB <> hazard.io.scb.updateWB
+  scoreboard.io.readRd <> hazard.io.scb.readRd
+  scoreboard.io.readRs1 <> hazard.io.scb.readRs1
+  scoreboard.io.readRs2 <> hazard.io.scb.readRs2
+  scoreboard.io.readRs3 <> hazard.io.scb.readRs3
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
   reservStation.io.admit <> hazard.io.rsAdmit
-  hazard.io.writeback <> reservStation.io.writebackHazard
+  scoreboard.io.updateColl <> reservStation.io.scb.updateColl
+  hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
 
   // TODO bogus
   val fakeExPipe = Module(new FakeWriteback)

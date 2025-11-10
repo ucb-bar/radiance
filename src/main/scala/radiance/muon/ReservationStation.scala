@@ -29,6 +29,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val writeback = Flipped(regWritebackT)
     /** writeback pass-through to the hazard module */
     val writebackHazard = regWritebackT
+    /** scoreboard interface for collector updates */
+    val scb = new Bundle {
+      val updateColl = Flipped(new ScoreboardUpdate)
+    }
     /** collector request/response; RS keeps track of operand validity */
     val collector = new Bundle {
       val readReq  = Flipped(CollectorRequest(Isa.maxNumRegs, isWrite = false))
@@ -47,8 +51,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   // whether the uop uses rs1/2/3
   // not actually a state; combinationally computed from uops
   val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))
+  // rs1/2/3 of the uop
+  // not actually a state; combinationally computed from uops
+  val rsTable        = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, pRegT)))
   // whether the used operands has been collected
-  val opValidTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // whether the operands are being written-to by in-flight uops in EX
   val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // whether the operands are currently being collected
@@ -63,6 +70,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     hasOpTable(i) := VecInit(Seq(uop.inst(HasRs1).asBool,
                                  uop.inst(HasRs2).asBool,
                                  uop.inst(HasRs3).asBool))
+    rsTable(i) := VecInit(Seq(uop.inst.rs1,
+                              uop.inst.rs2,
+                              uop.inst.rs3))
   }
 
   // ---------
@@ -78,13 +88,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     assert(!validTable(emptyRow))
     validTable(emptyRow) := true.B
     uopTable(emptyRow)   := io.admit.bits.uop
-    opValidTable(emptyRow) := io.admit.bits.valid
+    opReadyTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
     collPtrTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(0.U)
 
     if (muonParams.debug) {
-      printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
+      printf(cf"RS: admitted: PC=${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
       printTable
     }
   }
@@ -93,53 +103,82 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   // collector control
   // -----------------
 
-  // trigger collector on an entry with incomplete opValids
+  // trigger collector on an entry with incomplete opReadys
   val needCollects = (0 until numEntries).map { i =>
     val valid = validTable(i)
-    val opValids = opValidTable(i)
+    val opReadys = opReadyTable(i)
     val busys = busyTable(i)
-    val needCollectOps = VecInit((opValids zip busys)
-      .map { case (v, busy) => !v && !busy })
+    val needCollectOps = VecInit((opReadys zip busys)
+      .map { case (r, b) => !r && !b })
     val needCollect = valid && needCollectOps.reduce(_ || _)
     (needCollect, needCollectOps)
   }
   // select a single entry for collection
   // TODO: @perf: currently a simple priority encoder; might introduce fairness
   // problem
-  val collSelBitvec = VecInit(needCollects.map(_._1))
-  val collSelRow = PriorityEncoder(collSelBitvec)
-  val collSelOpValid = VecInit(needCollects.map(_._2))(collSelRow)
-  val collSelUop = uopTable(collSelRow)
-  val collSelRegs = Seq(collSelUop.inst.rs1, collSelUop.inst.rs2, collSelUop.inst.rs3)
-  assert(collSelOpValid.length == io.collector.readReq.bits.regs.length)
-  assert(collSelRegs.length == io.collector.readReq.bits.regs.length)
-  (collSelOpValid lazyZip collSelRegs lazyZip io.collector.readReq.bits.regs)
-    .zipWithIndex.foreach { case ((cv, pReg, collPort), rsi) =>
+  val collBitvec = WireDefault(VecInit(needCollects.map(_._1)))
+  dontTouch(collBitvec)
+  val collRow = PriorityEncoder(collBitvec)
+  val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
+  val collUop = uopTable(collRow)
+  val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
+  // this is clunky, but Mem does not support partial-field updates
+  val newCollFired = WireDefault(collFiredTable(collRow))
+  val newCollPtr = WireDefault(collPtrTable(collRow))
+  assert(collOpNeed.length == io.collector.readReq.bits.regs.length)
+  assert(collRegs.length == io.collector.readReq.bits.regs.length)
+  (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
+    .zipWithIndex.foreach { case ((need, pReg, collPort), rsi) =>
       assert(collPort.data.isEmpty)
-      collPort.enable := cv && !collFiredTable(collSelRow)(rsi)
-      collPort.pReg := Mux(cv, pReg, 0.U)
-      when (io.collector.readReq.fire && cv) {
-        collFiredTable(collSelRow)(rsi) := true.B
-        // TODO: currently assumes DuplicatedCollector with only 1 entry
-        collPtrTable(collSelRow)(rsi) := 0.U
-      }
+      collPort.enable := need && !collFiredTable(collRow)(rsi)
+      collPort.pReg := Mux(need, pReg, 0.U)
+      newCollFired(rsi) := true.B
+      // TODO: currently assumes DuplicatedCollector with only 1 entry
+      newCollPtr(rsi) := 0.U
     }
   io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
+  when (io.collector.readReq.fire) {
+    collFiredTable(collRow) := newCollFired
+    collPtrTable(collRow) := newCollPtr
+  }
 
-  // mark operand valid upon collector response
+  // upon collector response:
+  // 1. mark operand ready in the table
+  // 2. update scoreboard pending-reads
+  //
   // collector wakeup should never block
   io.collector.readResp.ports.foreach(_.ready := true.B)
+  io.scb.updateColl.enable := io.collector.readResp.ports.map(_.fire).reduce(_ || _)
+  // set later
+  io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+  io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
+
   (0 until numEntries).foreach { i =>
     val valid = validTable(i)
+    val rss = rsTable(i)
+    val opReadys = opReadyTable(i)
+    val newOpReadys = WireDefault(opReadys)
     val collFired = collFiredTable(i)
     val collPtrs = collPtrTable(i)
-    (collFired lazyZip collPtrs lazyZip io.collector.readResp.ports)
-      .zipWithIndex.foreach { case ((cv, cptr, cResp), rsi) =>
-        when (valid && cv && cResp.fire && (cResp.bits.collEntry === cptr)) {
-          assert(opValidTable(i)(rsi) === false.B)
-          opValidTable(i)(rsi) := true.B
+    val updated = WireDefault(false.B)
+    (opReadys lazyZip collFired lazyZip
+     (collPtrs zip rss) lazyZip
+     (io.collector.readResp.ports zip io.scb.updateColl.reads))
+      .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cPort, scbPort)), rsi) =>
+        when (cPort.fire && valid && !rdy && cf && (cPort.bits.collEntry === cptr)) {
+          newOpReadys(rsi) := true.B
+          updated := true.B
+
+          scbPort.pReg := rs
+          scbPort.incr := false.B
+          scbPort.decr := (rs =/= 0.U)
+
+          printf(cf"RS: collector response handled at row:${i}, rs:${rs}, rsi:${rsi}\n")
         }
       }
+    when (updated) {
+      opReadyTable(i) := newOpReadys
+    }
   }
 
   // -----
@@ -154,10 +193,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   // check issue eligiblity after collection finished & RAW settled
   val eligibles = VecInit((0 until numEntries).map { i =>
     val valid = validTable(i)
-    val opValids = opValidTable(i)
+    val opReadys = opReadyTable(i)
     val hasOps = hasOpTable(i)
     val busys = busyTable(i)
-    val allCollected = opValids.reduce(_ && _)
+    val allCollected = opReadys.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
 
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
@@ -195,6 +234,14 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   }
   dontTouch(issuedId)
 
+  if (muonParams.debug) {
+    when (io.issue.fire) {
+      printf(cf"RS: issued: PC=${io.issue.bits.pc}%x at row ${issueScheduler.io.out.bits.entryId}:\n")
+      printTable
+    }
+  }
+
+
   // ---------
   // writeback
   // ---------
@@ -211,8 +258,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val updated = WireDefault(false.B)
     (hasOps zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
       when (io.writeback.fire && valid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
-        assert(newBusys(rsi),
-          cf"RS: busy was already low when writeback arrived (pc:${uop.pc}%x, rd:${rdWriteback})")
+        assert(busys(rsi) === true.B,
+          cf"RS: busy was already low when writeback arrived " +
+          cf"(#${i}, pc:${uop.pc}%x, rdWB:${rdWriteback}, rsi:${rsi})")
         newBusys(rsi) := false.B
         updated := true.B
       }
@@ -221,7 +269,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     when (updated) {
       busyTable(i) := newBusys
       if (muonParams.debug) {
-        printf(cf"RS: writeback to PC=0x${uop.pc}%x at row ${emptyRow}\n")
+        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${emptyRow}\n")
+        printTable
       }
     }
   }
@@ -241,13 +290,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     for (i <- 0 until numEntries) {
       val valid = validTable(i)
       when (valid) {
-        val opValids = opValidTable(i)
-        val busys    = busyTable(i)
         val uop      = uopTable(i)
         printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
-               cf"opvalid: (rs1:${opValids(0)} rs2:${opValids(1)} rs3:${opValids(2)}) | " +
-               cf"busy: (rs1:${busys(0)} rs2:${busys(1)} rs3:${busys(2)}) | " +
-               cf"regs: (rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3})\n")
+               cf"regs: [rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
+               cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
+               cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
+               cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
+               cf"\n")
       }
     }
     printf("=" * 100 + "\n")

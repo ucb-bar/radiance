@@ -14,7 +14,14 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
     /** scoreboard interface */
-    val scb = Flipped(new ScoreboardIO)
+    val scb = new Bundle {
+      val updateRS = Flipped(new ScoreboardUpdate)
+      val updateWB = Flipped(new ScoreboardUpdate)
+      val readRs1  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
+      val readRs2  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
+      val readRs3  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
+      val readRd   = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
+    }
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
     /** writeback interface from EX */
@@ -48,6 +55,13 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     // TODO: for now simply gates WAR into RS; relax this into stalling at
     // writeback
     rsAdmit.valid := uopValid && !hasWAW && !hasWAR
+    if (muonParams.debug) {
+      when (uopValid && hasWAR) {
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.wid}, PC=${ibufPort.bits.pc}%x) is gated RS admission due to WAR\n")
+      }.elsewhen (uopValid && hasWAW) {
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.wid}, PC=${ibufPort.bits.pc}%x) is gated RS admission due to WAW\n")
+      }
+    }
 
     val rsEntry = rsAdmit.bits
     rsEntry.uop := ibufPort.bits
@@ -91,7 +105,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   val rsAdmitChosen = rsAdmitArbiter.io.out
 
   // update scoreboard upon RS admission
-  // this must be done at the same cycle as scoreboard read, so that updated
+  // This must be done at the same cycle as scoreboard read, so that the updated
   // values are immediately visible at the next cycle and never lost.
   //
   // Note that io.rsAdmit.ready needs to be checked so that we trigger scoreboard
@@ -109,6 +123,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
     io.scb.updateRS.enable := hasRd || hasRss.reduce(_ || _)
     io.scb.updateRS.write.pReg := chosenUop.inst.rd
+    // RS admission always increments
     io.scb.updateRS.write.incr := hasRd
     io.scb.updateRS.write.decr := false.B
     (io.scb.updateRS.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
@@ -130,6 +145,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   }
 
   // gate RS entry if scoreboard update failed
+  // note io.scb.updateRS.success is combinational.
   io.rsAdmit.valid := rsAdmitChosen.valid && io.scb.updateRS.success
   rsAdmitChosen.ready := io.rsAdmit.ready && io.scb.updateRS.success
   io.rsAdmit.bits  := rsAdmitChosen.bits
@@ -137,10 +153,17 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   // admission fire
   assert(!io.rsAdmit.fire || (!io.scb.updateRS.enable || io.scb.updateRS.success),
          "uop entered RS without succeeding scoreboard update")
+  if (muonParams.debug) {
+    when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb.updateRS.success) {
+      printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.uop.pc}%x) passed hazard check, but " +
+             cf"RS admission blocked due to scoreboard overflow\n")
+    }
+  }
 
   // update scoreboard upon writeback
   io.scb.updateWB.enable := io.writeback.valid
   io.scb.updateWB.write.pReg := Mux(io.writeback.valid, io.writeback.bits.rd, 0.U)
+  // Writeback always increments
   io.scb.updateWB.write.incr := false.B
   io.scb.updateWB.write.decr := io.writeback.valid
   io.scb.updateWB.reads.foreach { read =>
