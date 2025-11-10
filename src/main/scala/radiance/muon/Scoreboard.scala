@@ -175,9 +175,11 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           // if currCount + u.incr overflows but u.decr cancels it out, treat
           // it as a success.
           when (u.incr =/= u.decr) {
-            val delta = u.incr.asSInt - u.decr.asSInt
-            val newCountWide = currCount.asSInt +& delta
-            when (newCountWide.asUInt > maxCount) {
+            val delta = u.incr.asSInt -& u.decr.asSInt
+            val currCountWide = currCount.pad(currCount.getWidth + 1)
+            val newCountWide = currCountWide.asSInt + delta
+            val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
+            when (newCountWide > maxCountWide) {
               // overflow; don't reflect increments, but do decrements
               // it is important to always succeed WBs and collector
               // decrements, otherwise we risk deadlock
@@ -186,21 +188,22 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
               updateRSSuccess := false.B
               assert(false.B,
                      cf"TODO: partial update rollback on counter overflow not handled " +
-                     cf"(${countName}, pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCount})")
+                     cf"(${countName}, pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCountWide}, maxCount:${maxCountWide})")
 
+              // ignore incr and just reflect decr
               dirty := (u.decr =/= 0.U)
-              assert(currCount >= u.decr,
+              assert(currCountWide >= u.decr,
                      cf"scoreboard: ${countName} underflow at pReg=${u.pReg}" +
-                     cf"(currCount=${currCount}, incr=${u.incr}, decr=${u.decr}) ")
-              newCount := currCount - u.decr
+                     cf"(currCount=${currCountWide}, incr=${u.incr}, decr=${u.decr}) ")
+              newCount := currCountWide - u.decr
             }.otherwise {
               dirty := true.B
               // underflow should never be possible since the number of retired
               // regs should strictly be smaller than the pending regs, i.e. no
               // over-commit beyond what's issued
               assert(newCountWide >= 0.S,
-                     cf"scoreboard: ${countName} underflow at pReg=${u.pReg}" +
-                     cf"(currCount=${currCount}, incr=${u.incr}, decr=${u.decr}) ")
+                     cf"scoreboard: ${countName} underflow at pReg:${u.pReg}" +
+                     cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), incr:${u.incr}, decr:${u.decr})")
               newCount := newCountWide.asUInt
             }
           }

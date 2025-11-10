@@ -91,7 +91,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   val rsAdmitChosen = rsAdmitArbiter.io.out
 
   // update scoreboard upon RS admission
-  // this must be done at the same cycle as scoreboard read, so that updated
+  // This must be done at the same cycle as scoreboard read, so that the updated
   // values are immediately visible at the next cycle and never lost.
   //
   // Note that io.rsAdmit.ready needs to be checked so that we trigger scoreboard
@@ -109,6 +109,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
     io.scb.updateRS.enable := hasRd || hasRss.reduce(_ || _)
     io.scb.updateRS.write.pReg := chosenUop.inst.rd
+    // RS admission always increments
     io.scb.updateRS.write.incr := hasRd
     io.scb.updateRS.write.decr := false.B
     (io.scb.updateRS.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
@@ -141,6 +142,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
   // update scoreboard upon writeback
   io.scb.updateWB.enable := io.writeback.valid
   io.scb.updateWB.write.pReg := Mux(io.writeback.valid, io.writeback.bits.rd, 0.U)
+  // Writeback always increments
   io.scb.updateWB.write.incr := false.B
   io.scb.updateWB.write.decr := io.writeback.valid
   io.scb.updateWB.reads.foreach { read =>
