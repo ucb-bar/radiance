@@ -171,6 +171,9 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }.elsewhen (io.updateWB.enable) {
       printf(cf"scoreboard: received WB update ")
       printUpdate(io.updateWB)
+    }.elsewhen (io.updateColl.enable) {
+      printf(cf"scoreboard: received collector update ")
+      printUpdate(io.updateColl)
     }
 
     // updateWB/updateColl is decrement-only, and always succeeds (otherwise we
@@ -225,7 +228,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
             val currCountWide = currCount.pad(currCount.getWidth + 1)
             val newCountWide = currCountWide.asSInt + delta
             val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
-            printf(cf"applyUpdates: incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W), newCount: ${newCountWide}, currCount: ${currCountWide}\n")
+            printf(cf"applyUpdates: pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
             when (newCountWide > maxCountWide) {
               // FIXME: this doesn't guard against partial writes of updateRS!!!
               success := false.B
@@ -259,18 +262,21 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       (newRecords, success)
     }
 
-    // updateWB and updateColl
+    // collector and writeback updates
     val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
     val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
-    val (collRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false)
-    val (wbRecs, wbSuccess)     = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true)
+    val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false)
+    val (wbWriteRecs, wbSuccess)    = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true)
     assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
-    // updateRS
+    // RS admission updates
     val uniqRSReadUpdates  = consolidateUpdates(io.updateRS.reads)
     val uniqRSWriteUpdates = consolidateUpdates(Seq(io.updateRS.write))
-    val (newReadRecs,  rsReadSuccess)  = applyUpdates(collRecs, uniqRSReadUpdates,  isWrite = false)
-    val (newWriteRecs, rsWriteSuccess) = applyUpdates(wbRecs,   uniqRSWriteUpdates, isWrite = true)
+    val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collReadRecs, uniqRSReadUpdates,  isWrite = false)
+    val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbWriteRecs,  uniqRSWriteUpdates, isWrite = true)
+
+    val allReadRecs = collReadRecs ++ rsReadRecs
+    val allWriteRecs = wbWriteRecs ++ rsWriteRecs
 
     when (!rsReadSuccess) {
       printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
@@ -296,14 +302,17 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
     }
 
-    newReadRecs.foreach(commitUpdate(_, isWrite = false))
-    newWriteRecs.foreach(commitUpdate(_, isWrite = true))
+    allReadRecs.foreach(commitUpdate(_, isWrite = false))
+    allWriteRecs.foreach(commitUpdate(_, isWrite = true))
+
+    printf("scoreboard: table update, content beforehand:\n")
+    printTable
   }
 
   io.updateRS.success := updateRSSuccess
-  // WB decrement always succeeds
+  // WB and collector decrements always succeed
   io.updateWB.success := true.B
-  io.updateColl.success := true.B // FIXME!
+  io.updateColl.success := true.B
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {
@@ -329,4 +338,15 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     printf("}\n")
   }
 
+  def printTable = {
+    printf("=" * 10 + " Scoreboard " + "=" * 10 + "\n")
+    for (i <- 0 until muonParams.numPhysRegs) {
+      val reads = readTable(i)
+      val writes = writeTable(i)
+      when (reads > 0.U || writes > 0.U) {
+        printf(cf"p${i} | writes:${writes} | reads:${reads}\n")
+      }
+    }
+    printf("=" * 30 + "\n")
+  }
 }
