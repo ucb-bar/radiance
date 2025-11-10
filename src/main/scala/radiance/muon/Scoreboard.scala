@@ -31,9 +31,11 @@ class ScoreboardRead(
 }
 
 class ScoreboardIO(implicit p: Parameters) extends CoreBundle()(p) {
-  /** scoreboard updates on RS admission */
+  /** scoreboard pending-read/write increments on RS admission */
   val updateRS = new ScoreboardUpdate
-  /** scoreboard updates on writeback */
+  /** scoreboard pending-read decrements on collector response */
+  val updateColl = new ScoreboardUpdate
+  /** scoreboard pending-write decrements on writeback */
   val updateWB = new ScoreboardUpdate
   /** scoreboard accesses on RS admission */
   val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
@@ -146,7 +148,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // check for that and report to Hazard to guard admission.
   val updateRSSuccess = WireDefault(true.B)
 
-  when (io.updateRS.enable || io.updateWB.enable) {
+  when (io.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
     when (io.updateRS.enable) {
       printf(cf"scoreboard: received RS update ")
       printUpdate(io.updateRS)
@@ -160,7 +162,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     // collect the per-reg updates first, then do a separate commit at the end
     // when all regs are confirmed successful.
 
-    def generateNewCounters(uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean) = {
+    def applyUpdates(uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
+      Seq[(Bool /* dirty */, UInt /* pReg */, UInt /* new counter value */)] = {
       val table = (if (isWrite) {writeTable} else {readTable})
       val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
       val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
@@ -216,16 +219,16 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     // reads
     val allReadUpdates = io.updateRS.reads // updateWB.reads should be empty
     val uniqReadUpdates = consolidateUpdates(allReadUpdates)
-    val readNewCounters = generateNewCounters(uniqReadUpdates, isWrite = false)
+    val readNewCounters = applyUpdates(uniqReadUpdates, isWrite = false)
 
     // writes
     // consolidate updates from RS-admission and writeback
     val allWriteUpdates = Seq(io.updateRS.write, io.updateWB.write)
     val uniqWriteUpdates = consolidateUpdates(allWriteUpdates)
-    val writeNewCounters = generateNewCounters(uniqWriteUpdates, isWrite = true)
+    val writeNewCounters = applyUpdates(uniqWriteUpdates, isWrite = true)
 
     // commit
-    def commitReg(dirty: Bool, pReg: UInt, newVal: UInt, isWrite: Boolean) = {
+    def commitUpdate(dirty: Bool, pReg: UInt, newVal: UInt, isWrite: Boolean) = {
       when (dirty) {
         assert(pReg =/= 0.U, "update to x0 not filtered in the logic?")
         if (isWrite) {
@@ -239,10 +242,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     readNewCounters.foreach { case (dirty, pReg, newRead) => {
-      commitReg(dirty, pReg, newRead, isWrite = false)
+      commitUpdate(dirty, pReg, newRead, isWrite = false)
     }}
     writeNewCounters.foreach { case (dirty, pReg, newWrite) => {
-      commitReg(dirty, pReg, newWrite, isWrite = true)
+      commitUpdate(dirty, pReg, newWrite, isWrite = true)
     }}
 
     when (!updateRSSuccess) {
@@ -254,6 +257,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   io.updateRS.success := updateRSSuccess
   // WB decrement always succeeds
   io.updateWB.success := true.B
+  io.updateColl.success := true.B // FIXME!
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {

@@ -29,6 +29,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val writeback = Flipped(regWritebackT)
     /** writeback pass-through to the hazard module */
     val writebackHazard = regWritebackT
+    /** scoreboard interface for collector updates */
+    val scb = new Bundle {
+      val updateColl = Flipped(new ScoreboardUpdate)
+    }
     /** collector request/response; RS keeps track of operand validity */
     val collector = new Bundle {
       val readReq  = Flipped(CollectorRequest(Isa.maxNumRegs, isWrite = false))
@@ -47,6 +51,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   // whether the uop uses rs1/2/3
   // not actually a state; combinationally computed from uops
   val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))
+  // rs1/2/3 of the uop
+  // not actually a state; combinationally computed from uops
+  val rsTable        = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, pRegT)))
   // whether the used operands has been collected
   val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // whether the operands are being written-to by in-flight uops in EX
@@ -63,6 +70,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     hasOpTable(i) := VecInit(Seq(uop.inst(HasRs1).asBool,
                                  uop.inst(HasRs2).asBool,
                                  uop.inst(HasRs3).asBool))
+    rsTable(i) := VecInit(Seq(uop.inst.rs1,
+                              uop.inst.rs2,
+                              uop.inst.rs3))
   }
 
   // ---------
@@ -132,31 +142,43 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     collPtrTable(collRow) := newCollPtr
   }
 
-  // mark operand valid upon collector response
+  // upon collector response:
+  // 1. mark operand ready in the table
+  // 2. update scoreboard pending-reads
+  //
   // collector wakeup should never block
   io.collector.readResp.ports.foreach(_.ready := true.B)
+  io.scb.updateColl.enable := io.collector.readResp.ports.map(_.fire).reduce(_ || _)
+  // set later
+  io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+  io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
+
   (0 until numEntries).foreach { i =>
     val valid = validTable(i)
+    val rss = rsTable(i)
     val opReadys = opReadyTable(i)
     val newOpReadys = WireDefault(opReadys)
     val collFired = collFiredTable(i)
     val collPtrs = collPtrTable(i)
     val updated = WireDefault(false.B)
-    (opReadys lazyZip collFired lazyZip collPtrs lazyZip io.collector.readResp.ports)
-      .zipWithIndex.foreach { case ((rdy, cf, cptr, cResp), rsi) =>
-        when (cResp.fire && valid && !rdy && cf && (cResp.bits.collEntry === cptr)) {
+    (opReadys lazyZip collFired lazyZip
+     (collPtrs zip rss) lazyZip
+     (io.collector.readResp.ports zip io.scb.updateColl.reads))
+      .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cPort, scbPort)), rsi) =>
+        when (cPort.fire && valid && !rdy && cf && (cPort.bits.collEntry === cptr)) {
           newOpReadys(rsi) := true.B
           updated := true.B
-          printf(cf"RS: collector response handled at row ${i}, rsi ${rsi}\n")
+
+          scbPort.pReg := rs
+          scbPort.incr := false.B
+          scbPort.decr := true.B
+
+          printf(cf"RS: collector response handled at row:${i}, rs:${rs}, rsi:${rsi}\n")
         }
       }
     when (updated) {
       opReadyTable(i) := newOpReadys
     }
-  }
-  when (io.collector.readResp.ports.map(_.fire).reduce(_ || _)) {
-    printf(cf"RS: collector response handled; current table:\n")
-    printTable
   }
 
   // -----
