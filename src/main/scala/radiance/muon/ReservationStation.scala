@@ -8,15 +8,12 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   /** uop being admitted to the reservation station. */
   val uop = uopT
   /** Indicates whether each operand reg (rs1/2/3) has been collected.
-   *  If the uop does not use the operand field, sets to 1.
-   *  TODO: separate "used" field?
-   */
+   *  If the uop does not use the operand field, sets to 1. */
   val valid = Vec(Isa.maxNumRegs, Bool())
   /** Indicates whether each operand reg (rs1/2/3) is being written to by an
    *  in-flight uop in the backend. `busy == 1` means the operand can be
    *  potentially forwarded from EX. */
   val busy = Vec(Isa.maxNumRegs, Bool())
-  // TODO: collector entry pointer
 }
 
 class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
@@ -174,7 +171,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          printf(cf"RS: collector response handled at row:${i}, rs:${rs}, rsi:${rsi}\n")
+          printf(cf"RS: collector response handled at row:${i}, pc:${uopTable(i).pc}%x, rs:${rs}, rsi:${rsi}\n")
         }
       }
     when (updated) {
