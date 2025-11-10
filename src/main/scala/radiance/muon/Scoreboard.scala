@@ -173,20 +173,47 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       printUpdate(io.updateWB)
     }
 
-    // If any of the rs1/rs2/rs3/rd fails to update due to counter overflow,
-    // the entire instruction should be held back from commit to the table. So
-    // collect the per-reg updates first, then do a separate commit at the end
-    // when all regs are confirmed successful.
+    // updateWB/updateColl is decrement-only, and always succeeds (otherwise we
+    // risk deadlock);
+    // updateRS is increment-only, and may fail due to counter overflow.
+    //
+    // Apply updateWB/Coll first, and on the updated counter values, try
+    // applying updateRS.  If the latter fails, only commit the post-WB/Coll
+    // values to the table.  This requires generating updated counter values as
+    // a separate stage into a set of Wires, and conditionally latching those values
+    // to the Mem; that is what UpdateRecord is for.
 
-    def applyUpdates(records: Vec[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
-      (Seq[UpdateRecord], Bool /* success */) = {
+    // If a given pReg is found in the record, return that; otherwise, read
+    // from the table.
+    def lookupRecords(records: Seq[UpdateRecord], pReg: UInt, isWrite: Boolean) = {
+      val table = (if (isWrite) writeTable else readTable)
+
+      val value = Wire(UInt(table(0).getWidth.W))
+      val dirty = WireDefault(false.B)
+
+      value := table(pReg)
+
+      // priority-tree
+      records.foreach { rec =>
+        when (rec.pReg === pReg) {
+          value := rec.counter
+          dirty := rec.dirty
+        }
+      }
+
+      (value, dirty)
+    }
+
+    def applyUpdates(records: Seq[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
+      (Seq[UpdateRecord] /* new table */, Bool /* success */) = {
       val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
       val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
       val success = WireDefault(true.B)
 
       val newRecords = uniqUpdates.map { u =>
         val dirtied = WireDefault(false.B)
-        val currCount = records(u.pReg).counter
+        // val currCount = records(u.pReg).counter
+        val (currCount, prevDirty) = lookupRecords(records, u.pReg, isWrite)
         val newCount = WireDefault(currCount)
 
         // skip x0 updates
@@ -194,15 +221,12 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           // if currCount + u.incr overflows but u.decr cancels it out, treat
           // it as a success.
           when (u.incr =/= u.decr) {
-            val delta = u.incr.asSInt -& u.decr.asSInt
+            val delta = u.incr.pad(u.incr.getWidth + 1).asSInt -& u.decr.pad(u.decr.getWidth + 1).asSInt
             val currCountWide = currCount.pad(currCount.getWidth + 1)
             val newCountWide = currCountWide.asSInt + delta
             val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
+            printf(cf"applyUpdates: incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W), newCount: ${newCountWide}, currCount: ${currCountWide}\n")
             when (newCountWide > maxCountWide) {
-              // overflow; don't reflect increments, but do decrements
-              // it is important to always succeed WBs and collector
-              // decrements, otherwise we risk deadlock
-
               // FIXME: this doesn't guard against partial writes of updateRS!!!
               success := false.B
               assert(false.B,
@@ -222,40 +246,41 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
               // over-commit beyond what's issued
               assert(newCountWide >= 0.S,
                      cf"scoreboard: ${countName} underflow at pReg:${u.pReg} " +
-                     cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), incr:${u.incr}, decr:${u.decr})")
+                     cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), maxCount:${maxCountWide}, incr:${u.incr}, decr:${u.decr})")
               newCount := newCountWide.asUInt
             }
           }
         }
 
-        val dirty = records(u.pReg).dirty || dirtied
+        val dirty = prevDirty || dirtied
         UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth)
       }
 
       (newRecords, success)
     }
 
-    def tableToRecords(isWrite: Boolean) = {
-      val table = (if (isWrite) writeTable else readTable)
-      VecInit.tabulate(muonParams.numPhysRegs) { i =>
-        UpdateRecord(false.B, i.U, table(i), width = table(i).getWidth)
-      }
+    // updateWB and updateColl
+    val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
+    val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
+    val (collRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false)
+    val (wbRecs, wbSuccess)     = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true)
+    assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
+
+    // updateRS
+    val uniqRSReadUpdates  = consolidateUpdates(io.updateRS.reads)
+    val uniqRSWriteUpdates = consolidateUpdates(Seq(io.updateRS.write))
+    val (newReadRecs,  rsReadSuccess)  = applyUpdates(collRecs, uniqRSReadUpdates,  isWrite = false)
+    val (newWriteRecs, rsWriteSuccess) = applyUpdates(wbRecs,   uniqRSWriteUpdates, isWrite = true)
+
+    when (!rsReadSuccess) {
+      printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
+      printUpdate(io.updateRS)
+    }.elsewhen (!rsWriteSuccess) {
+      printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
+      printUpdate(io.updateRS)
     }
-    val readRecords  = tableToRecords(isWrite = false)
-    val writeRecords = tableToRecords(isWrite = true)
 
-    // reads
-    val allReadUpdates = io.updateRS.reads // updateWB.reads should be empty
-    val uniqReadUpdates = consolidateUpdates(allReadUpdates)
-    val (readNewCounters, readSuccess) = applyUpdates(readRecords, uniqReadUpdates, isWrite = false)
-
-    // writes
-    // consolidate updates from RS-admission and writeback
-    val allWriteUpdates = Seq(io.updateRS.write, io.updateWB.write)
-    val uniqWriteUpdates = consolidateUpdates(allWriteUpdates)
-    val (writeNewCounters, writeSuccess) = applyUpdates(writeRecords, uniqWriteUpdates, isWrite = true)
-
-    updateRSSuccess := readSuccess && writeSuccess
+    updateRSSuccess := rsReadSuccess && rsWriteSuccess
 
     // commit
     def commitUpdate(rec: UpdateRecord, isWrite: Boolean) = {
@@ -271,13 +296,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
     }
 
-    readNewCounters.foreach(commitUpdate(_, isWrite = false))
-    writeNewCounters.foreach(commitUpdate(_, isWrite = true))
-
-    when (!updateRSSuccess) {
-      printf(cf"scoreboard: failed to commit RS update ")
-      printUpdate(io.updateRS)
-    }
+    newReadRecs.foreach(commitUpdate(_, isWrite = false))
+    newWriteRecs.foreach(commitUpdate(_, isWrite = true))
   }
 
   io.updateRS.success := updateRSSuccess

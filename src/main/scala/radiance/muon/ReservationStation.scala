@@ -171,7 +171,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
 
           scbPort.pReg := rs
           scbPort.incr := false.B
-          scbPort.decr := true.B
+          scbPort.decr := (rs =/= 0.U)
 
           printf(cf"RS: collector response handled at row:${i}, rs:${rs}, rsi:${rsi}\n")
         }
