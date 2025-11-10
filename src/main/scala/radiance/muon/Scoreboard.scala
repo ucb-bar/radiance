@@ -144,9 +144,25 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
 
+  class UpdateRecord(counterBits: Int)(implicit p: Parameters) extends CoreBundle()(p) {
+    val dirty = Bool()
+    val pReg = pRegT
+    val counter = UInt(counterBits.W)
+  }
+
+  object UpdateRecord {
+    def apply(dirty: Bool, pReg: UInt, counter: UInt, width: Int): UpdateRecord = {
+      val rec = Wire(new UpdateRecord(width))
+      rec.dirty := dirty
+      rec.pReg := pReg
+      rec.counter := counter
+      rec
+    }
+  }
+
   // RS admission bumps counters up, which may fail due to saturation; need to
   // check for that and report to Hazard to guard admission.
-  val updateRSSuccess = WireDefault(true.B)
+  val updateRSSuccess = WireDefault(false.B)
 
   when (io.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
     when (io.updateRS.enable) {
@@ -162,15 +178,15 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     // collect the per-reg updates first, then do a separate commit at the end
     // when all regs are confirmed successful.
 
-    def applyUpdates(uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
-      Seq[(Bool /* dirty */, UInt /* pReg */, UInt /* new counter value */)] = {
-      val table = (if (isWrite) {writeTable} else {readTable})
+    def applyUpdates(records: Vec[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
+      (Seq[UpdateRecord], Bool /* success */) = {
       val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
       val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
+      val success = WireDefault(true.B)
 
-      uniqUpdates.map { u =>
-        val dirty = WireDefault(false.B)
-        val currCount = table(u.pReg)
+      val newRecords = uniqUpdates.map { u =>
+        val dirtied = WireDefault(false.B)
+        val currCount = records(u.pReg).counter
         val newCount = WireDefault(currCount)
 
         // skip x0 updates
@@ -188,65 +204,75 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
               // decrements, otherwise we risk deadlock
 
               // FIXME: this doesn't guard against partial writes of updateRS!!!
-              updateRSSuccess := false.B
+              success := false.B
               assert(false.B,
                      cf"TODO: partial update rollback on counter overflow not handled " +
                      cf"(${countName}, pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCountWide}, maxCount:${maxCountWide})")
 
               // ignore incr and just reflect decr
-              dirty := (u.decr =/= 0.U)
+              dirtied := (u.decr =/= 0.U)
               assert(currCountWide >= u.decr,
-                     cf"scoreboard: ${countName} underflow at pReg=${u.pReg}" +
+                     cf"scoreboard: ${countName} underflow at pReg=${u.pReg} " +
                      cf"(currCount=${currCountWide}, incr=${u.incr}, decr=${u.decr}) ")
               newCount := currCountWide - u.decr
             }.otherwise {
-              dirty := true.B
+              dirtied := true.B
               // underflow should never be possible since the number of retired
               // regs should strictly be smaller than the pending regs, i.e. no
               // over-commit beyond what's issued
               assert(newCountWide >= 0.S,
-                     cf"scoreboard: ${countName} underflow at pReg:${u.pReg}" +
+                     cf"scoreboard: ${countName} underflow at pReg:${u.pReg} " +
                      cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), incr:${u.incr}, decr:${u.decr})")
               newCount := newCountWide.asUInt
             }
           }
         }
 
-        (dirty, u.pReg, newCount)
+        val dirty = records(u.pReg).dirty || dirtied
+        UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth)
+      }
+
+      (newRecords, success)
+    }
+
+    def tableToRecords(isWrite: Boolean) = {
+      val table = (if (isWrite) writeTable else readTable)
+      VecInit.tabulate(muonParams.numPhysRegs) { i =>
+        UpdateRecord(false.B, i.U, table(i), width = table(i).getWidth)
       }
     }
+    val readRecords  = tableToRecords(isWrite = false)
+    val writeRecords = tableToRecords(isWrite = true)
 
     // reads
     val allReadUpdates = io.updateRS.reads // updateWB.reads should be empty
     val uniqReadUpdates = consolidateUpdates(allReadUpdates)
-    val readNewCounters = applyUpdates(uniqReadUpdates, isWrite = false)
+    val (readNewCounters, readSuccess) = applyUpdates(readRecords, uniqReadUpdates, isWrite = false)
 
     // writes
     // consolidate updates from RS-admission and writeback
     val allWriteUpdates = Seq(io.updateRS.write, io.updateWB.write)
     val uniqWriteUpdates = consolidateUpdates(allWriteUpdates)
-    val writeNewCounters = applyUpdates(uniqWriteUpdates, isWrite = true)
+    val (writeNewCounters, writeSuccess) = applyUpdates(writeRecords, uniqWriteUpdates, isWrite = true)
+
+    updateRSSuccess := readSuccess && writeSuccess
 
     // commit
-    def commitUpdate(dirty: Bool, pReg: UInt, newVal: UInt, isWrite: Boolean) = {
-      when (dirty) {
-        assert(pReg =/= 0.U, "update to x0 not filtered in the logic?")
+    def commitUpdate(rec: UpdateRecord, isWrite: Boolean) = {
+      when (rec.dirty) {
+        assert(rec.pReg =/= 0.U, "update to x0 not filtered in the logic?")
         if (isWrite) {
-          printf(cf"scoreboard: commited write (pReg:${pReg}, pendingWrites:${newVal})\n")
-          writeTable(pReg) := newVal
+          printf(cf"scoreboard: commited write (pReg:${rec.pReg}, pendingWrites:${rec.counter})\n")
+          writeTable(rec.pReg) := rec.counter
         } else {
-          printf(cf"scoreboard: commited read (pReg:${pReg}, pendingReads:${newVal})\n")
-          readTable(pReg) := newVal
+          printf(cf"scoreboard: commited read (pReg:${rec.pReg}, pendingReads:${rec.counter})\n")
+          readTable(rec.pReg) := rec.counter
         }
       }
     }
 
-    readNewCounters.foreach { case (dirty, pReg, newRead) => {
-      commitUpdate(dirty, pReg, newRead, isWrite = false)
-    }}
-    writeNewCounters.foreach { case (dirty, pReg, newWrite) => {
-      commitUpdate(dirty, pReg, newWrite, isWrite = true)
-    }}
+    readNewCounters.foreach(commitUpdate(_, isWrite = false))
+    writeNewCounters.foreach(commitUpdate(_, isWrite = true))
 
     when (!updateRSSuccess) {
       printf(cf"scoreboard: failed to commit RS update ")
