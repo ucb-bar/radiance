@@ -9,6 +9,8 @@ and L2 for the SoC. All caches are non-blocking.
 
 ### L0
 
+Note: L0 is not currently instantiated due to Rocket NBDCache implementation.
+
 #### L0i
 
 L0i should be 4KB with 64B cache lines (8 instructions), direct mapped.
@@ -35,13 +37,13 @@ Tag array size is 256x18b.
 
 L1 is a 64KiB unified cache that serves both instructions and data.
 
-4-way set associative, write through, 64B line.
+4-way set associative, write through, 32B line.
 
 Tag array size is 1024x18b.
 
 * **Banking**: 2 banks.
 * **Ports**: single port.
-* **Bandwidth**: 64B/cycle (1 line).
+* **Bandwidth**: 32B/cycle (1 line).
 * **Timing**: ???
 
 L0 and L1 will use HellaCache/NBDCache with modified MSHR datapath; write
@@ -186,6 +188,7 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 | `0x0002_0200`  |   `0x200` | Core 1 print and perf buffer    |
 | `0x0002_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
 | `0x0002_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
+| `0x0002_8000`  |  `0x8000` | Gemmini scaling factor memory |
 
 ## Global Memory Map
 
@@ -207,9 +210,16 @@ the CPU fails to schedule work on the SIMT cores.
 
 ![Fabric Block Diagram](./fig/fabric.svg)
 
+In particular, see the below diagram for detailed diagram of the Control Bus
+fabric subgraph, showcasing the bandwidths at each link.
+
+![CBus Block Diagram](./fig/cbus.svg)
+
+<!--
 ### Area Estimation
 
 TODO
+-->
 
 ## Other Stuff
 
