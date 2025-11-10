@@ -84,7 +84,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     collPtrTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(0.U)
 
     if (muonParams.debug) {
-      printf(cf"RS: admitted PC=0x${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
+      printf(cf"RS: admitted: PC=${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
       printTable
     }
   }
@@ -195,9 +195,24 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   }
   dontTouch(issuedId)
 
+  if (muonParams.debug) {
+    when (io.issue.fire) {
+      printf(cf"RS: issued: PC=${io.issue.bits.pc} at row ${issueScheduler.io.out.bits.entryId}:\n")
+      printTable
+    }
+  }
+
+
   // ---------
   // writeback
   // ---------
+
+  if (muonParams.debug) {
+    when (io.writeback.fire) {
+      printf(cf"RS: processing writeback fire; table content beforehand:\n")
+      printTable
+    }
+  }
 
   // CAM broadcast to wake-up entries
   (0 until numEntries).foreach { i =>
@@ -211,8 +226,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val updated = WireDefault(false.B)
     (hasOps zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
       when (io.writeback.fire && valid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
-        assert(newBusys(rsi),
-          cf"RS: busy was already low when writeback arrived (pc:${uop.pc}%x, rd:${rdWriteback})")
+        assert(busys(rsi) === true.B,
+          cf"RS: busy was already low when writeback arrived " +
+          cf"(#${i}, pc:${uop.pc}%x, rdWB:${rdWriteback}, rsi:${rsi})")
         newBusys(rsi) := false.B
         updated := true.B
       }
@@ -221,7 +237,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     when (updated) {
       busyTable(i) := newBusys
       if (muonParams.debug) {
-        printf(cf"RS: writeback to PC=0x${uop.pc}%x at row ${emptyRow}\n")
+        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${emptyRow}\n")
       }
     }
   }
