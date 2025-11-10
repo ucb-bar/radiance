@@ -259,9 +259,19 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val updated = WireDefault(false.B)
     (hasOps zip rss).zipWithIndex.foreach { case ((hasRs, rs), rsi) =>
       when (io.writeback.fire && valid && hasRs && (rs =/= 0.U) && (rs === rdWriteback)) {
-        assert(busys(rsi) === true.B,
-          cf"RS: busy was already low when writeback arrived " +
-          cf"(#${i}, pc:${uop.pc}%x, rdWB:${rdWriteback}, rsi:${rsi})")
+        // NOTE: busys(rsi) may actually be already false, since that rs might
+        // be referring to the rd of an older write. Example:
+        //     li  x4 <- ..
+        //     add .. <- x4
+        //     li  x4 <- .. // handling this writeback
+        // This becomes a problem only when the two li's write back
+        // out-of-order, which is prevented by the WAW gating at the hazard
+        // logic.  With that out of the way, the younger writeback does not
+        // need to wake up anything.
+        //
+        // assert(busys(rsi) === true.B,
+        //   cf"RS: busy was already low when writeback arrived " +
+        //   cf"(#${i}, pc:${uop.pc}%x, rdWB:${rdWriteback}, rsi:${rsi})")
         newBusys(rsi) := false.B
         updated := true.B
       }
