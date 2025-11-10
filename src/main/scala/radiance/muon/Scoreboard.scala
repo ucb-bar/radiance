@@ -293,10 +293,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       when (rec.dirty) {
         assert(rec.pReg =/= 0.U, "update to x0 not filtered in the logic?")
         if (isWrite) {
-          printf(cf"scoreboard: commited write (pReg:${rec.pReg}, pendingWrites:${rec.counter})\n")
+          printf(cf"scoreboard: committed write (pReg:${rec.pReg}, new pendingWrites:${rec.counter})\n")
           writeTable(rec.pReg) := rec.counter
         } else {
-          printf(cf"scoreboard: commited read (pReg:${rec.pReg}, pendingReads:${rec.counter})\n")
+          printf(cf"scoreboard: committed read (pReg:${rec.pReg}, new pendingReads:${rec.counter})\n")
           readTable(rec.pReg) := rec.counter
         }
       }
@@ -339,7 +339,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   def printTable = {
-    printf("=" * 10 + " Scoreboard " + "=" * 10 + "\n")
+    printf("=" * 8 + " Scoreboard " + "=" * 8 + "\n")
     for (i <- 0 until muonParams.numPhysRegs) {
       val reads = readTable(i)
       val writes = writeTable(i)
@@ -347,6 +347,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         printf(cf"p${i} | writes:${writes} | reads:${reads}\n")
       }
     }
-    printf("=" * 30 + "\n")
+    printf("=" * 28 + "\n")
   }
 }

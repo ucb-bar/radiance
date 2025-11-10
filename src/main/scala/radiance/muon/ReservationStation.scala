@@ -119,11 +119,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   val collBitvec = WireDefault(VecInit(needCollects.map(_._1)))
   dontTouch(collBitvec)
   val collRow = PriorityEncoder(collBitvec)
+  dontTouch(collRow)
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
   val collUop = uopTable(collRow)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
   // this is clunky, but Mem does not support partial-field updates
-  val newCollFired = WireDefault(collFiredTable(collRow))
   val newCollPtr = WireDefault(collPtrTable(collRow))
   assert(collOpNeed.length == io.collector.readReq.bits.regs.length)
   assert(collRegs.length == io.collector.readReq.bits.regs.length)
@@ -132,13 +132,14 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
       assert(collPort.data.isEmpty)
       collPort.enable := need && !collFiredTable(collRow)(rsi)
       collPort.pReg := Mux(need, pReg, 0.U)
-      newCollFired(rsi) := true.B
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
     }
   io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
   when (io.collector.readReq.fire) {
-    collFiredTable(collRow) := newCollFired
+    val fired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
+                .map { case (a,b) => a || b }
+    collFiredTable(collRow) := fired
     collPtrTable(collRow) := newCollPtr
   }
 
@@ -269,7 +270,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     when (updated) {
       busyTable(i) := newBusys
       if (muonParams.debug) {
-        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${emptyRow}\n")
+        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${i}, rd=${io.writeback.bits.rd}:\n")
         printTable
       }
     }
@@ -292,7 +293,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
       when (valid) {
         val uop      = uopTable(i)
         printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
-               cf"regs: [rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
+               cf"regs: [rd:${uop.inst.rd} rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
+               cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
                cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
