@@ -120,7 +120,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     ((pRegs zip matchCount) zip coalescedIncDec).map { case ((pr, cnt), (inc, dec)) =>
       val uniq = (cnt === 0.U)
       val upd = Wire(new ConsolidatedRegUpdate(updates.length))
-      upd.pReg := pr
+      upd.pReg := Mux(uniq, pr, 0.U)
       upd.incr := Mux(uniq, inc, 0.U)
       upd.decr := Mux(uniq, dec, 0.U)
       upd
@@ -192,7 +192,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           val currCountWide = currCount.pad(currCount.getWidth + 1)
           val newCountWide = currCountWide.asSInt + delta
           val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
-          printf(cf"applyUpdates: [${debug}] pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
+          printf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
           when (newCountWide > maxCountWide) {
             success := false.B
             // assert(false.B,
@@ -216,7 +216,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
             newCount := newCountWide.asUInt
           }
         }.elsewhen (u.incr === u.decr && u.incr =/= 0.U) {
-          printf(cf"applyUpdates: [${debug}] incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
+          printf(cf"applyUpdates: [${debug}] ${countName} incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
         }
       }
 
@@ -262,11 +262,12 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
     def commitUpdate(recs: Seq[UpdateRecord], isWrite: Boolean) = {
       // need to reflect the latest index in the seq
+      // TODO: refactor; the logic is largely similar to consolidateUpdates
       val syncRecs = recs.zipWithIndex.map { case (r, i) =>
         val count = WireDefault(r.counter)
         val dirty = WireDefault(r.dirty)
         for (j <- i + 1 until recs.length) {
-          when (recs(j).pReg === r.pReg) {
+          when (recs(j).dirty && recs(j).pReg === r.pReg) {
             // prefix-sum overwrite; relies on these orders being preserved in
             // the elaborated verilog
             count := recs(j).counter
@@ -293,13 +294,9 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     // partially apply RS updates on success
     // make sure this happens later than coll/WB!
     when (rsSuccess) {
-      // (collReadRecs ++ rsReadRecs).foreach(commitUpdate(_, isWrite = false))
-      // (wbWriteRecs  ++ rsWriteRecs).foreach(commitUpdate(_, isWrite = true))
       commitUpdate(collReadRecs ++ rsReadRecs, isWrite = false)
       commitUpdate(wbWriteRecs  ++ rsWriteRecs, isWrite = true)
     }.otherwise {
-      // collReadRecs.foreach(commitUpdate(_, isWrite = false))
-      // wbWriteRecs.foreach(commitUpdate(_, isWrite = true))
       commitUpdate(collReadRecs, isWrite = false)
       commitUpdate(wbWriteRecs, isWrite = true)
 
