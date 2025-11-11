@@ -331,8 +331,8 @@ class VortexTile private(
       val coal = LazyModule(
         new CoalescingUnit(coalParam)
       )
-      coal.cpuNode :=* dmemAggregateNode
-      coal.aggregateNode // N+1 lanes
+      coal.nexusNode :=* dmemAggregateNode
+      coal.nexusNode // N+1 lanes
     }
     case None => dmemAggregateNode
   }

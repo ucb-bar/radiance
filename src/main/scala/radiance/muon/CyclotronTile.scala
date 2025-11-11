@@ -79,8 +79,8 @@ class CyclotronTile private (
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalParam) => {
       val coal = LazyModule(new CoalescingUnit(coalParam))
-      coal.cpuNode :=* TLWidthWidget(4) :=* cyclotron.node
-      coal.aggregateNode
+      coal.nexusNode :=* TLWidthWidget(4) :=* cyclotron.node
+      coal.nexusNode
     }
     case None => cyclotron.node
   }

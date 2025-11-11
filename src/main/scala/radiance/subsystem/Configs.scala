@@ -409,7 +409,7 @@ class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config
       numNewSrcIds = nNewSrcIds,
       addressWidth = 32, // FIXME hardcoded as 32-bit system
       dataBusWidth = log2Ceil(maxCoalSizeInBytes),
-      coalLogSizes = Seq(log2Ceil(maxCoalSizeInBytes))
+      coalLogSize = log2Ceil(maxCoalSizeInBytes)
       )
     )
   }

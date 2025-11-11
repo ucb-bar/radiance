@@ -52,8 +52,8 @@ case object MemtraceInjector extends SubsystemInjector((p, baseSubsystem) => {
        val coalescerNode = p(CoalescerKey) match {
          case Some(coalParam) => {
            val coal = LazyModule(new CoalescingUnit(coalParam))
-           coal.cpuNode :=* coreSideLogger.node :=* tracer.node // N lanes
-           memSideLogger.node :=* coal.aggregateNode            // N+1 lanes
+           coal.nexusNode :=* coreSideLogger.node :=* tracer.node // N lanes
+           memSideLogger.node :=* coal.nexusNode            // N+1 lanes
            memSideLogger.node
          }
          case None => tracer.node

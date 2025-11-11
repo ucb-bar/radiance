@@ -78,8 +78,8 @@ class FuzzerTile private (
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalParam) => {
       val coal = LazyModule(new CoalescingUnit(coalParam))
-      coal.cpuNode :=* TLWidthWidget(4) :=* fuzzer.node
-      coal.aggregateNode
+      coal.nexusNode :=* TLWidthWidget(4) :=* fuzzer.node
+      coal.nexusNode
     }
     case None => fuzzer.node
   }
