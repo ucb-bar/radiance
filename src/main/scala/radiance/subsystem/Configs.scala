@@ -63,6 +63,8 @@ class WithMuonCores(
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
   headless: Boolean,
+  l0i: Option[DCacheParams],
+  l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
@@ -95,7 +97,8 @@ class WithMuonCores(
       val muon = MuonTileParams(
         core = here(MuonKey),
         icache = None,
-        dcache = Some(clusterParams.l1Config),
+        icacheUsingD = l0i,
+        dcache = l0d,
         cacheLineBytes = clusterParams.l1Config.rowBits / 8
       )
       List.tabulate(n)(i => MuonTileAttachParams(
@@ -112,15 +115,16 @@ class WithMuonCores(
   case NumMuonCores => up(NumMuonCores) + n
 }) {
   // constructor override that omits `crossing`
-  def this(n: Int, location: HierarchicalLocation = InSubsystem, headless: Boolean = false)
+  def this(n: Int, location: HierarchicalLocation = InSubsystem, headless: Boolean = false,
+          l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
     slave = HierarchicalElementSlavePortParams.locationDefault(location),
     mmioBaseAddressPrefixWhere = location match {
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
-    }
-  ), headless)
+    },
+  ), headless, l0i, l0d)
 }
 
 class WithCyclotronCores(

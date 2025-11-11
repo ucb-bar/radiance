@@ -45,11 +45,25 @@ object tapeoutSmemConfig extends RadianceSharedMemKey(
   prealignBufDepth = 2, filterAligned = false, serialization = CoreSerialized
 )
 
+object l0iCacheConfig extends DCacheParams(
+  nSets = 128,
+  nWays = 1,
+  rowBits = 32 * 8,
+  blockBytes = 32,
+)
+
+object l0dCacheConfig extends DCacheParams(
+  nSets = 512,
+  nWays = 1,
+  rowBits = 64 * 8,
+  blockBytes = 64,
+)
+
 object l1CacheConfig extends DCacheParams(
   nSets = 512,
   nWays = 4,
-  rowBits = 32 * 8,
-  blockBytes = 32,
+  rowBits = 32 * 8, // physical (sram) size
+  blockBytes = 32, // logical size
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
@@ -77,10 +91,10 @@ class RadianceCyclotronConfig extends Config(
 
 class RadianceTapeoutSimConfig extends Config(
   new WithRadianceGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
-  new WithMuonCores(2, location = InCluster(1)) ++
+  new WithMuonCores(2, location = InCluster(1), l0i = Some(l0iCacheConfig), l0d = Some(l0dCacheConfig)) ++
   new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
-  new WithMuonCores(2, location = InCluster(0)) ++
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(l0iCacheConfig), l0d = Some(l0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
@@ -106,8 +120,7 @@ class RadianceTapeoutConfig extends Config(
     bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
       dataBits = 256
     )
-  )
-  )) ++
+  ))) ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
   new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v") ++
   new RadianceTapeoutSimConfig)

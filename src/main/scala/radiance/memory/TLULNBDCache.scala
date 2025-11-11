@@ -12,23 +12,38 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
 
-class HackAcquireNode(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
+class TLCToTLULNode(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
+    val atom = TransferSizes(1, beatBytes)
   val node = TLAdapterNode(
-    clientFn  = c => c,
+    clientFn  = c => {
+      c.v2copy(masters = c.masters.map { m =>
+        m.v1copy(
+          // probes will be intercepted
+          supportsProbe = TransferSizes.none
+        )
+      })
+    },
     managerFn = m => {
-      val atom = TransferSizes(1, beatBytes)
-      m.v2copy(slaves = m.slaves.map( s => {
+      m.v2copy(slaves = m.slaves.map { s =>
         s.v1copy(
           // this allows read permissions (branch)
           supportsAcquireB = s.supportsAcquireB mincover atom,
           // this allows write permissions (trunk)
           supportsAcquireT = s.supportsAcquireT mincover atom,
         )
-      }))
+      })
     }
   )
   lazy val module = new LazyModuleImp(this) {
-    (node.in.map(_._1) zip node.out.map(_._1)).foreach { case (i, o) => o <> i }
+    (node.in.map(_._1) zip node.out.map(_._1)).foreach { case (i, o) =>
+      // out (ul) has no E bundle, but in (c) does
+      o.a <> i.a
+      i.b <> o.b
+      o.c <> i.c
+      i.d <> o.d
+
+      i.e.ready := true.B
+    }
   }
 }
 
@@ -42,10 +57,10 @@ class TLULNBDCache(staticIdForMetadataUseOnly: Int,
   val beatBytes = p(TileKey).dcache.get.blockBytes
   val inNode = tlnbdCache.inNode
   val tlcOutNode = tlnbdCache.outNode
-  val acquireNode = LazyModule(new HackAcquireNode(beatBytes)).node
+  val c2ulNode = LazyModule(new TLCToTLULNode(beatBytes)).node
   val outNode = TLIdentityNode()
 
-  outNode :=* /* acquireNode :=* */ tlcOutNode
+  outNode :=* c2ulNode :=* tlcOutNode
 
   override lazy val module = new TLULNBDCacheModule(this)
 }

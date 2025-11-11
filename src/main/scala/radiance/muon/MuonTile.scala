@@ -25,6 +25,7 @@ case class MuonTileParams(
   coreId: Int = 0,
   clusterId: Int = 0,
   icache: Option[ICacheParams] = None,
+  icacheUsingD: Option[DCacheParams] = None,
   dcache: Option[DCacheParams] = None,
   btb: Option[BTBParams] = None,
   beuAddr: Option[BigInt] = None,
@@ -168,21 +169,26 @@ class MuonTile(
     )))
   }
 
-  val l0i = LazyModule(new TLULNBDCache(muonParams.coreId, Some(3))(
-    p
-    // p.alterMap(Map(
-    //   TileKey -> FakeRadianceClusterTileParams(
-    //     cache = Some(muonParams.dcache.get),
-    //     muonCore = muonParams.core,
-    //     clusterId = 0
-    //   ),
-    //   CacheBlockBytes -> muonParams.dcache.get.blockBytes,
-    //   // TileVisibilityNodeKey -> visibilityNode,
-    // ))
-  ))
+  val (l0iOut, l0iIn) = muonParams.icacheUsingD.map { l0iParams =>
+    val l0i = LazyModule(new TLULNBDCache(muonParams.coreId, Some(3))(
+      p.alterMap(Map(
+        TileKey -> FakeRadianceClusterTileParams(
+          cache = Some(l0iParams),
+          muonCore = muonParams.core,
+          clusterId = 0
+        ),
+        CacheBlockBytes -> l0iParams.blockBytes,
+        // TileVisibilityNodeKey -> visibilityNode,
+      ))
+    ))
+    (l0i.outNode, l0i.inNode)
+  }.getOrElse {
+    val passthru = TLEphemeralNode()
+    (passthru, passthru)
+  }
   val icacheNode = TLIdentityNode()
-  icacheNode := l0i.outNode
-  l0i.inNode :=
+  icacheNode := l0iOut
+  l0iIn :=
     TLWidthWidget(muonParams.core.instBytes) :=
     ResponseFIFOFixer() :=
     icacheWordNode
@@ -190,17 +196,35 @@ class MuonTile(
   // TODO: source id bits is actually determined by the coalescer
   val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
   val sourceIdBits = lsuDerived.sourceIdBits
-  val dcacheNode_ = muonParams.dcache match {
-    case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
-        Seq(TLMasterParameters.v1(
-          name = s"muon_tile${muonParams.coreId}_l0d",
-          sourceId = IdRange(0, 1 << sourceIdBits)
-        )),
-    )))
-  }
+  val lsuNode = TLClientNode(Seq(TLMasterPortParameters.v2(
+    Seq(TLMasterParameters.v1(
+      name = s"muon_tile${muonParams.coreId}_lsu",
+      sourceId = IdRange(0, 1 << sourceIdBits)
+    )),
+  )))
 
+   val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
+     val l0d = LazyModule(new TLULNBDCache(muonParams.coreId)(
+       p.alterMap(Map(
+         TileKey -> FakeRadianceClusterTileParams(
+           cache = Some(l0dParams),
+           muonCore = muonParams.core,
+           clusterId = 0
+         ),
+         CacheBlockBytes -> l0dParams.blockBytes,
+         // TileVisibilityNodeKey -> visibilityNode,
+       ))
+     ))
+     (l0d.outNode, l0d.inNode)
+   }.getOrElse {
+    val passthru = TLEphemeralNode()
+    (passthru, passthru)
+   }
+
+  val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
   val dcacheNode = visibilityNode
-  dcacheNode := dcacheNode_
+  dcacheNode := TLFragmenter(32, 64) := TLWidthWidget(coalescedReqWidth) := l0dOut // TODO magic number
+  l0dIn := /* TODO coalescer goes here */ lsuNode
 
   val softResetFinishSlave = SoftResetFinishNode.Slave()
 
