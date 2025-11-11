@@ -136,6 +136,7 @@ class RadianceCluster (
         muonCore = muonTiles.head.muonParams.core,
         clusterId = clusterId
       ),
+      CacheBlockBytes -> thisClusterParams.l1Config.blockBytes,
       TileVisibilityNodeKey -> visibilityNode,
     ))
   ))

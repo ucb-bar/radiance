@@ -33,7 +33,7 @@ class CSRFile(
   def wrap(x: UInt) = Some(() => x)
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
   case object MArchId    extends MuonCSR(CSRs.marchid, 0x6D756F6E.U)
-  case object MImpId     extends MuonCSR(CSRs.mimpid, 0x20260402.U) // 🙏
+  case object MImpId     extends MuonCSR(CSRs.mimpid, 0x20260408.U) // 🙏
   case object MISA       extends MuonCSR(CSRs.misa, "b0100_0000_1000_0000_0001_0001_0110_0000".U)
   case object SATP       extends MuonCSR(CSRs.satp)
   case object MStatus    extends MuonCSR(CSRs.mstatus)

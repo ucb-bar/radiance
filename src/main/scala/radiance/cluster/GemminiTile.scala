@@ -67,12 +67,17 @@ case class GemminiCoreParams(
   ) extends CoreParams {
 }
 
+case class GemminiScalingFactorMemConfig(
+  sizeInBytes: BigInt = 32 << 10,
+  lineSizeInBytes: Int = 32
+)
+
 case class GemminiTileParams(
     tileId: Int = 0,
     gemminiConfig: GemminiArrayConfig[Float, Float, Float],
     tileSize: Either[(Int, Int, Int), Int] = Right(4),
     slaveAddress: BigInt,
-    scalingFactorMemoryBytes: Option[BigInt] = None,
+    scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
     hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
@@ -159,29 +164,30 @@ class GemminiTile private (
 
   regNode := TLFragmenter(4, 8) := slaveNode
 
-  val scalingFacNode = gemminiParams.scalingFactorMemoryBytes.map { memSize =>
+  val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means
     // the scaling factor memory starts 0x8000 + shared mem size,
     // which is usually 0x28000 after cluster base address. this address is
     // 32K aligned (which matches with its typical size 32K).
     val scalingFacBaseAddr = gemminiParams.slaveAddress + 0x5000
-    require(isPow2(memSize), "scaling fac memory size must be power of 2")
+    require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
+    require(isPow2(sfm.lineSizeInBytes), "scaling fac line size must be power of 2")
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
-        address = Seq(AddressSet(scalingFacBaseAddr, memSize - 1)),
+        address = Seq(AddressSet(scalingFacBaseAddr, sfm.sizeInBytes - 1)),
         fifoId = Some(0),
         supports = TLMasterToSlaveTransferSizes(
           // there's no get support because the scaling factor memory is
           // write-only from the control bus
-          putFull = TransferSizes(1, 8),
-          putPartial = TransferSizes(1, 8),
+          putFull = TransferSizes(1, sfm.lineSizeInBytes),
+          putPartial = TransferSizes(1, sfm.lineSizeInBytes),
         )
       )),
-      beatBytes = 8,
+      beatBytes = sfm.lineSizeInBytes,
     )))
   }
   // no fragmentation here, double bandwidth if writing from rocket
-  scalingFacNode.foreach(_ := slaveNode)
+  scalingFacNode.foreach(_ := TLWidthWidget(8) := slaveNode)
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 
@@ -202,6 +208,20 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   tieOffGemminiRocc
+
+  // scaling factor
+  outer.scalingFacNode.foreach { scalingFacNode =>
+    val (node, edge) = scalingFacNode.in.head
+    when (node.a.fire) {
+      val writeAddr = node.a.bits.address
+      val writeData = node.a.bits.data
+      val writeEn = true.B
+    }
+    node.a.ready := node.d.ready
+  }
+
+
+  // cisc
 
   val accSlave = outer.accSlaveNode.map(_.in.head._1)
 

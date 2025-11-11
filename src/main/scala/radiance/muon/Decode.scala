@@ -195,8 +195,6 @@ class Decoded(full: Boolean = true) extends Bundle {
       expanded.essentials := this.essentials
       Decoder.optionalFields.zipWithIndex.foreach { case (f, i) =>
         expanded.optionals.get(i) := this.decode(f, Some(i))(0.U)
-
-//        expanded.decode(f, Some(i))(0.U(64.W), from) // TODO
       }
       expanded
     }
@@ -337,9 +335,7 @@ object Decoder {
       case Rs1IsPC =>
         Some(Seq(
           MuOpcode.AUIPC,
-          // MuOpcode.BRANCH,
           MuOpcode.JAL,
-          // MuOpcode.JALR,
         ).contains(op))
       case Rs1IsZero => Some(op == MuOpcode.LUI)
       case Rs2IsImm =>
@@ -350,8 +346,6 @@ object Decoder {
           MuOpcode.JALR,
           MuOpcode.OP_IMM,
           MuOpcode.AUIPC,
-          // MuOpcode.LUI,
-          // MuOpcode.BRANCH,
         ).contains(op))
       case IsBranch =>  Some(op == MuOpcode.BRANCH)
       case IsJump =>    Some(op == MuOpcode.JAL || op == MuOpcode.JALR)
@@ -403,15 +397,6 @@ object Decoder {
         val tests = (0 until (1 << width)).filter(n => (n & ~mask) == 0)
         tests.map(x => (new BitPat(x, mask, width), x))
       }
-      // // if nothing is checked or if whitelist is exhaustive: generate ???;
-      // // follow with union (whitelist, blacklist) checks
-      // ((if (checked.isEmpty || (checked.size >= (1 << width))) {
-      //   Seq(("?" * width, dontCareValue))
-      // } else {
-      //   Seq()
-      // }) ++ checked.union(reverseChecked).map { x =>
-      //   (("0" * width + x.toBinaryString) takeRight width, x) // left pad 0
-      // }).map(x => (BitPat("b" + x._1), x._2))
     }
   }
 
@@ -438,23 +423,10 @@ object Decoder {
       }
     }
   }
-  _tableData.foreach(println)
+  // _tableData.foreach(println)
 
   val table = TruthTable(
     table = _tableData,
-      // def getBitPat(f3: => Int, f7: => Int) = {
-      //   BitPat("b" + allDecodeFields.flatMap {
-      //     staticDecode(_, op, f3)
-      //   }.map(b => if (b) '1' else '0').mkString.reverse) // string is big endian
-      // }
-      // val f0Signals = getBitPat({ f3Used = true; 0 }, { f7Used = true; 0 })
-      // if (f3Used) {
-      //   Seq.tabulate(8) { f3 =>
-      //     (BitPat(op + (("000" + f3.toBinaryString) takeRight 3)), getBitPat(f3))
-      //   }
-      // } else {
-      //   Seq((BitPat(op + "???"), f0Signals))
-      // }
     default = BitPat.dontCare(tableIndices.size)
   )
 
