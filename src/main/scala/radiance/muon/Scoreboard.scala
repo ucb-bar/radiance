@@ -328,7 +328,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       // NOTE: don't use rsReadRecs/rsWriteRecs here, otherwise results in a
       // combinational cycle with the RS admission logic in the Hazard module
       port.pendingReads  := lookup(collReadRecs, port.pReg, isWrite = false)._1
-      port.pendingWrites := lookup(wbWriteRecs, port.pReg, isWrite = true)._2
+      port.pendingWrites := lookup(wbWriteRecs, port.pReg, isWrite = true)._1
     }
   }
   read(io.readRs1)
