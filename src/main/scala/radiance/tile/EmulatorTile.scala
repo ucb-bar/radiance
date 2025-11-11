@@ -80,8 +80,8 @@ class EmulatorTile private (
   val coalescerNode = p(CoalescerKey) match {
     case Some(coalParam) => {
       val coal = LazyModule(new CoalescingUnit(coalParam))
-      coal.cpuNode :=* TLWidthWidget(4) :=* emulator.node
-      coal.aggregateNode
+      coal.nexusNode :=* TLWidthWidget(4) :=* emulator.node
+      coal.nexusNode
     }
     case None => emulator.node
   }
