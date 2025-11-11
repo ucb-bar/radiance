@@ -111,14 +111,14 @@ object DefaultCoalescerConfig extends CoalescerConfig(
 class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends LazyModule {
   // NexusNode: n inputs (CPU lanes) -> n+1 outputs (n non-coal + 1 coal)
   val nexusNode = TLNexusNode(
-    clientFn = { seq => // send requests
+    clientFn = { seq =>
       require(seq.length == config.numLanes, 
         s"Expected ${config.numLanes} client ports, got ${seq.length}")
       
       // Aggregate all client parameters with remapped source IDs
+      // NOTE: This is ONLY for diplomacy - hardware doesn't remap!
       val allMasters = seq.zipWithIndex.flatMap { case (clientParams, lane) =>
         clientParams.masters.map { master =>
-          // Remap source IDs to non-overlapping ranges
           val newSourceId = IdRange(
             master.sourceId.start + lane * config.numOldSrcIds,
             master.sourceId.end + lane * config.numOldSrcIds
@@ -135,10 +135,7 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
       
       TLMasterPortParameters.v1(allMasters :+ coalescedMaster)
     },
-    managerFn = { seq => // respond to requests
-      // FIXED: Return same manager params to all outputs
-      // Each output gets the same manager parameters from downstream
-      // require(seq.length == 1, "NexusNode expects single downstream manager")
+    managerFn = { seq =>
       seq.head
     }
   )
@@ -419,7 +416,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   println(s"    numNewSrcIds: ${config.numNewSrcIds}")
   println(s"    respQueueDepth: ${config.respQueueDepth}")
   println(s"    addressWidth: ${config.addressWidth}")
-  println(s"    totalSourceIds: ${config.totalSourceIds}")
   println(s"}")
 
   require(
@@ -427,8 +423,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     s"number of incoming edges (${outer.nexusNode.in.length}) is not the same as " +
       s"config.numLanes (${config.numLanes})"
   )
-  
-  println("imp clients\n", outer.nexusNode.out.head._2.master.clients)
 
   require(
     outer.nexusNode.out.length == config.numLanes + 1,
@@ -436,58 +430,28 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       s"${config.numLanes + 1} (n lanes + 1 coalesced)"
   )
 
-  val oldSourceWidth = log2Ceil(config.numOldSrcIds)
-  val globalSourceWidth = log2Ceil(config.totalSourceIds)
+  val oldSourceWidth = outer.nexusNode.in.head._1.params.sourceBits
   val nonCoalReqT = new NonCoalescedRequest(config)
   val coalReqT = new CoalescedRequest(config)
   val coalRespT = new CoalescedResponse(config)
 
-  // Helper functions for source ID remapping
-  def localToGlobalSourceId(localId: UInt, lane: Int): UInt = {
-    localId + (lane * config.numOldSrcIds).U
-  }
-  
-  def globalToLaneAndLocalId(globalId: UInt): (UInt, UInt) = {
-    val lane = globalId / config.numOldSrcIds.U
-    val localId = globalId % config.numOldSrcIds.U
-    (lane, localId)
-  }
-
-  // Spatial-only coalescer - direct from TL input
+  // Spatial-only coalescer
   val coalescer = Module(new Coalescer(config))
   val inflightTable = Module(
     new InFlightTable(config, nonCoalReqT, coalReqT, coalRespT)
   )
   val uncoalescer = Module(new Uncoalescer(config, inflightTable.entryT))
 
-  // Request flow - buffer requests per lane to break combinational paths
+  // Request flow - buffer requests per lane
   val reqBuffers = Seq.fill(config.numLanes)(Module(new Queue(nonCoalReqT, 2, pipe=true)))
   
-  // INPUT: Receive from nexusNode inputs with source ID remapping
+  // INPUT: Receive from nexusNode inputs - NO source ID remapping needed
   (outer.nexusNode.in zip reqBuffers).zipWithIndex.foreach {
     case (((tlIn, edgeIn), reqBuf), lane) =>
       val req = Wire(nonCoalReqT)
       req.op := TLUtils.AOpcodeIsStore(tlIn.a.bits.opcode, tlIn.a.fire)
-      // if (tlIn.a.bits.opcode == TLMessages.PutFullData)
-      //   println("hi")
-      // else
-      //   println("bye") // prints 4 "bye"s
-      
-      // Extract local source ID from global source ID
-      val globalSourceId = tlIn.a.bits.source
-      val expectedLaneOffset = (lane * config.numOldSrcIds).U
-      val localSourceId = globalSourceId - expectedLaneOffset
-      
-      // Verify source ID is in correct range for this lane
-      when(tlIn.a.fire) {
-        assert(
-          globalSourceId >= expectedLaneOffset && 
-          globalSourceId < (expectedLaneOffset + config.numOldSrcIds.U),
-          cf"Lane $lane received request with out-of-range source ID: $globalSourceId"
-        )
-      }
-      
-      req.source := localSourceId
+      // Use local source ID directly - no remapping
+      req.source := tlIn.a.bits.source
       req.address := tlIn.a.bits.address
       req.data := tlIn.a.bits.data
       req.size := tlIn.a.bits.size
@@ -505,31 +469,19 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
   
   // OUTPUT: Non-coalesced passthrough to nexusNode outputs (lanes 0 to n-1)
+  // NO source ID remapping - use local IDs
   (outer.nexusNode.out.take(config.numLanes) zip reqBuffers).zipWithIndex.foreach {
     case (((tlOut, edgeOut), reqBuf), lane) =>
-      // Send to downstream only if NOT being consumed
       val shouldPassthrough = reqBuf.io.deq.valid && !coalescer.io.consumed(lane)
       
       tlOut.a.valid := shouldPassthrough
-      
-      // Remap local source ID to global source ID for this lane
-      val reqWithGlobalId = WireInit(reqBuf.io.deq.bits)
-      reqWithGlobalId.source := localToGlobalSourceId(reqBuf.io.deq.bits.source, lane)
-      
-      val (legal, tlBits) = reqWithGlobalId.toTLA(edgeOut)
+      val (legal, tlBits) = reqBuf.io.deq.bits.toTLA(edgeOut)
       tlOut.a.bits := tlBits
       
-      // Dequeue when consumed OR successfully passed through
       reqBuf.io.deq.ready := coalescer.io.consumed(lane) || (shouldPassthrough && tlOut.a.ready)
       
       when(tlOut.a.fire) {
         assert(legal, "unhandled illegal TL req gen")
-        // Verify source ID is in expected range
-        assert(
-          tlOut.a.bits.source >= (lane * config.numOldSrcIds).U &&
-          tlOut.a.bits.source < ((lane + 1) * config.numOldSrcIds).U,
-          cf"Lane $lane output has incorrect source ID range"
-        )
       }
   }
 
@@ -545,36 +497,24 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   inflightTable.io.requests := coalescer.io.requests
   inflightTable.io.consumed := coalescer.io.consumed
 
-  // Add queue to break combinational path on coalesced output
   val coalReqQueue = Module(new Queue(coalReqT, 2))
   coalReqQueue.io.enq <> inflightTable.io.outCoalReq
   
   val coalReq = coalReqQueue.io.deq
   coalReq.ready := tlCoal.a.ready
   tlCoal.a.valid := coalReq.valid
-  
-  // Remap coalesced source ID to global range
-  val coalReqWithGlobalId = WireInit(coalReq.bits)
-  coalReqWithGlobalId.source := coalReq.bits.source + (config.numLanes * config.numOldSrcIds).U
-  
-  val (legal, tlBits) = coalReqWithGlobalId.toTLA(edgeCoal)
+  val (legal, tlBits) = coalReq.bits.toTLA(edgeCoal)
   tlCoal.a.bits := tlBits
   
   when(tlCoal.a.fire) {
     assert(legal, "unhandled illegal TL req gen")
-    // Verify coalesced source ID is in expected range
-    assert(
-      tlCoal.a.bits.source >= (config.numLanes * config.numOldSrcIds).U &&
-      tlCoal.a.bits.source < config.totalSourceIds.U,
-      cf"Coalesced output has incorrect source ID range"
-    )
   }
 
   tlCoal.b.ready := true.B
   tlCoal.c.valid := false.B
   tlCoal.e.valid := false.B
 
-  // Response flow - demultiplex based on source ID
+  // Response flow - NO source ID remapping
   val respQueueEntryT = new Response(
     oldSourceWidth,
     log2Ceil(config.maxCoalLogSize),
@@ -586,29 +526,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   // INPUT: Responses from nexusNode outputs (non-coalesced, lanes 0 to n-1)
+  // NO source ID remapping - responses use local IDs
   (outer.nexusNode.in zip outer.nexusNode.out.take(config.numLanes)).zipWithIndex.foreach {
     case (((tlIn, edgeIn), (tlOut, _)), lane) =>
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
-      
-      // Extract local source ID from global source ID
-      val globalSourceId = tlOut.d.bits.source
-      val expectedLaneOffset = (lane * config.numOldSrcIds).U
-      val localSourceId = globalSourceId - expectedLaneOffset
-      
-      // Create response with local source ID
-      val respBundle = WireInit(tlOut.d.bits)
-      respBundle.source := localSourceId
-      resp.fromTLD(respBundle, tlOut.d.fire)
-      
-      // Verify source ID is in correct range for this lane
-      when(tlOut.d.fire) {
-        assert(
-          globalSourceId >= expectedLaneOffset && 
-          globalSourceId < (expectedLaneOffset + config.numOldSrcIds.U),
-          cf"Lane $lane received response with out-of-range source ID: $globalSourceId"
-        )
-      }
+      // Use local source ID directly - no remapping
+      resp.fromTLD(tlOut.d.bits, tlOut.d.fire)
 
       respQueue.io.enq(0).valid := tlOut.d.valid
       respQueue.io.enq(0).bits := resp
@@ -620,28 +544,14 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   // INPUT: Coalesced responses from nexusNode output (lane n)
-  // Extract local coalesced source ID from global ID
-  val coalRespGlobalId = tlCoal.d.bits.source
-  val coalRespLocalId = coalRespGlobalId - (config.numLanes * config.numOldSrcIds).U
-  
-  val coalRespWithLocalId = WireInit(tlCoal.d.bits)
-  coalRespWithLocalId.source := coalRespLocalId
-  
-  when(tlCoal.d.fire) {
-    assert(
-      coalRespGlobalId >= (config.numLanes * config.numOldSrcIds).U &&
-      coalRespGlobalId < config.totalSourceIds.U,
-      cf"Coalesced response has out-of-range source ID: $coalRespGlobalId"
-    )
-  }
-  
+  // Use local source ID for coalesced responses too
   uncoalescer.io.coalResp.valid := coalSourceGen.io.inResp.valid
-  uncoalescer.io.coalResp.bits.fromTLD(coalRespWithLocalId, coalSourceGen.io.inResp.fire)
+  uncoalescer.io.coalResp.bits.fromTLD(coalSourceGen.io.inResp.bits, coalSourceGen.io.inResp.fire)
   coalSourceGen.io.inResp.ready := uncoalescer.io.coalResp.ready
 
   uncoalescer.io.inflightLookup <> inflightTable.io.lookupResult
   inflightTable.io.lookupSourceId.valid := coalSourceGen.io.inResp.valid
-  inflightTable.io.lookupSourceId.bits := coalRespLocalId
+  inflightTable.io.lookupSourceId.bits := coalSourceGen.io.inResp.bits.source
 
   (respQueues zip uncoalescer.io.respQueueIO).foreach {
     case (q, uncoalResp) =>
@@ -649,28 +559,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   coalSourceGen.io.outResp <> tlCoal.d
-  
-  // Additional assertions for source ID uniqueness
-  when(reset.asBool === false.B) {
-    // Verify no overlapping source IDs across all outputs
-    val allOutgoingSourceIds = outer.nexusNode.out.map { case (tl, _) =>
-      (tl.a.valid, tl.a.bits.source)
-    }
-    
-    // Check each pair of active outputs for source ID collision
-    for (i <- 0 until allOutgoingSourceIds.length) {
-      for (j <- (i + 1) until allOutgoingSourceIds.length) {
-        val (valid_i, source_i) = allOutgoingSourceIds(i)
-        val (valid_j, source_j) = allOutgoingSourceIds(j)
-        when(valid_i && valid_j) {
-          assert(
-            source_i =/= source_j,
-            cf"Source ID collision detected between output $i and $j: both using ID $source_i"
-          )
-        }
-      }
-    }
-  }
 }
 
 class Uncoalescer(
@@ -1733,14 +1621,12 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
 
   val coal = LazyModule(new CoalescingUnit(config))
 
-  // Input
   coal.nexusNode :=* driver.node
   
-  // Output - CRITICAL FIX:
   (0 until config.numLanes).foreach { i =>
     xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.nexusNode
   }
-  xbar.node := coal.nexusNode  // coalesced (no widget)
+  xbar.node := coal.nexusNode
   
   ram.node := xbar.node
 
@@ -1757,7 +1643,6 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
   io.finished := dut.io.finished
 }
 
-// tracedriver --> coalescer --> tracelogger --> tlram
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     extends LazyModule {
   val xbar = LazyModule(new TLXbar)
@@ -1779,15 +1664,13 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     )
   )
 
-  // Input side
   coal.nexusNode :=* coreSideLogger.node :=* driver.node
   
-  // Output side - CRITICAL FIX:
-  // Add width widgets to non-coalesced outputs only
+  // Non-coalesced outputs (need width widget)
   (0 until config.numLanes).foreach { i =>
     xbar.node := TLWidthWidget(config.wordSizeInBytes) := memSideLogger.node := coal.nexusNode
   }
-  // Coalesced output - already full width, no widget
+  // Coalesced output (already full width)
   xbar.node := memSideLogger.node := coal.nexusNode
   
   ram.node := xbar.node
@@ -1822,8 +1705,6 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
   io.finished := dut.io.finished
 }
 
-// tracedriver --> coalescer --> tlram
-// Test 3: TLRAMCoalescer
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   val xbar = LazyModule(new TLXbar)
   val numLanes = p(SIMTCoreKey).get.nMemLanes
@@ -1839,14 +1720,12 @@ class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
     )
   )
 
-  // Input
   coal.nexusNode :=* driver.node
   
-  // Output - CRITICAL FIX:
   (0 until config.numLanes).foreach { i =>
     xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.nexusNode
   }
-  xbar.node := coal.nexusNode  // coalesced (no widget)
+  xbar.node := coal.nexusNode
   
   ram.node := xbar.node
 
