@@ -119,6 +119,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
   dontTouch(collRow)
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
   val collUop = uopTable(collRow)
+  val collPC = WireDefault(collUop.pc)
+  dontTouch(collPC)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
   // this is clunky, but Mem does not support partial-field updates
   val newCollPtr = WireDefault(collPtrTable(collRow))
@@ -196,6 +198,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val busys = busyTable(i)
     val allCollected = opReadys.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
+
+    // TODO: Consider same-cycle writeback for busyTable
 
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 

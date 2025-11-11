@@ -172,7 +172,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // a separate stage into a set of Wires, and conditionally latching those values
   // to the Mem; that is what UpdateRecord is for.
 
-  def applyUpdates(records: Seq[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean):
+  def applyUpdates(records: Seq[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean, debug: String = ""):
     (Seq[UpdateRecord] /* new table */, Bool /* success */) = {
     val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
     val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
@@ -180,7 +180,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
     val newRecords = uniqUpdates.map { u =>
       val dirtied = WireDefault(false.B)
-      // val currCount = records(u.pReg).counter
       val (currCount, prevDirty) = lookup(records, u.pReg, isWrite)
       val newCount = WireDefault(currCount)
 
@@ -193,7 +192,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           val currCountWide = currCount.pad(currCount.getWidth + 1)
           val newCountWide = currCountWide.asSInt + delta
           val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
-          // printf(cf"applyUpdates: pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
+          printf(cf"applyUpdates: [${debug}] pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
           when (newCountWide > maxCountWide) {
             success := false.B
             // assert(false.B,
@@ -216,6 +215,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
                    cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), maxCount:${maxCountWide}, incr:${u.incr}, decr:${u.decr})")
             newCount := newCountWide.asUInt
           }
+        }.elsewhen (u.incr === u.decr && u.incr =/= 0.U) {
+          printf(cf"applyUpdates: [${debug}] incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
         }
       }
 
@@ -229,15 +230,15 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // collector and writeback updates
   val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
   val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
-  val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false)
-  val (wbWriteRecs, wbSuccess)    = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true)
+  val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
+  val (wbWriteRecs, wbSuccess)    = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
   assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
   // RS admission updates
   val uniqRSReadUpdates  = consolidateUpdates(io.updateRS.reads)
   val uniqRSWriteUpdates = consolidateUpdates(Seq(io.updateRS.write))
-  val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collReadRecs, uniqRSReadUpdates,  isWrite = false)
-  val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbWriteRecs,  uniqRSWriteUpdates, isWrite = true)
+  val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collReadRecs, uniqRSReadUpdates,  isWrite = false, debug = "rsRead")
+  val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbWriteRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
   val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
   dontTouch(rsSuccess)
 
@@ -246,47 +247,69 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   io.updateColl.success := wbSuccess
 
   when (io.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
-    def commitUpdate(rec: UpdateRecord, isWrite: Boolean) = {
-      when (rec.dirty) {
-        assert(rec.pReg =/= 0.U, "update to x0 not filtered in the logic?")
-        if (isWrite) {
-          printf(cf"scoreboard: committed write (pReg:${rec.pReg}, new pendingWrites:${rec.counter})\n")
-          writeTable(rec.pReg) := rec.counter
-        } else {
-          printf(cf"scoreboard: committed read (pReg:${rec.pReg}, new pendingReads:${rec.counter})\n")
-          readTable(rec.pReg) := rec.counter
-        }
-      }
-    }
-
-    collReadRecs.foreach(commitUpdate(_, isWrite = false))
-    wbWriteRecs.foreach(commitUpdate(_, isWrite = true))
-    // partially apply RS updates on success
-    // make sure this happens later than coll/WB!
-    when (rsSuccess) {
-      rsReadRecs.foreach(commitUpdate(_, isWrite = false))
-      rsWriteRecs.foreach(commitUpdate(_, isWrite = true))
-    }
-
-    // debug prints
-
     when (io.updateRS.enable) {
       printf(cf"scoreboard: received RS update ")
       printUpdate(io.updateRS)
-    }.elsewhen (io.updateWB.enable) {
+    }
+    when (io.updateWB.enable) {
       printf(cf"scoreboard: received WB update ")
       printUpdate(io.updateWB)
-    }.elsewhen (io.updateColl.enable) {
+    }
+    when (io.updateColl.enable) {
       printf(cf"scoreboard: received collector update ")
       printUpdate(io.updateColl)
     }
 
-    when (!rsReadSuccess) {
-      printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
-      printUpdate(io.updateRS)
-    }.elsewhen (!rsWriteSuccess) {
-      printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
-      printUpdate(io.updateRS)
+    def commitUpdate(recs: Seq[UpdateRecord], isWrite: Boolean) = {
+      // need to reflect the latest index in the seq
+      val syncRecs = recs.zipWithIndex.map { case (r, i) =>
+        val count = WireDefault(r.counter)
+        val dirty = WireDefault(r.dirty)
+        for (j <- i + 1 until recs.length) {
+          when (recs(j).pReg === r.pReg) {
+            // prefix-sum overwrite; relies on these orders being preserved in
+            // the elaborated verilog
+            count := recs(j).counter
+            dirty := recs(j).dirty
+          }
+        }
+        UpdateRecord(dirty, r.pReg, count, width = r.counter.getWidth)
+      }
+
+      syncRecs.foreach { r =>
+        when (r.dirty) {
+          assert(r.pReg =/= 0.U, "update to x0 not filtered in the logic?")
+          if (isWrite) {
+            printf(cf"scoreboard: committed write (pReg:${r.pReg}, new pendingWrites:${r.counter})\n")
+            writeTable(r.pReg) := r.counter
+          } else {
+            printf(cf"scoreboard: committed read (pReg:${r.pReg}, new pendingReads:${r.counter})\n")
+            readTable(r.pReg) := r.counter
+          }
+        }
+      }
+    }
+
+    // partially apply RS updates on success
+    // make sure this happens later than coll/WB!
+    when (rsSuccess) {
+      // (collReadRecs ++ rsReadRecs).foreach(commitUpdate(_, isWrite = false))
+      // (wbWriteRecs  ++ rsWriteRecs).foreach(commitUpdate(_, isWrite = true))
+      commitUpdate(collReadRecs ++ rsReadRecs, isWrite = false)
+      commitUpdate(wbWriteRecs  ++ rsWriteRecs, isWrite = true)
+    }.otherwise {
+      // collReadRecs.foreach(commitUpdate(_, isWrite = false))
+      // wbWriteRecs.foreach(commitUpdate(_, isWrite = true))
+      commitUpdate(collReadRecs, isWrite = false)
+      commitUpdate(wbWriteRecs, isWrite = true)
+
+      when (!rsReadSuccess) {
+        printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
+        printUpdate(io.updateRS)
+      }.elsewhen (!rsWriteSuccess) {
+        printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
+        printUpdate(io.updateRS)
+      }
     }
 
     printf("scoreboard: table update, content beforehand:\n")
