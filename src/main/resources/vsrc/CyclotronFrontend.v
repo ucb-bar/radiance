@@ -49,6 +49,18 @@ module CyclotronFrontendBlackBox #(
   output logic [(NUM_WARPS*NUM_LANES)-1:0]    ibuf_tmask,
   output logic [(NUM_WARPS*INST_BITS)-1:0]    ibuf_raw,
 
+  input  logic                            regTrace_valid,
+  input  logic [ARCH_LEN-1:0]             regTrace_pc,
+  input  logic                            regTrace_regs_0_enable,
+  input  logic [REG_BITS-1:0]             regTrace_regs_0_address,
+  input  logic [(NUM_LANES*ARCH_LEN)-1:0] regTrace_regs_0_data,
+  input  logic                            regTrace_regs_1_enable,
+  input  logic [REG_BITS-1:0]             regTrace_regs_1_address,
+  input  logic [(NUM_LANES*ARCH_LEN)-1:0] regTrace_regs_1_data,
+  input  logic                            regTrace_regs_2_enable,
+  input  logic [REG_BITS-1:0]             regTrace_regs_2_address,
+  input  logic [(NUM_LANES*ARCH_LEN)-1:0] regTrace_regs_2_data,
+
   output logic finished
 );
   // whenever you change these interfaces, make sure to update:

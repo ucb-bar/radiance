@@ -87,7 +87,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
     val finished = Bool()
   })
 
-  val be = Module(new Backend()(p.alterMap(Map(
+  val be = Module(new Backend(test = true)(p.alterMap(Map(
     TileKey -> FakeRadianceClusterTileParams(None, p(MuonKey), 0),
   ))))
   be.io.dmem.resp.foreach(_.valid := false.B)
@@ -107,6 +107,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   cfe.io.imem.req.valid := false.B
   cfe.io.imem.req.bits := DontCare
   cfe.io.imem.resp.ready := false.B
+  cfe.io.regTrace <> be.io.regTrace.get
 
   // TODO: also instantiate CyclotronBackend as the issue downstream
 
@@ -120,6 +121,17 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   // run until all ibufs dry up
   val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
   io.finished := cfe.io.finished && ibufDry
+}
+
+/** Backend IO to Cyclotron testbench that logs trace of register read data at
+ *  every issue.  Used for differential testing vs. instruction trace. */
+class RegTraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val pc = pcT
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
+    val address = pRegT
+    val data = Vec(numLanes, regDataT)
+  })
 }
 
 /** Testbench for Muon backend LSU pipe */
@@ -718,6 +730,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
     val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
+    val regTrace = Flipped(Valid(new RegTraceIO))
     val finished = Output(Bool())
   })
 
@@ -727,12 +740,12 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
 
   // helpers for connecting flattened Verilog IO to Chisel
   def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
-    require(flattened.getWidth % wordBits == 0)
+    assert(flattened.getWidth % wordBits == 0)
     val numWords = flattened.getWidth / wordBits
     VecInit.tabulate(numWords)(i => flattened((i + 1) * wordBits - 1, i * wordBits))
   }
-  def connectSplit(destWord: UInt, flattened: UInt, index: Int) = {
-    require(destWord.widthKnown)
+  def connectToSplit(destWord: UInt, flattened: UInt, index: Int) = {
+    assert(destWord.widthKnown)
     destWord := splitUInt(flattened, destWord.getWidth)(index)
   }
 
@@ -747,21 +760,28 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   cfbox.io.ibuf.ready := VecInit(io.ibuf.map(_.ready)).asUInt
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
     ib.valid := cfbox.io.ibuf.valid(i)
-    connectSplit(ib.bits.pc,     cfbox.io.ibuf.pc, i)
-    connectSplit(ib.bits.wid,    cfbox.io.ibuf.wid, i)
-    connectSplit(ib.bits.op,     cfbox.io.ibuf.op, i)
-    connectSplit(ib.bits.rd,     cfbox.io.ibuf.rd, i)
-    connectSplit(ib.bits.rs1,    cfbox.io.ibuf.rs1, i)
-    connectSplit(ib.bits.rs2,    cfbox.io.ibuf.rs2, i)
-    connectSplit(ib.bits.rs3,    cfbox.io.ibuf.rs3, i)
-    connectSplit(ib.bits.imm32,  cfbox.io.ibuf.imm32, i)
-    connectSplit(ib.bits.imm24,  cfbox.io.ibuf.imm24, i)
-    connectSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
-    connectSplit(ib.bits.f3,     cfbox.io.ibuf.f3, i)
-    connectSplit(ib.bits.f7,     cfbox.io.ibuf.f7, i)
-    connectSplit(ib.bits.pred,   cfbox.io.ibuf.pred, i)
-    connectSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
-    connectSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
+    connectToSplit(ib.bits.pc,     cfbox.io.ibuf.pc, i)
+    connectToSplit(ib.bits.wid,    cfbox.io.ibuf.wid, i)
+    connectToSplit(ib.bits.op,     cfbox.io.ibuf.op, i)
+    connectToSplit(ib.bits.rd,     cfbox.io.ibuf.rd, i)
+    connectToSplit(ib.bits.rs1,    cfbox.io.ibuf.rs1, i)
+    connectToSplit(ib.bits.rs2,    cfbox.io.ibuf.rs2, i)
+    connectToSplit(ib.bits.rs3,    cfbox.io.ibuf.rs3, i)
+    connectToSplit(ib.bits.imm32,  cfbox.io.ibuf.imm32, i)
+    connectToSplit(ib.bits.imm24,  cfbox.io.ibuf.imm24, i)
+    connectToSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
+    connectToSplit(ib.bits.f3,     cfbox.io.ibuf.f3, i)
+    connectToSplit(ib.bits.f7,     cfbox.io.ibuf.f7, i)
+    connectToSplit(ib.bits.pred,   cfbox.io.ibuf.pred, i)
+    connectToSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
+    connectToSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
+  }
+  cfbox.io.regTrace.valid := io.regTrace.valid
+  cfbox.io.regTrace.pc := io.regTrace.bits.pc
+  (cfbox.io.regTrace.regs zip io.regTrace.bits.regs).foreach { case (boxtr, tr) =>
+    boxtr.enable := tr.enable
+    boxtr.address := tr.address
+    boxtr.data := tr.data.asUInt
   }
 
   io.finished := cfbox.io.finished
@@ -778,7 +798,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
     ))
-    with HasBlackBoxResource with HasMuonCoreParameters {
+    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
@@ -805,7 +825,15 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
       val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
-
+    val regTrace = Input(new Bundle {
+      val valid = Bool()
+      val pc = pcT
+      val regs = Vec(Isa.maxNumRegs, new Bundle {
+        val enable = Bool()
+        val address = pRegT
+        val data = UInt((muonParams.numLanes * muonParams.archLen).W)
+      })
+    })
     val finished = Output(Bool())
   })
 

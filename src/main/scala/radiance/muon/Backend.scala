@@ -4,8 +4,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.fp.CVFPU
+import radiance.unittest.RegTraceIO
 
-class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class Backend(
+  /** backend-as-top testbench config with register IOs */
+  test: Boolean = false
+)(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
@@ -15,7 +19,12 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val softReset = Input(Bool())
+    val regTrace = Option.when(test)(Valid(new RegTraceIO))
   })
+
+  // -----
+  // issue
+  // -----
 
   val hazard = Module(new Hazard)
   hazard.io.ibuf <> io.ibuf
@@ -29,19 +38,18 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   scoreboard.io.readRs3 <> hazard.io.scb.readRs3
   dontTouch(scoreboard.io)
 
-  val reservStation = Module(new ReservationStation)
+  val reservStation = Module(new ReservationStation(test = test))
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
-
-  val collector = Module(new DuplicatedCollector)
-  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
+  io.regTrace.foreach(_ <> reservStation.io.regTrace.get)
 
   val bypass = true
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
     reservStation.reset := true.B
+    reservStation.io.issue.ready := false.B
 
     val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
@@ -50,14 +58,12 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     reservStation.io.issue
   }
 
-  val execute = Module(new Execute())
-  execute.io.id.clusterId := io.clusterId
-  execute.io.id.coreId := io.coreId
-  execute.io.softReset := io.softReset
-  execute.io.feCSR := io.feCSR
-  val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
-  val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
+  // -----------------
+  // operand collector
+  // -----------------
 
+  val collector = Module(new DuplicatedCollector)
+  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (bypass) {
     // on bypass, manage collector entirely after issue
     val haves = Seq(HasRs1, HasRs2, HasRs3)
@@ -70,7 +76,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     collector.io.readData.regs.foreach(_.enable := true.B)
     collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
 
-    reservStation.io.issue.ready := false.B
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
     reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
@@ -83,12 +88,22 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   }
 
   // drive EX operands from collector
+  val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
+  val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
   collector.io.readResp.ports.foreach(_.ready := true.B)
   (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
     opnd := port.data
   }
 
+  // -------
   // execute
+  // -------
+
+  val execute = Module(new Execute())
+  execute.io.id.clusterId := io.clusterId
+  execute.io.id.coreId := io.coreId
+  execute.io.softReset := io.softReset
+  execute.io.feCSR := io.feCSR
   execute.io.req.bits := executeIn
   if (bypass) {
     // fallback issue: stall every instruction until writeback
@@ -110,7 +125,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     executeIn.uop := issued.bits
   }
 
-  // writeback: schedule
+  // ---------
+  // writeback
+  // ---------
+
+  // to schedule
   val exSchedWb = execute.io.resp.bits.sched.get
   io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
   io.schedWb.bits := exSchedWb.bits
@@ -118,10 +137,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   // TODO: consider collector writeback ready
   execute.io.resp.ready := true.B
 
-  // writeback: RS
+  // to RS
   reservStation.io.writeback <> execute.io.resp.bits.reg.get
 
-  // writeback: collector
+  // to collector
   val exRegWb = execute.io.resp.bits.reg.get
   collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
@@ -131,6 +150,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   collector.io.writeResp.ports.foreach(_.ready := true.B)
   dontTouch(collector.io)
 
+  // debug
   when (execute.io.req.fire) {
     val e = execute.io.req.bits
     printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +

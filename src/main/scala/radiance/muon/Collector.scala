@@ -53,6 +53,7 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
     val enable = Input(Bool())
     val collEntry = Input(UInt(collEntryWidth.W))
     val data = Output(Vec(numLanes, regDataT))
+    // TODO: tmask
   })
 }
 

@@ -3,6 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import radiance.unittest.RegTraceIO
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   /** uop being admitted to the reservation station. */
@@ -16,7 +17,9 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class ReservationStation(
+  test: Boolean = false
+)(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
@@ -36,6 +39,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
+    val regTrace = Option.when(test)(Valid(new RegTraceIO))
   })
 
   val numEntries = muonParams.numIssueQueueEntries
@@ -235,6 +239,18 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     // port.data input is not used
   }
   dontTouch(issuedId)
+
+  // drive regtrace IO for testing
+  io.regTrace.foreach { traceIO =>
+    traceIO.valid := io.issue.fire
+    traceIO.bits.pc := uopTable(issuedId).pc
+    (traceIO.bits.regs zip io.collector.readData.regs)
+      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
+        tReg.enable := hasOpTable(issuedId)(rsi)
+        tReg.address := rsTable(issuedId)(rsi)
+        tReg.data := cReg.data
+      }
+  }
 
   if (muonParams.debug) {
     when (io.issue.fire) {
