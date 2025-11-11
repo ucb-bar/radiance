@@ -349,4 +349,46 @@ void cyclotron_mem(
     );
 };
 
+void cyclotron_difftest_reg_rs(
+    const uint8_t   regTest_valid,
+    const uint32_t  regTest_pc,
+    const uint8_t   regTest_regs_0_enable,
+    const uint8_t   regTest_regs_0_address,
+    const uint32_t *regTest_regs_0_data,
+    const uint8_t   regTest_regs_1_enable,
+    const uint8_t   regTest_regs_1_address,
+    const uint32_t *regTest_regs_1_data,
+    const uint8_t   regTest_regs_2_enable,
+    const uint8_t   regTest_regs_2_address,
+    const uint32_t *regTest_regs_2_data
+);
+
+void cyclotron_difftest_reg(
+    const uint8_t   regTest_valid,
+    const uint32_t  regTest_pc,
+    const uint8_t   regTest_regs_0_enable,
+    const uint8_t   regTest_regs_0_address,
+    const uint32_t *regTest_regs_0_data,
+    const uint8_t   regTest_regs_1_enable,
+    const uint8_t   regTest_regs_1_address,
+    const uint32_t *regTest_regs_1_data,
+    const uint8_t   regTest_regs_2_enable,
+    const uint8_t   regTest_regs_2_address,
+    const uint32_t *regTest_regs_2_data
+) {
+  cyclotron_difftest_reg_rs(
+    regTest_valid,
+    regTest_pc,
+    regTest_regs_0_enable,
+    regTest_regs_0_address,
+    regTest_regs_0_data,
+    regTest_regs_1_enable,
+    regTest_regs_1_address,
+    regTest_regs_1_data,
+    regTest_regs_2_enable,
+    regTest_regs_2_address,
+    regTest_regs_2_data
+  );
+}
+
 } // extern "C"

@@ -89,23 +89,37 @@ module CyclotronFrontendBlackBox #(
     output bit     finished
   );
 
+  import "DPI-C" function cyclotron_difftest_reg(
+    input bit  regTrace_valid,
+    input int  regTrace_pc,
+    input bit  regTrace_regs_0_enable,
+    input byte regTrace_regs_0_address,
+    input int  regTrace_regs_0_data[NUM_LANES],
+    input bit  regTrace_regs_1_enable,
+    input byte regTrace_regs_1_address,
+    input int  regTrace_regs_1_data[NUM_LANES],
+    input bit  regTrace_regs_2_enable,
+    input byte regTrace_regs_2_address,
+    input int  regTrace_regs_2_data[NUM_LANES]
+  );
+
   import "DPI-C" function void cyclotron_imem(
-    output byte    imem_req_ready,
-    input  byte    imem_req_valid,
+    output bit     imem_req_ready,
+    input  bit     imem_req_valid,
     input  byte    imem_req_bits_store,
     input  int     imem_req_bits_address,
     input  byte    imem_req_bits_size,
     input  byte    imem_req_bits_tag,
     input  longint imem_req_bits_data,
     input  byte    imem_req_bits_mask,
-    input  byte    imem_resp_ready,
-    output byte    imem_resp_valid,
+    input  bit     imem_resp_ready,
+    output bit     imem_resp_valid,
     output byte    imem_resp_bits_tag,
     output longint imem_resp_bits_data
   );
 
-  byte __imem_req_ready;
-  byte __imem_resp_valid;
+  bit  __imem_req_ready;
+  bit  __imem_resp_valid;
   byte __imem_resp_bits_tag;
   longint __imem_resp_bits_data;
 
@@ -130,7 +144,19 @@ module CyclotronFrontendBlackBox #(
   int     __in_ibuf_tmask  [0:NUM_WARPS-1];
   longint __in_ibuf_raw    [0:NUM_WARPS-1];
 
-  byte __in_finished;
+  bit     __out_regTrace_valid;
+  int     __out_regTrace_pc;
+  bit     __out_regTrace_regs_0_enable;
+  byte    __out_regTrace_regs_0_address;
+  int     __out_regTrace_regs_0_data [0:NUM_LANES-1];
+  bit     __out_regTrace_regs_1_enable;
+  byte    __out_regTrace_regs_1_address;
+  int     __out_regTrace_regs_1_data [0:NUM_LANES-1];
+  bit     __out_regTrace_regs_2_enable;
+  byte    __out_regTrace_regs_2_address;
+  int     __out_regTrace_regs_2_data [0:NUM_LANES-1];
+
+  bit __in_finished;
 
   // initialize model at the rtl sim start
   initial begin
@@ -207,6 +233,23 @@ module CyclotronFrontendBlackBox #(
     end
   endgenerate
 
+  // connect regtrace signals
+  assign __out_regTrace_valid = regTrace_valid;
+  assign __out_regTrace_pc = regTrace_pc;
+  assign __out_regTrace_regs_0_enable  = regTrace_regs_0_enable;
+  assign __out_regTrace_regs_0_address = regTrace_regs_0_address;
+  assign __out_regTrace_regs_1_enable  = regTrace_regs_1_enable;
+  assign __out_regTrace_regs_1_address = regTrace_regs_1_address;
+  assign __out_regTrace_regs_2_enable  = regTrace_regs_2_enable;
+  assign __out_regTrace_regs_2_address = regTrace_regs_2_address;
+  generate
+    for (g = 0; g < NUM_LANES; g = g + 1) begin
+      assign __out_regTrace_regs_0_data[g] = regTrace_regs_0_data[ARCH_LEN*g +: ARCH_LEN];
+      assign __out_regTrace_regs_1_data[g] = regTrace_regs_1_data[ARCH_LEN*g +: ARCH_LEN];
+      assign __out_regTrace_regs_2_data[g] = regTrace_regs_2_data[ARCH_LEN*g +: ARCH_LEN];
+    end
+  endgenerate
+
   assign finished = __in_finished;
 
   always @(posedge clock) begin
@@ -250,10 +293,20 @@ module CyclotronFrontendBlackBox #(
         __in_ibuf_raw,
         __in_finished
       );
-      // for (integer tid = 0; tid < NUM_LANES; tid = tid + 1) begin
-      //   $display("verilog: %04d a_valid[%d]=%d, a_address[%d]=0x%x, d_ready[%d]=%d",
-      //     $time, tid, __in_a_valid[tid], tid, __in_a_address[tid], tid, __in_d_ready[tid]);
-      // end
+
+      cyclotron_difftest_reg(
+        __out_regTrace_valid,
+        __out_regTrace_pc,
+        __out_regTrace_regs_0_enable,
+        __out_regTrace_regs_0_address,
+        __out_regTrace_regs_0_data,
+        __out_regTrace_regs_1_enable,
+        __out_regTrace_regs_1_address,
+        __out_regTrace_regs_1_data,
+        __out_regTrace_regs_2_enable,
+        __out_regTrace_regs_2_address,
+        __out_regTrace_regs_2_data
+      );
     end
   end
 
