@@ -95,7 +95,7 @@ class WithMuonCores(
       val muon = MuonTileParams(
         core = here(MuonKey),
         icache = None,
-        dcache = None,
+        dcache = Some(clusterParams.l1Config),
         cacheLineBytes = clusterParams.l1Config.rowBits / 8
       )
       List.tabulate(n)(i => MuonTileAttachParams(

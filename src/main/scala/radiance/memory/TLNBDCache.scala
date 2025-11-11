@@ -2,7 +2,7 @@ package radiance.memory
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
+import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
 import freechips.rocketchip.rocket.{NonBlockingDCache, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.tile.TileKey
@@ -12,10 +12,15 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
 
-class TLNBDCache(staticIdForMetadataUseOnly: Int)
+class TLNBDCache(staticIdForMetadataUseOnly: Int,
+                 overrideDChannelSize: Option[Int] = None)
                 (implicit p: Parameters) extends LazyModule {
 
-  val beatBytes = p(TileKey).dcache.get.rowBits / 8
+  val beatBytes = p(TileKey).dcache.get.blockBytes
+  require(p(TileKey).dcache.get.blockBytes == (p(TileKey).dcache.get.rowBits / 8))
+
+  // pretty hacky, might want to figure out a better way
+  val dChannelSize = overrideDChannelSize.getOrElse(log2Ceil(beatBytes))
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -28,10 +33,15 @@ class TLNBDCache(staticIdForMetadataUseOnly: Int)
             get = TransferSizes(1, beatBytes),
             putFull = TransferSizes(1, beatBytes),
             putPartial = TransferSizes(1, beatBytes),
+            // b and c are ignored, but this is passed down to clients
+            acquireB = TransferSizes(1, beatBytes),
+            acquireT = TransferSizes(1, beatBytes),
           ),
+          regionType = RegionType.CACHED
         )
       ),
       beatBytes = beatBytes,
+      endSinkId = staticIdForMetadataUseOnly + 1,
     )
   ))
 
@@ -102,7 +112,7 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     assert(!resp.valid || tlIn.d.ready, "response must be ready!")
     tlIn.d.valid := resp.valid
     tlIn.d.bits.data := resp.bits.data
-    tlIn.d.bits.size := 3.U // resp.bits.size // TODO hardcode for now, fix later
+    tlIn.d.bits.size := outer.dChannelSize.U
     tlIn.d.bits.source := resp.bits.tag
     tlIn.d.bits.opcode := MuxCase(TLMessages.AccessAckData, Seq(
       (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,

@@ -7,13 +7,13 @@ import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, IdRange, Transf
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.{HasTilesExternalResetVectorKey, HierarchicalElementCrossingParamsLike}
+import freechips.rocketchip.subsystem.{CacheBlockBytes, HasTilesExternalResetVectorKey, HierarchicalElementCrossingParamsLike}
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
-import radiance.cluster.SoftResetFinishNode
+import radiance.cluster.{FakeRadianceClusterTileParams, SoftResetFinishNode}
 import radiance.memory._
 import radiance.subsystem._
 
@@ -167,8 +167,22 @@ class MuonTile(
       channelBytes = TLChannelBeatBytes(muonParams.core.instBytes),
     )))
   }
+
+  val l0i = LazyModule(new TLULNBDCache(muonParams.coreId, Some(3))(
+    p
+    // p.alterMap(Map(
+    //   TileKey -> FakeRadianceClusterTileParams(
+    //     cache = Some(muonParams.dcache.get),
+    //     muonCore = muonParams.core,
+    //     clusterId = 0
+    //   ),
+    //   CacheBlockBytes -> muonParams.dcache.get.blockBytes,
+    //   // TileVisibilityNodeKey -> visibilityNode,
+    // ))
+  ))
   val icacheNode = TLIdentityNode()
-  icacheNode :=
+  icacheNode := l0i.outNode
+  l0i.inNode :=
     TLWidthWidget(muonParams.core.instBytes) :=
     ResponseFIFOFixer() :=
     icacheWordNode
