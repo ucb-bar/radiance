@@ -6,7 +6,6 @@ import freechips.rocketchip.diplomacy.{AddressSet, SimpleDevice, TransferSizes}
 import org.chipsalliance.diplomacy.lazymodule._
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.tilelink._
-import midas.targetutils.SynthesizePrintf
 import org.chipsalliance.cde.config.Parameters
 
 class FrameBuffer(baseAddress: BigInt, width: Int, size: Int, validAddress: BigInt, fbName: String = "fb")
@@ -72,7 +71,7 @@ class FrameBuffer(baseAddress: BigInt, width: Int, size: Int, validAddress: BigI
     val readData = buf.read(writeCounter.value, state)
     val prevIdx = RegNext(writeCounter.value)
     when (RegNext(state)) {
-      SynthesizePrintf(printf(s"$fbName %x %x\n", prevIdx, readData.asUInt))
+      printf(s"$fbName %x %x\n", prevIdx, readData.asUInt)
     }
   }
 }

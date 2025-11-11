@@ -18,10 +18,33 @@ Outputs: TODO
 
 Central scoreboard and distributed reservation stations working in conjunction. (TODO)
 
-We go after the following key performance opportunities in the issue stage:
+The issue stage design captures the following key performance opportunities:
 
 * **Past-head-of-line intra-warp ILP.**
 * **Bank conflict smoothing.**
+
+Detailed pipeline timing for the issue stage:
+
+<p align="center">
+  <img src="fig/issue-pipe.svg" width="70%" />
+</p>
+
+* **SCB Read / Write**: The [scoreboard](#scoreboard) is a flop-based memory with asynchronous
+  read / synchronous write.  It is important for the read and write stages to
+  be in the same cycle, so that the RS Admit stage does not miss the
+  newly-written values.
+* **RS Admit** determines whether to admit the instruction at the IBUF head to
+  the [reservation station](#reservation-station) by conducting a [hazard
+  check](#hazard-check) logic. It also asserts dequeue signals to the per-warp
+  IBUF upon successful admission.
+* **RS Search** conducts a CAM scan through every entry in the RS to generate
+  a bit vector that indicates all issue-eligible entries.
+* **RS Dispatch** receives the eligibility vector and arbitrates a single
+  instruction to dispatch to the EX pipeline, using an appropriate
+  warp-scheduling policy.
+
+**TODO**: Add collector pipe stages, IBUF dequeue timing, sync-read SCB.
+
 
 ## Scoreboard
 
@@ -80,57 +103,123 @@ This requires the scoreboard to keep track of a `pendingReads` signal per regist
 incrementing it when admitting an instruction that reads the register to the
 RS, and decrementing when its PRF read is complete.
 Importantly, `pendingReads` must be incremented only for regs that are
-**actually read from the PRF**.  Otherwise, if the regs are forwarded
-from the fabric, we don't need to protect them as their values will not be
-clobbered by an out-of-order WB.
+actually read from the PRF, and **not forwarded from the fabric**.  Otherwise,
+if the reg operand is forwarded from EX, we don't need to protect them as their
+values will not be clobbered by an out-of-order WB.
+
 In summary, the logic for `pendingReads` becomes:
 
 ```
-Increment pendingReads[R] when:
-    (admitting to RS an instruction writing to R)
-    AND (pendingWrite[R] == 0, i.e. R will be read from PRF)
-Decrement pendingReads[R] when:
-    (R completes operand collection from PRF)
+Increment pendingReads[inst.rs] when:
+    (admitting to RS an instruction reading inst.rs)
+    AND (pendingWrite[inst.rs] == 0, i.e. inst.rs will be read from PRF)
+Decrement pendingReads[inst.rs] when:
+    (inst.rs completes operand collection from PRF)
 ```
 
-With all of this in place, we now gate admission to RS if `pendingReads[rs]` is set:
+In case where we cannot increment `pendingReads[R]` because the counter bits
+are saturated, we simply gate admission to the RS and stall that warp until the
+counter falls back down.
+
+With all of this in place, we now gate admission to RS if `pendingReads[rd]` is set:
 
 ```
 admitRS[inst] iff:
-    pendingReads[rs] == 0 for all rs in inst.rs0/1/2
+    pendingReads[inst.rd] == 0
 ```
 
-While a simple solution, this likely overly constrains the instruction window as
+While simple, this solution likely overly constricts the instruction window, as
 false hazards are frequent.
 
 ##### Option 2: Stall WB of younger writes
 
 A second option is to use the same `pendingReads` counter, but **stall the
-writeback of the younger write**.  Going back to the above example, instead of
-gating admission of `i1` to the RS, we stall writeback of `i1` until
-`pendingReads[r5]` reaches 0.  This ensures `i0` reads the correct old value
-from PRF without getting clobbered by `i1`.
+writeback of the younger write until `pendingReads` clear**.  Going back to the
+above example, instead of gating admission of `i1` to the RS, we stall
+writeback of `i1` until `pendingReads[r5]` reaches 0.  This ensures `i0` reads
+the correct old value from PRF without getting clobbered by the younger `i1`.
+In other words:
 
-**TODO**: this likely requires a writeback buffer so that stalled writebacks do not
-stall the whole EX pipeline.
+```
+admitWriteback[inst] iff:
+    pendingReads[inst.rd] == 0
+```
 
-**Non-issue**: With this option, it seems like we risk clobbering younger reads
-after the WAR (`i2` below):
+###### Potential deadlock problem in Option 2
+
+By stalling WB instead of gating RS (Option 2), there is now a possible
+deadlock condition when we admit newer reads after the WAR. Consider this:
 
 ```
 i0: lw     <- 0(r5)
-i1: add r5 <-        # write-after-read
-i2: sub    <- r5     # different form i0's r5
+i1: add r5 <-        # WAR to i0
+i2: sub    <- r5     # RAW to i1
 ```
 
-However, this is correctly handled by the forwarding logic from `i1`,
-preventing `r5` from being read from the PRF that contains `i0`'s value.
-The forwarding is guaranteed by the RAW hazard logic seeing `pendingWrite[r5]
-== 1` and accordingly setting `busy` bit in the RS.
+The problem is that even though the admission to RS is in-order, the **operand
+read and writeback can happen out-of-order**.  Consider this series of events:
 
-Note that this requires a **must-forward invariant**, i.e. forwarding fabric
-must not drop any value due to arbitrating multiple writebacks.  This further
-necessitates having a writeback buffer (TODO).
+* `i0` reader enters RS, bumping `pendingRead++ -> 1`.
+* `i1` writer enters RS, bumps `pendingWrite++ -> 1`, and issues to EX.
+* `i2` reader enters RS, bumps `pendingRead++ -> 2`. Because of the RAW, it
+  cannot read its value from the PRF until `i1` finishes and sets `pendignWrite -> 0`.
+* `i1` EX finishes, but it must stall WB until `pendingRead` falls back to `0`.
+  Now there is a circular dependency between `i1 WB -> i2 read -> i1 WB`,
+  causing a deadlock.
+
+This deadlock can be resolved in one of two different options:
+
+###### Option 2-1: Must-forward invariant
+
+If we guarantee all RAWs within the instruction window to be forwarded
+instead of reading from the PRF, then we can skip incrementing `pendingRead`
+for the forwarded reads, which prevents the deadlock issue.
+
+In the below example, `i2` will see `pendingWrite[r5] = 1` set by `i1`, which
+will cause the hazard logic to admit `i2` to the RS with the `busy` bit set.
+Whenever the `busy` is set, we skip incrementing `pendingRead` upon RS admission:
+
+```
+i0: lw     <- 0(r5) # pendRead -> 1
+i1: add r5 <-       # WB stalled until pendRead -> 0; pendWrite -> 1
+i2: sub    <- r5    # admitted immediately; pendRead **not incremented** due to forwarding
+                    # issue stalled until pendWrite -> 0
+```
+
+For this to work, we need a strong guarantee that whenever `busy == 1`,
+**forwarding always succeeds**.  That is, if multiple EX operations finish
+within one cycle, all of the ops must successfully forward, instead of dropping
+any of the values (which will cause the RAW to fall back to regular PRF write
+-> re-read path).  This may necessitate having a **writeback buffer** to smooth
+out the back-pressure (TODO: explore).
+
+
+###### Option 2-2: Opportunistic forwarding with epoched pendingReads
+
+Another option is to not rely on the must-forward invariant and allow
+RAW reads to read from PRF, but make `pendingRead` counters **epoched**
+so that you can distinguish before and after the writes and break the circular
+dependency.
+
+Now, each register has two counters `pendingRead[0]` and `pendingRead[1]`,
+which will be indexed by `epoch={0,1}`.
+
+If we allow some of the forwarded values to be dropped, now we need to ensure
+the younger reads past a write does not read the old value in the PRF before
+the write, i.e. `i2` does not read `r5` before `i1` writes to it.
+
+```
+--------- RS ---------
+i0: lw     <- 0(r5) # pendRead[epoch=0]: 0->1
+i1: add r5 <-       # WB stalled until pendRead[epoch=0] -> 0; **flip epoch->1**, bump pendWrite: 0->1
+i2: sub    <- r5    # pendRead[epoch=1]: 0->1; issue stalled until pendWrite -> 0
+```
+
+Now, `i1` needs to stall WB until `pendRead[epoch=0]` goes to 0, which is
+independent from `i2`'s `pendRead[epoch=1]` changes, breaking the dependency.
+
+Note that we only need 2 epochs because we only admit a single write to the RS
+window for every register.
 
 
 #### WAW hazard
@@ -464,7 +553,7 @@ P(≥3 distinct banks among 3C draws)
 = 1 − [ N + (N·(N−1)/2)·(2^(3C) − 2) ] / N^(3C)
 ```
 
-Some values are:
+Some values of `P` are:
 ```
 N=4, C=1: 37.5%
 N=4, C=2: 90.8%

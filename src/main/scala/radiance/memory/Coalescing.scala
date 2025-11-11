@@ -10,7 +10,7 @@ import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.util.{Code, MultiPortQueue, OnePortLanePositionedQueue}
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.tilelink._
-import radiance.core.{SIMTCoreParams, SIMTCoreKey}
+import radiance.subsystem.{SIMTCoreKey, SIMTCoreParams}
 
 case class CoalXbarParam()
 
@@ -1608,7 +1608,7 @@ class DummyDriverImp(outer: DummyDriver, config: CoalescerConfig)
 // Test 2: DummyCoalescer
 class DummyCoalescer(implicit p: Parameters) extends LazyModule {
   val xbar = LazyModule(new TLXbar)
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new DummyDriver(config))
@@ -1646,7 +1646,7 @@ class DummyCoalescerTest(timeout: Int = 500000)(implicit p: Parameters)
 class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
     extends LazyModule {
   val xbar = LazyModule(new TLXbar)
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val driver = LazyModule(new MemTraceDriver(config, filename))
@@ -1707,7 +1707,7 @@ class TLRAMCoalescerLoggerTest(filename: String, timeout: Int = 500000)(implicit
 
 class TLRAMCoalescer(implicit p: Parameters) extends LazyModule {
   val xbar = LazyModule(new TLXbar)
-  val numLanes = p(SIMTCoreKey).get.nMemLanes
+  val numLanes = p(SIMTCoreKey).get.numLanes
   val config = DefaultCoalescerConfig.copy(numLanes = numLanes)
 
   val filename = "vecadd.core1.thread4.trace"

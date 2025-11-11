@@ -9,6 +9,8 @@ and L2 for the SoC. All caches are non-blocking.
 
 ### L0
 
+Note: L0 is not currently instantiated due to Rocket NBDCache implementation.
+
 #### L0i
 
 L0i should be 4KB with 64B cache lines (8 instructions), direct mapped.
@@ -33,18 +35,15 @@ Tag array size is 256x18b.
 
 ### L1
 
-L1 should be unified L1i and L1d.
+L1 is a 64KiB unified cache that serves both instructions and data.
 
-L1 should be 64KB. Hopper has 256KB. We have half the amount of cores and half
-lanes (and half warps for instruction).
-
-4-way set associative, write through, 64B line.
+4-way set associative, write through, 32B line.
 
 Tag array size is 1024x18b.
 
 * **Banking**: 2 banks.
 * **Ports**: single port.
-* **Bandwidth**: 64B/cycle (1 line).
+* **Bandwidth**: 32B/cycle (1 line).
 * **Timing**: ???
 
 L0 and L1 will use HellaCache/NBDCache with modified MSHR datapath; write
@@ -61,7 +60,7 @@ Bandwidth is 32B/cycle (SBus size = 256b).
 ![SMEM Block Diagram](./fig/smem.svg)
 
 In order to fulfill the [workload requirement](#flashattention-3-requirements),
-Shared memory should be sized 64KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
+Shared memory should be sized 128KB/SM, 64B lines, 1R1W dual-port per bank, banked 4x16.
 Each SRAM is 4B wide, 256 entries deep.
 Total aggregate bandwidth is read+write 256B/cycle.
 
@@ -151,7 +150,7 @@ With the above bank mapping, the total capacity requirement for SMEM becomes:
 | 128         | 128          | 8                   | 16                   | 320                         |                                |
 
 Since we need some extra margin above the minimum numbers for storing row-wise
-max/sum factors, etc., the current recommended size for Muon is **128KiB** with
+max/sum factors, etc., the current recommended size for Muon is **128KiB/cluster** with
 `Brow=Bcol` 64 and head dimension 64.
 
 **FP8 Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
@@ -184,18 +183,19 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 
 | GPU Address |  Size     | Description |
 |----------------|-----------|-------------------------------- |
-| `0x7000_0000`  | `0x10000` | Shared memory cluster local     |
-| `0x7001_0000`  |   `0x200` | Core 0 print and perf buffer    |
-| `0x7001_0200`  |   `0x200` | Core 1 print and perf buffer    |
-| `0x7001_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
-| `0x7001_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
+| `0x0000_0000`  | `0x10000` | Shared memory cluster local     |
+| `0x0002_0000`  |   `0x200` | Core 0 print and perf buffer    |
+| `0x0002_0200`  |   `0x200` | Core 1 print and perf buffer    |
+| `0x0002_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
+| `0x0002_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
+| `0x0002_8000`  |  `0x8000` | Gemmini scaling factor memory |
 
 ## Global Memory Map
 
 |  CPU Address |  Size         | Description |
 |-----------------|---------------|---------------------------------|
-|   `0x4000_0000` | `0x20000`     | Cluster 0 SMEM (inc. Gemmini)   |
-|   `0x4002_0000` | `0x20000`     | Cluster 1 SMEM (inc. Gemmini)   |
+|   `0x4000_0000` | `0x40000`     | Cluster 0 SMEM (inc. Gemmini)   |
+|   `0x4004_0000` | `0x40000`     | Cluster 1 SMEM (inc. Gemmini)   |
 |   `0x6000_0000` | `0x10000`     | GPU device command processor    |
 |   `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)             |
 | `0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable |
@@ -210,9 +210,16 @@ the CPU fails to schedule work on the SIMT cores.
 
 ![Fabric Block Diagram](./fig/fabric.svg)
 
+In particular, see the below diagram for detailed diagram of the Control Bus
+fabric subgraph, showcasing the bandwidths at each link.
+
+![CBus Block Diagram](./fig/cbus.svg)
+
+<!--
 ### Area Estimation
 
 TODO
+-->
 
 ## Other Stuff
 

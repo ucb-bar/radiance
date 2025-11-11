@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
+import radiance.virgo.TensorCoreDecoupled
 
 class TensorCoreDecoupledTest extends AnyFlatSpec with ChiselScalatestTester {
   behavior of "TensorCoreDecoupled"

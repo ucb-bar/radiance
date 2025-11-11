@@ -1,11 +1,18 @@
 package radiance.memory
 
-import freechips.rocketchip.diplomacy.LazyModule
+import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import freechips.rocketchip.subsystem._
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.tilelink._
-import radiance.core.{SIMTCoreKey, MemtraceCoreKey}
-import testchipip.soc.{SubsystemInjector}
+import radiance.subsystem.SIMTCoreKey
+import testchipip.soc.SubsystemInjector
+
+case class MemtraceCoreParams(
+    tracefilename: String = "undefined",
+    traceHasSource: Boolean = false
+)
+case object MemtraceCoreKey
+    extends Field[Option[MemtraceCoreParams]](None /*default*/ )
 
 // TODO: possibly move to somewhere closer to CoalescingUnit
 // TODO: separate coalescer config from CanHaveMemtraceCore
@@ -18,10 +25,10 @@ case object MemtraceInjector extends SubsystemInjector((p, baseSubsystem) => {
     // Safe to use get as WithMemtraceCore requires WithNLanes to be defined
     val simtParam = p(SIMTCoreKey).get
     val config = DefaultCoalescerConfig.copy(
-      numLanes = simtParam.nMemLanes, 
-      numOldSrcIds = simtParam.nSrcIds
+      numLanes = simtParam.numLsuLanes,
+      numOldSrcIds = simtParam.numSMEMInFlights
       )
-    val numLanes = simtParam.nMemLanes
+    val numLanes = simtParam.numLsuLanes
     val filename = param.tracefilename
 
     val sbus = baseSubsystem.locateTLBusWrapper(SBUS)

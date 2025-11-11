@@ -5,17 +5,21 @@ package radiance.subsystem
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import freechips.rocketchip.rocket._
-import freechips.rocketchip.tile._
+import freechips.rocketchip.prci._
+import freechips.rocketchip.resources.BigIntHexContext
+import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
-import gemmini._
+import freechips.rocketchip.tilelink.{TLBusWrapperConnection, TLBusWrapperTopology}
 import gemmini.Arithmetic.FloatArithmetic._
-import radiance.tile._
-import radiance.core._
+import gemmini._
+import org.chipsalliance.cde.config._
+import org.chipsalliance.diplomacy.nodes._
+import testchipip.soc.SubsystemInjectorKey
+import radiance.cluster._
 import radiance.memory._
-import radiance.subsystem.RadianceGemminiDataType.{BF16, FP16, FP32, Int8}
-import testchipip.soc.{SubsystemInjectorKey}
+import radiance.muon._
+import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
+import radiance.muon.LoadStoreUnitParams
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -31,11 +35,12 @@ case class RadianceSharedMemKey(address: BigInt,
                                 numBanks: Int,
                                 numWords: Int,
                                 wordSize: Int = 4,
+                                prealignBufDepth: Int = 2,
                                 memType: MemType = TwoPort,
                                 strideByWord: Boolean = true,
                                 filterAligned: Boolean = true,
                                 disableMonitors: Boolean = true,
-                                serializeUnaligned: RadianceSmemSerialization = FullySerialized)
+                                serialization: RadianceSmemSerialization = FullySerialized)
 case object RadianceSharedMemKey extends Field[Option[RadianceSharedMemKey]](None)
 
 case class RadianceFrameBufferKey(baseAddress: BigInt,
@@ -45,59 +50,69 @@ case class RadianceFrameBufferKey(baseAddress: BigInt,
                                   fbName: String = "fb")
 case object RadianceFrameBufferKey extends Field[Seq[RadianceFrameBufferKey]](Seq())
 
-class WithRadianceCores(
+case class SIMTCoreParams(
+  numWarps: Int = 4,        // # of warp slots in the core
+  numLanes: Int = 4,        // # of SIMT lanes per warp
+  numLsuLanes: Int = 4,     // # of LSU lanes in the core
+  numSMEMInFlights: Int = 8 // # of in-flight SMEM requests handled in the LSU
+)
+case object SIMTCoreKey extends Field[Option[SIMTCoreParams]](None)
+
+class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
-  tensorCoreFP16: Boolean,
-  tensorCoreDecoupled: Boolean,
-  useVxCache: Boolean
-) extends Config((site, _, up) => {
+  headless: Boolean,
+) extends Config((site, here, up) => {
+  // for use in tile-less standalone instantiation
+  case MuonKey => {
+    MuonCoreParams(
+      numWarps = up(SIMTCoreKey).get.numWarps,
+      numLanes = up(SIMTCoreKey).get.numLanes,
+      numCores = n,
+      numClusters = 2, // TODO: magic number
+      logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+
+      lsu = LoadStoreUnitParams(
+        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
+      )
+    )
+  }
   case TilesLocated(`location`) => {
-    val prev = up(TilesLocated(`location`))
-    val idOffset = up(NumTiles)
-    val coreIdOffset = up(NumRadianceCores)
-    val vortex = RadianceTileParams(
-      core = VortexCoreParams(
-        tensorCoreFP16 = tensorCoreFP16,
-        tensorCoreDecoupled = tensorCoreDecoupled
-      ),
-      btb = None,
-      useVxCache = useVxCache,
-      dcache = Some(DCacheParams(
-        rowBits = site(SystemBusKey).beatBits,
-        nSets = 64,
-        nWays = 1,
-        nTLBSets = 1,
-        nTLBWays = 1,
-        nTLBBasePageSectors = 1,
-        nTLBSuperpages = 1,
-        nMSHRs = 0,
-        blockBytes = site(CacheBlockBytes))),
-      icache = Some(ICacheParams(
-        rowBits = site(SystemBusKey).beatBits,
-        nSets = 64,
-        nWays = 1,
-        nTLBSets = 1,
-        nTLBWays = 1,
-        nTLBBasePageSectors = 1,
-        nTLBSuperpages = 1,
-        blockBytes = site(CacheBlockBytes))))
-    List.tabulate(n)(i => RadianceTileAttachParams(
-      vortex.copy(
-        tileId = i + idOffset,
-        coreId = i + coreIdOffset,
-      ),
-      crossing
-    )) ++ prev
+    if (headless) {
+      Seq()
+    } else {
+      val prev = up(TilesLocated(`location`))
+      val idOffset = up(NumTiles)
+      val coreIdOffset = up(NumMuonCores)
+      require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
+
+      val clusterParams = (location match {
+        case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
+        case _ => None
+      }).get.clusterParams.asInstanceOf[RadianceClusterParams]
+
+      val muon = MuonTileParams(
+        core = here(MuonKey),
+        icache = None,
+        dcache = Some(clusterParams.l1Config),
+        cacheLineBytes = clusterParams.l1Config.rowBits / 8
+      )
+      List.tabulate(n)(i => MuonTileAttachParams(
+        muon.copy(
+          tileId = i + idOffset,
+          coreId = i + coreIdOffset,
+          clusterId = clusterParams.clusterId,
+        ),
+        crossing
+      )) ++ prev
+    }
   }
   case NumTiles => up(NumTiles) + n
-  case NumRadianceCores => up(NumRadianceCores) + n
+  case NumMuonCores => up(NumMuonCores) + n
 }) {
   // constructor override that omits `crossing`
-  def this(n: Int, location: HierarchicalLocation = InSubsystem,
-    tensorCoreFP16: Boolean = false, tensorCoreDecoupled: Boolean = false,
-    useVxCache: Boolean = false)
+  def this(n: Int, location: HierarchicalLocation = InSubsystem, headless: Boolean = false)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
     slave = HierarchicalElementSlavePortParams.locationDefault(location),
@@ -105,26 +120,24 @@ class WithRadianceCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     }
-  ), tensorCoreFP16, tensorCoreDecoupled, useVxCache)
+  ), headless)
 }
 
-class WithEmulatorCores(
-  n: Int,
-  useVxCache: Boolean
+class WithCyclotronCores(
+  n: Int
 ) extends Config((site, _, up) => {
   case TilesLocated(InSubsystem) => {
     val prev = up(TilesLocated(InSubsystem))
     val idOffset = up(NumTiles)
-    val emulator = EmulatorTileParams(
-      core = VortexCoreParams(),
-      useVxCache = useVxCache)
-    List.tabulate(n)(i => EmulatorTileAttachParams(
-      emulator.copy(tileId = i + idOffset),
+    val cyclotron = CyclotronTileParams(
+      core = MuonCoreParams())
+    List.tabulate(n)(i => CyclotronTileAttachParams(
+      cyclotron.copy(tileId = i + idOffset),
       RocketCrossingParams()
     )) ++ prev
   }
   case NumTiles => up(NumTiles) + 1
-  case NumRadianceCores => up(NumRadianceCores) + 1
+  case NumVortexCores => up(NumVortexCores) + 1
 })
 
 class WithFuzzerCores(
@@ -143,7 +156,7 @@ class WithFuzzerCores(
     )) ++ prev
   }
   case NumTiles => up(NumTiles) + 1
-  case NumRadianceCores => up(NumRadianceCores) + 1
+  case NumVortexCores => up(NumVortexCores) + 1
 })
 
 object RadianceGemminiDataType extends Enumeration {
@@ -153,7 +166,8 @@ object RadianceGemminiDataType extends Enumeration {
 
 class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossingParams,
                           dim: Int, accSizeInKB: Int, tileSize: Either[(Int, Int, Int), Int],
-                          dataType: RadianceGemminiDataType.Type, dmaBytes: Int) extends Config((site, _, up) => {
+                          dataType: RadianceGemminiDataType.Type, dmaBytes: Int,
+                          hasAccSlave: Boolean) extends Config((site, _, up) => {
   case TilesLocated(`location`) => {
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
@@ -165,15 +179,28 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       case _: GemminiTileParams => 1
       case _ => 0
     }.sum
-    val smKey = site(RadianceSharedMemKey).get
+
+    val clusterParams = (location match {
+      case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
+      case _ => None
+    }).get.clusterParams
+
+    val smKey = (clusterParams match {
+      case params: RadianceClusterParams => Some(params.smemConfig)
+      case _: VirgoClusterParams => site(RadianceSharedMemKey)
+      case _ =>
+        assert(false, "this config requires either a radiance cluster or a virgo cluster")
+        None
+    }).get
+
     val skipRecoding = false
     val tileParams = GemminiTileParams(
       gemminiConfig = {
         implicit val arithmetic: Arithmetic[Float] =
           Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
         dataType match {
-        case FP32 => GemminiFPConfigs.FP32DefaultConfig
-        case FP16 => GemminiFPConfigs.FP16DefaultConfig.copy(
+        case RadianceGemminiDataType.FP32 => GemminiFPConfigs.FP32DefaultConfig
+        case RadianceGemminiDataType.FP16 => GemminiFPConfigs.FP16DefaultConfig.copy(
           acc_scale_args = Some(ScaleArguments(
             (t: Float, u: Float) => {t},
             1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
@@ -197,7 +224,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
           // clock_gate = true,
           num_counter = 0
         )
-        case BF16 => GemminiFPConfigs.BF16DefaultConfig
+        case RadianceGemminiDataType.BF16 => GemminiFPConfigs.BF16DefaultConfig
         // TODO: Int8
       }}.copy(
         dataflow = Dataflow.WS,
@@ -225,7 +252,8 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis
+      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
+      hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -235,7 +263,8 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
   case NumTiles => up(NumTiles) + 1
 }) {
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: Either[(Int, Int, Int), Int],
-           dataType: RadianceGemminiDataType.Type = RadianceGemminiDataType.FP32, dmaBytes: Int = 256) =
+           dataType: RadianceGemminiDataType.Type = RadianceGemminiDataType.FP32,
+           dmaBytes: Int = 256, hasAccSlave: Boolean = true) =
     this(location, RocketCrossingParams(
       master = HierarchicalElementMasterPortParams.locationDefault(location),
       slave = HierarchicalElementSlavePortParams.locationDefault(location),
@@ -243,7 +272,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
         case InSubsystem => CBUS
         case InCluster(clusterId) => CCBUS(clusterId)
       }
-    ), dim, accSizeInKB, tileSize, dataType, dmaBytes)
+    ), dim, accSizeInKB, tileSize, dataType, dmaBytes, hasAccSlave)
 
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: Int) =
     this(location, dim, accSizeInKB, Right(tileSize))
@@ -261,13 +290,13 @@ class WithRadianceSharedMem(address: BigInt,
                             strideByWord: Boolean = true,
                             filterAligned: Boolean = true,
                             disableMonitors: Boolean = true,
-                            serializeUnaligned: RadianceSmemSerialization = FullySerialized
+                            serialization: RadianceSmemSerialization = FullySerialized
                            ) extends Config((_, _, _) => {
   case RadianceSharedMemKey => {
     require(isPow2(size) && size >= 1024)
     Some(RadianceSharedMemKey(
-      address, size, numBanks, numWords, 4, memType,
-      strideByWord, filterAligned, disableMonitors, serializeUnaligned
+      address, size, numBanks, numWords, 4, 2, memType,
+      strideByWord, filterAligned, disableMonitors, serialization
     ))
   }
 })
@@ -287,11 +316,21 @@ class WithRadianceFrameBuffer(baseAddress: BigInt,
 class WithRadianceCluster(
   clusterId: Int,
   location: HierarchicalLocation = InSubsystem,
-  crossing: RocketCrossingParams = RocketCrossingParams()
+  crossing: RocketCrossingParams = RocketCrossingParams(),
+  smemConfig: RadianceSharedMemKey,
+  l1Config: DCacheParams,
 ) extends Config((site, here, up) => {
-  case ClustersLocated(`location`) => up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
-    RadianceClusterParams(clusterId = clusterId),
-    crossing)
+  case ClustersLocated(`location`) => {
+    val baseAddress = x"4000_0000" + x"4_0000" * clusterId
+    up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
+      RadianceClusterParams(
+        clusterId = clusterId,
+        baseAddr = baseAddress,
+        smemConfig = smemConfig.copy(address = baseAddress + smemConfig.address),
+        l1Config = l1Config,
+      ),
+      crossing)
+  }
   case TLNetworkTopologyLocated(InCluster(`clusterId`)) => List(
     RadianceClusterBusTopologyParams(
       clusterId = clusterId,
@@ -303,16 +342,15 @@ class WithRadianceCluster(
   case PossibleTileLocations => up(PossibleTileLocations) :+ InCluster(clusterId)
 })
 
-// `nSrcIds`: number of source IDs for each mem lane.  This is for all warps
-class WithSimtConfig(nWarps: Int = 4, nCoreLanes: Int = 4, nMemLanes: Int = 4, nSrcIds: Int = 8)
+class WithSIMTConfig(numWarps: Int = 4, numLanes: Int = 4, numLsuLanes: Int = 4, numSMEMInFlights: Int = 8)
 extends Config((site, _, up) => {
   case SIMTCoreKey => {
     Some(up(SIMTCoreKey).getOrElse(SIMTCoreParams()).copy(
-      nWarps = nWarps,
-      nCoreLanes = nCoreLanes,
-      nMemLanes = nMemLanes,
-      nSrcIds = nSrcIds
-      ))
+      numWarps = numWarps,
+      numLanes = numLanes,
+      numLsuLanes = numLsuLanes,
+      numSMEMInFlights = numSMEMInFlights
+    ))
   }
 })
 
@@ -334,17 +372,7 @@ class WithPriorityCoalXbar extends Config((site, _, up) => {
   }
 })
 
-class WithVortexL1Banks(nBanks: Int = 4) extends Config ((site, here, up) => {
-  case VortexL1Key => {
-    Some(defaultVortexL1Config.copy(
-      numBanks = nBanks,
-      inputSize = up(SIMTCoreKey).get.nMemLanes * 4/*32b word*/,
-      cacheLineSize = up(SIMTCoreKey).get.nMemLanes * 4/*32b word*/,
-      memSideSourceIds = 16,
-      mshrSize = 16,
-    ))
-  }
-})
+
 
 // When `enable` is false, we still elaborate Coalescer, but it acts as a
 // pass-through logic that always outputs un-coalesced requests.  This is
@@ -353,7 +381,7 @@ class WithVortexL1Banks(nBanks: Int = 4) extends Config ((site, here, up) => {
 class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config((site, _, up) => {
   case CoalescerKey => {
     val (nLanes, numOldSrcIds) = up(SIMTCoreKey) match {
-      case Some(param) => (param.nMemLanes, param.nSrcIds)
+      case Some(param) => (param.numLsuLanes, param.numSMEMInFlights)
       case None => (1,1)
     }
 
@@ -383,57 +411,66 @@ class WithCoalescer(nNewSrcIds: Int = 8, enable : Boolean = true) extends Config
   }
 })
 
-class WithNCustomSmallRocketCores(
-                             n: Int,
-                             overrideIdOffset: Option[Int] = None,
-                             crossing: RocketCrossingParams = RocketCrossingParams()
-                           ) extends Config((site, here, up) => {
-  case TilesLocated(InSubsystem) => {
-    val prev = up(TilesLocated(InSubsystem))
-    val idOffset = up(NumTiles)
-    val med = RocketTileParams(
-      core = RocketCoreParams(fpu = None),
-      btb = None,
-      dcache = Some(DCacheParams(
-        rowBits = site(SystemBusKey).beatBits,
-        nSets = 2,
-        nWays = 1,
-        nTLBSets = 1,
-        nTLBWays = 2,
-        nTLBBasePageSectors = 1,
-        nTLBSuperpages = 1,
-        nMSHRs = 0,
-        blockBytes = site(CacheBlockBytes))),
-      icache = Some(ICacheParams(
-        rowBits = site(SystemBusKey).beatBits,
-        nSets = 2,
-        nWays = 1,
-        nTLBSets = 1,
-        nTLBWays = 2,
-        nTLBBasePageSectors = 1,
-        nTLBSuperpages = 1,
-        blockBytes = site(CacheBlockBytes))))
-    List.tabulate(n)(i => RocketTileAttachParams(
-      med.copy(tileId = i + idOffset),
-      crossing
-    )) ++ prev
-  }
-  case NumTiles => up(NumTiles) + n
-})
-
-class WithExtGPUMem(address: BigInt = BigInt("0x100000000", 16),
-                    size: BigInt = 0x80000000) extends Config((site, here, up) => {
-  case GPUMemory() => Some(GPUMemParams(address, size))
+class WithExtGPUMem(address: BigInt = x"1_0000_0000",
+                    size: BigInt = x"8000_0000") extends Config((site, here, up) => {
+  case GPUMemory => Some(GPUMemParams(address, size))
   case ExtMem => up(ExtMem).map(x => {
     val gap = address - x.master.base - x.master.size
     x.copy(master = x.master.copy(size = x.master.size + gap + size))
   })
 })
 case class GPUMemParams(address: BigInt = BigInt("0x100000000", 16), size: BigInt = 0x80000000)
-case class GPUMemory() extends Field[Option[GPUMemParams]](None)
+case object GPUMemory extends Field[Option[GPUMemParams]](None)
 
 object RadianceSimArgs extends Field[Option[Boolean]](None)
 
 class WithRadianceSimParams(enabled: Boolean) extends Config((_, _, _) => {
   case RadianceSimArgs => Some(enabled)
 })
+
+case class MuonTileAttachParams(
+  tileParams: MuonTileParams,
+  crossingParams: RocketCrossingParams
+) extends CanAttachTile {
+  type TileType = MuonTile
+}
+
+case class RadianceClusterAttachParams(
+  clusterParams: RadianceClusterParams,
+  crossingParams: HierarchicalElementCrossingParamsLike
+) extends CanAttachCluster {
+  type ClusterType = RadianceCluster
+}
+
+// cluster local sbus: between muons and l1 (csbus is l1->l2)
+case class CLSBUS(clusterId: Int) extends TLBusWrapperLocation(s"clsbus$clusterId")
+// cluster local cbus: carries low bw traffic intra cluster (e.g. gemmini cmd)
+case class CLCBUS(clusterId: Int) extends TLBusWrapperLocation(s"clcbus$clusterId")
+
+case class RadianceClusterBusTopologyParams(
+  clusterId: Int,
+  csbus: SystemBusParams,
+  ccbus: PeripheryBusParams,
+  coherence: BankedCoherenceParams
+) extends TLBusWrapperTopology(
+  instantiations = List(
+    (CSBUS(clusterId), csbus),
+    (CLSBUS(clusterId), csbus),
+    (CLCBUS(clusterId), RadianceCBusParams(
+      beatBytes = ccbus.beatBytes,
+      blockBytes = ccbus.beatBytes,
+    )),
+    (CCBUS(clusterId), RadianceCBusParams(
+      beatBytes = ccbus.beatBytes,
+      blockBytes = ccbus.blockBytes,
+    ))) ++ (if (coherence.nBanks == 0) Nil else List(
+    (CMBUS(clusterId), csbus),
+    (CCOH (clusterId), CoherenceManagerWrapperParams(csbus.blockBytes, csbus.beatBytes, coherence.nBanks, CCOH(clusterId).name)(coherence.coherenceManager)))),
+  connections = if (coherence.nBanks == 0) Nil else List(
+    (CSBUS(clusterId), CCOH (clusterId), TLBusWrapperConnection(driveClockFromMaster = Some(true), nodeBinding = BIND_STAR)()),
+    (CCOH (clusterId), CMBUS(clusterId), TLBusWrapperConnection.crossTo(
+      xType = NoCrossing,
+      driveClockFromMaster = Some(true),
+      nodeBinding = BIND_QUERY))
+  )
+)
