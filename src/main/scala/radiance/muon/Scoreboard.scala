@@ -184,6 +184,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       val newCount = WireDefault(currCount)
 
       // skip x0 updates
+      //
+      // TODO: refactor; handling both incr / decr seems overkill
       when (u.pReg =/= 0.U) {
         // if currCount + u.incr overflows but u.decr cancels it out, treat
         // it as a success.
@@ -195,10 +197,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           printf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
           when (newCountWide > maxCountWide) {
             success := false.B
-            // assert(false.B,
-            //        cf"TODO: partial update rollback on counter overflow not handled " +
-            //        cf"(${countName}, pReg:${u.pReg}, newCount:${newCountWide}, oldCount:${currCountWide}, maxCount:${maxCountWide})")
-
             // ignore incr and just reflect decr
             dirtied := (u.decr =/= 0.U)
             assert(currCountWide >= u.decr,

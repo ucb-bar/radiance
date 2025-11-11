@@ -34,17 +34,14 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
 
-  // TODO bogus
-  val fakeExPipe = Module(new FakeWriteback)
-  fakeExPipe.io.issue <> reservStation.io.issue
-  reservStation.io.writeback <> fakeExPipe.io.writeback
+  val collector = Module(new DuplicatedCollector)
+  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
 
   val bypass = true
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
     reservStation.reset := true.B
-    fakeExPipe.reset := true.B
 
     val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
@@ -58,18 +55,13 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
-
   val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
-
-  val haves = Seq(HasRs1, HasRs2, HasRs3)
-  val regs = Seq(Rs1, Rs2, Rs3)
   val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
-
-  val collector = Module(new DuplicatedCollector)
-  collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
 
   if (bypass) {
     // on bypass, manage collector entirely after issue
+    val haves = Seq(HasRs1, HasRs2, HasRs3)
+    val regs = Seq(Rs1, Rs2, Rs3)
     (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
       val pReg = issued.bits.inst(reg)
       collReq.enable := issued.valid && issued.bits.inst.b(has)
@@ -78,6 +70,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     collector.io.readData.regs.foreach(_.enable := true.B)
     collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
 
+    reservStation.io.issue.ready := false.B
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
     reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
@@ -89,20 +82,46 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     collector.io.readData <> reservStation.io.collector.readData
   }
 
-  // connect collector to EX operands
-  // TODO: connect with executeIn ready
+  // drive EX operands from collector
   collector.io.readResp.ports.foreach(_.ready := true.B)
   (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
     opnd := port.data
   }
 
-  // signal execute on collector finish
-  // TODO: relax 1-cycle delay
-  execute.io.req.valid := RegNext(issued.valid)
+  // execute
   execute.io.req.bits := executeIn
-  executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
+  if (bypass) {
+    // fallback issue: stall every instruction until writeback
+    val inFlight = RegInit(false.B)
+    when (issued.fire) {
+      inFlight := true.B
+    }
+    issued.ready := !inFlight
+    // assumes 1-cycle latency collector
+    execute.io.req.valid := RegNext(issued.fire)
+    executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
+    assert(RegNext(issued.fire) === execute.io.req.fire)
+    when (execute.io.resp.fire) {
+      inFlight := false.B
+    }
+  } else {
+    issued.ready := execute.io.req.ready
+    execute.io.req.valid := issued.valid
+    executeIn.uop := issued.bits
+  }
 
-  // execute-to-issue writeback
+  // writeback: schedule
+  val exSchedWb = execute.io.resp.bits.sched.get
+  io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
+  io.schedWb.bits := exSchedWb.bits
+  // scheduler writeback is valid only
+  // TODO: consider collector writeback ready
+  execute.io.resp.ready := true.B
+
+  // writeback: RS
+  reservStation.io.writeback <> execute.io.resp.bits.reg.get
+
+  // writeback: collector
   val exRegWb = execute.io.resp.bits.reg.get
   collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
@@ -111,29 +130,6 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   // TODO: tmask
   collector.io.writeResp.ports.foreach(_.ready := true.B)
   dontTouch(collector.io)
-
-  reservStation.io.writeback <> execute.io.resp.bits.reg.get
-
-  // execute-to-schedule writeback
-  val exSchedWb = execute.io.resp.bits.sched.get
-  io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
-  io.schedWb.bits := exSchedWb.bits
-  // scheduler writeback is valid only; TODO: consider collector writeback ready
-  execute.io.resp.ready := true.B
-
-  // Fallback: stall every instruction until writeback
-  if (bypass) {
-    val inFlight = RegInit(false.B)
-    when (issued.fire) {
-      inFlight := true.B
-    }
-    issued.ready := !inFlight
-    execute.io.req.valid := RegNext(issued.fire)
-    assert(RegNext(issued.fire) === execute.io.req.fire)
-    when (execute.io.resp.fire) {
-      inFlight := false.B
-    }
-  }
 
   when (execute.io.req.fire) {
     val e = execute.io.req.bits
