@@ -13,7 +13,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
-import radiance.cluster.{FakeRadianceClusterTileParams, SoftResetFinishNode}
+import radiance.cluster.SoftResetFinishNode
 import radiance.memory._
 import radiance.subsystem._
 
@@ -32,7 +32,7 @@ case class MuonTileParams(
   blockerCtrlAddr: Option[BigInt] = None,
   clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
   boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None,
-  cacheLineBytes: Int = 32,
+  l1CacheLineBytes: Int = 32,
 ) extends InstantiableTileParams[MuonTile] {
   def instantiate(
     crossing: HierarchicalElementCrossingParamsLike,
@@ -162,19 +162,12 @@ class MuonTile(
   }
 
   val (l0iOut, l0iIn) = muonParams.icacheUsingD.map { l0iParams =>
-    val l0i = LazyModule(new TLULNBDCache(muonParams.coreId, Some(3))(
-      p.alterMap(Map(
-        TileKey -> FakeRadianceClusterTileParams(
-          cache = Some(l0iParams),
-          muonCore = muonParams.core.copy(
-            overrideCacheTagBits = muonParams.core.l0iReqTagBits
-          ),
-          clusterId = 0
-        ),
-        CacheBlockBytes -> l0iParams.blockBytes,
-        // TileVisibilityNodeKey -> visibilityNode,
-      ))
-    ))
+    val l0i = LazyModule(new TLULNBDCache(TLNBDCacheParams(
+      id = tileId,
+      cache = l0iParams,
+      cacheTagBits = muonParams.core.l0iReqTagBits,
+      overrideDChannelSize = Some(3)
+    )))
     (connectBuf(l0i.outNode, 4), l0i.inNode)
   }.getOrElse {
     val passthru = TLEphemeralNode()
@@ -200,26 +193,18 @@ class MuonTile(
 
   val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
 
-   val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
-     require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
-     val l0d = LazyModule(new TLULNBDCache(muonParams.coreId)(
-       p.alterMap(Map(
-         TileKey -> FakeRadianceClusterTileParams(
-           cache = Some(l0dParams),
-          muonCore = muonParams.core.copy(
-            overrideCacheTagBits = muonParams.core.l0dReqTagBits
-          ),
-           clusterId = 0
-         ),
-         CacheBlockBytes -> l0dParams.blockBytes,
-         // TileVisibilityNodeKey -> visibilityNode,
-       ))
-     ))
-     (l0d.outNode, l0d.inNode)
-   }.getOrElse {
-    val passthru = TLEphemeralNode()
-    (passthru, passthru)
-   }
+  val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
+    require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
+    val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
+      id = tileId,
+      cache = l0dParams,
+      cacheTagBits = muonParams.core.l0dReqTagBits
+    )))
+    (l0d.outNode, l0d.inNode)
+  }.getOrElse {
+   val passthru = TLEphemeralNode()
+   (passthru, passthru)
+  }
 
   val dcacheNode = visibilityNode
 
@@ -238,7 +223,7 @@ class MuonTile(
   )))
 
   dcacheNode :=
-    TLFragmenter(muonParams.core.cacheLineBytes, coalescedReqWidth) :=
+    TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth) :=
     TLWidthWidget(coalescedReqWidth) :=
     l0dOut
   val coalXbar = TLXbar(nameSuffix = Some("coal_out_xbar"))

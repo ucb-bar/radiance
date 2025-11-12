@@ -4,23 +4,51 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket.{NonBlockingDCache, PRV, SimpleHellaCacheIF}
+import freechips.rocketchip.rocket.{DCacheParams, NonBlockingDCache, PRV, SimpleHellaCacheIF}
+import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import radiance.subsystem.GPUMemory
+import radiance.subsystem.{DummyTileParams, GPUMemory, PhysicalCoreParams}
 
+case class TLNBDCacheParams(
+  id: Int,
+  cache: DCacheParams,
+  cacheTagBits: Int,
+  overrideDChannelSize: Option[Int] = None
+)
 
-class TLNBDCache(staticIdForMetadataUseOnly: Int,
-                 overrideDChannelSize: Option[Int] = None)
+case class DummyCacheCoreParams(
+  cacheLineBytes: Int = 32,
+  overrideCacheTagBits: Int = 0,
+) extends PhysicalCoreParams {
+  override val useVector: Boolean = true // for cache line size
+  override val vLen: Int = 32
+  override val eLen: Int = 32
+  override def vMemDataBits: Int = cacheLineBytes * 8
+  override def dcacheReqTagBits: Int = overrideCacheTagBits
+}
+
+case class DummyCacheTileParams(
+  params: TLNBDCacheParams
+) extends DummyTileParams {
+  val core = DummyCacheCoreParams(
+    cacheLineBytes = params.cache.blockBytes,
+    overrideCacheTagBits = params.cacheTagBits
+  )
+  override val tileId = params.id
+  override val dcache: Option[DCacheParams] = Some(params.cache)
+}
+
+class TLNBDCache(params: TLNBDCacheParams)
                 (implicit p: Parameters) extends LazyModule {
 
-  val beatBytes = p(TileKey).dcache.get.blockBytes
-  require(p(TileKey).dcache.get.blockBytes == (p(TileKey).dcache.get.rowBits / 8))
+  val beatBytes = params.cache.blockBytes
+  require(params.cache.blockBytes == (params.cache.rowBits / 8))
 
   // pretty hacky, might want to figure out a better way
-  val dChannelSize = overrideDChannelSize.getOrElse(log2Ceil(beatBytes))
+  val dChannelSize = params.overrideDChannelSize.getOrElse(log2Ceil(beatBytes))
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -45,13 +73,19 @@ class TLNBDCache(staticIdForMetadataUseOnly: Int,
     )
   ))
 
-  val nbdCache = LazyModule(new NonBlockingDCache(staticIdForMetadataUseOnly))
+  implicit val q = p.alterMap(Map(
+    TileKey -> DummyCacheTileParams(params),
+    CacheBlockBytes -> params.cache.blockBytes,
+    // TileVisibilityNodeKey -> visibilityNode,
+  ))
+
+  val nbdCache = LazyModule(new NonBlockingDCache(params.id)(q))
 
   val outNode = nbdCache.node
-  override lazy val module = new TLNBDCacheModule(this)
+  override lazy val module = new TLNBDCacheModule(this)(q)
 }
 
-class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
+class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyModuleImp(outer)
   with MemoryOpConstants {
 
   val (tlIn, _) = outer.inNode.in.head

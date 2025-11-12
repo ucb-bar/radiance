@@ -99,7 +99,7 @@ class WithMuonCores(
         icache = None,
         icacheUsingD = l0i,
         dcache = l0d,
-        cacheLineBytes = clusterParams.l1Config.rowBits / 8
+        l1CacheLineBytes = clusterParams.l1Config.blockBytes
       )
       List.tabulate(n)(i => MuonTileAttachParams(
         muon.copy(

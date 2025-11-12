@@ -47,14 +47,12 @@ class TLCToTLULNode(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class TLULNBDCache(staticIdForMetadataUseOnly: Int,
-                   overrideDChannelSize: Option[Int] = None)
+class TLULNBDCache(params: TLNBDCacheParams)
                   (implicit p: Parameters) extends LazyModule {
 
-  val tlnbdCache = LazyModule(new TLNBDCache(staticIdForMetadataUseOnly, overrideDChannelSize))
+  val tlnbdCache = LazyModule(new TLNBDCache(params))
 
-
-  val beatBytes = p(TileKey).dcache.get.blockBytes
+  val beatBytes = params.cache.blockBytes
   val inNode = tlnbdCache.inNode
   val tlcOutNode = tlnbdCache.outNode
   val c2ulNode = LazyModule(new TLCToTLULNode(beatBytes)).node

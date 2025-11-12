@@ -18,25 +18,6 @@ import radiance.memory._
 import radiance.muon._
 import radiance.subsystem._
 
-case class FakeRadianceClusterTileParams(
-  cache: Option[DCacheParams],
-  muonCore: MuonCoreParams,
-  clusterId: Int,
-) extends TileParams {
-  val core: MuonCoreParams = muonCore.copy(
-    xLen = 32,
-    cacheLineBytes = cache.map(_.rowBits / 8).getOrElse(0),
-  )
-  val icache: Option[ICacheParams] = None
-  val dcache: Option[DCacheParams] = cache
-  val btb: Option[BTBParams] = None
-  val tileId: Int = -1
-  val blockerCtrlAddr: Option[BigInt] = None
-  val baseName: String = "fake_radiance_cluster_tile"
-  val uniqueName: String = s"fake_radiance_cluster_tile_$clusterId"
-  val clockSinkParams: ClockSinkParameters = ClockSinkParameters()
-}
-
 case class RadianceClusterParams(
   clusterId: Int,
   clockSinkParams: ClockSinkParameters = ClockSinkParameters(),
@@ -128,17 +109,12 @@ class RadianceCluster (
 
   val visibilityNode = TLEphemeralNode()
   // TODO: inflights should be ibuf depth!
-  val l1cache = LazyModule(new TLNBDCache(clusterId)(
+  val l1cache = LazyModule(new TLNBDCache(TLNBDCacheParams(
+    id = clusterId,
+    cache = thisClusterParams.l1Config,
+    cacheTagBits = muonTiles.head.muonParams.core.l1ReqTagBits,
+  ))(
     p.alterMap(Map(
-      // a bit hacky, but required to instantiate dcache outside a tile
-      TileKey -> FakeRadianceClusterTileParams(
-        cache = Some(thisClusterParams.l1Config),
-        muonCore = muonTiles.head.muonParams.core.copy(
-          overrideCacheTagBits = muonTiles.head.muonParams.core.l1ReqTagBits
-        ),
-        clusterId = clusterId
-      ),
-      CacheBlockBytes -> thisClusterParams.l1Config.blockBytes,
       TileVisibilityNodeKey -> visibilityNode,
     ))
   ))

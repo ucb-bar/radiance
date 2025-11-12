@@ -11,7 +11,6 @@ import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import radiance.cluster.FakeRadianceClusterTileParams
 import radiance.muon._
 import freechips.rocketchip.tilelink.{
   TLMasterPortParameters, TLClientParameters, TLClientNode, TLMasterParameters,
@@ -21,6 +20,7 @@ import freechips.rocketchip.diplomacy.{
   IdRange, AddressSet
 }
 import radiance.muon.backend.LaneRecomposer
+import radiance.subsystem.DummyTileParams
 import scala.collection.mutable.ArrayBuffer
 
 /** Testbench for Muon with the test signals */
@@ -88,7 +88,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   })
 
   val be = Module(new Backend(test = true)(p.alterMap(Map(
-    TileKey -> FakeRadianceClusterTileParams(None, p(MuonKey), 0),
+    TileKey -> DummyTileParams
   ))))
   be.io.dmem.resp.foreach(_.valid := false.B)
   be.io.dmem.resp.foreach(_.bits := DontCare)
