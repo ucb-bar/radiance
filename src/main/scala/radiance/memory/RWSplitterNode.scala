@@ -71,9 +71,9 @@ class RWSplitterNode(visibility: Option[AddressSet], override val name: String =
       }
 
       val supports = shrinkAll(seq.map(_.anySupportClaims).reduce(_ mincover _))
-      println(f"combined address range of $name managers: " +
-        f"${AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address)))}, supports:" +
-        f"$supports, ${supports.get}, ${supports.putFull}, ${seq.map(_.anySupportClaims)}")
+      // println(f"combined address range of $name managers: " +
+      //   f"${AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address)))}, supports:" +
+      //   f"$supports, ${supports.get}, ${supports.putFull}, ${seq.map(_.anySupportClaims)}")
 
       seq.head.v1copy(
         responseFields = BundleField.union(seq.flatMap(_.responseFields)),

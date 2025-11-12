@@ -43,9 +43,9 @@ class DuplicatorNode(override val name: String = "dup")
       )
     },
     managerFn = { seq =>
-      println(f"combined address range of $name managers: " +
-        f"${AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address)))}, supports:" +
-        f"${seq.map(_.anySupportClaims).reduce(_ mincover _)}")
+      // println(f"combined address range of $name managers: " +
+      //   f"${AddressSet.unify(seq.flatMap(_.slaves.flatMap(_.address)))}, supports:" +
+      //   f"${seq.map(_.anySupportClaims).reduce(_ mincover _)}")
 
       seq.head.v1copy(
         responseFields = BundleField.union(seq.flatMap(_.responseFields)),

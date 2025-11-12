@@ -100,6 +100,9 @@ class TLULNBDCacheModule(outer: TLULNBDCache) extends LazyModuleImp(outer)
     TLMessages.GrantData, // response for A channel AcquireBlock
     TLMessages.ReleaseAck // response for C channel ReleaseData
   )
+  tlIn.d.bits.sink := Counter(
+    tlIn.d.fire && tlIn.d.bits.opcode === TLMessages.GrantData,
+    1 << tlIn.params.sinkBits)._1
   tlOut.d.ready := tlIn.d.ready
 
   tlOut.e.valid := false.B

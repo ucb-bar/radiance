@@ -41,7 +41,7 @@ class TLNBDCache(staticIdForMetadataUseOnly: Int,
         )
       ),
       beatBytes = beatBytes,
-      endSinkId = staticIdForMetadataUseOnly + 1,
+      endSinkId = 4, // hardcoded 4 sink ids for $ to ack E
     )
   ))
 
