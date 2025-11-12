@@ -162,7 +162,7 @@ class GemminiTile private (
     beatBytes = 4,
     concurrency = 1)
 
-  regNode := TLFragmenter(4, 8) := slaveNode
+  regNode := TLWidthWidget(8) := slaveNode
 
   val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means

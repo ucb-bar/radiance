@@ -92,7 +92,7 @@ class RadianceCluster (
   // bad things will happen however if we actually do amo on this region.
   // also: fragmenter does not expand arithmetic/logical ops, so the hack node
   // must be upwards of the fragmenter to hack in beat bytes = 8
-  gemminiTiles.foreach(_.slaveNode :*= HackAtomicNode(8) :*= clcbus.outwardNode)
+  gemminiTiles.foreach(_.slaveNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode)
 
   if (gemminiTiles.isEmpty) {
     // make sure even without a gemmini in the cluster, clc node still finds a manager
@@ -103,7 +103,7 @@ class RadianceCluster (
         putFull = TransferSizes(1, 8)),
       fifoId = Some(0),
     )), beatBytes = 8)))
-    dummySinkNode := HackAtomicNode(8) := clcbus.outwardNode
+    dummySinkNode := TLFragmenter(4, 8) := HackAtomicNode(8) := clcbus.outwardNode
   }
 
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
