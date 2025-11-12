@@ -83,6 +83,7 @@ case class MuonCoreParams(
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
   cacheLineBytes: Int = 32,
+  overrideCacheTagBits: Int = 0,
   // debug bundles and prints
   debug: Boolean = true
 ) extends CoreParams {
@@ -90,14 +91,28 @@ case class MuonCoreParams(
   val coreIdBits: Int = log2Ceil(numCores)
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
-  override def dcacheReqTagBits: Int = {
-    val instVsData = 1
+  def l0dReqTagBits: Int = {
     val packetBits = log2Up(numLanes / lsu.numLsuLanes) // from lsu derived params
     val sourceIdBits = LsuQueueToken.width(this) + packetBits
-    val maxInFlight = log2Ceil(ibufDepth) max sourceIdBits
-    val coreBits = log2Ceil(numCores)
-    instVsData + maxInFlight + coreBits + warpIdBits + 2
+    println("l0d tag bits", packetBits + sourceIdBits)
+
+    val laneBits = log2Ceil(numLanes)
+    val perLaneBits = sourceIdBits + packetBits // = coalescer new ids
+
+    // the coalescer crossbar has n inputs and n+1 outputs
+    perLaneBits + laneBits * 2 + 1
   }
+  def l0iReqTagBits: Int = {
+    println("l0i tag bits", warpIdBits + log2Ceil(ibufDepth))
+    log2Ceil(ibufDepth) + warpIdBits
+  }
+  def l1ReqTagBits: Int = {
+    val instVsData = 1
+    val coreBits = log2Ceil(numCores)
+    println("l1 tag bits", instVsData + coreBits + 6) // max(log2Ceil(nMSHRs + nMMIOs) for i, d)
+    instVsData + coreBits + 6
+  }
+  override def dcacheReqTagBits: Int = overrideCacheTagBits
   override val useVector: Boolean = true // for cache line size
   override val vLen: Int = 32
   override val eLen: Int = 32

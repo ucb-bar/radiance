@@ -74,8 +74,8 @@ class TLNBDCacheModule(outer: TLNBDCache) extends LazyModuleImp(outer)
     tlIn.a.ready := req.ready
     req.bits := 0.U.asTypeOf(req.bits.cloneType)
     req.bits.tag := tlIn.a.bits.source
-    assert(req.bits.tag.getWidth >= tlIn.a.bits.source.getWidth,
-      s"cache does not have enough tag bits: ${req.bits.tag.getWidth}<${tlIn.a.bits.source.getWidth}")
+    assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth,
+      s"cache tag bits doesnt match source: ${req.bits.tag.getWidth} != ${tlIn.a.bits.source.getWidth}")
 
     // every read is cache line sized. this is because the output always starts at lsb
     // regardless of address. i.e. this logic does not use active byte lanes that

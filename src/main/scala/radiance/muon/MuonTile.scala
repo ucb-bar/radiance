@@ -142,19 +142,6 @@ class MuonTile(
     )
   }
 
-// TODO
-//  // Conditionally instantiate memory coalescer
-//  val coalescerNode = p(CoalescerKey) match {
-//    case Some(coalParam) => {
-//      val coal = LazyModule(
-//        new CoalescingUnit(coalParam)
-//      )
-//      coal.cpuNode :=* dmemAggregateNode
-//      coal.aggregateNode // N+1 lanes
-//    }
-//    case None => dmemAggregateNode
-//  }
-
   val icacheWordNode = muonParams.icache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v2(
@@ -169,19 +156,26 @@ class MuonTile(
     )))
   }
 
+  def connectBuf(node: TLNode, n: Int): TLNode = {
+    val cacheBuf = TLBuffer(ace = BufferParams(n), bd = BufferParams(0))
+    cacheBuf := node
+  }
+
   val (l0iOut, l0iIn) = muonParams.icacheUsingD.map { l0iParams =>
     val l0i = LazyModule(new TLULNBDCache(muonParams.coreId, Some(3))(
       p.alterMap(Map(
         TileKey -> FakeRadianceClusterTileParams(
           cache = Some(l0iParams),
-          muonCore = muonParams.core,
+          muonCore = muonParams.core.copy(
+            overrideCacheTagBits = muonParams.core.l0iReqTagBits
+          ),
           clusterId = 0
         ),
         CacheBlockBytes -> l0iParams.blockBytes,
         // TileVisibilityNodeKey -> visibilityNode,
       ))
     ))
-    (l0i.outNode, l0i.inNode)
+    (connectBuf(l0i.outNode, 4), l0i.inNode)
   }.getOrElse {
     val passthru = TLEphemeralNode()
     (passthru, passthru)
@@ -193,22 +187,28 @@ class MuonTile(
     ResponseFIFOFixer() :=
     icacheWordNode
 
-  // TODO: source id bits is actually determined by the coalescer
   val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
-  val sourceIdBits = lsuDerived.sourceIdBits
-  val lsuNode = TLClientNode(Seq(TLMasterPortParameters.v2(
-    Seq(TLMasterParameters.v1(
-      name = s"muon_tile${muonParams.coreId}_lsu",
-      sourceId = IdRange(0, 1 << sourceIdBits)
-    )),
-  )))
+  val lsuSourceIdBits = lsuDerived.sourceIdBits
+  val lsuNodes = Seq.tabulate(muonParams.core.numLanes) { lid =>
+    TLClientNode(Seq(TLMasterPortParameters.v2(
+      Seq(TLMasterParameters.v1(
+        name = s"muon_tile${muonParams.coreId}_lsu_$lid",
+        sourceId = IdRange(0, 1 << lsuSourceIdBits)
+      )),
+    )))
+  }
+
+  val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
 
    val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
+     require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
      val l0d = LazyModule(new TLULNBDCache(muonParams.coreId)(
        p.alterMap(Map(
          TileKey -> FakeRadianceClusterTileParams(
            cache = Some(l0dParams),
-           muonCore = muonParams.core,
+          muonCore = muonParams.core.copy(
+            overrideCacheTagBits = muonParams.core.l0dReqTagBits
+          ),
            clusterId = 0
          ),
          CacheBlockBytes -> l0dParams.blockBytes,
@@ -221,10 +221,30 @@ class MuonTile(
     (passthru, passthru)
    }
 
-  val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
   val dcacheNode = visibilityNode
-  dcacheNode := TLFragmenter(32, 64) := TLWidthWidget(coalescedReqWidth) := l0dOut // TODO magic number
-  l0dIn := /* TODO coalescer goes here */ lsuNode
+
+  val coalescer = LazyModule(new CoalescingUnit(CoalescerConfig(
+    enable = true,
+    numLanes = muonParams.core.numLanes,
+    addressWidth = muonParams.core.archLen,
+    dataBusWidth = log2Ceil(coalescedReqWidth),
+    coalLogSize = log2Ceil(coalescedReqWidth),
+    wordSizeInBytes = muonParams.core.archLen / 8,
+    numOldSrcIds = 1 << lsuSourceIdBits,
+    numNewSrcIds = 1 << lsuSourceIdBits,
+    respQueueDepth = 4,
+    sizeEnum = DefaultInFlightTableSizeEnum,
+    numCoalReqs = 1,
+  )))
+
+  dcacheNode :=
+    TLFragmenter(muonParams.core.cacheLineBytes, coalescedReqWidth) :=
+    TLWidthWidget(coalescedReqWidth) :=
+    l0dOut
+  val coalXbar = TLXbar(nameSuffix = Some("coal_out_xbar"))
+  l0dIn := coalXbar
+  (0 until muonParams.core.numLanes + 1).foreach(_ => coalXbar := coalescer.nexusNode)
+  lsuNodes.foreach(coalescer.nexusNode := _)
 
   val softResetFinishSlave = SoftResetFinishNode.Slave()
 
