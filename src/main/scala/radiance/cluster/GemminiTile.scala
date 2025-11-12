@@ -153,16 +153,20 @@ class GemminiTile private (
   tlOtherMastersNode :=* gemmini.tlNode
   // gemmini.stlNode := tlSlaveXbar.node
 
+  override def connectTLSlave(node: TLNode, bytes: Int): Unit = {}
+  override def connectTLSlave(xbarNode: TLOutwardNode, node: TLNode, bytes: Int): Unit = {}
+
   require(!gemmini.config.sp_singleported, "external scratchpad must be dual ported")
 
   val regDevice = new SimpleDevice(f"gemmini-cmd-reg-$tileId", Seq(s"gemmini-cmd-reg-$tileId"))
   val regNode = TLRegisterNode(
     address = Seq(AddressSet(gemminiParams.slaveAddress, 0xff)),
     device = regDevice,
-    beatBytes = 4,
+    beatBytes = 8,
     concurrency = 1)
 
-  regNode := TLWidthWidget(8) := slaveNode
+  // regNode := TLFragmenter(4, 4) := TLWidthWidget(8) := TLFragmenter(8, 8) := slaveNode
+  regNode := slaveNode
 
   val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means
