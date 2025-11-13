@@ -226,6 +226,16 @@ trait HasCoreBundles extends HasMuonCoreParameters {
     }))
   }
 
+  def memoryIO = new Bundle {
+    val dmem = new DataMemIO
+    val smem = new SharedMemIO
+  }
+
+  def reservationIO = Vec(muonParams.numWarps, new Bundle {
+    val req = Flipped(Decoupled(new LsuReservationReq))
+    val resp = Valid(new LsuReservationResp)
+  })
+
   def issueIO = new Bundle {
     val eligible = Flipped(Valid(wmaskT))
     val issued = Output(widT) // comb
@@ -301,6 +311,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.softReset := io.softReset
   be.io.feCSR := fe.io.csr
 
+  fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb
 
   (be.io.ibuf zip fe.io.ibuf).foreach { case (b, f) => b <> f }

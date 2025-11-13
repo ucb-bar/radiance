@@ -13,6 +13,7 @@ class Frontend(implicit p: Parameters)
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val ibuf = Vec(muonParams.numWarps, Decoupled(uopT))
+    val lsuReserve = Flipped(reservationIO)
     // TODO: writeback
     val commit = Flipped(schedWritebackT)
 //    val issue = issueIO
@@ -104,6 +105,8 @@ class Frontend(implicit p: Parameters)
       to :<>= from
     }
 
+    io.lsuReserve <> ibuffer.io.lsuReserve
+    
     // io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
     // io.ibuf.valid := eligible.orR
     // (ibuffer.io.deq zip winner.asBools).foreach { case (warpBuf, w) =>

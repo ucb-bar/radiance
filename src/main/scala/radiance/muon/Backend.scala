@@ -11,6 +11,7 @@ class Backend(
   test: Boolean = false
 )(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
+    val lsuReserve = reservationIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
@@ -105,6 +106,11 @@ class Backend(
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
   execute.io.req.bits := executeIn
+  
+  execute.io.mem.dmem <> io.dmem
+  execute.io.mem.smem <> io.smem
+  execute.io.lsuReserve <> io.lsuReserve
+
   if (bypass) {
     // fallback issue: stall every instruction until writeback
     val inFlight = RegInit(false.B)
@@ -177,11 +183,4 @@ class Backend(
       cf"] mask=${r.tmask}%b" +
       cf"\n")
   }
-
-  io.dmem.req.foreach(_.valid := false.B)
-  io.dmem.req.foreach(_.bits := DontCare)
-  io.dmem.resp.foreach(_.ready := false.B)
-  io.smem.req.foreach(_.valid := false.B)
-  io.smem.req.foreach(_.bits := DontCare)
-  io.smem.resp.foreach(_.ready := false.B)
 }

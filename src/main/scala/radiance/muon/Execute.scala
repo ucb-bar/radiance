@@ -11,16 +11,18 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
     val resp = Decoupled(writebackT())
     val id = clusterCoreIdT
+    val mem = memoryIO
+    val lsuReserve = reservationIO
     val feCSR = Flipped(feCSRIO)
     val softReset = Input(Bool())
   })
-
+  
   val aluPipe = Module(new ALUPipe())
   // val fp32Pipe = Module(new FP32Pipe())
   // val fp16Pipe = Module(new FP16Pipe())
   val fpPipe = Module(new FPPipe())
   val mulDivPipe = Module(new MulDivPipe())
-  val lsuPipe = Module(new ALUPipe()) // TODO: should be lsu pipe
+  val lsuPipe = Module(new LSUPipe()) // TODO: should be lsu pipe
   val sfuPipe = Module(new SFUPipe())
 
   val inst = io.req.bits.uop.inst
@@ -28,13 +30,16 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   sfuPipe.csrIO.fcsr <> fpPipe.fCSRIO
   sfuPipe.idIO := io.id
 
+  lsuPipe.memIO <> io.mem
+  lsuPipe.reserveIO <> io.lsuReserve
+
   val pipes = Seq(aluPipe, fpPipe, mulDivPipe, lsuPipe, sfuPipe)
   val uses = Seq(inst.b(UseALUPipe),
                  inst.b(UseFPPipe),
                  inst.b(UseMulDivPipe),
                  inst.b(UseLSUPipe),
                  inst.b(UseSFUPipe))
-
+  
   assert(!io.req.valid || uses.map(_.asUInt).reduce(_ +& _) === 1.U,
     cf"pipeline selection should be one hot, but got ${VecInit(uses).asUInt}%b")
 
