@@ -14,63 +14,26 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossingParamsLike, RocketCrossingParams}
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.UIntIsOneOf
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
-import radiance.memory.HackAtomicNode
-import radiance.subsystem.{GPUMemParams, GPUMemory}
+import radiance.subsystem.{GPUMemParams, GPUMemory, PhysicalCoreParams}
 
-case class GemminiCoreParams(
-  useVM: Boolean = false,
-  useHypervisor: Boolean = false,
-  useUser: Boolean = false,
-  useSupervisor: Boolean = false,
-  useDebug: Boolean = false,
-  useAtomics: Boolean = false,
-  useAtomicsOnlyForIO: Boolean = false,
-  useCompressed: Boolean = false,
-  useRVE: Boolean = false,
-  mulDiv: Option[MulDivParams] = None,
-  fpu: Option[FPUParams] = None,
-  fetchWidth: Int = 1,
-  decodeWidth: Int = 1,
-  retireWidth: Int = 1,
-  instBits: Int = 0,
-  nLocalInterrupts: Int = 0,
-  nPMPs: Int = 0,
-  nBreakpoints: Int = 0,
-  useBPWatch: Boolean = false,
-  nPerfCounters: Int = 0,
-  haveBasicCounters: Boolean = false,
-  haveFSDirty: Boolean = false,
-  misaWritable: Boolean = false,
-  haveCFlush: Boolean = false,
-  nL2TLBEntries: Int = 0,
-  mtvecInit: Option[BigInt] = Some(BigInt(0)),
-  mtvecWritable: Boolean = false,
-  nL2TLBWays: Int = 0,
-  lrscCycles: Int = 8,
-  mcontextWidth: Int = 0,
-  scontextWidth: Int = 0,
-  useNMI: Boolean = false,
-  nPTECacheEntries: Int = 0,
-  traceHasWdata: Boolean = false,
-  useConditionalZero: Boolean = false,
-  bootFreqHz: BigInt = 0,
-  pmpGranularity: Int = 0,
-  useZba: Boolean = false,
-  useZbb: Boolean = false,
-  useZbs: Boolean = false,
-  xLen: Int = 64,
-  pgLevels: Int = 2,
-  ) extends CoreParams {
+object GemminiCoreParams extends PhysicalCoreParams {
+  override val xLen: Int = 64
 }
 
 case class GemminiScalingFactorMemConfig(
   sizeInBytes: BigInt = 32 << 10,
-  lineSizeInBytes: Int = 32
-)
+  sramLineSizeInBytes: Int = 32,
+  logicalLineSizeInBytes: Int = 32,
+) {
+  def addrBits = log2Ceil(sizeInBytes)
+  def lineOffsetBits = log2Ceil(sramLineSizeInBytes)
+  def bankSelectBits = log2Ceil(logicalLineSizeInBytes / sramLineSizeInBytes)
+}
 
 case class GemminiTileParams(
     tileId: Int = 0,
@@ -85,7 +48,7 @@ case class GemminiTileParams(
   ): GemminiTile = {
     new GemminiTile(this, crossing, lookup)
   }
-  val core = GemminiCoreParams()
+  val core = GemminiCoreParams
   val name = Some(f"radiance_gemmini_tile_$tileId")
   val clockSinkParams = ClockSinkParameters()
   val blockerCtrlAddr = None
@@ -138,7 +101,7 @@ class GemminiTile private (
 
   tlOtherMastersNode := tlMasterXbar.node
   masterNode :=* tlOtherMastersNode
-  // DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
+  DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
 
   // TODO: evaluate if gemmini write node is required at all
 
@@ -166,32 +129,35 @@ class GemminiTile private (
     concurrency = 1)
 
   // regNode := TLFragmenter(4, 4) := TLWidthWidget(8) := TLFragmenter(8, 8) := slaveNode
-  regNode := slaveNode
+  regNode := tlSlaveXbar.node
 
   val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means
     // the scaling factor memory starts 0x8000 + shared mem size,
     // which is usually 0x28000 after cluster base address. this address is
-    // 32K aligned (which matches with its typical size 32K).
+    // 32K aligned.
     val scalingFacBaseAddr = gemminiParams.slaveAddress + 0x5000
+
     require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
-    require(isPow2(sfm.lineSizeInBytes), "scaling fac line size must be power of 2")
+    require(isPow2(sfm.sramLineSizeInBytes), "scaling fac line size must be power of 2")
+    require(isPow2(sfm.logicalLineSizeInBytes), "scaling fac line size must be power of 2")
+
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
         address = Seq(AddressSet(scalingFacBaseAddr, sfm.sizeInBytes - 1)),
         fifoId = Some(0),
         supports = TLMasterToSlaveTransferSizes(
-          // there's no get support because the scaling factor memory is
+          // there's no real get support because the scaling factor memory is
           // write-only from the control bus
-          putFull = TransferSizes(1, sfm.lineSizeInBytes),
-          putPartial = TransferSizes(1, sfm.lineSizeInBytes),
+          get = TransferSizes(1, sfm.sramLineSizeInBytes),
+          putFull = TransferSizes(1, sfm.sramLineSizeInBytes),
+          putPartial = TransferSizes(1, sfm.sramLineSizeInBytes),
         )
       )),
-      beatBytes = sfm.lineSizeInBytes,
+      beatBytes = sfm.sramLineSizeInBytes,
     )))
   }
-  // no fragmentation here, double bandwidth if writing from rocket
-  scalingFacNode.foreach(_ := TLWidthWidget(8) := slaveNode)
+  scalingFacNode.foreach(_ := TLWidthWidget(8) := tlSlaveXbar.node)
 
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 
@@ -215,13 +181,27 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // scaling factor
   outer.scalingFacNode.foreach { scalingFacNode =>
+    val conf = outer.gemminiParams.scalingFactorMem.get
     val (node, edge) = scalingFacNode.in.head
-    when (node.a.fire) {
-      val writeAddr = node.a.bits.address
-      val writeData = node.a.bits.data
-      val writeEn = true.B
-    }
+
+    val wen = WireInit(node.a.fire)
+    val writeData = WireInit(node.a.bits.data)
+
+    val writeFullAddr = node.a.bits.address(conf.addrBits - 1, 0)
+    val lineAddr = WireInit(writeFullAddr(conf.addrBits - 1, conf.lineOffsetBits))
+
+    val sramRowAddr = WireInit(lineAddr(conf.addrBits - conf.lineOffsetBits - 1, conf.bankSelectBits))
+    val bankSelect = WireInit(lineAddr(conf.bankSelectBits - 1, 0))
+
+    Seq(wen, writeData, lineAddr, sramRowAddr, bankSelect).foreach(dontTouch(_))
+
     node.a.ready := node.d.ready
+    node.d.valid := node.a.valid
+    node.d.bits := edge.AccessAck(node.a.bits)
+
+    require(node.params.dataBits == conf.sramLineSizeInBytes * 8)
+    assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
+    assert(!node.a.valid || (node.a.bits.size === 3.U))
   }
 
 
