@@ -210,10 +210,13 @@ the CPU fails to schedule work on the SIMT cores.
 
 ![Fabric Block Diagram](./fig/fabric.svg)
 
-In particular, see the below diagram for detailed diagram of the Control Bus
-fabric subgraph, showcasing the bandwidths at each link.
+### Control Bus
 
 ![CBus Block Diagram](./fig/cbus.svg)
+
+### System Bus
+
+![SBus Block Diagram](./fig/sbus.svg)
 
 <!--
 ### Area Estimation
