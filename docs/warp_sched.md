@@ -117,7 +117,9 @@ Otherwise, a round robin arbiter will pick the next warp.
 ### Control flow changes
 
 Any of the jumps (jal/jalr), branches, splits (but not joins), thread mask
-changes (tmc, pred) will stall the warp until that instruction is committed.
+changes (tmc, pred) will stall the warp until that instruction is committed. CSR
+accesses will also stall the warp (pending: we could make a fast path for
+CSRR instructions).
 
 The predecoder will look for these opcodes and mark the warp as stalled in the
 stall tracker. The stall tracker is a per-warp record that notes the PC of the
@@ -216,12 +218,16 @@ Upon thread mask set to 0, the warp is not unstalled (keep stalled).
 
 ### Warp spawning
 
-When the command processor asks for a new warp to be spawned, the PC of that
-warp is set to the given PC, the stall tracker is updated to unstall that warp,
-and the thread mask value is set to all 1s. All of these are done at the same
-time so the state is synchronized when being scheduled.
+> When the command processor asks for a new warp to be spawned, the PC of that
+> warp is set to the given PC, the stall tracker is updated to unstall that warp,
+> and the thread mask value is set to all 1s. All of these are done at the same
+> time so the state is synchronized when being scheduled.
 
-TODO: do we need to stall CSRs as well?
+In the tapeout version of Muon, Vortex-like `wspawn` instructions are
+responsible for spawning warps. We enumerate warp 0 to warp `count`, and set
+thread mask to be full if it's currently 0, but retain existing nonzero thread
+masks. All PCs of spawned warps are set to the `wspawn` `pc`, irrespective of
+its current active status.
 
 ## SRAM Physical Dimensions
 

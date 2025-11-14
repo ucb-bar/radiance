@@ -87,6 +87,7 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
   val io = IO(new Bundle {
     val enq = Flipped(ibufEnqIO)
     val deq = Vec(muonParams.numWarps, Decoupled(uopT))
+    val lsuReserve = Flipped(reservationIO)
   })
 
   val warpBufs = Seq.tabulate(muonParams.numWarps){ wid =>
@@ -101,12 +102,28 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
     buf.ram.suggestName(s"ibuf")
     buf
   }
-  (warpBufs zip io.deq).zipWithIndex.foreach { case ((b, deq), wid) =>
+  (warpBufs lazyZip io.deq lazyZip io.lsuReserve).zipWithIndex.foreach { case ((b, deq, reserve), wid) =>
     b.io.enq.valid := io.enq.entry.valid && (io.enq.entry.bits.wid === wid.U)
     b.io.enq.bits := io.enq.entry.bits.uop
     assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
 
+    
     deq <> b.io.deq
+
+    /*
+    TODO: need to consider if this is the best point to do lsu reserve
+    val needsLsuReserve = b.io.deq.bits.inst.b(UseLSUPipe)
+    reserve.req.valid := b.io.deq.valid && needsLsuReserve
+
+    val reserveFire = reserve.req.fire
+    when (needsLsuReserve) {
+      deq.valid := reserveFire
+      b.io.deq.ready := reserveFire
+    }
+    */
+
+    reserve.req.valid := false.B
+    reserve.req.bits := DontCare
 
     io.enq.count(wid) := b.io.count
   }

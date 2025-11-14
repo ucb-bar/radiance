@@ -21,20 +21,14 @@ import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
 class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false)  with HasCoreBundles {
-    val reservationIO = IO(Vec(muonParams.numWarps, new Bundle {
-        val req = Flipped(Decoupled(new LsuReservationReq))
-        val resp = Valid(new LsuReservationResp)
-    }))
+    val reserveIO = IO(reservationIO)
     
     val tokenIO = IO(Input(new LsuQueueToken))
 
-    val memoryIO = IO(new Bundle {
-        val dmem = new DataMemIO
-        val smem = new SharedMemIO
-    })
+    val memIO = IO(memoryIO)
     
     val lsu = Module(new LoadStoreUnit)
-    lsu.io.coreReservations <> reservationIO
+    lsu.io.coreReservations <> reserveIO
 
     val reqOp = LsuOpDecoder.decode(inst.opcode, inst.f3)
     lsu.io.coreReq.bits.op := reqOp
@@ -71,7 +65,7 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     wb.bits.rd := firstPacket.destReg
     wb.bits.tmask := Cat(firstPacket.tmask.reverse)
     
-    val packets = lsuRecomposer.io.out.bits.data.asTypeOf(Vec(lsuDerived.numPackets, new LsuResponse))
+    val packets = lsuRecomposer.io.out.bits.data(0).asTypeOf(Vec(lsuDerived.numPackets, new LsuResponse))
     val allData = packets.foldLeft(Seq[UInt]())((d: Seq[UInt], r: LsuResponse) => {
       d ++ r.writebackData.toSeq
     })
@@ -84,8 +78,8 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     lsuAdapter.io.lsu.shmemReq :<>= lsu.io.shmemReq
     lsu.io.shmemResp :<>= lsuAdapter.io.lsu.shmemResp
 
-    lsuAdapter.io.core.dmem <> memoryIO.dmem
-    lsuAdapter.io.core.smem <> memoryIO.smem
+    lsuAdapter.io.core.dmem <> memIO.dmem
+    lsuAdapter.io.core.smem <> memIO.smem
 }
 
 object LsuOpDecoder {
