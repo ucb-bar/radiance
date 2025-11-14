@@ -925,11 +925,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     // TODO: need 2R1W (read for writeback tmask, read for tracking packet completion, write on receive operands)
     // is it expensive?
-    val metadataMem = SyncReadMem(totalQueueEntries, new Metadata)
-    val packetValid = SyncReadMem(
+    val metadataMem = Mem(totalQueueEntries, new Metadata)
+    val packetValid = Mem(
         totalQueueEntries, 
         Vec(muonParams.numLanes, Bool()),
-        SyncReadMem.WriteFirst
+        // SyncReadMem.WriteFirst
     )
     val packetValidValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
 

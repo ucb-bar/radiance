@@ -216,7 +216,7 @@ class MuonTile(
     coalLogSize = log2Ceil(coalescedReqWidth),
     wordSizeInBytes = muonParams.core.archLen / 8,
     numOldSrcIds = 1 << lsuSourceIdBits,
-    numNewSrcIds = 1 << lsuSourceIdBits,
+    numNewSrcIds = 1 << 5,
     respQueueDepth = 4,
     sizeEnum = DefaultInFlightTableSizeEnum,
     numCoalReqs = 1,
@@ -226,9 +226,14 @@ class MuonTile(
     TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth) :=
     TLWidthWidget(coalescedReqWidth) :=
     l0dOut
-  val coalXbar = TLXbar(nameSuffix = Some("coal_out_xbar"))
+  val coalXbar = TLXbar(nameSuffix = Some("coal_out_agg_xbar"))
+  val nonCoalXbar = TLXbar(nameSuffix = Some("coal_out_nc_xbar"))
   l0dIn := coalXbar
-  (0 until muonParams.core.numLanes + 1).foreach(_ => coalXbar := coalescer.nexusNode)
+
+  (0 until muonParams.core.numLanes).foreach(_ => nonCoalXbar := coalescer.nexusNode)
+  coalXbar := coalescer.nexusNode
+  coalXbar := TLWidthWidget(muonParams.core.archLen / 8) := nonCoalXbar
+
   lsuNodes.foreach(coalescer.nexusNode := _)
 
   val softResetFinishSlave = SoftResetFinishNode.Slave()
