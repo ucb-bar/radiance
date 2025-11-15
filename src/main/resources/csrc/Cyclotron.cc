@@ -5,45 +5,6 @@
 #include <stdint.h>
 
 extern "C" {
-void cyclotron_trace_rs(
-    uint8_t*  warp_id,
-    uint8_t*  tmask_vec,
-
-    uint32_t* rs1_data,
-    uint32_t* rs2_data,
-    uint32_t* imm_data,
-
-    uint8_t*  rd_addr,
-    uint32_t* rd_data,
-
-    uint8_t*  finished_ptr
-);
-
-void cyclotron_trace(
-    uint8_t*  warp_id,
-    uint8_t*  tmask_vec,
-
-    uint32_t* rs1_data,
-    uint32_t* rs2_data,
-    uint32_t* imm_data,
-
-    uint8_t*  rd_addr,
-    uint32_t* rd_data,
-
-    uint8_t*  finished_ptr
-) {
-    cyclotron_trace_rs(
-        warp_id,
-        tmask_vec,
-        rs1_data,
-        rs2_data,
-        imm_data,
-        rd_addr,
-        rd_data,
-        finished_ptr
-    );
-}
-
 
 void cyclotron_init_rs(int num_lanes);
 void cyclotron_init(int num_lanes) { cyclotron_init_rs(num_lanes); }
