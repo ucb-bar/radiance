@@ -8,12 +8,14 @@ class CollectorRequest(
   val numPorts: Int,
   val isWrite: Boolean
 )(implicit p: Parameters) extends CoreBundle()(p) {
+  val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
   val regs = Vec(numPorts, new Bundle {
     val enable = Bool()
     val pReg = pRegT
     val data = Option.when(isWrite)(Vec(numLanes, regDataT))
     // TODO: tmask
   })
+  val rsEntryId = UInt(rsEntryIdWidth.W)
 
   def anyEnabled(): Bool = {
     regs.map(_.enable).reduce(_ || _)
@@ -78,9 +80,11 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
     val readData = new CollectorOperandRead
   })
 
+  def vecRegDataT = Vec(numLanes, regDataT)
+  val vecZeros = 0.U.asTypeOf(vecRegDataT)
   val rfBanks = Seq.fill(3)(Seq.fill(muonParams.numRegBanks)(SRAM(
     size = muonParams.numPhysRegs / muonParams.numRegBanks,
-    tpe = Vec(numLanes, regDataT),
+    tpe = vecRegDataT,
     numReadPorts = 1,
     numWritePorts = 1,
     numReadwritePorts = 0
@@ -92,34 +96,48 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   def regBankAddr(r: UInt): UInt = r(bankAddrWidth - 1, 0)
   def regBankId(r: UInt): UInt   = r(r.getWidth - 1, bankAddrWidth)
 
-  // PReg #s and bank IDs serving the current response.  Used at accessing
-  // collector banks at issue time.
-  val respBankIds = Seq.fill(3)(WireDefault(0.U(bankIdWidth.W)))
-  val respPRegs = Seq.fill(3)(WireDefault(0.U.asTypeOf(pRegT)))
+  // collector bank entry allocation
+  //
+  // only one entry for DuplicatedCollector
+  val allocTable = RegInit(0.U.asTypeOf(new CollectorAllocTableEntry))
+  // if readReq is requesting partial ops on the already-registered RS row, we
+  // should admit it
+  val allocInUse = allocTable.valid && (allocTable.rsEntryId =/= io.readReq.bits.rsEntryId)
+  val allocFreedNow = WireDefault(false.B) // set later
+  io.readReq.ready := !allocInUse || allocFreedNow
+
+  val rfBankOuts = WireDefault(VecInit.fill(3)(0.U.asTypeOf(vecRegDataT)))
+  val rfBankOutEns = WireDefault(VecInit.fill(3)(false.B))
+  dontTouch(rfBankOuts)
+  dontTouch(rfBankOutEns)
 
   // read port
-  // duplicated collector never locks up
-  io.readReq.ready := true.B
   val readValid = io.readReq.valid
   val readEnables = io.readReq.bits.regs.map(_.enable)
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
-  (readEnables lazyZip (readPRegs zip respPRegs) lazyZip io.readResp.ports lazyZip (rfBanks zip respBankIds))
-    .foreach { case (en, (pReg, respPReg), respPort, (banks, respBankId)) =>
-      val bankReads = VecInit(banks.map(_.readPorts.head))
+  (readEnables lazyZip readPRegs lazyZip io.readResp.ports
+    lazyZip (rfBanks lazyZip rfBankOuts lazyZip rfBankOutEns))
+    .foreach { case (en, pReg, respPort, (banks, bankOut, bankOutEn)) =>
+      val bankPorts = VecInit(banks.map(_.readPorts.head))
       val bankId = regBankId(pReg)
+      val nextBankId = RegNext(bankId, 0.U)
+      val nextPReg = RegNext(pReg, 0.U)
 
       // request
-      bankReads.foreach(_.enable := false.B)
-      bankReads(bankId).enable := readValid && en
-      bankReads.foreach(_.address := regBankAddr(pReg))
+      bankPorts.foreach(_.enable := false.B)
+      val opEn = readValid && en
+      bankPorts(bankId).enable := opEn && (pReg =/= 0.U)
+      bankPorts.foreach(_.address := regBankAddr(pReg))
+
+      bankOut := Mux(nextPReg =/= 0.U,
+                     VecInit(bankPorts.map(_.data))(nextBankId),
+                     vecZeros)
+      // also register zeros to the collector banks
+      bankOutEn := RegNext(opEn, false.B)
 
       // response: 1 cycle latency
-      respPReg := RegNext(pReg, 0.U)
-      respBankId := RegNext(bankId, 0.U)
-      respPort.valid := RegNext(en, false.B)
+      respPort.valid := bankOutEn
       respPort.bits.collEntry := 0.U // duplicated collector has no collector entry
-
-      // data is served by io.readData
     }
 
   // write port
@@ -128,6 +146,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   val writeEnable = io.writeReq.valid && io.writeReq.bits.regs.head.enable
   val writePReg = io.writeReq.bits.regs.head.pReg
   val writeData = io.writeReq.bits.regs.head.data.get
+  // write to all of rs1/2/3 banks
   rfBanks.foreach { case banks =>
     val bankWrites = VecInit(banks.map(_.writePorts.head))
     bankWrites.foreach { b =>
@@ -141,17 +160,31 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   io.writeResp.ports.head.valid := RegNext(writeEnable)
   io.writeResp.ports.head.bits.collEntry := 0.U // duplicated collector has no collector entry
 
-  // operand serve
-  //
-  // DuplicatedCollector doesn't have separate collector banks; SRAM output
-  // ports directly drive the data.  The RS must ensure to align issue and SRAM
-  // read.
-  (io.readData.regs zip (rfBanks lazyZip respPRegs lazyZip respBankIds))
-    .foreach { case (port, (banks, pReg, bankId)) =>
-      val zeros = VecInit.fill(numLanes)(0.U.asTypeOf(regDataT))
-      val bankReads = banks.map(_.readPorts.head)
-      val bankOuts = VecInit(bankReads.map(_.data))(bankId)
-      val bankEnable = port.enable && (pReg =/= 0.U)
-      port.data := Mux(bankEnable, bankOuts, zeros)
-    }
+  // collector banks
+
+  val collBanks = Seq.fill(3)(Module(new Queue(vecRegDataT, entries = 1, pipe = true, flow = false)))
+  allocFreedNow := io.readData.regs.map(_.enable).reduce(_ || _)
+
+  // write
+  (collBanks lazyZip rfBankOutEns lazyZip rfBankOuts).foreach { case (q, en, rfOut) =>
+    assert(!en || q.io.enq.ready,
+           "collector: allocation did not correctly ensure collector banks are enq-ready")
+    q.io.enq.valid := en
+    q.io.enq.bits := Mux(en, rfOut, vecZeros)
+  }
+
+  // read
+  (io.readData.regs zip collBanks).foreach { case (port, q) =>
+    assert(port.collEntry === 0.U)
+    q.io.deq.ready := port.enable
+    port.data := q.io.deq.bits
+  }
+}
+
+class CollectorAllocTableEntry(implicit p: Parameters) extends CoreBundle()(p) {
+  val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
+  val collEntryIdWidth = log2Up(muonParams.numCollectorEntries)
+  val valid = Bool()
+  val rsEntryId = UInt(rsEntryIdWidth.W)
+  val collEntryId = UInt(collEntryIdWidth.W)
 }

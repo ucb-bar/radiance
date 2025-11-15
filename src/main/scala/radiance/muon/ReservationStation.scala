@@ -65,6 +65,7 @@ class ReservationStation(
   val collFiredTable = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
+  val collPriorityTable = Wire(Vec(numEntries, Bool()))
 
   (0 until numEntries).map { i =>
     val uop = uopTable(i)
@@ -112,20 +113,38 @@ class ReservationStation(
     val needCollectOps = VecInit((opReadys zip busys)
       .map { case (r, b) => !r && !b })
     val needCollect = valid && needCollectOps.reduce(_ || _)
-    (needCollect, needCollectOps)
+    // is this uop RAW-cleared and only waiting for collection?
+    val priority = needCollect && (needCollectOps === VecInit(opReadys.map(!_)))
+    (needCollect, needCollectOps, priority)
   }
   // select a single entry for collection
   // TODO: @perf: currently a simple priority encoder; might introduce fairness
   // problem
   val collBitvec = WireDefault(VecInit(needCollects.map(_._1)))
+  collPriorityTable := VecInit(needCollects.map(_._3))
   dontTouch(collBitvec)
-  val collRow = PriorityEncoder(collBitvec)
+  dontTouch(collPriorityTable)
+
+  // Prioritize rows that has no RAW-busy ops, and only needs collection as the
+  // last step before issue.  Otherwise, rows with partial ops can take up
+  // valuable space in the collector banks.
+  //
+  // NOTE: It's debatable whether this logic should be in the collector or not.
+  // But for that, we need some kind of bookkeeping in the collector for the
+  // partial-collect uops, which is what the collector banks are meant for,
+  // which are expensive.
+  val anyPriority = collPriorityTable.reduce(_ || _)
+  val firstPriorityRow = PriorityEncoder(collPriorityTable)
+  val firstNeedRow = PriorityEncoder(collBitvec)
+  val collRow = Mux(anyPriority, firstPriorityRow, firstNeedRow)
   dontTouch(collRow)
+
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
   val collUop = uopTable(collRow)
   val collPC = WireDefault(collUop.pc)
   dontTouch(collPC)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
+
   // this is clunky, but Mem does not support partial-field updates
   val newCollPtr = WireDefault(collPtrTable(collRow))
   assert(collOpNeed.length == io.collector.readReq.bits.regs.length)
@@ -138,6 +157,7 @@ class ReservationStation(
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
     }
+  io.collector.readReq.bits.rsEntryId := collRow
   io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
   when (io.collector.readReq.fire) {
     val fired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
@@ -205,6 +225,9 @@ class ReservationStation(
 
     // TODO: Consider same-cycle writeback for busyTable
 
+    // NOTE: cannot bypass same-cycle collector response for allCollected, since
+    // the collected data are visible at the readData port 1 cycle after the
+    // response.
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
     val bundle = Wire(Decoupled(issueArbBundleT))
@@ -231,10 +254,10 @@ class ReservationStation(
   io.issue.bits := issueScheduler.io.out.bits.uop
   issueScheduler.io.out.ready := io.issue.ready
 
-  // drive the operands port upon issue fire
+  // drive the operands port upon issue via collector's combinational readData
   val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
   io.collector.readData.regs.zipWithIndex.foreach { case (port, rsi) =>
-    port.enable := hasOpTable(issuedId)(rsi)
+    port.enable := io.issue.valid && hasOpTable(issuedId)(rsi)
     port.collEntry := collPtrTable(issuedId)(rsi)
     // port.data input is not used
   }
@@ -246,7 +269,7 @@ class ReservationStation(
     traceIO.bits.pc := uopTable(issuedId).pc
     (traceIO.bits.regs zip io.collector.readData.regs)
       .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
-        tReg.enable := hasOpTable(issuedId)(rsi)
+        tReg.enable := cReg.enable
         tReg.address := rsTable(issuedId)(rsi)
         tReg.data := cReg.data
       }
@@ -324,6 +347,7 @@ class ReservationStation(
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
+               cf"collPriority:${collPriorityTable(i)} | " +
                cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
                cf"\n")
       }
