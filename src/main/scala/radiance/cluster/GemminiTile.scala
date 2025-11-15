@@ -6,7 +6,7 @@ package radiance.cluster
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources._
@@ -19,6 +19,7 @@ import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
+import radiance.memory.SourceGenerator
 import radiance.subsystem.{GPUMemParams, GPUMemory, PhysicalCoreParams}
 
 object GemminiCoreParams extends PhysicalCoreParams {
@@ -35,20 +36,36 @@ case class GemminiScalingFactorMemConfig(
   def bankSelectBits = log2Ceil(logicalLineSizeInBytes / sramLineSizeInBytes)
 }
 
+case class GemminiRequantizerConfig(
+  baseAddr: BigInt,
+  numInputLanes: Int = 16,
+  numOutputLanes: Int = 32,
+  gpuMaxFactor: Int = 2, // maximum fp16->fp8 for gpus, determines address space size
+  gpuWordSize: Int = 4,
+  inputBits: Int = 16,
+  minOutputBits: Int = 4,
+  maxOutputBits: Int = 8,
+  outputIdBits: Int = 3,
+)
+
 object RequantizerDataType extends ChiselEnum {
   val FP4, FP6, FP8 = Value
+
+  def widthBits(x: Type): UInt = {
+    Mux(x === FP4, 4.U(4.W), 8.U(4.W))
+  }
 }
 
-class RequantizerInBundle(numLanes: Int) extends Bundle {
-  val data = Vec(numLanes, UInt(16.W))
+class RequantizerInBundle(numLanes: Int, dataWidth: Int = 16) extends Bundle {
+  val data = Vec(numLanes, UInt(dataWidth.W))
   val address = UInt(32.W) // in bytes
-  val dataType = RequantizerDataType
+  val dataType = RequantizerDataType()
 }
 
-class RequantizerOutBundle(numLanes: Int) extends Bundle {
-  val data = UInt((numLanes * 8).W) // maximum data type is fp8 (1 byte/lane), valid from lsb
+class RequantizerOutBundle(numLanes: Int, dataWidth: Int = 8) extends Bundle {
+  val data = UInt((numLanes * dataWidth).W) // no active byte lanes (valid from lsb)
   val address = UInt(32.W)
-  val dataType = RequantizerDataType // data type determines response size
+  val dataType = RequantizerDataType() // data type determines response size
 }
 
 case class GemminiTileParams(
@@ -57,6 +74,7 @@ case class GemminiTileParams(
     tileSize: Either[(Int, Int, Int), Int] = Right(4),
     slaveAddress: BigInt,
     scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
+    requantizer: Option[GemminiRequantizerConfig] = None,
     hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
@@ -175,6 +193,43 @@ class GemminiTile private (
   }
   scalingFacNode.foreach(_ := TLWidthWidget(8) := tlSlaveXbar.node)
 
+  val requantizerMuonManagers = gemminiParams.requantizer.map { q =>
+    val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
+      .asInstanceOf[CapacityInKilobytes].kilobytes * 1024
+    require(isPow2(gemminiSpadSizeBytes))
+    Seq.tabulate(q.numInputLanes) { _ =>
+      TLManagerNode(Seq(TLSlavePortParameters.v1(
+        managers = Seq(TLSlaveParameters.v2(
+          address = Seq(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1)),
+          fifoId = Some(0),
+          // also real no get support
+          supports = TLMasterToSlaveTransferSizes(
+            get = TransferSizes(1, q.gpuWordSize),
+            putFull = TransferSizes(1, q.gpuWordSize),
+            putPartial = TransferSizes(1, q.gpuWordSize),
+          )
+        )),
+        beatBytes = q.gpuWordSize,
+      )))
+    }
+  }
+
+  // width is max output width & num output lanes
+  val requantizerSmemClient = gemminiParams.requantizer.map { q =>
+    TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v2(
+        name = "requantizer_out",
+        sourceId = IdRange(0, 1 << q.outputIdBits),
+        emits = TLMasterToSlaveTransferSizes(
+          putFull = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
+            q.numOutputLanes * q.maxOutputBits / 8),
+          putPartial = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
+            q.numOutputLanes * q.maxOutputBits / 8)
+        )
+      ))
+    )))
+  }
+
   // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
 
   override lazy val module = new GemminiTileModuleImp(this)
@@ -221,12 +276,78 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // requantizer
-  val requantizerIO = IO(new Bundle {
-    val in = Input(new RequantizerInBundle(16))
-    val out = Output(new RequantizerOutBundle(16))
-  })
+  outer.gemminiParams.requantizer.foreach { q =>
+    val in = WireInit(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
+    val out = WireInit(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
-  requantizerIO.out := DontCare
+    { // input
+      val nodesAndEdges = outer.requantizerMuonManagers.get.map(_.in.head)
+      val (nodes, edges) = (nodesAndEdges.map(_._1), nodesAndEdges.map(_._2))
+      val head = nodes.head
+
+      nodes.zipWithIndex.foreach { case (x, i) =>
+        x.d.valid := x.a.valid
+        x.d.bits := edges.head.AccessAck(x.a.bits)
+        x.a.ready := VecInit(nodes.map(_.d.ready)).asUInt.orR && in.ready
+
+        assert(x.a.valid === head.a.valid, "non-full access")
+        assert(!x.a.valid || x.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
+        assert(!x.a.valid || (x.a.bits.size === 1.U), "gpu write size should be 2 bytes")
+        assert(!x.a.valid || (x.a.bits.address === head.a.bits.address + (i * 2).U),
+          "unexpected address strides")
+      }
+      assert(!head.a.valid || !(head.a.bits.address & (q.numInputLanes * q.gpuWordSize - 1).U).orR,
+        "head address unaligned")
+
+      in.valid := head.a.valid
+      in.bits.dataType := RequantizerDataType.FP8
+      in.bits.address := ((nodes.head.a.bits.address - q.baseAddr.U) >> 1).asTypeOf(in.bits.address) // hardcoded 16->8
+      in.bits.data := VecInit(nodes.map { x =>
+        Mux(x.a.bits.mask(0),
+          x.a.bits.data(15, 0),
+          x.a.bits.data(31, 16),
+        ).asTypeOf(UInt(16.W))
+      }).asUInt
+    }
+
+    { // output
+      val (node, edge) = outer.requantizerSmemClient.get.out.head
+      node.a.valid := out.valid
+
+      // source
+      val sourceGen = Module(new SourceGenerator(q.outputIdBits))
+      sourceGen.io.reclaim.valid := node.d.fire
+      sourceGen.io.reclaim.bits := node.d.bits.source
+      sourceGen.io.gen := node.a.fire
+
+      out.ready := node.a.ready && sourceGen.io.id.valid
+
+      // data
+      val isFP4 = out.bits.dataType === RequantizerDataType.FP4
+      val fullWidth = q.numOutputLanes
+      val halfWidth = q.numOutputLanes / 2
+      node.a.bits := edge.Put(
+        fromSource = sourceGen.io.id.bits,
+        toAddress = out.bits.address,
+        lgSize = Mux(isFP4,
+          log2Ceil(halfWidth).U, // half byte per lane
+          log2Ceil(q.numOutputLanes).U // fp6, fp8: 1 byte per lane
+        ),
+        data = Mux(isFP4,
+          Mux(
+            out.bits.address(log2Ceil(halfWidth)), // not aligned to full line
+            (out.bits.data(halfWidth - 1, 0) << halfWidth).asTypeOf(UInt(fullWidth.W)),
+            out.bits.data
+          ),
+          out.bits.data
+        )
+      )._2
+
+      node.d.ready := true.B
+    }
+
+    out := DontCare // TODO connect requantizer module from Gemmini
+  }
 
   // cisc
 

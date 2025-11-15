@@ -357,7 +357,8 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         sizeInBytes = 16 << 10,
         sramLineSizeInBytes = 256 / 8,
         logicalLineSizeInBytes = 512 / 8,
-      ))
+      )),
+
     )
     Seq(GemminiTileAttachParams(
       tileParams,
