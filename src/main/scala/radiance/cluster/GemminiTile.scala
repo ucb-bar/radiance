@@ -35,6 +35,22 @@ case class GemminiScalingFactorMemConfig(
   def bankSelectBits = log2Ceil(logicalLineSizeInBytes / sramLineSizeInBytes)
 }
 
+object RequantizerDataType extends ChiselEnum {
+  val FP4, FP6, FP8 = Value
+}
+
+class RequantizerInBundle(numLanes: Int) extends Bundle {
+  val data = Vec(numLanes, UInt(16.W))
+  val address = UInt(32.W) // in bytes
+  val dataType = RequantizerDataType
+}
+
+class RequantizerOutBundle(numLanes: Int) extends Bundle {
+  val data = UInt((numLanes * 8).W) // maximum data type is fp8 (1 byte/lane), valid from lsb
+  val address = UInt(32.W)
+  val dataType = RequantizerDataType // data type determines response size
+}
+
 case class GemminiTileParams(
     tileId: Int = 0,
     gemminiConfig: GemminiArrayConfig[Float, Float, Float],
@@ -204,6 +220,13 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     assert(!node.a.valid || (node.a.bits.size === 3.U))
   }
 
+  // requantizer
+  val requantizerIO = IO(new Bundle {
+    val in = Input(new RequantizerInBundle(16))
+    val out = Output(new RequantizerOutBundle(16))
+  })
+
+  requantizerIO.out := DontCare
 
   // cisc
 
