@@ -85,13 +85,16 @@ class Backend(
     // on bypass, manage collector entirely after issue
     val haves = Seq(HasRs1, HasRs2, HasRs3)
     val regs = Seq(Rs1, Rs2, Rs3)
-    (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
-      val pReg = issued.bits.uop.inst(reg)
-      collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
-      collReq.pReg := pReg
-    }
-    collector.io.readData.regs.foreach(_.enable := true.B)
-    collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
+    (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
+      .foreach { case (has, reg, readData, collReq) =>
+        val pReg = issued.bits.uop.inst(reg)
+        collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
+        collReq.pReg := pReg
+        readData.enable := issued.valid && issued.bits.uop.inst.b(has)
+        readData.pReg.get := pReg
+        readData.collEntry := DontCare
+      }
+    collector.io.readReq.bits.rsEntryId := DontCare
 
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
@@ -191,6 +194,7 @@ class Backend(
   collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
   collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
+  collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this
   collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
   collector.io.writeResp.ports.foreach(_.ready := true.B)
