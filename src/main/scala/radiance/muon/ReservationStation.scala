@@ -110,8 +110,9 @@ class ReservationStation(
     val valid = validTable(i)
     val opReadys = opReadyTable(i)
     val busys = busyTable(i)
-    val needCollectOps = VecInit((opReadys zip busys)
-      .map { case (r, b) => !r && !b })
+    val collFired = collFiredTable(i)
+    val needCollectOps = VecInit((opReadys zip (busys zip collFired))
+      .map { case (r, (b, cf)) => !r && !b && !cf})
     val needCollect = valid && needCollectOps.reduce(_ || _)
     // is this uop RAW-cleared and only waiting for collection?
     val priority = needCollect && (needCollectOps === VecInit(opReadys.map(!_)))
@@ -152,7 +153,7 @@ class ReservationStation(
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
     .zipWithIndex.foreach { case ((need, pReg, collPort), rsi) =>
       assert(collPort.data.isEmpty)
-      collPort.enable := need && !collFiredTable(collRow)(rsi)
+      collPort.enable := need
       collPort.pReg := Mux(need, pReg, 0.U)
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
@@ -164,6 +165,8 @@ class ReservationStation(
                 .map { case (a,b) => a || b }
     collFiredTable(collRow) := fired
     collPtrTable(collRow) := newCollPtr
+
+    printf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:

@@ -102,9 +102,19 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   val allocTable = RegInit(0.U.asTypeOf(new CollectorAllocTableEntry))
   // if readReq is requesting partial ops on the already-registered RS row, we
   // should admit it
-  val allocInUse = allocTable.valid && (allocTable.rsEntryId =/= io.readReq.bits.rsEntryId)
+  val allocInUse = WireDefault(false.B) // set later
+  allocInUse := allocTable.valid && (allocTable.rsEntryId =/= io.readReq.bits.rsEntryId)
   val allocFreedNow = WireDefault(false.B) // set later
   io.readReq.ready := !allocInUse || allocFreedNow
+  dontTouch(allocInUse)
+  dontTouch(allocFreedNow)
+
+  when (io.readReq.fire) {
+    allocTable.valid := true.B
+    allocTable.rsEntryId := io.readReq.bits.rsEntryId
+  }.elsewhen (allocFreedNow) {
+    allocTable.valid := false.B
+  }
 
   val rfBankOuts = WireDefault(VecInit.fill(3)(0.U.asTypeOf(vecRegDataT)))
   val rfBankOutEns = WireDefault(VecInit.fill(3)(false.B))
@@ -112,7 +122,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   dontTouch(rfBankOutEns)
 
   // read port
-  val readValid = io.readReq.valid
+  // drive SRAM read ports
   val readEnables = io.readReq.bits.regs.map(_.enable)
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
   (readEnables lazyZip readPRegs lazyZip io.readResp.ports
@@ -125,7 +135,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
 
       // request
       bankPorts.foreach(_.enable := false.B)
-      val opEn = readValid && en
+      val opEn = io.readReq.fire && en
       bankPorts(bankId).enable := opEn && (pReg =/= 0.U)
       bankPorts.foreach(_.address := regBankAddr(pReg))
 
@@ -143,7 +153,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   // write port
   require(io.writeReq.bits.regs.length == 1, "collector: only single-writeback per cycle supported")
   io.writeReq.ready := true.B
-  val writeEnable = io.writeReq.valid && io.writeReq.bits.regs.head.enable
+  val writeEnable = io.writeReq.fire && io.writeReq.bits.regs.head.enable
   val writePReg = io.writeReq.bits.regs.head.pReg
   val writeData = io.writeReq.bits.regs.head.data.get
   // write to all of rs1/2/3 banks
@@ -164,6 +174,11 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
 
   val collBanks = Seq.fill(3)(Module(new Queue(vecRegDataT, entries = 1, pipe = true, flow = false)))
   allocFreedNow := io.readData.regs.map(_.enable).reduce(_ || _)
+
+  collBanks.foreach(q => dontTouch(q.io.enq.valid))
+  collBanks.foreach(q => dontTouch(q.io.enq.ready))
+  collBanks.foreach(q => dontTouch(q.io.deq.valid))
+  collBanks.foreach(q => dontTouch(q.io.deq.ready))
 
   // write
   (collBanks lazyZip rfBankOutEns lazyZip rfBankOuts).foreach { case (q, en, rfOut) =>
