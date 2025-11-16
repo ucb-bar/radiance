@@ -48,6 +48,10 @@ case class GemminiRequantizerConfig(
   outputIdBits: Int = 3,
 )
 
+case class GemminiLUTConfig(
+  numBits: Int = 96
+)
+
 object RequantizerDataType extends ChiselEnum {
   val FP4, FP6, FP8 = Value
 
@@ -75,6 +79,7 @@ case class GemminiTileParams(
     slaveAddress: BigInt,
     scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
     requantizer: Option[GemminiRequantizerConfig] = None,
+    lookupTable: Option[GemminiLUTConfig] = None,
     hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
@@ -276,7 +281,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // requantizer
-  outer.gemminiParams.requantizer.foreach { q =>
+  val requantizerIO = outer.gemminiParams.requantizer.map { q =>
     val in = WireInit(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
     val out = WireInit(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
@@ -347,7 +352,12 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     }
 
     out := DontCare // TODO connect requantizer module from Gemmini
+    (in, out)
   }
+
+  // lut
+  val lutIO = outer.gemminiParams.lookupTable.map(c => WireInit(Decoupled(UInt(c.numBits.W))))
+  lutIO.foreach(dontTouch(_))
 
   // cisc
 
@@ -367,29 +377,30 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val mmioStartsLoop = WireInit(false.B)
   val runningLoops = RegInit(0.U(4.W))
 
+  val accCommandQueue = Module(new Queue(UInt(32.W), 4, false, true))
+  accCommandQueue.io.deq.ready := !ciscValid
+
+  when (accCommandQueue.io.enq.fire) {
+    val enqId = accCommandQueue.io.enq.bits(6, 0)
+    startsLoop := VecInit(Seq(0, 1, 2, 9, 10, 12).map { x => enqId === x.U }).asUInt.orR
+  }
+
+  when (accCommandQueue.io.deq.fire) {
+    ciscValid := true.B
+    ciscId := accCommandQueue.io.deq.bits(7, 0)
+    ciscArgs := accCommandQueue.io.deq.bits(31, 8)
+    instCounter.reset()
+  }
+
+  assert(!accCommandQueue.io.enq.valid || accCommandQueue.io.enq.ready, "cisc command queue full")
+
   accSlave match {
     case Some(as) => {
-      val accCommandQueue = Module(new Queue(UInt(32.W), 4, false, true))
       accCommandQueue.io.enq.bits := as.cmd.bits
       accCommandQueue.io.enq.valid := as.cmd.valid
-      accCommandQueue.io.deq.ready := !ciscValid
-      assert(!as.cmd.valid || accCommandQueue.io.enq.ready, "cisc command queue full")
-
-      when (accCommandQueue.io.enq.fire) {
-        val enqId = as.cmd.bits(6, 0)
-        startsLoop := VecInit(Seq(0, 1, 2, 9, 10, 12).map { x => enqId === x.U }).asUInt.orR
-      }
-
-      when (accCommandQueue.io.deq.fire) {
-        ciscValid := true.B
-        ciscId := accCommandQueue.io.deq.bits(7, 0)
-        ciscArgs := accCommandQueue.io.deq.bits(31, 8)
-        instCounter.reset()
-      }
-
       as.status := RegNext(outer.gemmini.module.io.busy).asUInt
     }
-    case None =>
+    case None => // mmio will handle
   }
 
 
@@ -526,7 +537,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     (true.B, runningLoops)
   }
 
-  outer.regNode.regmap(
+  val gemminiBaseMMIO = Seq(
     0x00 -> Seq(RegField.w(32, gemminiCommandReg(_, _))),
     0x10 -> Seq(
       RegField.w(32, gemminiRs1RegLSB),
@@ -536,6 +547,37 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       RegField.w(32, gemminiRs2RegMSB)),
     0x20 -> Seq(RegField.r(32, gemminiBusyReg(_))),
     0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_)))
+  )
+
+  val gemminiCiscMMIO = Option.when(outer.gemminiParams.hasAccSlave) {
+    def gemminiCisc(valid: Bool, bits: UInt): Bool = {
+      accCommandQueue.io.enq.bits := bits
+      accCommandQueue.io.enq.valid := valid
+      true.B
+    }
+    val ciscBits = RegInit(0.U(32.W))
+    0x30 -> Seq(RegField.w(32, ciscBits))
+  }.toSeq
+
+  val gemminiLutMMIO = lutIO.map { io =>
+    require(io.bits.getWidth == 96)
+
+    val lutW0 = RegInit(0.U(32.W))
+    val lutW1 = RegInit(0.U(32.W))
+    def lutW2(valid: Bool, bits: UInt): Bool = {
+      io.valid := valid
+      io.bits := Cat(bits, lutW1, lutW0)
+      io.ready
+    }
+    Seq(
+      0x40 -> Seq(RegField.w(32, lutW0)),
+      0x44 -> Seq(RegField.w(32, lutW1)),
+      0x48 -> Seq(RegField.w(32, lutW2(_, _))),
+    )
+  }.toSeq.flatten
+
+  outer.regNode.regmap(
+    (gemminiBaseMMIO ++ gemminiCiscMMIO ++ gemminiLutMMIO):_*
   )
 
   assert(!regValid || gemminiIO.ready)
