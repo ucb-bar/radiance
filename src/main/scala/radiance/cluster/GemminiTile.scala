@@ -549,14 +549,13 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_)))
   )
 
-  val gemminiCiscMMIO = Option.when(outer.gemminiParams.hasAccSlave) {
+  val gemminiCiscMMIO = Option.when(!outer.gemminiParams.hasAccSlave) {
     def gemminiCisc(valid: Bool, bits: UInt): Bool = {
       accCommandQueue.io.enq.bits := bits
       accCommandQueue.io.enq.valid := valid
       true.B
     }
-    val ciscBits = RegInit(0.U(32.W))
-    0x30 -> Seq(RegField.w(32, ciscBits))
+    0x30 -> Seq(RegField.w(32, gemminiCisc(_, _)))
   }.toSeq
 
   val gemminiLutMMIO = lutIO.map { io =>
