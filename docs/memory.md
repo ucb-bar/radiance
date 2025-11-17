@@ -182,13 +182,27 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 | GPU Address    |  Size     | Description                     |
 |----------------|-----------|-------------------------------- |
 | `0x0000_0000`  | `0x20000` | Shared memory cluster local     |
-| `0x0002_0000`  | `0x40000` | Requantized shared memory       |
+| `0x0004_0000`  | `0x40000` | Requantized shared memory       |
 | `0x0008_0000`  |   `0x200` | Core 0 print and perf buffer    |
 | `0x0008_0200`  |   `0x200` | Core 1 print and perf buffer    |
-| `0x0008_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
-| `0x0008_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
-| `0x0008_3200`  |   `0x100` | Cluster local Requantizer MMIO  |
+| `0x0008_4000`  |   `0x100` | Gemmini MMIO                    |
 | `0x0008_8000`  |  `0x4000` | Gemmini scaling factor memory   |
+
+Gemmini MMIO has the following address map:
+
+| Address | Bits | Description       |
+|---------|------|-------------------|
+| `0x00`  |   32 | RoCC instruction  |
+| `0x10`  |   32 | RoCC RS1 LSB      |
+| `0x14`  |   32 | RoCC RS1 MSB      |
+| `0x18`  |   32 | RoCC RS2 LSB      |
+| `0x1c`  |   32 | RoCC RS2 MSB      |
+| `0x20`  |   32 | Busy              |
+| `0x28`  |   32 | Num running loops |
+| `0x30`  |   32 | CISC instruction  |
+| `0x40`  |   32 | LUT word 0        |
+| `0x44`  |   32 | LUT word 1        |
+| `0x48`  |   32 | LUT word 2 (RV)   |
 
 
 GPU to requantizer: fp16 in, fp8 out; addressing scheme: magnify by 2x.
