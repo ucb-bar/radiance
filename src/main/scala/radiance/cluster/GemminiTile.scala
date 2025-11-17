@@ -27,6 +27,7 @@ object GemminiCoreParams extends PhysicalCoreParams {
 }
 
 case class GemminiScalingFactorMemConfig(
+  baseAddr: BigInt,
   sizeInBytes: BigInt = 32 << 10,
   sramLineSizeInBytes: Int = 32,
   logicalLineSizeInBytes: Int = 32,
@@ -73,14 +74,14 @@ class RequantizerOutBundle(numLanes: Int, dataWidth: Int = 8) extends Bundle {
 }
 
 case class GemminiTileParams(
-    tileId: Int = 0,
-    gemminiConfig: GemminiArrayConfig[Float, Float, Float],
-    tileSize: Either[(Int, Int, Int), Int] = Right(4),
-    slaveAddress: BigInt,
-    scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
-    requantizer: Option[GemminiRequantizerConfig] = None,
-    lookupTable: Option[GemminiLUTConfig] = None,
-    hasAccSlave: Boolean = false,
+  tileId: Int = 0,
+  gemminiConfig: GemminiArrayConfig[Float, Float, Float],
+  tileSize: Either[(Int, Int, Int), Int] = Right(4),
+  mmioAddress: BigInt,
+  scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
+  requantizer: Option[GemminiRequantizerConfig] = None,
+  lookupTable: Option[GemminiLUTConfig] = None,
+  hasAccSlave: Boolean = false,
 ) extends InstantiableTileParams[GemminiTile] {
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
       implicit p: Parameters
@@ -162,7 +163,7 @@ class GemminiTile private (
 
   val regDevice = new SimpleDevice(f"gemmini-cmd-reg-$tileId", Seq(s"gemmini-cmd-reg-$tileId"))
   val regNode = TLRegisterNode(
-    address = Seq(AddressSet(gemminiParams.slaveAddress, 0xff)),
+    address = Seq(AddressSet(gemminiParams.mmioAddress, 0xff)),
     device = regDevice,
     beatBytes = 8,
     concurrency = 1)
@@ -175,7 +176,6 @@ class GemminiTile private (
     // the scaling factor memory starts 0x8000 + shared mem size,
     // which is usually 0x28000 after cluster base address. this address is
     // 32K aligned.
-    val scalingFacBaseAddr = gemminiParams.slaveAddress + 0x5000
 
     require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
     require(isPow2(sfm.sramLineSizeInBytes), "scaling fac line size must be power of 2")
@@ -183,7 +183,7 @@ class GemminiTile private (
 
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
-        address = Seq(AddressSet(scalingFacBaseAddr, sfm.sizeInBytes - 1)),
+        address = Seq(AddressSet(sfm.baseAddr, sfm.sizeInBytes - 1)),
         fifoId = Some(0),
         supports = TLMasterToSlaveTransferSizes(
           // there's no real get support because the scaling factor memory is
@@ -356,7 +356,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // lut
-  val lutIO = outer.gemminiParams.lookupTable.map(c => WireInit(Decoupled(UInt(c.numBits.W))))
+  val lutIO = outer.gemminiParams.lookupTable.map(c => Wire(Decoupled(UInt(c.numBits.W))))
   lutIO.foreach(dontTouch(_))
 
   // cisc
