@@ -249,16 +249,12 @@ class SourceGenerator[T <: Data](
     metadata: Option[T] = None,
     ignoreInUse: Boolean = false
 ) extends Module {
-  def getMetadataType = metadata match {
-    case Some(gen) => gen.cloneType
-    case None      => UInt(0.W)
-  }
   val io = IO(new Bundle {
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
-    val meta = Input(getMetadataType)
-    val peek = Output(getMetadataType)
+    val meta = metadata.map(Input(_))
+    val peek = metadata.map(Output(_))
     val inflight = Output(Bool())
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
@@ -269,7 +265,7 @@ class SourceGenerator[T <: Data](
 
   val numSourceId = 1 << sourceWidth
   val occupancyTable = Mem(numSourceId, Bool())
-  val metadataTable = Mem(numSourceId, getMetadataType)
+  val metadataTable = metadata.map(Mem(numSourceId, _))
   
   when(reset.asBool) {
     (0 until numSourceId).foreach { occupancyTable(_) := false.B }
@@ -285,8 +281,8 @@ class SourceGenerator[T <: Data](
   when(io.gen && io.id.valid) {
     when (!io.reclaim.valid || io.reclaim.bits =/= io.id.bits) {
       occupancyTable(io.id.bits) := true.B
-      if (metadata.isDefined) {
-        metadataTable(io.id.bits) := io.meta
+      metadataTable.foreach { table =>
+        table(io.id.bits) := io.meta.get
       }
     }
   }
@@ -294,9 +290,10 @@ class SourceGenerator[T <: Data](
   when(io.reclaim.valid) {
     occupancyTable(io.reclaim.bits) := false.B
   }
-  
-  io.peek := {
-    if (metadata.isDefined) metadataTable(io.reclaim.bits) else 0.U
+
+
+  metadataTable.foreach { table =>
+    io.peek.get := table(io.reclaim.bits)
   }
 
   when(io.gen && io.id.valid) {
@@ -395,7 +392,6 @@ class CoalescerSourceGen(
   sourceGen.io.gen := io.outReq.fire
   sourceGen.io.reclaim.valid := io.outResp.fire
   sourceGen.io.reclaim.bits := io.outResp.bits.source
-  sourceGen.io.meta := DontCare
 
   io.outReq <> io.inReq
   io.inResp <> io.outResp
@@ -937,7 +933,7 @@ class MemTraceDriverImp(
       // mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
       wordData := Mux(subword, req.bits.data << (offsetInWord * 8.U), req.bits.data)
       val wordAlignedAddress =
-        req.bits.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
+        req.bits.address & (~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)).asUInt
       val wordAlignedSize = Mux(subword, 2.U, req.bits.size)
 
       val sourceGen = sourceGens(lane)
@@ -945,7 +941,6 @@ class MemTraceDriverImp(
       // assert(sourceGen.io.id.valid)
       sourceGen.io.reclaim.valid := tlOut.d.fire
       sourceGen.io.reclaim.bits := tlOut.d.bits.source
-      sourceGen.io.meta := DontCare
 
       val (plegal, pbits) = edge.Put(
         fromSource = sourceGen.io.id.bits,
@@ -1160,16 +1155,16 @@ class MemTraceLogger(
         // where HIGH bits in the mask may not be contiguous.
         when(tlIn.a.valid) { // && tlIn.a.bits.opcode === TLMessages.PutFullData
           assert(
-            PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
+            PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size).asUInt,
             "mask HIGH popcount do not match the TL size. " +
               "Partial masks are not allowed for PutFull"
           )
         }
         val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
         val dataW = tlIn.params.dataBits
-        val sizeInBits = (1.U(1.W) << tlIn.a.bits.size) << 3.U
-        val mask = ~(~(0.U(dataW.W)) << sizeInBits)
-        req.bits.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
+        val sizeInBits = ((1.U(1.W) << tlIn.a.bits.size) << 3.U).asUInt
+        val mask = (~(~(0.U(dataW.W)) << sizeInBits)).asUInt
+        req.bits.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U)).asUInt
         // when (req.bits.valid) {
         //   printf("trailingZerosInMask=%d, mask=%x, data=%x\n", trailingZerosInMask, mask, req.bits.data)
         // }
@@ -1204,13 +1199,13 @@ class MemTraceLogger(
       }
     val reqBytesThisCycle =
       laneReqs
-        .map { l => Mux(l.valid, 1.U(64.W) << l.bits.size, 0.U(64.W)) }
+        .map { l => Mux(l.valid, (1.U(64.W) << l.bits.size).asTypeOf(UInt(64.W)), 0.U(64.W)) }
         .reduce { (b0, b1) =>
           b0 + b1
         }
     val respBytesThisCycle =
       laneResps
-        .map { l => Mux(l.valid, 1.U(64.W) << l.bits.size, 0.U(64.W)) }
+        .map { l => Mux(l.valid, (1.U(64.W) << l.bits.size).asTypeOf(UInt(64.W)), 0.U(64.W)) }
         .reduce { (b0, b1) =>
           b0 + b1
         }
@@ -1430,14 +1425,13 @@ class MemFuzzerImp(
       // mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
       wordData := Mux(subword, req.bits.data << (offsetInWord * 8.U), req.bits.data)
       val wordAlignedAddress =
-        req.bits.address & ~((1 << log2Ceil(wordSizeInBytes)) - 1).U(addrW.W)
+        req.bits.address & (~((1 << log2Ceil(wordSizeInBytes)) - 1).U(addrW.W)).asUInt
       val wordAlignedSize = Mux(subword, 2.U, req.bits.size)
 
       val sourceGen = sourceGens(lane)
       sourceGen.io.gen := tlOut.a.fire
       sourceGen.io.reclaim.valid := tlOut.d.fire
       sourceGen.io.reclaim.bits := tlOut.d.bits.source
-      sourceGen.io.meta := DontCare
 
       val (plegal, pbits) = edge.Put(
         fromSource = sourceGen.io.id.bits,

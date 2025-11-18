@@ -257,7 +257,7 @@ class TensorCoreDecoupled(
       ))
 
       sourceGen.io.gen := req.fire
-      sourceGen.io.meta := (if (i == 0) tagA else tagB)
+      sourceGen.io.meta.get := (if (i == 0) tagA else tagB)
       req.valid := (if (i == 0) genReqA else genReqB)
       req.bits.address := (if (i == 0) addressA else addressB)
       req.bits.source := sourceGen.io.id.bits
@@ -267,7 +267,7 @@ class TensorCoreDecoupled(
 
       // translate source
       respTagged.valid := resp.valid
-      respTagged.bits.tag := sourceGen.io.peek
+      respTagged.bits.tag := sourceGen.io.peek.get
       respTagged.bits.data := resp.bits.data
       resp.ready := respTagged.ready
     }
