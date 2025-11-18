@@ -198,25 +198,42 @@ class GemminiTile private (
   }
   scalingFacNode.foreach(_ := TLWidthWidget(8) := tlSlaveXbar.node)
 
-  val requantizerMuonManagers = gemminiParams.requantizer.map { q =>
+  val requantizerMuonManager = gemminiParams.requantizer.map { q =>
     val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
       .asInstanceOf[CapacityInKilobytes].kilobytes * 1024
     require(isPow2(gemminiSpadSizeBytes))
-    Seq.tabulate(q.numInputLanes) { _ =>
-      TLManagerNode(Seq(TLSlavePortParameters.v1(
-        managers = Seq(TLSlaveParameters.v2(
-          address = Seq(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1)),
-          fifoId = Some(0),
-          // also real no get support
-          supports = TLMasterToSlaveTransferSizes(
-            get = TransferSizes(1, q.gpuWordSize),
-            putFull = TransferSizes(1, q.gpuWordSize),
-            putPartial = TransferSizes(1, q.gpuWordSize),
-          )
-        )),
-        beatBytes = q.gpuWordSize,
-      )))
-    }
+    val reqSize = q.numInputLanes * q.inputBits / 8
+
+    TLManagerNode(Seq(TLSlavePortParameters.v1(
+      managers = Seq(TLSlaveParameters.v2(
+        address = Seq(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1)),
+        fifoId = Some(0),
+        // also real no get support
+        supports = TLMasterToSlaveTransferSizes(
+          get = TransferSizes(reqSize, reqSize),
+          putFull = TransferSizes(reqSize, reqSize),
+          putPartial = TransferSizes(reqSize, reqSize),
+        )
+      )),
+      beatBytes = reqSize,
+    )))
+
+    // Seq.tabulate(q.numInputLanes) { _ =>
+    //   TLManagerNode(Seq(TLSlavePortParameters.v1(
+    //     managers = Seq(TLSlaveParameters.v2(
+    //       // TODO: word level offset and masking?
+    //       address = Seq(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1)),
+    //       fifoId = Some(0),
+    //       // also real no get support
+    //       supports = TLMasterToSlaveTransferSizes(
+    //         get = TransferSizes(1, q.gpuWordSize),
+    //         putFull = TransferSizes(1, q.gpuWordSize),
+    //         putPartial = TransferSizes(1, q.gpuWordSize),
+    //       )
+    //     )),
+    //     beatBytes = q.gpuWordSize,
+    //   )))
+    // }
   }
 
   // width is max output width & num output lanes
@@ -282,37 +299,25 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // requantizer
   val requantizerIO = outer.gemminiParams.requantizer.map { q =>
-    val in = WireInit(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
-    val out = WireInit(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
+    val in = Wire(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
+    val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
     { // input
-      val nodesAndEdges = outer.requantizerMuonManagers.get.map(_.in.head)
-      val (nodes, edges) = (nodesAndEdges.map(_._1), nodesAndEdges.map(_._2))
-      val head = nodes.head
+      val (node, edge) = outer.requantizerMuonManager.get.in.head
 
-      nodes.zipWithIndex.foreach { case (x, i) =>
-        x.d.valid := x.a.valid
-        x.d.bits := edges.head.AccessAck(x.a.bits)
-        x.a.ready := VecInit(nodes.map(_.d.ready)).asUInt.orR && in.ready
+      node.d.valid := node.a.valid && in.ready // ensures a.fire <=> d.fire
+      node.d.bits := edge.AccessAck(node.a.bits)
+      node.a.ready := node.d.ready && in.ready
 
-        assert(x.a.valid === head.a.valid, "non-full access")
-        assert(!x.a.valid || x.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
-        assert(!x.a.valid || (x.a.bits.size === 1.U), "gpu write size should be 2 bytes")
-        assert(!x.a.valid || (x.a.bits.address === head.a.bits.address + (i * 2).U),
-          "unexpected address strides")
-      }
-      assert(!head.a.valid || !(head.a.bits.address & (q.numInputLanes * q.gpuWordSize - 1).U).orR,
-        "head address unaligned")
+      assert(node.a.fire === node.d.fire)
 
-      in.valid := head.a.valid
+      in.valid := node.a.valid
       in.bits.dataType := RequantizerDataType.FP8
-      in.bits.address := ((nodes.head.a.bits.address - q.baseAddr.U) >> 1).asTypeOf(in.bits.address) // hardcoded 16->8
-      in.bits.data := VecInit(nodes.map { x =>
-        Mux(x.a.bits.mask(0),
-          x.a.bits.data(15, 0),
-          x.a.bits.data(31, 16),
-        ).asTypeOf(UInt(16.W))
-      }).asUInt
+      in.bits.address := ((node.a.bits.address - q.baseAddr.U) >> 1).asTypeOf(in.bits.address) // hardcoded 16->8
+      in.bits.data := node.a.bits.data.asTypeOf(in.bits.data)
+
+      require(in.bits.data.asUInt.getWidth == node.a.bits.data.getWidth)
+      assert(!node.a.valid || ((node.a.bits.address & q.baseAddr.U) === q.baseAddr.U))
     }
 
     { // output
@@ -351,12 +356,15 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       node.d.ready := true.B
     }
 
-    out := DontCare // TODO connect requantizer module from Gemmini
+    out.valid := false.B // TODO connect requantizer module from Gemmini
+    out.bits := DontCare
+    in.ready := false.B
     (in, out)
   }
 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map(c => Wire(Decoupled(UInt(c.numBits.W))))
+  lutIO.foreach(_.ready := false.B) // TODO connect lut io from Gemmini
   lutIO.foreach(dontTouch(_))
 
   // cisc

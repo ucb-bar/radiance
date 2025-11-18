@@ -359,7 +359,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         logicalLineSizeInBytes = 512 / 8,
       )),
       // TODO: enable requantizer after integration with shared memory
-      requantizer = None /* site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
+      requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
         baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
         numInputLanes = simt.numLanes,
         // numOutputLanes = 32,
@@ -369,7 +369,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         // minOutputBits = 4,
         // maxOutputBits = 8,
         // outputIdBits = 3,
-      )) */,
+      )),
       lookupTable = Some(GemminiLUTConfig(
         numBits = 96
       )),

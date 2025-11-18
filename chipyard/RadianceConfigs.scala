@@ -40,12 +40,12 @@ class RadianceBaseConfig extends Config(
   new chipyard.harness.WithHarnessBinderClockFreqMHz(500.0) ++
   new chipyard.config.AbstractConfig)
 
-object tapeoutSmemConfig extends RadianceSharedMemKey(
+object TapeoutSmemConfig extends RadianceSharedMemKey(
   address = 0, size = 128 << 10, numBanks = 4, numWords = 16, wordSize = 4,
   prealignBufDepth = 2, filterAligned = false, serialization = CoreSerialized
 )
 
-object l0iCacheConfig extends DCacheParams(
+object L0iCacheConfig extends DCacheParams(
   nSets = 128,
   nWays = 1,
   rowBits = 32 * 8,
@@ -53,7 +53,7 @@ object l0iCacheConfig extends DCacheParams(
   nMSHRs = 8,
 )
 
-object l0dCacheConfig extends DCacheParams(
+object L0dCacheConfig extends DCacheParams(
   nSets = 512,
   nWays = 1,
   rowBits = 64 * 8,
@@ -61,7 +61,7 @@ object l0dCacheConfig extends DCacheParams(
   nMSHRs = 8,
 )
 
-object l1CacheConfig extends DCacheParams(
+object L1CacheConfig extends DCacheParams(
   nSets = 512,
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
@@ -80,7 +80,7 @@ class WithRadianceControlBus extends Config ((site, here, up) => {
 class RadianceMuonConfig extends Config(
   new WithMuonCores(1, location = InCluster(0)) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
-  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new RadianceBaseConfig)
 
 /*
@@ -94,11 +94,11 @@ class RadianceCyclotronConfig extends Config(
 
 class RadianceTapeoutSimConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 16, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(1), l0i = Some(l0iCacheConfig), l0d = Some(l0dCacheConfig)) ++
-  new WithRadianceCluster(1, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
+  new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(0), l0i = Some(l0iCacheConfig), l0d = Some(l0dCacheConfig)) ++
-  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
   new RadianceBaseConfig
@@ -131,7 +131,7 @@ class RadianceTapeoutConfig extends Config(
 class RadianceClusterConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++
   new WithMuonCores(2, location = InCluster(0)) ++
-  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new RadianceBaseConfig)
 
