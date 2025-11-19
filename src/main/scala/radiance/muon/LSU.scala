@@ -8,6 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util._
 
 import radiance.muon.AddressSpaceCfg._
+import radiance.memory.MultiReadOneWriteSRAM
 
 case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
@@ -916,20 +917,60 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val op = MemOp()
     }
 
-    val addressTmaskMem = SyncReadMem(muonParams.lsu.addressEntries, new AddressTmask)
-    val storeDataMem = SyncReadMem(muonParams.lsu.storeDataEntries, Vec(muonParams.numLanes, UInt(muonParams.archLen.W)))
+    val addressTmaskMem = SRAM(
+        muonParams.lsu.addressEntries, 
+        new AddressTmask,
+        numReadPorts = 1,
+        numWritePorts = 1,
+        numReadwritePorts = 0,
+    )
+
+    val addressTmaskMemR = addressTmaskMem.readPorts(0)
+    val addressTmaskMemW = addressTmaskMem.writePorts(0)
     
-    val loadDataMem = SyncReadMem(muonParams.lsu.loadDataEntries * lsuDerived.numPackets, Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)))
+    val storeDataMem = SRAM(
+        muonParams.lsu.storeDataEntries, 
+        Vec(muonParams.numLanes, UInt(muonParams.archLen.W)),
+        numReadPorts = 1,
+        numWritePorts = 1,
+        numReadwritePorts = 0,
+    )
+    
+    val storeDataMemR = storeDataMem.readPorts(0)
+    val storeDataMemW = storeDataMem.writePorts(0)
+    
+    val loadDataMem = SRAM.masked(
+        muonParams.lsu.loadDataEntries * lsuDerived.numPackets, 
+        Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)),
+        numReadPorts = 1,
+        numWritePorts = 1,
+        numReadwritePorts = 0,
+    )
+
+    val loadDataMemR = loadDataMem.readPorts(0)
+    val loadDataMemW = loadDataMem.writePorts(0)
     
     val totalQueueEntries = muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
     
     // TODO: need 2R1W (read for writeback tmask, read for tracking packet completion, write on receive operands)
     // is it expensive?
-    val metadataMem = Mem(totalQueueEntries, new Metadata)
-    val packetValid = Mem(
+    val metadataMem = MultiReadOneWriteSRAM(
+        totalQueueEntries, 
+        new Metadata,
+        numReadPorts = 2,
+        masked = false,
+    )
+
+    val metadataMemR0 = metadataMem.readPorts(0)
+    val metadataMemR1 = metadataMem.readPorts(1)
+    val metadataMemW  = metadataMem.writePorts(0)
+    
+    // only SyncReadMem supports forwarding (`WriteFirst`), so we just need to 
+    // be careful to only do one read, one write 
+    val packetValid = SyncReadMem(
         totalQueueEntries, 
         Vec(muonParams.numLanes, Bool()),
-        // SyncReadMem.WriteFirst
+        SyncReadMem.WriteFirst
     )
     val packetValidValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
 
@@ -1013,6 +1054,18 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     queueReceivedOperands.req.bits.token := io.coreReq.bits.token
     queueReceivedOperands.req.bits.tmask := io.coreReq.bits.tmask
 
+    addressTmaskMemW.address := DontCare
+    addressTmaskMemW.data := DontCare
+    addressTmaskMemW.enable := false.B
+
+    storeDataMemW.address := DontCare
+    storeDataMemW.data := DontCare
+    storeDataMemW.enable := false.B
+
+    metadataMemW.address := DontCare
+    metadataMemW.data := DontCare
+    metadataMemW.enable := false.B
+
     when (io.coreReq.fire) {
         val addressTmask = Wire(new AddressTmask)
         
@@ -1022,9 +1075,14 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         addressTmask.address := address
         addressTmask.tmask := io.coreReq.bits.tmask
 
-        addressTmaskMem.write(queueReceivedOperands.resp.bits.addressIdx, addressTmask)
+        addressTmaskMemW.address := queueReceivedOperands.resp.bits.addressIdx
+        addressTmaskMemW.data := addressTmask
+        addressTmaskMemW.enable := true.B
+        
         when (MemOp.isStore(io.coreReq.bits.op) || MemOp.isAtomic(io.coreReq.bits.op)) {
-            storeDataMem.write(queueReceivedOperands.resp.bits.storeDataIdx, io.coreReq.bits.storeData)
+            storeDataMemW.address := queueReceivedOperands.resp.bits.storeDataIdx
+            storeDataMemW.data := io.coreReq.bits.storeData
+            storeDataMemW.enable := true.B
         }
 
         val metadataWriteIdx = tokenToMetadataIndex(io.coreReq.bits.token)
@@ -1036,6 +1094,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         for (i <- 0 until muonParams.numLanes) {
             metadata.mask(i) := address(i)(lsuDerived.smallPerLaneMaskBits-1, 0)
         }
+        
+        metadataMemW.address := metadataWriteIdx
+        metadataMemW.data := metadata
+        metadataMemW.enable := true.B
 
         printf(cf"[LSU] Operands / metadata update: " +
           cf"token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), " +
@@ -1046,16 +1108,20 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
           cf"op = ${io.coreReq.bits.op}, " +
           cf"mask = ${metadata.mask}\n"
         )
-        
-        metadataMem.write(metadataWriteIdx, metadata)
     }
 
     // -- Generate downstream memory requests -- 
 
     val addressTmaskReadIdx = Wire(UInt(muonParams.lsu.addressIdxBits.W))
     val storeDataReadIdx = Wire(UInt(muonParams.lsu.storeDataIdxBits.W))
-    val addressTmask = addressTmaskMem.read(addressTmaskReadIdx)
-    val storeData = storeDataMem.read(storeDataReadIdx)
+
+    addressTmaskMemR.address := addressTmaskReadIdx
+    addressTmaskMemR.enable := true.B
+    val addressTmask = addressTmaskMemR.data
+
+    storeDataMemR.address := storeDataReadIdx
+    storeDataMemR.enable := true.B
+    val storeData = storeDataMemR.data
     
     class MemRequestGen extends CoreModule {
         val io = IO(new Bundle {
@@ -1254,19 +1320,29 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             io.shmemResp.bits.valid
         ))
 
+        loadDataMemW.address := DontCare
+        loadDataMemW.data := DontCare
+        loadDataMemW.enable := false.B
+
         when (receivedResp) {
             printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.token.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}, data = ${loadDataWriteVal}\n")
             
             when (shouldWriteLoadData) {
                 printf(p"[LSU] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
-            
-                loadDataMem.write(loadDataWriteIdx, loadDataWriteVal, respValidsVec)
+
+                loadDataMemW.address := loadDataWriteIdx
+                loadDataMemW.data := loadDataWriteVal
+                loadDataMemW.mask.get := respValidsVec
+                loadDataMemW.enable := true.B
             }
         }
 
         // Read expected tmask from metadata
         val metadataIdx = tokenToMetadataIndex(respTag.token)
-        val respMetadata_d1 = metadataMem.read(metadataIdx)
+
+        metadataMemR0.enable := true.B
+        metadataMemR0.address := metadataIdx
+        val respMetadata_d1 = metadataMemR0.data
 
         // Read accumulated tmask for this packet
         val packetValid_d1 = packetValid.read(metadataIdx)
@@ -1313,16 +1389,20 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             val packetTmaskUInt = packetTmask.asUInt
             val allPacketLanesReceived = (packetValidUInt & packetTmaskUInt) === packetTmaskUInt
             
+            val packetValidWrite = Wire(Vec(muonParams.numLanes, Bool()))
+            packetValid.write(metadataIdx_d1, packetValidWrite)
+            
+
             when (allPacketLanesReceived) {
                 when (newPacketValid === respMetadata_d1.tmask) {
-                    packetValid.write(metadataIdx_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
+                    packetValidWrite := VecInit(Seq.fill(muonParams.numLanes)(false.B))
                 }.otherwise {
-                    packetValid.write(metadataIdx_d1, newPacketValid)
+                    packetValidWrite := newPacketValid
                 }
                 
                 allRequestedLanesReceived_d1 := true.B
             }.otherwise {
-                packetValid.write(metadataIdx_d1, newPacketValid)
+                packetValidWrite := newPacketValid
             }
             
             printf(cf"[LSU] packetValid updated: packet=${respTag_d1.packet}, new valids=${newPacketValid}, prev valids=${packetValid_d1}, packet tmask=${packetTmask}, all received=${allPacketLanesReceived}\n")
@@ -1339,11 +1419,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             val writebackReq = Flipped(Decoupled(new LSQWritebackReq))
             val coreResp = Decoupled(new LsuResponse)
 
-            val loadDataReadIdx = Output(UInt(lsuDerived.loadDataPhysicalIdxBits.W))
-            val loadDataReadVal = Input(Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W)))
-
-            val metadataReadIdx = Output(new LsuQueueToken)
-            val metadataReadVal = Input(new Metadata)
+            val loadDataR = Flipped(loadDataMemR.cloneType)
+            val metadataR = Flipped(metadataMemR1.cloneType)
 
             val deallocateLoadData = Output(Bool())
             val deallocateLoadDataIdx = Output(UInt(muonParams.lsu.loadDataIdxBits.W))
@@ -1367,8 +1444,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val s2_fire_prev = RegNext(s1_valid && s2_ready, false.B)
         val s2_metadata = Mux(
             s2_fire_prev,
-            io.metadataReadVal,
-            RegEnable(io.metadataReadVal, 0.U.asTypeOf(new Metadata), s2_fire_prev)
+            io.metadataR.data,
+            RegEnable(io.metadataR.data, 0.U.asTypeOf(new Metadata), s2_fire_prev)
         )
         
         // Ensure debugId is not optimized away
@@ -1393,14 +1470,16 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             s1_valid := true.B
             s1_req := io.writebackReq.bits
         }
-    
-        io.loadDataReadIdx := Mux(
+
+        io.loadDataR.enable := true.B
+        io.loadDataR.address := Mux(
             s2_ready,
             s1_req.loadDataIdx * lsuDerived.numPackets.U,
             s2_req.loadDataIdx * lsuDerived.numPackets.U + s2_packet + 1.U
         )
         
-        io.metadataReadIdx := s1_req.token
+        io.metadataR.enable := true.B
+        io.metadataR.address := tokenToMetadataIndex(s1_req.token)
 
         when (io.coreResp.fire) {
             s2_packet := s2_packet + 1.U
@@ -1434,7 +1513,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
         val s2_packet_mask = Utils.selectPacket(s2_metadata.mask, s2_packet)(this)
         for (i <- 0 until muonParams.lsu.numLsuLanes) {
-            val word = io.loadDataReadVal(i)
+            val word = io.loadDataR.data(i)
             val mask = s2_packet_mask(i)
             io.coreResp.bits.writebackData(i) := MuxCase(0.U, Seq(
                 (s2_metadata.op === MemOp.loadByte) -> ((word >> (mask * 8.U))(7, 0)).sextTo(muonParams.archLen),
@@ -1457,10 +1536,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     loadDataAllocator.io.deallocate := writeback.io.deallocateLoadData
     loadDataAllocator.io.deallocateIndex := writeback.io.deallocateLoadDataIdx
 
-    writeback.io.loadDataReadVal := loadDataMem.read(writeback.io.loadDataReadIdx)
-    writeback.io.metadataReadVal := metadataMem.read(
-        tokenToMetadataIndex(writeback.io.metadataReadIdx)
-    )
+    writeback.io.loadDataR <> loadDataMemR
+    writeback.io.metadataR <> metadataMemR1
 }
 
 // See [Downstream memory interface]

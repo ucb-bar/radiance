@@ -87,3 +87,22 @@ object TwoReadOneWriteSyncMem {
     Module(new TwoReadOneWriteSyncMem[T](n, t, maskedUnitWidth))
   }
 }
+
+object MultiReadOneWriteSRAM {
+  def apply[T <: Data](
+    n: Int, 
+    t: T, 
+    numReadPorts: Int = 2, 
+    masked: Boolean = false
+  ): SRAMInterface[T] = {
+
+    val sramInterface = Wire(new SRAMInterface(n, t, numReadPorts, numWritePorts = 1, numReadwritePorts = 0, masked))
+    for (i <- 0 until numReadPorts) {
+      val inner = SRAM(n, t, numReadPorts = 1, numWritePorts = 1, numReadwritePorts = 0)
+      sramInterface.readPorts(i) <> inner.readPorts(0)
+      inner.writePorts(0) := sramInterface.writePorts(0)
+    }
+
+    sramInterface
+  }
+}
