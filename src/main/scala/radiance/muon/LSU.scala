@@ -967,12 +967,13 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     // only SyncReadMem supports forwarding (`WriteFirst`), so we just need to 
     // be careful to only do one read, one write 
-    val packetValid = SyncReadMem(
+    val completionTable = SyncReadMem(
         totalQueueEntries, 
         Vec(muonParams.numLanes, Bool()),
         SyncReadMem.WriteFirst
     )
-    val packetValidValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
+    // TODO: we don't need this if we can flush completionTable to 0's
+    val completionTableValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
 
     // -- Handle reservations from core --
 
@@ -1345,15 +1346,15 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val respMetadata_d1 = metadataMemR0.data
 
         // Read accumulated tmask for this packet
-        val packetValid_d1 = packetValid.read(metadataIdx)
+        val completion_d1 = completionTable.read(metadataIdx)
 
         val receivedResp_d1 = RegNext(receivedResp, false.B)
         val respValidsVec_d1 = RegNext(respValidsVec, 0.U.asTypeOf(respValidsVec))
         val metadataIdx_d1 = RegNext(metadataIdx, 0.U)
         val respTag_d1 = RegNext(respTag, 0.U.asTypeOf(respTag))
-        val packetValidValid_d1 = RegNext(packetValidValid(metadataIdx), false.B)
+        val completionValid_d1 = RegNext(completionTableValid(metadataIdx), false.B)
 
-        when (receivedResp) { packetValidValid(metadataIdx) := true.B }
+        when (receivedResp) { completionTableValid(metadataIdx) := true.B }
         
         val allRequestedLanesReceived_d1 = Wire(Bool())
         allRequestedLanesReceived_d1 := false.B
@@ -1362,50 +1363,50 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             // Extract packet-specific tmask (which lanes were requested for this packet)
             val packetTmask = Utils.selectPacket(respMetadata_d1.tmask, respTag_d1.packet)(this)
 
-            val packetValid_d1_masked = Mux(packetValidValid_d1, packetValid_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
+            val completion_d1_masked = Mux(completionValid_d1, completion_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
             
-            // Place respValidsVec_d1 at the correct position in the full packetValid vector
-            val newPacketValid = Wire(Vec(muonParams.numLanes, Bool()))
+            // Place respValidsVec_d1 at the correct position in the full completion vector
+            val newCompletion = Wire(Vec(muonParams.numLanes, Bool()))
             for (i <- 0 until muonParams.numLanes) {
                 val packetNum = i / muonParams.lsu.numLsuLanes
                 val laneInPacket = i % muonParams.lsu.numLsuLanes
                 val isThisPacket = respTag_d1.packet === packetNum.U
-                newPacketValid(i) := Mux(isThisPacket, 
-                    packetValid_d1_masked(i) || respValidsVec_d1(laneInPacket),
-                    packetValid_d1_masked(i)
+                newCompletion(i) := Mux(isThisPacket, 
+                    completion_d1_masked(i) || respValidsVec_d1(laneInPacket),
+                    completion_d1_masked(i)
                 )
             }
             
             // Extract the packet-specific valid bits and check completion
-            val packetValidBits = Wire(Vec(muonParams.lsu.numLsuLanes, Bool()))
+            val completionBits = Wire(Vec(muonParams.lsu.numLsuLanes, Bool()))
             for (i <- 0 until muonParams.lsu.numLsuLanes) {
                 val globalIdx = respTag_d1.packet * muonParams.lsu.numLsuLanes.U + i.U
-                packetValidBits(i) := newPacketValid(globalIdx)
+                completionBits(i) := newCompletion(globalIdx)
             }
             
             // Check if all requested lanes for THIS PACKET have been received
             // Only check the lanes that were requested (packetTmask)
-            val packetValidUInt = packetValidBits.asUInt
+            val completionUInt = completionBits.asUInt
             val packetTmaskUInt = packetTmask.asUInt
-            val allPacketLanesReceived = (packetValidUInt & packetTmaskUInt) === packetTmaskUInt
+            val allPacketLanesReceived = (completionUInt & packetTmaskUInt) === packetTmaskUInt
             
-            val packetValidWrite = Wire(Vec(muonParams.numLanes, Bool()))
-            packetValid.write(metadataIdx_d1, packetValidWrite)
+            val completionWrite = Wire(Vec(muonParams.numLanes, Bool()))
+            completionTable.write(metadataIdx_d1, completionWrite)
             
 
             when (allPacketLanesReceived) {
-                when (newPacketValid === respMetadata_d1.tmask) {
-                    packetValidWrite := VecInit(Seq.fill(muonParams.numLanes)(false.B))
+                when (newCompletion === respMetadata_d1.tmask) {
+                    completionWrite := VecInit(Seq.fill(muonParams.numLanes)(false.B))
                 }.otherwise {
-                    packetValidWrite := newPacketValid
+                    completionWrite := newCompletion
                 }
                 
                 allRequestedLanesReceived_d1 := true.B
             }.otherwise {
-                packetValidWrite := newPacketValid
+                completionWrite := newCompletion
             }
             
-            printf(cf"[LSU] packetValid updated: packet=${respTag_d1.packet}, new valids=${newPacketValid}, prev valids=${packetValid_d1}, packet tmask=${packetTmask}, all received=${allPacketLanesReceived}\n")
+            printf(cf"[LSU] completion updated: packet=${respTag_d1.packet}, new valids=${newCompletion}, prev valids=${completion_d1}, packet tmask=${packetTmask}, all received=${allPacketLanesReceived}\n")
         }
 
         // Notify queue when all requested lanes for this packet are received
