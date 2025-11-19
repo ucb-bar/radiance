@@ -1323,6 +1323,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
         loadDataMemW.address := DontCare
         loadDataMemW.data := DontCare
+        loadDataMemW.mask.get := DontCare
         loadDataMemW.enable := false.B
 
         when (receivedResp) {
@@ -1591,6 +1592,8 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
     def connectResp = (lsuResp: DecoupledIO[LsuMemResponse], coreResp: Vec[DecoupledIO[MemResponse[Bundle]]]) => {
         val respValids = coreResp.map(_.valid)
         val lsuTags = VecInit(coreResp.map(r => coreTagToLsuTag(r.bits.tag)))
+        
+        // TODO: might be better to select leader in round-robin fashion
         val leader = PriorityEncoder(respValids)
         val leaderLsuTag = lsuTags(leader)
         val matchesLeader = VecInit(lsuTags.map(t => t === leaderLsuTag))
