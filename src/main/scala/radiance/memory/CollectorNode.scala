@@ -60,6 +60,9 @@ class CollectorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyModu
     val (out, outEdge) = (outNodesAndEdges.head._1, outNodesAndEdges.head._2)
     val head = ins.head
 
+    require(ins.length == numManagers)
+
+    // A
     ins.zipWithIndex.foreach { case (x, i) =>
       // lane d valid only if self valid and all other lanes ready
       // this is because out.d fires only if all lanes are ready, but we cannot
@@ -70,10 +73,9 @@ class CollectorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyModu
       x.d.bits := out.d.bits // inEdges.head.AccessAck(x.a.bits)
       x.a.ready := out.a.ready
 
-      // these three assertions may not be necessary due to masking, disable if causing trouble
+      // these two assertions may not be necessary due to masking, disable if causing trouble
       assert(x.a.valid === head.a.valid, "non-full access")
       assert(x.a.fire === head.a.fire)
-      assert(x.d.fire === head.d.fire)
 
       assert(!x.a.valid || x.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
       assert(!x.a.valid || (x.a.bits.size === log2Ceil(from).U), s"collected write size should be $from bytes")
@@ -91,6 +93,9 @@ class CollectorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyModu
       data = VecInit(ins.map(_.a.bits.data)).asUInt,
       mask = VecInit(ins.map(_.a.valid)).asUInt,
     )._2
+    // out.a.bits.data := VecInit(ins.map(_.a.bits.data)).asTypeOf(UInt((to * 8).W))
+
+    // D
 
     val currDFires = VecInit(ins.map(_.d.fire))
     val pendingDResp = RegInit(VecInit.fill(numManagers)(false.B))

@@ -157,7 +157,7 @@ class RadianceSharedMemComponents(
       quantCollector
     }
     // multiple cores, but only one requantizer
-    val collectedXbar = TLXbar(nameSuffix = Some("collected_xbar"))
+    val collectedXbar = LazyModule(new TLXbar()).suggestName("collected_xbar").node
     collectors.foreach(collectedXbar := _)
     qm := collectedXbar
   }
