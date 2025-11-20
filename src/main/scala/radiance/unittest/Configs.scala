@@ -13,6 +13,7 @@ import freechips.rocketchip.unittest._
 import radiance.subsystem.{WithMuonCores, WithSIMTConfig}
 import radiance.muon.MuonCore
 import radiance.virgo.TensorCoreDecoupledTest
+import radiance.muon.MuonLoadStoreUnitDebugIdKey
 
 case object TestDurationMultiplier extends Field[Int]
 
@@ -24,6 +25,10 @@ class WithMuonUnitTestHarness(harness: Parameters => UnitTest) extends Config((s
   case UnitTests => (q: Parameters) => {
     Seq(Module(harness(q)))
   }
+})
+
+class WithMuonLSUDebugIds(width: Int) extends Config((_, _, _) => {
+  case MuonLoadStoreUnitDebugIdKey => Some(width)
 })
 
 class MuonTestConfig extends Config(
@@ -45,6 +50,7 @@ class MuonBackendTestConfig extends Config(
   new BaseSubsystemConfig)
 
 class MuonLSUTestConfig extends Config(
+  new WithMuonLSUDebugIds(width = 16) ++
   new WithMuonUnitTestHarness(new MuonLSUTest()(_)) ++
   new WithMuonCores(1, headless = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
