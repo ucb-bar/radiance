@@ -305,49 +305,49 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     val smKey = clusterParams.smemConfig
 
     val tileParams = MxGemminiTileParams(
-      gemminiConfig = {
-        // implicit val arithmetic: Arithmetic[Float] =
-        //   Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
-        GemminiMxFPConfigs.defaultMxFPConfig.copy(
-          // acc_scale_args = Some(ScaleArguments(
-          //   (t: Float, u: Float) => {t},
-          //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
-          // )),
-          // mvin_scale_args = Some(ScaleArguments(
-          //   (t: Float, u: Float) => t * u,
-          //   1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
-          // )),
-          // mvin_scale_acc_args = None,
-          has_training_convs = false,
-          // spatialArrayInputType = Float(5, 11, isRecoded = false),
-          // spatialArrayWeightType = Float(5, 11, isRecoded = false),
-          // spatialArrayOutputType = Float(8, 24, isRecoded = false),
-          // accType = Float(8, 24),
-          acc_read_full_width = false, // set to true to output fp32
-          num_counter = 0,
-          dataflow = Dataflow.WS,
-          ex_read_from_acc = false,
-          ex_write_to_spad = false,
-          has_max_pool = false,
-          use_tl_ext_mem = true,
-          sp_singleported = false,
-          spad_read_delay = 4,
-          use_shared_ext_mem = true,
-          acc_sub_banks = 1,
-          has_normalizations = false,
-          meshRows = dim,
-          meshColumns = dim,
-          tile_latency = 0,
-          mesh_output_delay = 1,
-          acc_latency = 3,
-          dma_maxbytes = site(CacheBlockBytes),
-          dma_buswidth = site(CacheBlockBytes),
-          tl_ext_mem_base = clusterParams.baseAddr, // TODO: no longer need this with address rewriting
-          sp_banks = smKey.numBanks,
-          sp_capacity = CapacityInKilobytes(smKey.size >> 10),
-          acc_capacity = CapacityInKilobytes(accSizeInKB),
-        )
-      },
+      mxGemminiConfig = GemminiMxFPConfigs.defaultMxFPConfig.copy(
+        // acc_scale_args = Some(ScaleArguments(
+        //   (t: Float, u: Float) => {t},
+        //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
+        // )),
+        // mvin_scale_args = Some(ScaleArguments(
+        //   (t: Float, u: Float) => t * u,
+        //   1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
+        // )),
+        // mvin_scale_acc_args = None,
+        has_training_convs = false,
+        inputType = MxFloat(5, 3, 1),
+        weightType = MxFloat(5, 3, 1),
+        accType = MxFloat(8, 8, 1),
+        spatialArrayInputType = MxFloat(5, 3, 1),
+        spatialArrayWeightType = MxFloat(5, 3, 1),
+        spatialArrayOutputType = MxFloat(8, 8, 1),
+        meshProdPrecisionList = Seq.fill(16)(8, 8),
+        meshAccPrecisionList = Seq.fill(16)(MxFloat(8, 8, 1)),
+        acc_read_full_width = false, // set to true to output fp32
+        num_counter = 0,
+        dataflow = Dataflow.WS,
+        ex_read_from_acc = false,
+        ex_write_to_spad = false,
+        has_max_pool = false,
+        use_tl_ext_mem = true,
+        sp_singleported = false,
+        spad_read_delay = 4,
+        use_shared_ext_mem = true,
+        acc_sub_banks = 1,
+        has_normalizations = false,
+        meshRows = dim,
+        meshColumns = dim,
+        tile_latency = 0,
+        mesh_output_delay = 1,
+        acc_latency = 3,
+        dma_maxbytes = site(CacheBlockBytes),
+        dma_buswidth = site(CacheBlockBytes),
+        tl_ext_mem_base = clusterParams.baseAddr, // TODO: no longer need this with address rewriting
+        sp_banks = smKey.numBanks,
+        sp_capacity = CapacityInKilobytes(smKey.size >> 10),
+        acc_capacity = CapacityInKilobytes(accSizeInKB),
+      ),
       tileId = idOffset,
       tileSize = Left(tileSize),
       mmioAddress = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x4000,
@@ -355,7 +355,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         baseAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x8000,
         sizeInBytes = 16 << 10,
         sramLineSizeInBytes = 256 / 8,
-        logicalLineSizeInBytes = 512 / 8,
+        numBanks = 4,
       )),
       requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
         baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned

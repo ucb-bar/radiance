@@ -28,7 +28,7 @@ object GemminiCoreParams extends PhysicalCoreParams {
 
 final case class MxGemminiTileParams(
   tileId: Int = 0,
-  gemminiConfig: GemminiArrayConfig[MxFloat, Float, Float],
+  mxGemminiConfig: GemminiArrayConfig[MxFloat, Float, Float],
   tileSize: Either[(Int, Int, Int), Int] = Right(4),
   mmioAddress: BigInt,
   override val scalingFactorMem: Option[GemminiScalingFactorMemConfig],
@@ -38,6 +38,11 @@ final case class MxGemminiTileParams(
   type T = MxFloat
   type U = Float
   type V = Float
+  override val gemminiConfig = mxGemminiConfig.copy(
+    scale_mem = scalingFactorMem,
+    requantizer = requantizer,
+    lut = lookupTable
+  )
   override val arithmetic = MxFloatArithmetic
 }
 
@@ -163,7 +168,6 @@ class GemminiTile private (
 
     require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
     require(isPow2(sfm.sramLineSizeInBytes), "scaling fac line size must be power of 2")
-    require(isPow2(sfm.logicalLineSizeInBytes), "scaling fac line size must be power of 2")
 
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
@@ -253,22 +257,21 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     // val sramRowAddr = WireInit(lineAddr(conf.addrBits - conf.lineOffsetBits - 1, conf.bankSelectBits))
     // val bankSelect = WireInit(lineAddr(conf.bankSelectBits - 1, 0))
 
-    val scalingFacWriteReq = Wire(Valid(new ScalingFactorWriteReq(
+    val scalingFacWriteReq = Wire(Decoupled(new ScalingFactorWriteReq(
       conf.addrBits - conf.lineOffsetBits, conf.sramLineSizeInBytes * 8)))
     scalingFacWriteReq.valid := wen
     scalingFacWriteReq.bits.addr := lineAddr
     scalingFacWriteReq.bits.data := writeData
 
-    node.a.ready := node.d.ready
-    node.d.valid := node.a.valid
+    node.a.ready := node.d.ready && scalingFacWriteReq.ready
+    node.d.valid := node.a.valid && scalingFacWriteReq.ready
     node.d.bits := edge.AccessAck(node.a.bits)
 
     require(node.params.dataBits == conf.sramLineSizeInBytes * 8)
     assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
     assert(!node.a.valid || (node.a.bits.size === 3.U))
 
-    // TODO connect scaling fac mem from Gemmini
-    dontTouch(scalingFacWriteReq)
+    outer.gemmini.module.mx_io.get.scale_mem <> scalingFacWriteReq
 
     scalingFacWriteReq
   }
