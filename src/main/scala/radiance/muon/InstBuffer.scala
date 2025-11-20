@@ -3,6 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import radiance.muon.backend.int.LsuOpDecoder
 
 /** UOp represents a single instruction executed in the backend, as well as a
  *  single entry in InstBuffer.
@@ -86,7 +87,7 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasIn
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val enq = Flipped(ibufEnqIO)
-    val deq = Vec(muonParams.numWarps, Decoupled(uopT))
+    val deq = Vec(muonParams.numWarps, Decoupled(uopWithTokenT))
     val lsuReserve = Flipped(reservationIO)
   })
 
@@ -107,23 +108,54 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
     b.io.enq.bits := io.enq.entry.bits.uop
     assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
 
-    
-    deq <> b.io.deq
+    // this is slow (more latency), but safe
+    // for memory instructions, we first acquire LSU token, then dequeue,
+    // rather than trying to do both on the same cycle
+    val inst = b.io.deq.bits.inst
+    val needsLsuReserve = b.io.deq.valid && inst.b(UseLSUPipe)
+    val opext = inst.opcode(8, 7)
+    reserve.req.bits.addressSpace := MuxLookup(opext, AddressSpace.globalMemory)(Seq(
+      0.U -> AddressSpace.globalMemory,
+      1.U -> AddressSpace.sharedMemory
+    ))
+    reserve.req.bits.op := LsuOpDecoder.decode(inst.opcode, inst.f3)
 
-    /*
-    TODO: need to consider if this is the best point to do lsu reserve
-    val needsLsuReserve = b.io.deq.bits.inst.b(UseLSUPipe)
-    reserve.req.valid := b.io.deq.valid && needsLsuReserve
-
-    val reserveFire = reserve.req.fire
     when (needsLsuReserve) {
-      deq.valid := reserveFire
-      b.io.deq.ready := reserveFire
-    }
-    */
+      val acquiredToken = RegInit(0.U.asTypeOf(new LsuQueueToken))
+      val acquiredTokenValid = RegInit(false.B)
+      
+      deq.valid := false.B
+      b.io.deq.ready := false.B
+      reserve.req.valid := true.B
 
-    reserve.req.valid := false.B
-    reserve.req.bits := DontCare
+      deq.bits := DontCare
+
+      when (reserve.req.fire) {
+        acquiredToken := reserve.resp.bits.token
+        acquiredTokenValid := true.B
+      }
+
+      when (acquiredTokenValid) {
+        deq.valid := true.B
+        b.io.deq.ready := deq.ready
+        reserve.req.valid := false.B
+
+        deq.bits.uop := b.io.deq.bits
+        deq.bits.token := acquiredToken
+
+        when (deq.fire) {
+          acquiredTokenValid := false.B
+        }
+      }
+    }
+    .otherwise {
+      deq.valid := b.io.deq.valid
+      b.io.deq.ready := deq.ready
+      reserve.req.valid := false.B
+
+      deq.bits.uop := b.io.deq.bits
+      deq.bits.token := DontCare
+    }
 
     io.enq.count(wid) := b.io.count
   }

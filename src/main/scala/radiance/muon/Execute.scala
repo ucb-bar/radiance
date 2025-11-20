@@ -12,6 +12,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val resp = Decoupled(writebackT())
     val id = clusterCoreIdT
     val mem = memoryIO
+    val token = Input(lsuTokenT)
     val lsuReserve = reservationIO
     val feCSR = Flipped(feCSRIO)
     val softReset = Input(Bool())
@@ -32,6 +33,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve
+  lsuPipe.tokenIO := io.token
 
   val pipes = Seq(aluPipe, fpPipe, mulDivPipe, lsuPipe, sfuPipe)
   val uses = Seq(inst.b(UseALUPipe),

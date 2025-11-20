@@ -23,7 +23,7 @@ import radiance.muon.LsuResponse
 class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false)  with HasCoreBundles {
     val reserveIO = IO(reservationIO)
     
-    val tokenIO = IO(Input(new LsuQueueToken))
+    val tokenIO = IO(Input(lsuTokenT))
 
     val memIO = IO(memoryIO)
     
@@ -43,10 +43,11 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     lsu.io.coreReq.valid := io.req.valid
     io.req.ready := lsu.io.coreReq.ready
 
-    // we use the recomposer in a bit of a weird way
+    // we use the recomposer in a bit of a weird way, compose numPackets
+    // LsuResponse bundles
     val lsuRecomposer = Module(new LaneRecomposer(
-      inLanes = 1,
-      outLanes = lsuDerived.numPackets,
+      inLanes = lsuDerived.numPackets,
+      outLanes = 1,
       elemTypes = Seq(new LsuResponse)
     ))
 

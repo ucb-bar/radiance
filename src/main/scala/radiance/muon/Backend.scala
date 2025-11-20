@@ -15,7 +15,7 @@ class Backend(
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopWithTokenT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
@@ -28,7 +28,14 @@ class Backend(
   // -----
 
   val hazard = Module(new Hazard)
-  hazard.io.ibuf <> io.ibuf
+  // @hansung TODO: hazard -> reservation station path needs to be updated to 
+  // include token also
+  // hazard.io.ibuf <> io.ibuf
+  (hazard.io.ibuf zip io.ibuf).foreach {case (hazard_in, ibuf_out) =>
+    hazard_in.bits := ibuf_out.bits.uop
+    hazard_in.valid := ibuf_out.valid
+    ibuf_out.ready := hazard_in.ready
+  }
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.updateRS <> hazard.io.scb.updateRS
@@ -52,11 +59,15 @@ class Backend(
     reservStation.reset := true.B
     reservStation.io.issue.ready := false.B
 
-    val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
+    val issueArb = Module(new RRArbiter(uopWithTokenT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
-    reservStation.io.issue
+    // @hansung TODO: hazard -> reservation station path needs to be updated to 
+    // include token also
+
+    // reservStation.io.issue
+    ???
   }
 
   // -----------------
@@ -70,8 +81,8 @@ class Backend(
     val haves = Seq(HasRs1, HasRs2, HasRs3)
     val regs = Seq(Rs1, Rs2, Rs3)
     (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
-      val pReg = issued.bits.inst(reg)
-      collReq.enable := issued.valid && issued.bits.inst.b(has)
+      val pReg = issued.bits.uop.inst(reg)
+      collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
       collReq.pReg := pReg
     }
     collector.io.readData.regs.foreach(_.enable := true.B)
@@ -107,6 +118,7 @@ class Backend(
   execute.io.feCSR := io.feCSR
   execute.io.req.bits := executeIn
   
+  execute.io.token := issued.bits.token
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
@@ -120,7 +132,7 @@ class Backend(
     issued.ready := !inFlight
     // assumes 1-cycle latency collector
     execute.io.req.valid := RegNext(issued.fire)
-    executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
+    executeIn.uop := RegNext(issued.bits.uop, 0.U.asTypeOf(executeIn.uop.cloneType))
     assert(RegNext(issued.fire) === execute.io.req.fire)
     when (execute.io.resp.fire) {
       inFlight := false.B
@@ -128,7 +140,7 @@ class Backend(
   } else {
     issued.ready := execute.io.req.ready
     execute.io.req.valid := issued.valid
-    executeIn.uop := issued.bits
+    executeIn.uop := issued.bits.uop
   }
 
   // ---------

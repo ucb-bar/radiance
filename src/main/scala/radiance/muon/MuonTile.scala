@@ -283,13 +283,13 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   val muon = Module(new MuonCore())
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
-  // TODO: both dmem and smem should be a vector of bundles
-//  MuonMemTL.connectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.dcacheNode_)
-//  MuonMemTL.connectTL(muon.io.smem.req, muon.io.smem.resp, outer.smemNodes)
-
-//  muon.io.imem.req
+  
   muon.io.dmem <> DontCare
   muon.io.smem <> DontCare
+  // why is this broken
+  // MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.dcacheNode)
+  // MuonMemTL.multiConnectTL(muon.io.smem.req, muon.io.smem.resp, outer.smemNodes)
+  
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
   outer.reportCease(None)
