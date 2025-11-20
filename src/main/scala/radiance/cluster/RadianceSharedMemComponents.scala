@@ -138,16 +138,16 @@ class RadianceSharedMemComponents(
     connectOne(alignmentXbar, () => RWSplitterNode(f"muon_aligned_splitter_$wid")))
   val muonAligned = Seq.tabulate(2)(_ => muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
 
-  val quantOutputWidth = gemminiTiles.head.gemminiParams.requantizer
-    .map(q => q.numOutputLanes * q.maxOutputBits / 8)
+  val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
+    .map(q => q.numOutputLanes * q.maxOutputBits / 8))
   val quantOutputNodesSingleBank = distAndDuplicate(
-    gemminiTiles.flatMap(_.requantizerSmemClient.toSeq).map(x =>
-      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.get)
+    gemminiTiles.flatMap(_.requantizerSmemClient).map(x =>
+      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.head)
     ), "quant_w")
   val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
 
   // connect requantizer managers directly here TODO: move outside, make smemNodes xbars
-  gemminiTiles.head.requantizerMuonManager.foreach { qm =>
+  gemminiTiles.flatMap(_.requantizerMuonManager).foreach { qm =>
     val destBytes = qm.portParams.head.beatBytes
     require(2 * numLanes == destBytes, "requantizer input width mismatch: not lanes * 2B")
     // pack lanes into a single wide request per core
