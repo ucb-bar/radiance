@@ -9,6 +9,7 @@ import freechips.rocketchip.util._
 
 import radiance.muon.AddressSpaceCfg._
 import radiance.memory.MultiReadOneWriteSRAM
+import org.chipsalliance.cde.config.Field
 
 case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
@@ -39,6 +40,8 @@ case class LoadStoreUnitParams(
     val addressIdxBits = log2Up(addressEntries)
 }
 
+case object MuonLoadStoreUnitDebugIdKey extends Field[Option[Int]](None)
+
 class LoadStoreUnitDerivedParams(
     p: Parameters,
     muonParams: MuonCoreParams
@@ -64,7 +67,7 @@ class LoadStoreUnitDerivedParams(
     val laneIdBits = log2Up(muonParams.lsu.numLsuLanes)
 
     // debug id for testbench
-    val debugIdBits = Some(32) 
+    val debugIdBits = p(MuonLoadStoreUnitDebugIdKey) 
 }
 
 // Chisel type
@@ -398,7 +401,12 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
                 debugId.get(idxBits(tail)) := io.debugId.get
             }
 
-            printf(cf"[LSU] Enqueue: warp = ${warpId}, index = ${idxBits(tail)}, otherTail = ${io.otherTail}, debugId = ${io.debugId.get}\n")
+
+            val debugIdMsg = io.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
+            printf(
+                cf"[LSU] Enqueue: warp = ${warpId}, index = ${idxBits(tail)}, " +
+                cf"otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
+            )
 
             tail := tail + 1.U
         }
@@ -1527,7 +1535,12 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         }
 
         when (io.coreResp.fire) {
-            printf(cf"[Writeback] coreResp fire: debugId = ${io.coreResp.bits.debugId.get}, tmask = ${io.coreResp.bits.tmask}, writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n")
+            val debugIdMsg = io.coreResp.bits.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
+            printf(
+                cf"[Writeback] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
+                cf"writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, " +
+                cf"destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n"
+            )
         }
     }
 
