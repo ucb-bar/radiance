@@ -4,32 +4,35 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class CollectorRequest(
+class CollectorAllocRequest(implicit p: Parameters) extends CoreBundle()(p) {
+  val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
+  val rsEntryId = UInt(rsEntryIdWidth.W)
+}
+
+class CollectorOpRequest(
   val numPorts: Int,
   val isWrite: Boolean
 )(implicit p: Parameters) extends CoreBundle()(p) {
-  val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
   val regs = Vec(numPorts, new Bundle {
     val enable = Bool()
     val pReg = pRegT
     val data = Option.when(isWrite)(Vec(numLanes, regDataT))
     // TODO: tmask
   })
-  val rsEntryId = UInt(rsEntryIdWidth.W)
 
   def anyEnabled(): Bool = {
     regs.map(_.enable).reduce(_ || _)
   }
 }
 
-object CollectorRequest {
+object CollectorOpRequest {
   def apply(numPorts: Int, isWrite: Boolean)(implicit p: Parameters)
-  : DecoupledIO[CollectorRequest] = {
-    Flipped(Decoupled(new CollectorRequest(numPorts, isWrite)))
+  : DecoupledIO[CollectorOpRequest] = {
+    Flipped(Decoupled(new CollectorOpRequest(numPorts, isWrite)))
   }
 }
 
-class CollectorResponse(
+class CollectorOpResponse(
   val numPorts: Int,
   val isWrite: Boolean
 )(implicit p: Parameters) extends CoreBundle()(p) {
@@ -42,10 +45,10 @@ class CollectorResponse(
   }))
 }
 
-object CollectorResponse {
+object CollectorOpResponse {
   def apply(numPorts: Int, isWrite: Boolean)(implicit p: Parameters)
-  : CollectorResponse = {
-    new CollectorResponse(numPorts, isWrite)
+  : CollectorOpResponse = {
+    new CollectorOpResponse(numPorts, isWrite)
   }
 }
 
@@ -65,19 +68,23 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
  */
 class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
-    /** Request collection of a single uop with full rs1/2/3 combination. */
-    val readReq  = CollectorRequest(Isa.maxNumRegs, isWrite = false)
+    /** Allocate a collector bank entry for this RS entry. */
+    val alloc     = Flipped(Decoupled(new CollectorAllocRequest))
+    /** Request collection of a single uop with full rs1/2/3 combination.
+     *  readReq can be at the same cycle as allocation success, for which the
+     *  collector will start collecting ops at that cycle. */
+    val readReq   = CollectorOpRequest(Isa.maxNumRegs, isWrite = false)
     /** Response that indicates a register read has been collected.  The
      *  rs1/2/3 registers of a single uop may potentially be responded to at
      *  different cycles. Responses to the same pReg are guaranteed to be
      *  served in the same order as the requests. */
-    val readResp = CollectorResponse(Isa.maxNumRegs, isWrite = false)
+    val readResp  = CollectorOpResponse(Isa.maxNumRegs, isWrite = false)
     /** Writebacks are served one dest register at a time. */
-    val writeReq  = CollectorRequest(1, isWrite = true)
-    val writeResp = CollectorResponse(1, isWrite = true)
+    val writeReq  = CollectorOpRequest(1, isWrite = true)
+    val writeResp = CollectorOpResponse(1, isWrite = true)
     /** Data read port for the operands readily collected & stored in the
      *  flip-flop banks.  Combinational-read. */
-    val readData = new CollectorOperandRead
+    val readData  = new CollectorOperandRead
   })
 
   def vecRegDataT = Vec(numLanes, regDataT)
@@ -103,15 +110,15 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   // if readReq is requesting partial ops on the already-registered RS row, we
   // should admit it
   val allocInUse = WireDefault(false.B) // set later
-  allocInUse := allocTable.valid && (allocTable.rsEntryId =/= io.readReq.bits.rsEntryId)
+  allocInUse := allocTable.valid && (allocTable.rsEntryId =/= io.alloc.bits.rsEntryId)
   val allocFreedNow = WireDefault(false.B) // set later
   io.readReq.ready := !allocInUse || allocFreedNow
   dontTouch(allocInUse)
   dontTouch(allocFreedNow)
 
-  when (io.readReq.fire) {
+  when (io.alloc.fire) {
     allocTable.valid := true.B
-    allocTable.rsEntryId := io.readReq.bits.rsEntryId
+    allocTable.rsEntryId := io.alloc.bits.rsEntryId
   }.elsewhen (allocFreedNow) {
     allocTable.valid := false.B
   }

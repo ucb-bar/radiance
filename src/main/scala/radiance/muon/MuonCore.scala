@@ -32,8 +32,12 @@ case class MuonCoreParams(
   // issue
   numIssueQueueEntries: Int = 8, // RS
   maxPendingReads: Int = 3,      // scoreboard
-  numRegBanks: Int = 4,          // collector
-  numCollectorEntries: Int = 1,  // collector
+  // collector
+  // if true, use a bank-conflict-avoiding operand collector
+  // if false, use a simple rs1/2/3-duplicated register file
+  useCollector: Boolean = false,
+  numRegBanks: Int = 1,          // when useCollector true
+  numCollectorEntries: Int = 1,  // when useCollector true
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),

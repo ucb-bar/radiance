@@ -35,8 +35,9 @@ class ReservationStation(
     }
     /** collector request/response; RS keeps track of operand validity */
     val collector = new Bundle {
-      val readReq  = Flipped(CollectorRequest(Isa.maxNumRegs, isWrite = false))
-      val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
+      val alloc    = Decoupled(new CollectorAllocRequest)
+      val readReq  = Flipped(CollectorOpRequest(Isa.maxNumRegs, isWrite = false))
+      val readResp = Flipped(CollectorOpResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
     val regTrace = Option.when(test)(Valid(new RegTraceIO))
@@ -59,6 +60,11 @@ class ReservationStation(
   val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // whether the operands are being written-to by in-flight uops in EX
   val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  // whether the uop has allocated an entry in the collector
+  // A uop with an outstanding allocation can request the collector to collect
+  // subsequent partial operations without fighting with other uop for an
+  // entry.
+  val collAllocTable = Mem(numEntries, Bool())
   // whether the operands are currently being collected
   // a partial set of hasOpTable; not all of the operands can be collected at
   // once
@@ -131,23 +137,41 @@ class ReservationStation(
   // valuable space in the collector banks.
   //
   // NOTE: It's debatable whether this logic should be in the collector or not.
-  // But for that, we need some kind of bookkeeping in the collector for the
-  // partial-collect uops, which is what the collector banks are meant for,
-  // which are expensive.
+  val anyNeed = collBitvec.reduce(_ || _)
   val anyPriority = collPriorityTable.reduce(_ || _)
-  val firstPriorityRow = PriorityEncoder(collPriorityTable)
   val firstNeedRow = PriorityEncoder(collBitvec)
-  val collRow = Mux(anyPriority, firstPriorityRow, firstNeedRow)
-  dontTouch(collRow)
+  val firstPriorityRow = PriorityEncoder(collPriorityTable)
+  val collNewAllocRow = Mux(anyPriority, firstPriorityRow, firstNeedRow)
+  dontTouch(collNewAllocRow)
 
-  val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
-  val collUop = uopTable(collRow)
+  // collector allocation
+  io.collector.alloc.valid := anyNeed
+  io.collector.alloc.bits := collNewAllocRow
+  when (io.collector.alloc.fire) {
+    collAllocTable(collNewAllocRow) := true.B
+  }
+  // TODO: deallocation
+
+  // find an RS entry that has a valid collector allocation (or has
+  // successfully allocated at this cycle), and use that to drive collector
+  // read requests
+  val collAllocBitvec = VecInit.tabulate(numEntries)(collAllocTable(_))
+  val anyAlloced = collAllocBitvec.reduce(_ || _)
+  val firstAllocedRow = PriorityEncoder(collAllocBitvec)
+  val collReqValid = anyAlloced || io.collector.alloc.fire
+  // prioritize already-allocated entries over a freshly allocated one to
+  // prevent starvation
+  val collReqRow = Mux(anyAlloced, firstAllocedRow, collNewAllocRow)
+  dontTouch(firstAllocedRow)
+
+  val collOpNeed = VecInit(needCollects.map(_._2))(collReqRow)
+  val collUop = uopTable(collReqRow)
   val collPC = WireDefault(collUop.pc)
   dontTouch(collPC)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
 
   // this is clunky, but Mem does not support partial-field updates
-  val newCollPtr = WireDefault(collPtrTable(collRow))
+  val newCollPtr = WireDefault(collPtrTable(collReqRow))
   assert(collOpNeed.length == io.collector.readReq.bits.regs.length)
   assert(collRegs.length == io.collector.readReq.bits.regs.length)
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
@@ -158,15 +182,16 @@ class ReservationStation(
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
     }
-  io.collector.readReq.bits.rsEntryId := collRow
+
+  // TODO: check allocation first here
   io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
   when (io.collector.readReq.fire) {
-    val fired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
+    val fired = (collFiredTable(collReqRow) zip io.collector.readReq.bits.regs.map(_.enable))
                 .map { case (a,b) => a || b }
-    collFiredTable(collRow) := fired
-    collPtrTable(collRow) := newCollPtr
+    collFiredTable(collReqRow) := fired
+    collPtrTable(collReqRow) := newCollPtr
 
-    printf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
+    printf(cf"RS: collector request fired at row:${collReqRow}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:
@@ -203,6 +228,7 @@ class ReservationStation(
           printf(cf"RS: collector response handled at row:${i}, pc:${uopTable(i).pc}%x, rs:${rs}, rsi:${rsi}\n")
         }
       }
+    // if all ops collected, mark deallocated
     when (updated) {
       opReadyTable(i) := newOpReadys
     }
@@ -323,10 +349,14 @@ class ReservationStation(
     when (updated) {
       busyTable(i) := newBusys
       if (muonParams.debug) {
-        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${i}, rd=${io.writeback.bits.rd}:\n")
+        printf(cf"RS: writeback: rd=${io.writeback.bits.rd}, woke up PC=${uop.pc}%x at row ${i}:\n")
         printTable
       }
     }
+  }
+
+  when (!reset.asBool) {
+    printTable
   }
 
   // pass-through to scoreboard to also update pendingWrites
