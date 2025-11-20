@@ -2,12 +2,13 @@
 - Memory system will not support unaligned accesses (N-byte loads must be to addresses divisible by N)
 	- CUDA has same limitation
 - Memory ordering will be very relaxed - loads and stores in one thread can appear in any order to another thread
+  - Also, there is no ordering at all between different address spaces
 - Coherence is also relaxed; without explicit flushes (common case: kernel boundary), different threadblocks have no guarantee of coherent view to memory
 - ISA modification: we introduce address space qualifier for loads and stores to distinguish global from shared memory; this requires some compiler changes but LLVM certainly supports it (worst case, use intrinsics for shared memory)
 - Below details are written by AI and checked by me
 
 ## Architecture
-The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, fences) from the core. 
+The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, and fences) from the core. 
 
 ### Overall Structure
 - **Per-Warp Queues:** Each warp has four independent circular FIFO queues:
@@ -23,11 +24,12 @@ The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, f
   - Each entry in a queue contains:
     - Valid bit
     - Operation type (load, store, atomic, fence)
-    - Operand readiness
+    - Operand readiness (whether address + store data have been received)
+    - Hazard tracking info (snapshot of other queue's tail at reservation time)
     - Issued status (whether a memory request has been sent)
     - Address and store data indices (SRAM pointers)
     - Load data index (SRAM pointer, for loads and atomics)
-    - Hazard tracking info (snapshot of other queue's tail)
+    - Packet index to track memory responses
     - Done and writeback flags
 
 - **Hazard Tracking:**
@@ -37,31 +39,36 @@ The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, f
 
 - **Resource Allocation:**
   - Free list allocators manage indices for address/tmask SRAM, store data SRAM, and load data SRAM.
-  - Address and store data indices are allocated at queue reservation time to avoid deadlock.
-  - Load data indices are allocated at memory request issue time 
+  - Address and store data indices are allocated at queue reservation time to avoid deadlock; they are deallocated when the memory request is sent
+  - Load data indices are allocated at memory request issue time and deallocated once writeback is finished
+  - Entries in Metadata SRAM and Completion SRAM are statically allocated (one for every queue entry)
 
 - **SRAMs:**
   - Address/tmask SRAM: Stores addresses and lane masks for each memory operation.
   - Store data SRAM: Stores data for store operations.
   - Load data SRAM: Stores data returned from memory for loads and atomics.
-  - PReg/tmask SRAM: Stores destination register and tmask for writeback.
+  - Metadata SRAM: Stores destination register and tmask for writeback, as well as the memory operation + byte mask of memory request to extract correct bits / do sign extension for sub-word loads.
+  - Completion SRAM: Bit vector which tracks how many of the lanes have received a response from memory subsystem for loads and atomics.
 
 - **Data and Control Flow:**
   1. **Reservation:**
      - The IBUF stage issues a reservation to the LSU for each memory instruction, specifying address space and operation type.
-     - The LSU allocates a queue slot and SRAM indices, returning a token that is ultimately stored in the LSU-local reservation station.
+     - The LSU allocates a queue slot and SRAM indices in Address/tmask SRAM and Store data SRAM (for stores and atomics only), returning a token that is ultimately stored in the reservation station.
   2. **Operand Collection:**
      - When operands are ready, the reservation station issues them to the LSU, which writes address/tmask and store data to SRAM.
-     - The queue entry (found using token) is marked as ready for issue.
+     - The queue entry (found using token) is marked as ready for issue; the queue entry also provides previously allocated indices into address/tmask and store data SRAMs.
   3. **Request Issue:**
      - The queue checks for hazards and readiness, then issues a memory request when safe.
      - Loads wait for older stores to retire; stores issue strictly in program order.
      - Atomics and fences are treated as stores for purposes of ordering.
+     - Fences immediately retire after checking for hazards, they don't issue real memory requests.
   4. **Memory Response:**
-     - When memory responds, the LSU updates the queue entry, writes load data to SRAM, and marks the entry for writeback (loads/atomics) or retirement (stores/fences).
+     - When memory responds, the LSU updates the queue entry, writes load data to SRAM (masked by valid bits, only for loads and atomics), and uses the valid bits to update completion SRAM (all memory operations)
+     - Once the memory request is fully completed, it signals the queue entry to begin writeback (loads/atomics) or just retire (stores).
   5. **Writeback:**
-     - The LSU arbitrates writeback requests, reads data from SRAM, and returns results to the core.
-     - Entries are deallocated after writeback or retirement.
+     - The LSU arbitrates writeback requests from different queues
+     - Load data, thread mask, operation type are read from SRAM; appropriately sign-extended data is returned to core.
+     - Load data SRAM entries and load / atomic entries are deallocated after writeback.
 
 - **Arbitration:**
   - Memory requests from all queues are arbitrated using a priority scheme:
@@ -76,7 +83,27 @@ The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, f
 
 ### Memory Ordering and Relaxation
 - Only consecutive loads within the same warp are allowed to be reordered
-- Atomics and fences enforce ordering by being treated as stores.
+- Atomics and fences enforce ordering by being treated as stores, blocking reordering around them
+  - This isn't actually that useful, since it only stops reordering of loads
+  - As stated in "General Notes" section, we don't guarantee any ordering between memory requests made by different threads. The current implementation of the LSU means that there is actually ordering for threads in the same warp, but this shouldn't be relied upon
+
+### Downstream memory interface (copied from source)
+The LSU Memory Request interface is per-warp with separate data / address / tmask per lane, 
+but the tag is shared across all lanes.
+
+The core's memory interface is fully per-LSU-lane, with a per-LSU-lane tag as well. Generally, for coalesced requests, 
+the responses will come back together, but for uncoalesced requests, no such guarantee is made. As such, we
+need to support partial writes into the load data staging SRAM, and we need to keep track of which words in a row
+are valid, only advancing the state machine to begin writing back once all of them are.
+
+As such, we need to convert from LSU memory request to core memory request by appending LSU lane id, 
+and the LSU Memory Response interface should support per-LSU-lane valids. 
+We also need to convert from core memory response to LSU memory response(s). This is done very naively, 
+by picking the first valid lane on the core side, and filtering only those responses whose tag (excluding lane id) 
+matches it. 
+
+In the future, it may be possible to begin writing back to register files once a packet is ready (or even
+individual lanes within a packet), rather than the full warp.
 
 ## Parameters
 
@@ -94,6 +121,8 @@ The Load/Store Unit (LSU) handles memory instructions (loads, stores, atomics, f
 - `multiCycleWriteback`: True if numLanes > numLsuLanes
 - `numPackets`: Number of packets needed to process full vector (numLanes / numLsuLanes)
 - `sourceIdBits`: Bits needed for request tags (LsuQueueToken width + packetBits)
+- `debugIdBits`: A debug id can be attached to a queue entry at reservation time; this gets printed out in 
+informative Chisel `printf`s for debugging purposes (and is also used for verification)
 
 ## Core Interface
 
