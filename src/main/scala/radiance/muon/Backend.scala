@@ -67,8 +67,12 @@ class Backend(
     // @hansung TODO: hazard -> reservation station path needs to be updated to 
     // include token also
 
-    // reservStation.io.issue
-    ???
+    val issue = Wire(Decoupled(uopWithTokenT))
+    issue.valid := reservStation.io.issue.valid
+    issue.bits.uop := reservStation.io.issue.bits
+    issue.bits.token := DontCare // TODO
+    reservStation.io.issue.ready:= issue.ready
+    issue
   }
 
   // -----------------
