@@ -198,7 +198,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
     }).get
 
     val skipRecoding = false
-    val tileParams = GemminiTileParams(
+    val tileParams = FloatGemminiTileParams(
       gemminiConfig = {
         implicit val arithmetic: Arithmetic[Float] =
           Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
@@ -257,7 +257,6 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       tileId = idOffset,
       tileSize = tileSize,
       mmioAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
-      hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -305,25 +304,25 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     }).get
     val smKey = clusterParams.smemConfig
 
-    val tileParams = GemminiTileParams(
+    val tileParams = MxGemminiTileParams(
       gemminiConfig = {
-        implicit val arithmetic: Arithmetic[Float] =
-          Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
-        GemminiFPConfigs.FP16DefaultConfig.copy(
-          acc_scale_args = Some(ScaleArguments(
-            (t: Float, u: Float) => {t},
-            1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
-          )),
-          mvin_scale_args = Some(ScaleArguments(
-            (t: Float, u: Float) => t * u,
-            1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
-          )),
-          mvin_scale_acc_args = None,
+        // implicit val arithmetic: Arithmetic[Float] =
+        //   Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
+        GemminiMxFPConfigs.defaultMxFPConfig.copy(
+          // acc_scale_args = Some(ScaleArguments(
+          //   (t: Float, u: Float) => {t},
+          //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
+          // )),
+          // mvin_scale_args = Some(ScaleArguments(
+          //   (t: Float, u: Float) => t * u,
+          //   1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
+          // )),
+          // mvin_scale_acc_args = None,
           has_training_convs = false,
-          spatialArrayInputType = Float(5, 11, isRecoded = false),
-          spatialArrayWeightType = Float(5, 11, isRecoded = false),
-          spatialArrayOutputType = Float(8, 24, isRecoded = false),
-          accType = Float(8, 24),
+          // spatialArrayInputType = Float(5, 11, isRecoded = false),
+          // spatialArrayWeightType = Float(5, 11, isRecoded = false),
+          // spatialArrayOutputType = Float(8, 24, isRecoded = false),
+          // accType = Float(8, 24),
           acc_read_full_width = false, // set to true to output fp32
           num_counter = 0,
           dataflow = Dataflow.WS,
@@ -343,7 +342,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
           acc_latency = 3,
           dma_maxbytes = site(CacheBlockBytes),
           dma_buswidth = site(CacheBlockBytes),
-          tl_ext_mem_base = clusterParams.baseAddr,
+          tl_ext_mem_base = clusterParams.baseAddr, // TODO: no longer need this with address rewriting
           sp_banks = smKey.numBanks,
           sp_capacity = CapacityInKilobytes(smKey.size >> 10),
           acc_capacity = CapacityInKilobytes(accSizeInKB),
@@ -358,7 +357,6 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         sramLineSizeInBytes = 256 / 8,
         logicalLineSizeInBytes = 512 / 8,
       )),
-      // TODO: enable requantizer after integration with shared memory
       requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
         baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
         numInputLanes = simt.numLanes,

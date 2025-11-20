@@ -6,7 +6,7 @@ import chisel3.experimental.BundleLiterals._
 import freechips.rocketchip.resources.BigIntHexContext
 
 class GemminiCISC(accSlave: Option[AccNode.Slave],
-                  busy: Bool,
+                  busy: Bool, spadRows: Int,
                   tileParams: GemminiTileParams) {
 
   val instCounter = Counter(4)
@@ -64,8 +64,7 @@ class GemminiCISC(accSlave: Option[AccNode.Slave],
     case Left(v: (Int, Int, Int)) => v
     case Right(v: Int) => (v, v, v)
   }
-  val config = tileParams.gemminiConfig
-  val spadHexadecile = config.sp_bank_entries * config.sp_banks / 16
+  val spadHexadecile = spadRows / 16
 
   // TODO: as a temporary hack, bit 7 of the cisc opcode
   // TODO: will force the tile size to be a square base on M.

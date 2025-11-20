@@ -14,6 +14,7 @@ import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossin
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.UIntIsOneOf
+import gemmini.Arithmetic._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
@@ -25,68 +26,46 @@ object GemminiCoreParams extends PhysicalCoreParams {
   override val xLen: Int = 64
 }
 
-case class GemminiScalingFactorMemConfig(
-  baseAddr: BigInt,
-  sizeInBytes: BigInt = 32 << 10,
-  sramLineSizeInBytes: Int = 32,
-  logicalLineSizeInBytes: Int = 32,
-) {
-  def addrBits = log2Ceil(sizeInBytes)
-  def lineOffsetBits = log2Ceil(sramLineSizeInBytes)
-  def bankSelectBits = log2Ceil(logicalLineSizeInBytes / sramLineSizeInBytes)
+final case class MxGemminiTileParams(
+  tileId: Int = 0,
+  gemminiConfig: GemminiArrayConfig[MxFloat, Float, Float],
+  tileSize: Either[(Int, Int, Int), Int] = Right(4),
+  mmioAddress: BigInt,
+  override val scalingFactorMem: Option[GemminiScalingFactorMemConfig],
+  override val requantizer: Option[GemminiRequantizerConfig],
+  override val lookupTable: Option[GemminiLUTConfig],
+) extends GemminiTileParams {
+  type T = MxFloat
+  type U = Float
+  type V = Float
+  override val arithmetic = MxFloatArithmetic
 }
 
-class ScalingFactorWriteReq(addrWidth: Int, dataWidth: Int) extends Bundle {
-  val addr = UInt(addrWidth.W) // 9 bit [8:1]: row_addr, [0]:bank_sel
-  val data = UInt(dataWidth.W) // 256 bits
-}
-
-case class GemminiRequantizerConfig(
-  baseAddr: BigInt,
-  numInputLanes: Int = 16,
-  numOutputLanes: Int = 32,
-  gpuMaxFactor: Int = 2, // maximum fp16->fp8 for gpus, determines address space size
-  gpuWordSize: Int = 4,
-  inputBits: Int = 16,
-  minOutputBits: Int = 4,
-  maxOutputBits: Int = 8,
-  outputIdBits: Int = 3,
-)
-
-case class GemminiLUTConfig(
-  numBits: Int = 96
-)
-
-object RequantizerDataType extends ChiselEnum {
-  val FP4, FP6, FP8 = Value
-
-  def widthBits(x: Type): UInt = {
-    Mux(x === FP4, 4.U(4.W), 8.U(4.W))
-  }
-}
-
-class RequantizerInBundle(numLanes: Int, dataWidth: Int = 16) extends Bundle {
-  val data = Vec(numLanes, UInt(dataWidth.W))
-  val address = UInt(32.W) // in bytes
-  val dataType = RequantizerDataType()
-}
-
-class RequantizerOutBundle(numLanes: Int, dataWidth: Int = 8) extends Bundle {
-  val data = UInt((numLanes * dataWidth).W) // no active byte lanes (valid from lsb)
-  val address = UInt(32.W)
-  val dataType = RequantizerDataType() // data type determines response size
-}
-
-case class GemminiTileParams(
+final case class FloatGemminiTileParams(
   tileId: Int = 0,
   gemminiConfig: GemminiArrayConfig[Float, Float, Float],
   tileSize: Either[(Int, Int, Int), Int] = Right(4),
   mmioAddress: BigInt,
-  scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None,
-  requantizer: Option[GemminiRequantizerConfig] = None,
-  lookupTable: Option[GemminiLUTConfig] = None,
-  hasAccSlave: Boolean = false,
-) extends InstantiableTileParams[GemminiTile] {
+) extends GemminiTileParams {
+  type T = Float
+  type U = Float
+  type V = Float
+  override val arithmetic = FloatArithmetic
+}
+
+abstract class GemminiTileParams extends InstantiableTileParams[GemminiTile] {
+  type T <: Data
+  type U <: Data
+  type V <: Data
+  implicit val arithmetic: Arithmetic[T]
+  val gemminiConfig: GemminiArrayConfig[T, U, V]
+  val tileSize: Either[(Int, Int, Int), Int]
+  val mmioAddress: BigInt
+  val scalingFactorMem: Option[GemminiScalingFactorMemConfig] = None
+  val requantizer: Option[GemminiRequantizerConfig] = None
+  val lookupTable: Option[GemminiLUTConfig] = None
+  val hasAccSlave: Boolean = false
+
   def instantiate(crossing: HierarchicalElementCrossingParamsLike, lookup: LookupByHartIdImpl)(
       implicit p: Parameters
   ): GemminiTile = {
@@ -103,7 +82,7 @@ case class GemminiTileParams(
   ))
   val btb = None
   val baseName = name.get
-  val uniqueName = s"${baseName}_tileId"
+  val uniqueName = s"${baseName}_$tileId"
 }
 
 case class GemminiTileAttachParams(
@@ -149,6 +128,7 @@ class GemminiTile private (
 
   // TODO: evaluate if gemmini write node is required at all
 
+  implicit val arithmetic = gemminiParams.arithmetic
   val gemmini = LazyModule(new Gemmini(gemminiParams.gemminiConfig))
   val base = p(GPUMemory) match {
     case Some(GPUMemParams(baseAddr, _)) => baseAddr
@@ -370,6 +350,8 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val cisc = new GemminiCISC(
     accSlave = outer.accSlaveNode,
     busy = outer.gemmini.module.io.busy,
+    spadRows = outer.gemminiParams.gemminiConfig.sp_bank_entries *
+      outer.gemminiParams.gemminiConfig.sp_banks,
     tileParams = outer.gemminiParams)
 
   // mmio
