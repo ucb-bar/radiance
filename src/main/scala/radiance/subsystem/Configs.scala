@@ -256,7 +256,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
+      mmioAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
       hasAccSlave = hasAccSlave,
     )
     Seq(GemminiTileAttachParams(
@@ -294,17 +294,16 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
 
-    val clusterParams = (location match {
+    val clusterParams = ((location match {
       case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
       case _ => None
-    }).get.clusterParams
-
-    val smKey = (clusterParams match {
-      case params: RadianceClusterParams => Some(params.smemConfig)
+    }).get.clusterParams match {
+      case params: RadianceClusterParams => Some(params)
       case _ =>
         assert(false, "this config requires a radiance cluster")
         None
     }).get
+    val smKey = clusterParams.smemConfig
 
     val tileParams = GemminiTileParams(
       gemminiConfig = {
@@ -344,7 +343,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
           acc_latency = 3,
           dma_maxbytes = site(CacheBlockBytes),
           dma_buswidth = site(CacheBlockBytes),
-          tl_ext_mem_base = smKey.address,
+          tl_ext_mem_base = clusterParams.baseAddr,
           sp_banks = smKey.numBanks,
           sp_capacity = CapacityInKilobytes(smKey.size >> 10),
           acc_capacity = CapacityInKilobytes(accSizeInKB),
@@ -352,13 +351,28 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
       },
       tileId = idOffset,
       tileSize = Left(tileSize),
-      slaveAddress = smKey.address + smKey.size + 0x3000,
+      mmioAddress = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x4000,
       scalingFactorMem = Some(GemminiScalingFactorMemConfig(
+        baseAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x8000,
         sizeInBytes = 16 << 10,
         sramLineSizeInBytes = 256 / 8,
         logicalLineSizeInBytes = 512 / 8,
       )),
-
+      // TODO: enable requantizer after integration with shared memory
+      requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
+        baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
+        numInputLanes = simt.numLanes,
+        // numOutputLanes = 32,
+        // gpuMaxFactor = 2,
+        // gpuWordSize = 4,
+        // inputBits = 16,
+        // minOutputBits = 4,
+        // maxOutputBits = 8,
+        // outputIdBits = 3,
+      )),
+      lookupTable = Some(GemminiLUTConfig(
+        numBits = 96
+      )),
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -417,7 +431,7 @@ class WithRadianceCluster(
   l1Config: DCacheParams,
 ) extends Config((site, here, up) => {
   case ClustersLocated(`location`) => {
-    val baseAddress = x"4000_0000" + x"4_0000" * clusterId
+    val baseAddress = x"4000_0000" + x"10_0000" * clusterId
     up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
       RadianceClusterParams(
         clusterId = clusterId,

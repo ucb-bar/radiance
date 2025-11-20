@@ -24,6 +24,7 @@ case class RadianceClusterParams(
   baseAddr: BigInt,
   smemConfig: RadianceSharedMemKey,
   l1Config: DCacheParams,
+  peripheralAddrOffset: Int = 0x80000,
 ) extends InstantiableClusterParams[RadianceCluster] {
   val baseName = "radiance_cluster"
   val uniqueName = s"${baseName}_$clusterId"
@@ -86,6 +87,16 @@ class RadianceCluster (
     )), beatBytes = 8)))
     dummySinkNode := HackAtomicNode(8) := clcbus.outwardNode
   }
+
+  // clcbus -> print buffer
+  val printBuf = TLRAM(
+    address = AddressSet(thisClusterParams.baseAddr +
+      thisClusterParams.peripheralAddrOffset, 0x100 * muonTiles.length - 1),
+    cacheable = false,
+    atomics = true,
+    beatBytes = 8
+  )
+  printBuf := clcbus.outwardNode
 
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
