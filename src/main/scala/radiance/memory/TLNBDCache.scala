@@ -41,14 +41,11 @@ case class DummyCacheTileParams(
   override val dcache: Option[DCacheParams] = Some(params.cache)
 }
 
-class TLNBDCache(params: TLNBDCacheParams)
+class TLNBDCache(val params: TLNBDCacheParams)
                 (implicit p: Parameters) extends LazyModule {
 
   val beatBytes = params.cache.blockBytes
   require(params.cache.blockBytes == (params.cache.rowBits / 8))
-
-  // pretty hacky, might want to figure out a better way
-  val dChannelSize = params.overrideDChannelSize.getOrElse(log2Ceil(beatBytes))
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -103,13 +100,19 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     inIF.io.requestor <> 0.U.asTypeOf(inIF.io.requestor)
     inIF.io.requestor.keep_clock_enabled := true.B
 
+    val dChSize = outer.params.overrideDChannelSize
+    val sizeTagWidth = dChSize match {
+      case Some(_) => 0
+      case None => tlIn.params.sizeBits
+    }
+
     // A
     req.valid := tlIn.a.valid
     tlIn.a.ready := req.ready
     req.bits := 0.U.asTypeOf(req.bits.cloneType)
-    req.bits.tag := tlIn.a.bits.source
-    assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth,
-      s"cache tag bits doesnt match source: ${req.bits.tag.getWidth} != ${tlIn.a.bits.source.getWidth}")
+    assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth + sizeTagWidth,
+      s"cache tag bits doesnt match source:" +
+      s"${req.bits.tag.getWidth} != ${tlIn.a.bits.source.getWidth} + $sizeTagWidth")
 
     // every read is cache line sized. this is because the output always starts at lsb
     // regardless of address. i.e. this logic does not use active byte lanes that
@@ -146,8 +149,6 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     assert(!resp.valid || tlIn.d.ready, "response must be ready!")
     tlIn.d.valid := resp.valid
     tlIn.d.bits.data := resp.bits.data
-    tlIn.d.bits.size := outer.dChannelSize.U
-    tlIn.d.bits.source := resp.bits.tag
     tlIn.d.bits.opcode := MuxCase(TLMessages.AccessAckData, Seq(
       (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,
       (resp.bits.cmd === M_XWR) -> TLMessages.AccessAck,
@@ -155,6 +156,18 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     assert(!resp.fire || resp.bits.cmd === M_XRD || resp.bits.cmd === M_XWR)
     assert(!resp.fire || (resp.bits.has_data === (resp.bits.cmd === M_XRD)))
     // tlIn.d.bits.user := ???
+
+    outer.params.overrideDChannelSize match {
+      case Some(size) =>
+        req.bits.tag := tlIn.a.bits.source
+        tlIn.d.bits.size := size.U
+        tlIn.d.bits.source := resp.bits.tag
+      case None =>
+        req.bits.tag := Cat(tlIn.a.bits.size, tlIn.a.bits.source)
+        tlIn.d.bits.size := resp.bits.tag >> tlIn.params.sourceBits
+        tlIn.d.bits.source := resp.bits.tag(tlIn.params.sourceBits - 1, 0)
+    }
+
   }
 
   // simple if <-> cache

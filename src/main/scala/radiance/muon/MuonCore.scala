@@ -51,13 +51,12 @@ case class MuonCoreParams(
   def l0dReqTagBits: Int = {
     val packetBits = log2Up(numLanes / lsu.numLsuLanes) // from lsu derived params
     val sourceIdBits = LsuQueueToken.width(this) + packetBits
-    println("l0d tag bits", packetBits + sourceIdBits)
-
     val laneBits = log2Ceil(numLanes)
-    val perLaneBits = sourceIdBits + packetBits // = coalescer new ids
-
-    // the coalescer crossbar has n inputs and n+1 outputs
-    perLaneBits + laneBits * 2 + 1
+    val coalVsNonCoal = 1
+    val sizeTagBits = 3 // store the size in the cache tag
+    val totalBits = sourceIdBits + laneBits + coalVsNonCoal + sizeTagBits
+    println("l0d tag bits", totalBits)
+    totalBits
   }
   def l0iReqTagBits: Int = {
     println("l0i tag bits", warpIdBits + log2Ceil(ibufDepth))
