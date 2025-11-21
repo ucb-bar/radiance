@@ -70,6 +70,7 @@ class ReservationStation(
       case false => VecInit.fill(Isa.maxNumRegs)(WireDefault(true.B))
     }
   }
+  def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
   // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
   val collPriorityTable = Wire(Vec(numEntries, Bool()))
@@ -117,7 +118,7 @@ class ReservationStation(
     val valid = validTable(i)
     val opReadys = opReadyTable(i)
     val busys = busyTable(i)
-    val collFired = collFiredTable(i.U)
+    val collFired = collFiredTable(i)
     val needCollectOps = VecInit((opReadys zip (busys zip collFired))
       .map { case (r, (b, cf)) => !r && !b && !cf})
     val needCollect = valid && needCollectOps.reduce(_ || _)
@@ -192,7 +193,7 @@ class ReservationStation(
     val rss = rsTable(i)
     val opReadys = opReadyTable(i)
     val newOpReadys = WireDefault(opReadys)
-    val collFired = collFiredTable(i.U)
+    val collFired = collFiredTable(i)
     val collPtrs = collPtrTable(i)
     val updated = WireDefault(false.B)
     (opReadys lazyZip collFired lazyZip
@@ -247,6 +248,9 @@ class ReservationStation(
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
     // TODO: Consider same-cycle writeback for busyTable
+    // NOTE: When doing this, need to ensure that the collector itself supports
+    // writeback-to-read forwarding.
+
     // TODO: Consider same-cycle collector response
 
     val candidate = Wire(Decoupled(issueArbBundleT))
@@ -280,7 +284,8 @@ class ReservationStation(
       // for no-collector config, collEntry pointer is not used; use pRegs to
       // actually drive SRAMs
       case Some(pReg) => pReg := rsTable(issuedId)(rsi)
-      case None => assert(useCollector, "collector data port has unused pReg port instantiated")
+      case None => assert(useCollector,
+           "collector data port has unnecessary pReg field instantiated when useCollector == true")
     }
     // port.data input is not used
   }
@@ -339,8 +344,6 @@ class ReservationStation(
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
     val hasOps = hasOpTable(i)
     val valid = validTable(i)
-    val opReadys = opReadyTable(i)
-    val newOpReadys = WireDefault(opReadys)
     val busys = busyTable(i)
     val newBusys = WireDefault(busys)
     val rdWriteback = io.writeback.bits.rd
@@ -396,7 +399,7 @@ class ReservationStation(
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
                cf"collPriority:${collPriorityTable(i)} | " +
-               cf"collFired:${collFiredTable(i.U)(0)}${collFiredTable(i.U)(1)}${collFiredTable(i.U)(2)}" +
+               cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
                cf"\n")
       }
     }

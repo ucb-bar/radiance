@@ -111,7 +111,7 @@ class MemResponse[T <: Bundle] (
   val metadata = metadataT.cloneType
 }
 
-/** Derived parameters from the op-level MuonCoreParams. */
+/** derived parameters from MuonCoreParams */
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
@@ -120,12 +120,7 @@ trait HasMuonCoreParameters {
   val archLen = muonParams.archLen
   val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 
-  // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
-
-  val numLsqEntries = {
-    muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
-  }
   val addressBits = muonParams.archLen
   val dmemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
   val dmemDataBits = muonParams.archLen // FIXME: needs to be cache line
@@ -301,9 +296,6 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val finished = Output(Bool())
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
-
-  // TODO: L0
-
   dontTouch(io)
 
   val fe = Module(new Frontend)
