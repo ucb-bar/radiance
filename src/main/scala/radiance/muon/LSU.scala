@@ -404,8 +404,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
             val debugIdMsg = io.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
             printf(
-                cf"[LSU] Enqueue: warp = ${warpId}, index = ${idxBits(tail)}, " +
-                cf"otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
+                cf"[LSU] Enqueue (LDQ: ${loadQueue}): warp = ${warpId}, index = ${idxBits(tail)}, " +
+                cf"op = ${io.op}, otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
             )
 
             tail := tail + 1.U
@@ -501,7 +501,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
             // fences are fake entries, and don't generate any downstream requests
             // instead, they immediately retire 
-            when (MemOp.isFence(readyStoreOp)) {
+            when (readyStore && MemOp.isFence(readyStoreOp)) {
                 io.sendMemRequest.req.valid := false.B
                 valid(readyStoreIndex) := false.B
             }

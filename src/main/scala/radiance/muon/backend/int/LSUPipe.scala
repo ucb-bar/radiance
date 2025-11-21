@@ -95,6 +95,8 @@ object LsuOpDecoder {
       (BitPat(MuOpcode.STORE) ## BitPat("b000")) -> BitPat(MemOp.storeByte.litValue.U(MemOp.getWidth.W)),
       (BitPat(MuOpcode.STORE) ## BitPat("b001")) -> BitPat(MemOp.storeHalf.litValue.U(MemOp.getWidth.W)),
       (BitPat(MuOpcode.STORE) ## BitPat("b010")) -> BitPat(MemOp.storeWord.litValue.U(MemOp.getWidth.W)),
+    
+      (BitPat(MuOpcode.MISC_MEM) ## BitPat("b000") -> BitPat(MemOp.fence.litValue.U(MemOp.getWidth.W))),
     )
     
     val memOpUint = decoder(Cat(opcode(6, 0), f3), TruthTable(table, BitPat(MemOp.loadWord.litValue.U(MemOp.getWidth.W))))

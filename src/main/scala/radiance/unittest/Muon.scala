@@ -141,22 +141,24 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCorePara
   // every lsu lane is a separate TL client
   def masterParams = (lane: Int) => {
     val sourceId = IdRange(
-      lane * sourceIdsPerLane,
-      (lane + 1) * sourceIdsPerLane
+      0,
+      sourceIdsPerLane
     )
 
     TLMasterParameters.v1(
-      name = f"lsu-lane$lane",
+      name = f"lsu-gmem-lane$lane",
       sourceId = sourceId,
       requestFifo = false
     )
   }
 
-  val node = TLClientNode(Seq.tabulate(muonParams.lsu.numLsuLanes) { lane =>
-    TLMasterPortParameters.v1(
-      Seq(masterParams(lane))
-    )
-  })
+  val lsuNodes = Seq.tabulate(muonParams.lsu.numLsuLanes) {lane => 
+    TLClientNode(Seq(
+      TLMasterPortParameters.v1(
+        Seq(masterParams(lane))
+      )
+    ))
+  }
 
   lazy val module = new LSUWrapperImpl
   class LSUWrapperImpl extends LazyModuleImp(this) {
@@ -194,7 +196,7 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCorePara
     MuonMemTL.multiConnectTL(
       lsuAdapter.io.core.dmem.req,
       lsuAdapter.io.core.dmem.resp,
-      node
+      lsuNodes
     )
 
     // tie off shared mem
@@ -484,9 +486,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
 
   val scalaStimulus = stimulus(0)
 
-  // convert it down into 1 module per memory operation
-  // this is "synthesizable" in some sense :)
-  class StimulusModule(memoryOp: MemoryOperation) extends CoreModule {
+  class StimulusModuleV1(memoryOp: MemoryOperation) extends CoreModule {
     val io = IO(new Bundle {
       val coreReservationReq = Decoupled(new LsuReservationReq)
       val coreReservationResp = Flipped(Valid(new LsuReservationResp))
@@ -551,6 +551,88 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     io.done := state === s_done
   }
 
+  class SynthesizableMemoryOperation extends Bundle {
+    val warpId = UInt(muonParams.warpIdBits.W)
+    val memOp = MemOp()
+    val address = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+    val imm = UInt(muonParams.archLen.W)
+    val data = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+    val tmask = Vec(muonParams.numLanes, Bool())
+    val destReg = UInt(muonParams.pRegBits.W)
+
+    val reservationAt = UInt(32.W)
+    val operandsDelay = UInt(32.W)
+
+    val debugId = UInt(lsuDerived.debugIdBits.get.W)
+  }
+  
+  class StimulusModuleV2 extends CoreModule {
+    val io = IO(new Bundle {
+      val stimulus = Input(new SynthesizableMemoryOperation)
+
+      val coreReservationReq = Decoupled(new LsuReservationReq)
+      val coreReservationResp = Flipped(Valid(new LsuReservationResp))
+      
+      val coreReq = Decoupled(new LsuRequest)
+      val done = Bool()
+    })
+
+    val s_idle :: s_reserve :: s_operandsDelay :: s_issueReq :: s_done :: Nil = Enum(5)
+    val state = RegInit(s_idle)
+    val token = RegInit(0.U.asTypeOf(new LsuQueueToken))
+    val (cycleCounter, _) = Counter(true.B, Int.MaxValue)
+
+    io.coreReservationReq.valid := false.B
+    io.coreReservationReq.bits := DontCare
+
+    io.coreReq.valid := false.B
+    io.coreReq.bits := DontCare
+    
+    switch (state) {
+      is(s_idle) {
+        when (cycleCounter >= io.stimulus.reservationAt) {
+          state := s_reserve
+        }
+      }
+      
+      is (s_reserve) {
+        io.coreReservationReq.valid := true.B
+        io.coreReservationReq.bits.addressSpace := AddressSpace.globalMemory
+        io.coreReservationReq.bits.op := io.stimulus.memOp
+        io.coreReservationReq.bits.debugId.get := io.stimulus.debugId
+        when (io.coreReservationReq.fire) {
+          token := io.coreReservationResp.bits.token
+          state := s_operandsDelay
+        }
+      }
+
+      is (s_operandsDelay) {
+        when (cycleCounter >= (io.stimulus.reservationAt + io.stimulus.operandsDelay)) {
+          state := s_issueReq
+        }
+      }
+
+      is (s_issueReq) {
+        io.coreReq.valid := true.B
+        io.coreReq.bits.op := io.stimulus.memOp
+        io.coreReq.bits.address := io.stimulus.address
+        io.coreReq.bits.imm := io.stimulus.imm
+        io.coreReq.bits.storeData := io.stimulus.data
+        io.coreReq.bits.tmask := io.stimulus.tmask
+        io.coreReq.bits.destReg := io.stimulus.destReg
+        io.coreReq.bits.token := token
+
+        when (io.coreReq.fire) {
+          state := s_done
+        }
+      }
+
+      is(s_done) {/* nop */}
+    }
+
+    io.done := state === s_done
+  }
+
   class ResponseChecker(implicit p: Parameters) extends CoreModule {
     val io = IO(new Bundle {
       val coreResp = Flipped(Decoupled(new LsuResponse))
@@ -598,10 +680,11 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     val gotResponse = RegInit(VecInit(
       flattenedStimulus.map(s => s.expectedWriteback.isEmpty.B).toSeq
     ))
+
     // collect packets together
     val recomposer = Module(new LaneRecomposer(
-      inLanes = 1,
-      outLanes = muonParams.numLanes / muonParams.lsu.numLsuLanes,
+      inLanes = lsuDerived.numPackets,
+      outLanes = 1,
       elemTypes = Seq(new LsuResponse)
     ))
 
@@ -658,10 +741,38 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     io.done := gotResponse.reduce(_ && _)
   }
 
-  val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModule]()
+  // val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModuleV2]()
+  val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModuleV1]()
+  val stimulusBundleT = new SynthesizableMemoryOperation
   for (i <- 0 until muonParams.numWarps) {
-    val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModule(op)))
+    // val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModuleV2))
+    // val stimulusBundles = scalaStimulus(i).map(op => {
+    //   val addressLit = op.address.map(_.U(muonParams.archLen.W))
+    //   val dataLit = op.data.map(_.U(muonParams.archLen.W))
+    //   val tmaskLit = op.tmask.map(_.B)
+
+    //   stimulusBundleT.Lit(
+    //     _.warpId -> op.warpId.U(muonParams.warpIdBits.W),
+    //     _.memOp -> op.memOp,
+    //     _.address -> Vec.Lit(addressLit: _*),
+    //     _.imm -> op.imm.U(muonParams.archLen.W),
+    //     _.data -> Vec.Lit(dataLit: _*),
+    //     _.tmask -> Vec.Lit(tmaskLit: _*),
+    //     _.destReg -> op.destReg.U(muonParams.pRegBits.W),
+    //     _.reservationAt -> op.reservationAt.U(32.W),
+    //     _.operandsDelay -> op.operandsDelay.U(32.W),
+    //     _.debugId -> op.debugId.U(lsuDerived.debugIdBits.get.W),
+    //   )
+    // })
+    // val stimulusBundlesVec = VecInit(stimulusBundles)
     
+    // (stimulusModules zip stimulusBundlesVec).foreach { case (module, bundle) => 
+    //   module.io.stimulus := bundle
+    // }
+    
+    val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModuleV1(op)))
+    println("hi")
+
     if (stimulusModules.length == 0) {
       io.coreReservations(i).req.valid := false.B
       io.coreReservations(i).req.bits := DontCare
@@ -706,7 +817,9 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   // leads to combinational loop if there is no buffer between. this is not compliant
   // with TL standard (which states valid should never depend on ready), but should probably
   // be safe.
-  xbar :=* TLBuffer() :=* lsuWrapper.node
+  for (lane <- 0 until p(MuonKey).numLanes) {
+    xbar := TLBuffer() := lsuWrapper.lsuNodes(lane)
+  }
   fakeGmem := xbar
   
   lazy val module = new MuonLSUTestbenchImp
