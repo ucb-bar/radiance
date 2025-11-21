@@ -773,11 +773,11 @@ the responses will come back together, but for uncoalesced requests, no such gua
 need to support partial writes into the load data staging SRAM, and we need to keep track of which words in a row
 are valid, only advancing the state machine to begin writing back once all of them are.
 
-As such, we need to convert from LSU memory request to core memory request by appending LSU lane id, 
-and the LSU Memory Response interface should support per-LSU-lane valids. 
+As such, we need to convert from LSU memory request to core memory request, and the LSU Memory Response interface 
+should support per-LSU-lane valids. We don't need to have a separate tag for each core memory request lane, since 
+the coalescer treats each lane as a separate client with a separate source id space. 
 We also need to convert from core memory response to LSU memory response(s). This is done very naively, 
-by picking the first valid lane on the core side, and filtering only those responses whose tag (excluding lane id) 
-matches it. 
+by picking the first valid lane on the core side, and filtering only those responses whose tag matches it. 
 
 In the future, it may be possible to begin writing back to register files once a packet is ready (or even
 individual lanes within a packet), rather than the full warp
@@ -1572,21 +1572,13 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         }
     })
 
-    def lsuTagToCoreTag = (lsuTag: UInt, lane: Int) => {
-        Cat(lane.U(lsuDerived.laneIdBits.W), lsuTag)
-    }
-
-    def coreTagToLsuTag = (coreTag: UInt) => {
-        coreTag(lsuDerived.sourceIdBits-1, 0)
-    }
-
     def connectReq = (lsuReq: DecoupledIO[LsuMemRequest], coreReq: Vec[DecoupledIO[MemRequest[Bundle]]]) => {
         val readys = coreReq.map(_.ready)
         val allReady = readys.reduce(_ && _)
         val laneValids = Wire(Vec(coreReq.length, Bool()))
         for ((lane, laneId) <- coreReq.zipWithIndex) {
             lane.valid := allReady && lsuReq.valid && lsuReq.bits.tmask(laneId)
-            lane.bits.tag := lsuTagToCoreTag(lsuReq.bits.tag, laneId)
+            lane.bits.tag := lsuReq.bits.tag
             lane.bits.address := lsuReq.bits.address(laneId)
             lane.bits.data := lsuReq.bits.data(laneId)
             lane.bits.mask := lsuReq.bits.mask(laneId)
@@ -1604,7 +1596,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
 
     def connectResp = (lsuResp: DecoupledIO[LsuMemResponse], coreResp: Vec[DecoupledIO[MemResponse[Bundle]]]) => {
         val respValids = coreResp.map(_.valid)
-        val lsuTags = VecInit(coreResp.map(r => coreTagToLsuTag(r.bits.tag)))
+        val lsuTags = VecInit(coreResp.map(r => r.bits.tag))
         
         // TODO: might be better to select leader in round-robin fashion
         val leader = PriorityEncoder(respValids)

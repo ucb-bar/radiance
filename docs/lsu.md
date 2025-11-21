@@ -96,14 +96,14 @@ the responses will come back together, but for uncoalesced requests, no such gua
 need to support partial writes into the load data staging SRAM, and we need to keep track of which words in a row
 are valid, only advancing the state machine to begin writing back once all of them are.
 
-As such, we need to convert from LSU memory request to core memory request by appending LSU lane id, 
-and the LSU Memory Response interface should support per-LSU-lane valids. 
+As such, we need to convert from LSU memory request to core memory request, and the LSU Memory Response interface 
+should support per-LSU-lane valids. We don't need to have a separate tag for each core memory request lane, since 
+the coalescer treats each lane as a separate client with a separate source id space. 
 We also need to convert from core memory response to LSU memory response(s). This is done very naively, 
-by picking the first valid lane on the core side, and filtering only those responses whose tag (excluding lane id) 
-matches it. 
+by picking the first valid lane on the core side, and filtering only those responses whose tag matches it. 
 
 In the future, it may be possible to begin writing back to register files once a packet is ready (or even
-individual lanes within a packet), rather than the full warp.
+individual lanes within a packet), rather than the full warp
 
 ## Parameters
 
