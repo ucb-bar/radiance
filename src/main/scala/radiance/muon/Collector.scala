@@ -111,9 +111,9 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   }
 
   // read data port
-  val readEnables = io.readData.regs.map(_.enable)
-  val readPRegs = io.readData.regs.map(_.pReg.get)
-  (readEnables lazyZip readPRegs lazyZip rfBanks lazyZip io.readData.regs)
+  val dataEnables = io.readData.regs.map(_.enable)
+  val dataPRegs = io.readData.regs.map(_.pReg.get)
+  (dataEnables lazyZip dataPRegs lazyZip rfBanks lazyZip io.readData.regs)
     .foreach { case (en, pReg, banks, readDataOp) =>
       val bankPorts = VecInit(banks.map(_.readPorts.head))
       val bankId = regBankId(pReg)
@@ -122,8 +122,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
 
       // request
       bankPorts.foreach(_.enable := false.B)
-      val opEn = io.readReq.fire && en
-      bankPorts(bankId).enable := opEn && (pReg =/= 0.U)
+      bankPorts(bankId).enable := en && (pReg =/= 0.U)
       bankPorts.foreach(_.address := regBankAddr(pReg))
 
       val bankOut = Mux(nextPReg =/= 0.U,
