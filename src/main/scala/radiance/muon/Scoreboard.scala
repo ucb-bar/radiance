@@ -229,7 +229,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
   val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
   val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
-  val (wbWriteRecs, wbSuccess)    = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
+  val (wbWriteRecs,  wbSuccess)   = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
   assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
   // RS admission updates

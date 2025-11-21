@@ -65,10 +65,10 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
 
     val rsEntry = rsAdmit.bits
     rsEntry.uop := ibufPort.bits
-    // shortcut: mark operand as valid if x0; reduces collector contention
-    rsEntry.valid(0) := !hasRs1 || (ibufPort.bits.inst.rs1 === 0.U)
-    rsEntry.valid(1) := !hasRs2 || (ibufPort.bits.inst.rs2 === 0.U)
-    rsEntry.valid(2) := !hasRs3 || (ibufPort.bits.inst.rs3 === 0.U)
+    // don't filter out x0 for valid; collector will handle that
+    rsEntry.valid(0) := !hasRs1
+    rsEntry.valid(1) := !hasRs2
+    rsEntry.valid(2) := !hasRs3
     rsEntry.busy(0) := hasRs1 && (io.scb.readRs1.pendingWrites =/= 0.U)
     rsEntry.busy(1) := hasRs2 && (io.scb.readRs2.pendingWrites =/= 0.U)
     rsEntry.busy(2) := hasRs3 && (io.scb.readRs3.pendingWrites =/= 0.U)

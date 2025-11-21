@@ -51,7 +51,6 @@ class Backend(
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
-  io.regTrace.foreach(_ <> reservStation.io.regTrace.get)
 
   val bypass = true
   val issued = if (bypass) {
@@ -67,8 +66,12 @@ class Backend(
     // @hansung TODO: hazard -> reservation station path needs to be updated to 
     // include token also
 
-    // reservStation.io.issue
-    ???
+    val issue = Wire(Decoupled(uopWithTokenT))
+    issue.valid := reservStation.io.issue.valid
+    issue.bits.uop := reservStation.io.issue.bits
+    issue.bits.token := DontCare // TODO
+    reservStation.io.issue.ready:= issue.ready
+    issue
   }
 
   // -----------------
@@ -81,13 +84,16 @@ class Backend(
     // on bypass, manage collector entirely after issue
     val haves = Seq(HasRs1, HasRs2, HasRs3)
     val regs = Seq(Rs1, Rs2, Rs3)
-    (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
-      val pReg = issued.bits.uop.inst(reg)
-      collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
-      collReq.pReg := pReg
-    }
-    collector.io.readData.regs.foreach(_.enable := true.B)
-    collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
+    (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
+      .foreach { case (has, reg, readData, collReq) =>
+        val pReg = issued.bits.uop.inst(reg)
+        collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
+        collReq.pReg := pReg
+        readData.enable := issued.valid && issued.bits.uop.inst.b(has)
+        readData.pReg.get := pReg
+        readData.collEntry := DontCare
+      }
+    collector.io.readReq.bits.rsEntryId := DontCare
 
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
@@ -106,6 +112,19 @@ class Backend(
   collector.io.readResp.ports.foreach(_.ready := true.B)
   (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
     opnd := port.data
+  }
+
+  // drive regtrace IO for testing
+  io.regTrace.foreach { traceIO =>
+    traceIO.valid := issued.valid
+    traceIO.bits.pc := issued.bits.uop.pc
+    (traceIO.bits.regs zip collector.io.readData.regs)
+      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
+        tReg.enable := cReg.enable
+        val index = Seq(Rs1, Rs2, Rs3)(rsi)
+        tReg.address := issued.bits.uop.inst(index)
+        tReg.data := cReg.data
+      }
   }
 
   // -------
@@ -187,6 +206,7 @@ class Backend(
   collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
   collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
+  collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this
   collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
   collector.io.writeResp.ports.foreach(_.ready := true.B)

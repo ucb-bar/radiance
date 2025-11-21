@@ -101,6 +101,11 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.coreId := 0.U
   be.io.softReset := false.B
   be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
+  // TODO: LSU hookup
+  be.io.lsuReserve.foreach { r =>
+    r.req.valid := false.B
+    r.req.bits := DontCare
+  }
 
   val cfe = Module(new CyclotronFrontend()(p))
   // Imem in the ISA model is not used
@@ -114,7 +119,9 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
     b.valid := f.valid
     f.ready := b.ready
-    b.bits := f.bits.toUop()
+    b.bits.uop := f.bits.toUop()
+    // TODO: LSU hookup
+    b.bits.token := DontCare
   }
   dontTouch(be.io)
 
