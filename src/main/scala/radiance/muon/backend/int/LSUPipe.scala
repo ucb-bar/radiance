@@ -20,7 +20,7 @@ import radiance.muon.LsuQueueToken
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
-class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false)  with HasCoreBundles {
+class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) with HasCoreBundles {
     val reserveIO = IO(reservationIO)
     
     val tokenIO = IO(Input(lsuTokenT))

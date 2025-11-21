@@ -5,6 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.fp.CVFPU
 import radiance.unittest.RegTraceIO
+import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
   /** backend-as-top testbench config with register IOs */
@@ -125,16 +126,39 @@ class Backend(
 
   if (bypass) {
     // fallback issue: stall every instruction until writeback
+    // or execute req fire, for instructions that don't need writeback (i.e. stores, fences)
     val inFlight = RegInit(false.B)
+    val hasIssued = RegInit(false.B)
+    val willWriteback = RegInit(false.B)
+
     when (issued.fire) {
       inFlight := true.B
+      willWriteback := true.B
+      hasIssued := false.B
+
+      val isLsuInst = issued.bits.uop.inst.b(UseLSUPipe)
+      when (isLsuInst) {
+        val memOp = LsuOpDecoder.decode(issued.bits.uop.inst.opcode, issued.bits.uop.inst.f3)
+        willWriteback := MemOp.isLoad(memOp) || MemOp.isAtomic(memOp)
+      }
     }
     issued.ready := !inFlight
+
     // assumes 1-cycle latency collector
-    execute.io.req.valid := RegNext(issued.fire)
-    executeIn.uop := RegNext(issued.bits.uop, 0.U.asTypeOf(executeIn.uop.cloneType))
-    assert(RegNext(issued.fire) === execute.io.req.fire)
-    when (execute.io.resp.fire) {
+    execute.io.req.valid := inFlight && !hasIssued
+    val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
+    executeIn.uop := uop
+
+    when (execute.io.req.fire) {
+      when (willWriteback) {
+        hasIssued := true.B
+      }
+      .otherwise {
+        inFlight := false.B
+      }
+    }
+    
+    when (execute.io.resp.fire && willWriteback) {
       inFlight := false.B
     }
   } else {
