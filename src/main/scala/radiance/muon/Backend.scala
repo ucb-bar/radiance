@@ -115,15 +115,17 @@ class Backend(
   }
 
   // drive regtrace IO for testing
-  io.regTrace.foreach { traceIO =>
-    traceIO.valid := issued.valid
-    traceIO.bits.pc := issued.bits.uop.pc
-    (traceIO.bits.regs zip operands)
-      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
-        tReg.enable := issued.bits.uop.inst(haves(rsi))
-        tReg.address := issued.bits.uop.inst(regs(rsi))
-        tReg.data := opnd
-      }
+  if (test) {
+    io.regTrace.foreach { traceIO =>
+      traceIO.valid := issued.valid
+      traceIO.bits.pc := issued.bits.uop.pc
+      (traceIO.bits.regs zip operands)
+        .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+          tReg.enable := issued.bits.uop.inst(haves(rsi))
+          tReg.address := issued.bits.uop.inst(regs(rsi))
+          tReg.data := opnd
+        }
+    }
   }
 
   // -------
