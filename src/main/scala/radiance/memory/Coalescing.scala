@@ -5,9 +5,9 @@ package radiance.memory
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.diplomacy.{IdRange, AddressSet, BufferParams}
+import freechips.rocketchip.diplomacy.{AddressRange, AddressSet, BufferParams, IdRange, TransferSizes}
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.util.{Code, MultiPortQueue, OnePortLanePositionedQueue}
+import freechips.rocketchip.util.{BundleField, Code, MultiPortQueue, OnePortLanePositionedQueue}
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.tilelink._
 import radiance.subsystem.{SIMTCoreKey, SIMTCoreParams}
@@ -114,31 +114,51 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
     clientFn = { seq =>
       require(seq.length == config.numLanes, 
         s"Expected ${config.numLanes} client ports, got ${seq.length}")
-      
-      // Aggregate all client parameters with remapped source IDs
-      // NOTE: This is ONLY for diplomacy - hardware doesn't remap!
-      val allMasters = seq.zipWithIndex.flatMap { case (clientParams, lane) =>
-        clientParams.masters.map { master =>
-          val newSourceId = IdRange(
-            master.sourceId.start + lane * config.numOldSrcIds,
-            master.sourceId.end + lane * config.numOldSrcIds
-          )
-          master.v1copy(sourceId = newSourceId)
-        }
-      }
-      
-      // Add coalesced master
-      val coalescedMaster = TLMasterParameters.v1(
-        name = "CoalescerNode",
-        sourceId = config.coalescedSourceIdRange
-      )
-      
-      TLMasterPortParameters.v1(allMasters :+ coalescedMaster)
+      TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
+        name = "coalesced_node",
+        sourceId = IdRange(0, config.numNewSrcIds)
+      )))
     },
     managerFn = { seq =>
-      seq.head
+      val addrRanges = AddressRange.fromSets(seq.flatMap(_.slaves.flatMap(_.address)))
+      require(addrRanges.length == 1)
+      seq.head.v1copy(
+        responseFields = BundleField.union(seq.flatMap(_.responseFields)),
+        requestKeys = seq.flatMap(_.requestKeys).distinct,
+        minLatency = seq.map(_.minLatency).min,
+        endSinkId = 0, // dont support TLC
+        managers = Seq(TLSlaveParameters.v2(
+          name = Some(s"coalescer_manager"),
+          address = addrRanges.map(r => AddressSet(r.base, r.size - 1)),
+          // supports = seq.map(_.anySupportClaims).reduce(_ mincover _),
+          supports = TLMasterToSlaveTransferSizes(
+            get = seq.flatMap(_.slaves.map(_.supportsGet)).reduce(_ mincover _),
+            putFull = seq.flatMap(_.slaves.map(_.supportsPutFull)).reduce(_ mincover _),
+            putPartial = seq.flatMap(_.slaves.map(_.supportsPutPartial)).reduce(_ mincover _),
+          ),
+          fifoId = Some(0),
+        )),
+      )
     }
   )
+
+  // using a single nexus node unfortunately necessitates one of two things:
+  // 1. assign per-lane source ranges and then doing manual routing for non coalesced lanes
+  //    in the nexus node imp for responses, like a xbar, and exposing just one master
+  // 2. declare disjoint source ranges but don't actually assign disjoint source ids, instead
+  //    relying on a subsequent tlxbar to handle routing. this will duplicate bits in the
+  //    source id that pertains to lane id
+  // this is because we have to use single port multiple masters, instead of multiple ports
+  // single master with nexusnode. we prioritize a narrower source id here, so the workaround
+  // is to provide multiple ports each with a single master by creating a bunch of clientnodes.
+  val passthroughNodes = Seq.tabulate(config.numLanes) { i =>
+    TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v2(
+        name = s"noncoalesced_lane_$i",
+        sourceId = IdRange(0, config.numOldSrcIds)
+      ))
+    )))
+  }
 
   lazy val module = new CoalescingUnitImp(this, config)
 }
@@ -420,12 +440,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       s"config.numLanes (${config.numLanes})"
   )
 
-  require(
-    outer.nexusNode.out.length == config.numLanes + 1,
-    s"number of outgoing edges (${outer.nexusNode.out.length}) should be " +
-      s"${config.numLanes + 1} (n lanes + 1 coalesced)"
-  )
-
   val oldSourceWidth = outer.nexusNode.in.head._1.params.sourceBits
   val nonCoalReqT = new NonCoalescedRequest(config)
   val coalReqT = new CoalescedRequest(config)
@@ -466,7 +480,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   
   // OUTPUT: Non-coalesced passthrough to nexusNode outputs (lanes 0 to n-1)
   // NO source ID remapping - use local IDs
-  (outer.nexusNode.out.take(config.numLanes) zip reqBuffers).zipWithIndex.foreach {
+  (outer.passthroughNodes.flatMap(_.out) zip reqBuffers).zipWithIndex.foreach {
     case (((tlOut, edgeOut), reqBuf), lane) =>
       val shouldPassthrough = reqBuf.io.deq.valid && !coalescer.io.consumed(lane)
       
@@ -482,7 +496,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   // OUTPUT: Coalesced requests to nexusNode output (lane n)
-  val (tlCoal, edgeCoal) = outer.nexusNode.out.last
+  val (tlCoal, edgeCoal) = outer.nexusNode.out.head
 
   val coalSourceGen = Module(
     new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits)
@@ -523,7 +537,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
   // INPUT: Responses from nexusNode outputs (non-coalesced, lanes 0 to n-1)
   // NO source ID remapping - responses use local IDs
-  (outer.nexusNode.in zip outer.nexusNode.out.take(config.numLanes)).zipWithIndex.foreach {
+  (outer.nexusNode.in zip outer.passthroughNodes.flatMap(_.out)).zipWithIndex.foreach {
     case (((tlIn, edgeIn), (tlOut, _)), lane) =>
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
@@ -1618,7 +1632,7 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
   coal.nexusNode :=* driver.node
   
   (0 until config.numLanes).foreach { i =>
-    xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.nexusNode
+    xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.passthroughNodes(i)
   }
   xbar.node := coal.nexusNode
   
@@ -1662,7 +1676,7 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
   
   // Non-coalesced outputs (need width widget)
   (0 until config.numLanes).foreach { i =>
-    xbar.node := TLWidthWidget(config.wordSizeInBytes) := memSideLogger.node := coal.nexusNode
+    xbar.node := TLWidthWidget(config.wordSizeInBytes) := memSideLogger.node := coal.passthroughNodes(i)
   }
   // Coalesced output (already full width)
   xbar.node := memSideLogger.node := coal.nexusNode
