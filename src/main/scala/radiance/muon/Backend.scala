@@ -78,12 +78,12 @@ class Backend(
   // operand collector
   // -----------------
 
+  val haves = Seq(HasRs1, HasRs2, HasRs3)
+  val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (bypass) {
     // on bypass, manage collector entirely after issue
-    val haves = Seq(HasRs1, HasRs2, HasRs3)
-    val regs = Seq(Rs1, Rs2, Rs3)
     (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
       .foreach { case (has, reg, readData, collReq) =>
         val pReg = issued.bits.uop.inst(reg)
@@ -118,12 +118,11 @@ class Backend(
   io.regTrace.foreach { traceIO =>
     traceIO.valid := issued.valid
     traceIO.bits.pc := issued.bits.uop.pc
-    (traceIO.bits.regs zip collector.io.readData.regs)
-      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
-        tReg.enable := cReg.enable
-        val index = Seq(Rs1, Rs2, Rs3)(rsi)
-        tReg.address := issued.bits.uop.inst(index)
-        tReg.data := cReg.data
+    (traceIO.bits.regs zip operands)
+      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+        tReg.enable := issued.bits.uop.inst(haves(rsi))
+        tReg.address := issued.bits.uop.inst(regs(rsi))
+        tReg.data := opnd
       }
   }
 
