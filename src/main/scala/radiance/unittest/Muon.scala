@@ -112,7 +112,7 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   cfe.io.imem.req.valid := false.B
   cfe.io.imem.req.bits := DontCare
   cfe.io.imem.resp.ready := false.B
-  cfe.io.regTrace <> be.io.regTrace.get
+  cfe.io.trace <> be.io.trace.get
 
   // TODO: also instantiate CyclotronBackend as the issue downstream
 
@@ -128,17 +128,6 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   // run until all ibufs dry up
   val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
   io.finished := cfe.io.finished && ibufDry
-}
-
-/** Backend IO to Cyclotron testbench that logs trace of register read data at
- *  every issue.  Used for differential testing vs. instruction trace. */
-class RegTraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
-  val pc = pcT
-  val regs = Vec(Isa.maxNumRegs, new Bundle {
-    val enable = Bool()
-    val address = pRegT
-    val data = Vec(numLanes, regDataT)
-  })
 }
 
 /** Testbench for Muon backend LSU pipe */
@@ -850,7 +839,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
     val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
-    val regTrace = Flipped(Valid(new RegTraceIO))
+    val trace = Flipped(Valid(new TraceIO))
     val finished = Output(Bool())
   })
 
@@ -896,9 +885,9 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     connectToSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
     connectToSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
   }
-  cfbox.io.regTrace.valid := io.regTrace.valid
-  cfbox.io.regTrace.pc := io.regTrace.bits.pc
-  (cfbox.io.regTrace.regs zip io.regTrace.bits.regs).foreach { case (boxtr, tr) =>
+  cfbox.io.trace.valid := io.trace.valid
+  cfbox.io.trace.pc := io.trace.bits.pc
+  (cfbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
     boxtr.enable := tr.enable
     boxtr.address := tr.address
     boxtr.data := tr.data.asUInt
@@ -945,7 +934,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
       val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
-    val regTrace = Input(new Bundle {
+    val trace = Input(new Bundle {
       val valid = Bool()
       val pc = pcT
       val regs = Vec(Isa.maxNumRegs, new Bundle {

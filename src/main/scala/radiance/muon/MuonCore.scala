@@ -174,6 +174,17 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
   ).cloneType))
 }
 
+/** Trace IO to software testbench that logs PC and register read data at
+ *  issue time. */
+class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val pc = pcT
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
+    val address = pRegT
+    val data = Vec(numLanes, regDataT)
+  })
+}
+
 trait HasCoreBundles extends HasMuonCoreParameters {
   implicit val m = muonParams
 
@@ -285,7 +296,9 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 }
 
 /** Muon core and core-private L0 caches */
-class MuonCore(implicit p: Parameters) extends CoreModule {
+class MuonCore(
+  test: Boolean = false
+)(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
@@ -294,6 +307,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val finished = Output(Bool())
+    /** PC/reg trace IO for diff-testing against model */
+    val trace = Option.when(test)(Valid(new TraceIO))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
   dontTouch(io)
@@ -303,13 +318,14 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
-  val be = Module(new Backend)
+  val be = Module(new Backend(test))
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
+  be.io.feCSR := fe.io.csr
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset
-  be.io.feCSR := fe.io.csr
+  be.io.trace.foreach(_ <> io.trace.get)
 
   fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb

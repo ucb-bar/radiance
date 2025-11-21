@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import radiance.unittest.RegTraceIO
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   /** uop being admitted to the reservation station. */

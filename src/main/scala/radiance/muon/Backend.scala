@@ -4,11 +4,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.fp.CVFPU
-import radiance.unittest.RegTraceIO
 import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
-  /** backend-as-top testbench config with register IOs */
   test: Boolean = false
 )(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
@@ -21,7 +19,8 @@ class Backend(
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val softReset = Input(Bool())
-    val regTrace = Option.when(test)(Valid(new RegTraceIO))
+    /** PC/reg trace IO for diff-testing against model */
+    val trace = Option.when(test)(Valid(new TraceIO))
   })
 
   // -----
@@ -116,7 +115,7 @@ class Backend(
 
   // drive regtrace IO for testing
   if (test) {
-    io.regTrace.foreach { traceIO =>
+    io.trace.foreach { traceIO =>
       traceIO.valid := issued.valid
       traceIO.bits.pc := issued.bits.uop.pc
       (traceIO.bits.regs zip operands)
