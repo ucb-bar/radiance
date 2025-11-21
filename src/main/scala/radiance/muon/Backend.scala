@@ -51,7 +51,6 @@ class Backend(
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
-  io.regTrace.foreach(_ <> reservStation.io.regTrace.get)
 
   val bypass = true
   val issued = if (bypass) {
@@ -113,6 +112,19 @@ class Backend(
   collector.io.readResp.ports.foreach(_.ready := true.B)
   (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
     opnd := port.data
+  }
+
+  // drive regtrace IO for testing
+  io.regTrace.foreach { traceIO =>
+    traceIO.valid := issued.valid
+    traceIO.bits.pc := issued.bits.uop.pc
+    (traceIO.bits.regs zip collector.io.readData.regs)
+      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
+        tReg.enable := cReg.enable
+        val index = Seq(Rs1, Rs2, Rs3)(rsi)
+        tReg.address := issued.bits.uop.inst(index)
+        tReg.data := cReg.data
+      }
   }
 
   // -------

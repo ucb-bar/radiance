@@ -39,7 +39,6 @@ class ReservationStation(
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
-    val regTrace = Option.when(test)(Valid(new RegTraceIO))
   })
 
   val numEntries = muonParams.numIssueQueueEntries
@@ -288,18 +287,6 @@ class ReservationStation(
     io.issue.valid := issueScheduler.io.out.valid
     io.issue.bits := issueScheduler.io.out.bits.uop
     issueScheduler.io.out.ready := io.issue.ready
-  }
-
-  // drive regtrace IO for testing
-  io.regTrace.foreach { traceIO =>
-    traceIO.valid := io.issue.fire
-    traceIO.bits.pc := uopTable(issuedId).pc
-    (traceIO.bits.regs zip io.collector.readData.regs)
-      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
-        tReg.enable := cReg.enable
-        tReg.address := rsTable(issuedId)(rsi)
-        tReg.data := cReg.data
-      }
   }
 
   if (muonParams.debug) {
