@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import radiance.unittest.RegTraceIO
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   /** uop being admitted to the reservation station. */
@@ -43,6 +42,7 @@ class ReservationStation(
 
   val numEntries = muonParams.numIssueQueueEntries
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
+  val useCollector = muonParams.useCollector
 
   // whether this table row is valid
   val validTable     = Mem(numEntries, Bool())
@@ -61,7 +61,15 @@ class ReservationStation(
   // whether the operands are currently being collected
   // a partial set of hasOpTable; not all of the operands can be collected at
   // once
-  val collFiredTable = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val collFiredTableMem = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  def collFiredTable(row: UInt): Vec[Bool] = {
+    useCollector match {
+      case true  => collFiredTableMem(row)
+      // if not using collector, mark always fired
+      case false => VecInit.fill(Isa.maxNumRegs)(WireDefault(true.B))
+    }
+  }
+  def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
   // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
   val collPriorityTable = Wire(Vec(numEntries, Bool()))
@@ -191,6 +199,9 @@ class ReservationStation(
      (collPtrs zip rss) lazyZip
      (io.collector.readResp.ports zip io.scb.updateColl.reads))
       .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cPort, scbPort)), rsi) =>
+        assert(useCollector.B || !cPort.fire,
+               "RS: unexpected collector response when useCollector == false!")
+
         when (cPort.fire && valid && !rdy && cf && (cPort.bits.collEntry === cptr)) {
           newOpReadys(rsi) := true.B
           updated := true.B
@@ -224,26 +235,34 @@ class ReservationStation(
     val busys = busyTable(i)
     val allCollected = opReadys.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
-
-    // TODO: Consider same-cycle writeback for busyTable
-    // TODO: Consider same-cycle collector response
+    // issue eligibility logic
+    val eligible = useCollector match {
+      case true  => valid && allCollected
+      case false => valid && noneBusy
+    }
 
     // NOTE: cannot bypass same-cycle collector response for allCollected, since
     // the collected data are visible at the readData port 1 cycle after the
     // response.
     assert(!valid || !allCollected || noneBusy, "operand collected but still marked busy?")
 
-    val bundle = Wire(Decoupled(issueArbBundleT))
-    bundle.valid := valid && allCollected
-    bundle.bits.uop := uopTable(i)
-    bundle.bits.entryId := i.U
+    // TODO: Consider same-cycle writeback for busyTable
+    // NOTE: When doing this, need to ensure that the collector itself supports
+    // writeback-to-read forwarding.
+
+    // TODO: Consider same-cycle collector response
+
+    val candidate = Wire(Decoupled(issueArbBundleT))
+    candidate.valid := eligible
+    candidate.bits.uop := uopTable(i)
+    candidate.bits.entryId := i.U
 
     // deregister upon issue
-    when (bundle.fire) {
+    when (candidate.fire) {
       validTable(i) := false.B
     }
 
-    bundle
+    candidate
   })
   dontTouch(eligibles)
 
@@ -258,25 +277,42 @@ class ReservationStation(
   // drive the operands port upon issue via collector's combinational readData
   val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
   io.collector.readData.regs.zipWithIndex.foreach { case (port, rsi) =>
-    port.enable := issueScheduled.valid && hasOpTable(issuedId)(rsi)
+    port.enable := issueScheduled.fire && hasOpTable(issuedId)(rsi)
     port.collEntry := collPtrTable(issuedId)(rsi)
-    if (!muonParams.useCollector) {
+    port.pReg match {
       // for no-collector config, collEntry pointer is not used; use pRegs to
       // actually drive SRAMs
-      port.pReg match {
-        case Some(pReg) => pReg := rsTable(issuedId)(rsi)
-        case None => assert(false, "")
-      }
+      case Some(pReg) => pReg := rsTable(issuedId)(rsi)
+      case None => assert(useCollector,
+           "collector data port has unnecessary pReg field instantiated when useCollector == true")
     }
     // port.data input is not used
   }
   dontTouch(issuedId)
 
-  // if using raw SRAM banks instead of an operand collector, read ports of the
-  // collector stage introduces 1-cycle sqeuential delay, with which we need to
-  // align the EX ports
-  val collectorSequentialRead = !muonParams.useCollector
-  assert(!muonParams.useCollector, "muonParams.useCollector = true not supported yet")
+  // if not using collector, RS only directly uses the readData port and never
+  // sends readReq / gets readResp back, so we need to signal scoreboard
+  // explicitly at issue time
+  if (!useCollector) {
+    io.scb.updateColl.enable := issueScheduled.fire
+    io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+    io.scb.updateColl.reads.zipWithIndex.foreach { case (scbPort, rsi) =>
+      when (issueScheduled.fire) {
+        val hasRs = hasOpTable(issuedId)(rsi)
+        val rs = rsTable(issuedId)(rsi)
+        scbPort.pReg := rs
+        scbPort.incr := false.B
+        scbPort.decr := hasRs && (rs =/= 0.U)
+      }
+    }
+    io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
+  }
+
+  // If true, we're using simple SRAMs with op-duplication, which has timing
+  // implication due to sequential reads unlike collector buffers with
+  // combinational reads. In that case, we need to align the issue timing with
+  // the SRAM round-trip.
+  val collectorSequentialRead = !useCollector
   if (collectorSequentialRead) {
     val queue = Module(new Queue(gen = uopT, entries = 1, pipe = true))
     queue.io.enq.valid := issueScheduler.io.out.valid

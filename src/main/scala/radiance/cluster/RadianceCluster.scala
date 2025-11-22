@@ -124,6 +124,7 @@ class RadianceCluster (
     id = clusterId,
     cache = thisClusterParams.l1Config,
     cacheTagBits = muonTiles.head.muonParams.core.l1ReqTagBits,
+    overrideDChannelSize = Some(log2Ceil(thisClusterParams.l1Config.blockBytes)),
   ))(
     p.alterMap(Map(
       TileVisibilityNodeKey -> visibilityNode,

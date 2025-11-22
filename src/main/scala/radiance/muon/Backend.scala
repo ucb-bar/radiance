@@ -4,11 +4,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.fp.CVFPU
-import radiance.unittest.RegTraceIO
 import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
-  /** backend-as-top testbench config with register IOs */
   test: Boolean = false
 )(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
@@ -21,7 +19,8 @@ class Backend(
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val softReset = Input(Bool())
-    val regTrace = Option.when(test)(Valid(new RegTraceIO))
+    /** PC/reg trace IO for diff-testing against model */
+    val trace = Option.when(test)(Valid(new TraceIO))
   })
 
   // -----
@@ -78,12 +77,12 @@ class Backend(
   // operand collector
   // -----------------
 
+  val haves = Seq(HasRs1, HasRs2, HasRs3)
+  val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (bypass) {
     // on bypass, manage collector entirely after issue
-    val haves = Seq(HasRs1, HasRs2, HasRs3)
-    val regs = Seq(Rs1, Rs2, Rs3)
     (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
       .foreach { case (has, reg, readData, collReq) =>
         val pReg = issued.bits.uop.inst(reg)
@@ -115,16 +114,17 @@ class Backend(
   }
 
   // drive regtrace IO for testing
-  io.regTrace.foreach { traceIO =>
-    traceIO.valid := issued.valid
-    traceIO.bits.pc := issued.bits.uop.pc
-    (traceIO.bits.regs zip collector.io.readData.regs)
-      .zipWithIndex.foreach { case ((tReg, cReg), rsi) =>
-        tReg.enable := cReg.enable
-        val index = Seq(Rs1, Rs2, Rs3)(rsi)
-        tReg.address := issued.bits.uop.inst(index)
-        tReg.data := cReg.data
-      }
+  if (test) {
+    io.trace.foreach { traceIO =>
+      traceIO.valid := issued.valid
+      traceIO.bits.pc := issued.bits.uop.pc
+      (traceIO.bits.regs zip operands)
+        .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+          tReg.enable := issued.bits.uop.inst(haves(rsi))
+          tReg.address := issued.bits.uop.inst(regs(rsi))
+          tReg.data := opnd
+        }
+    }
   }
 
   // -------
