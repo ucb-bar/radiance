@@ -98,6 +98,10 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     val resp = inIF.io.requestor.resp
 
     inIF.io.requestor <> 0.U.asTypeOf(inIF.io.requestor)
+    // following example of Saturn's HellaInterface
+    inIF.io.requestor.s1_kill := false.B
+    inIF.io.requestor.s1_data := DontCare
+    inIF.io.requestor.s2_kill := false.B
     inIF.io.requestor.keep_clock_enabled := true.B
 
     val dChSize = outer.params.overrideDChannelSize
@@ -175,12 +179,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   val cacheIO = outer.nbdCache.module.io
 
   cacheIO.cpu <> inIF.io.cache
-  // cacheIO.cpu.req <> inIF.io.cache.req
-  cacheIO.cpu.s1_kill := false.B
-  cacheIO.cpu.s1_data := 0.U.asTypeOf(cacheIO.cpu.s1_data.cloneType)
-  cacheIO.cpu.s2_kill := false.B
-  cacheIO.cpu.keep_clock_enabled := true.B
-
+  
   inIF.io.cache.resp := cacheIO.cpu.resp
   inIF.io.cache.perf := cacheIO.cpu.perf
 //  inIF.io.cache.s2_nack := cacheIO.cpu.s2_nack
