@@ -16,9 +16,8 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(
-  test: Boolean = false
-)(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class ReservationStation(implicit p: Parameters)
+extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))

@@ -46,7 +46,7 @@ class Backend(
   scoreboard.io.readRs3 <> hazard.io.scb.readRs3
   dontTouch(scoreboard.io)
 
-  val reservStation = Module(new ReservationStation(test = test))
+  val reservStation = Module(new ReservationStation)
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
@@ -114,17 +114,15 @@ class Backend(
   }
 
   // drive regtrace IO for testing
-  if (test) {
-    io.trace.foreach { traceIO =>
-      traceIO.valid := issued.valid
-      traceIO.bits.pc := issued.bits.uop.pc
-      (traceIO.bits.regs zip operands)
-        .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
-          tReg.enable := issued.bits.uop.inst(haves(rsi))
-          tReg.address := issued.bits.uop.inst(regs(rsi))
-          tReg.data := opnd
-        }
-    }
+  io.trace.foreach { traceIO =>
+    traceIO.valid := issued.fire
+    traceIO.bits.pc := issued.bits.uop.pc
+    (traceIO.bits.regs zip operands)
+      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+        tReg.enable := issued.bits.uop.inst(haves(rsi))
+        tReg.address := issued.bits.uop.inst(regs(rsi))
+        tReg.data := opnd
+      }
   }
 
   // -------
