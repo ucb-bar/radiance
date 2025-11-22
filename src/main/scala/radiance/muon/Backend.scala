@@ -138,7 +138,6 @@ class Backend(
   execute.io.feCSR := io.feCSR
   execute.io.req.bits := executeIn
   
-  execute.io.token := issued.bits.token
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
@@ -165,8 +164,11 @@ class Backend(
 
     // assumes 1-cycle latency collector
     execute.io.req.valid := inFlight && !hasIssued
+    
     val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
+    val token = RegEnable(issued.bits.token, 0.U.asTypeOf(issued.bits.token.cloneType), issued.fire)
     executeIn.uop := uop
+    execute.io.token := token
 
     when (execute.io.req.fire) {
       when (willWriteback) {

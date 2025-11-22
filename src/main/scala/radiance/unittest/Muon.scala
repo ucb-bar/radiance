@@ -767,7 +767,6 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     // }
     
     val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModuleV1(op)))
-    println("hi")
 
     if (stimulusModules.length == 0) {
       io.coreReservations(i).req.valid := false.B
