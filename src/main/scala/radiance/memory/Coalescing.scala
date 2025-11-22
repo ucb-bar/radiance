@@ -114,6 +114,7 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
     clientFn = { seq =>
       require(seq.length == config.numLanes, 
         s"Expected ${config.numLanes} client ports, got ${seq.length}")
+
       TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
         name = "coalesced_node",
         sourceId = IdRange(0, config.numNewSrcIds)
@@ -124,6 +125,7 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
       require(addrRanges.length == 1)
       seq.head.v1copy(
         responseFields = BundleField.union(seq.flatMap(_.responseFields)),
+        beatBytes = 4, // hardcoded to be word-sized
         requestKeys = seq.flatMap(_.requestKeys).distinct,
         minLatency = seq.map(_.minLatency).min,
         endSinkId = 0, // dont support TLC
