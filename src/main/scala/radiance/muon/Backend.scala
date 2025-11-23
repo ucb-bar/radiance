@@ -14,7 +14,7 @@ class Backend(
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopWithTokenT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
@@ -28,14 +28,7 @@ class Backend(
   // -----
 
   val hazard = Module(new Hazard)
-  // @hansung TODO: hazard -> reservation station path needs to be updated to 
-  // include token also
-  // hazard.io.ibuf <> io.ibuf
-  (hazard.io.ibuf zip io.ibuf).foreach {case (hazard_in, ibuf_out) =>
-    hazard_in.bits := ibuf_out.bits.uop
-    hazard_in.valid := ibuf_out.valid
-    ibuf_out.ready := hazard_in.ready
-  }
+  hazard.io.ibuf <> io.ibuf
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.updateRS <> hazard.io.scb.updateRS
@@ -58,19 +51,11 @@ class Backend(
     reservStation.reset := true.B
     reservStation.io.issue.ready := false.B
 
-    val issueArb = Module(new RRArbiter(uopWithTokenT, io.ibuf.length))
+    val issueArb = Module(new RRArbiter(ibufEntryT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
-    // @hansung TODO: hazard -> reservation station path needs to be updated to 
-    // include token also
-
-    val issue = Wire(Decoupled(uopWithTokenT))
-    issue.valid := reservStation.io.issue.valid
-    issue.bits.uop := reservStation.io.issue.bits
-    issue.bits.token := DontCare // TODO
-    reservStation.io.issue.ready:= issue.ready
-    issue
+    reservStation.io.issue
   }
 
   // -----------------

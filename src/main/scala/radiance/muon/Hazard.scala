@@ -12,7 +12,7 @@ import org.chipsalliance.cde.config.Parameters
 class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     /** per-warp IBUF interface */
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     /** scoreboard interface */
     val scb = new Bundle {
       val updateRS = Flipped(new ScoreboardUpdate)
@@ -28,22 +28,22 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     val writeback = Flipped(regWritebackT)
   })
 
-  def tryWarp(ibufPort: DecoupledIO[UOp]): DecoupledIO[ReservationStationEntry] = {
+  def tryWarp(ibufPort: DecoupledIO[InstBufEntry]): DecoupledIO[ReservationStationEntry] = {
     val uopValid = ibufPort.valid
-    val hasRd    = ibufPort.bits.inst(HasRd) .asBool
-    val hasRs1   = ibufPort.bits.inst(HasRs1).asBool
-    val hasRs2   = ibufPort.bits.inst(HasRs2).asBool
-    val hasRs3   = ibufPort.bits.inst(HasRs3).asBool
+    val hasRd    = ibufPort.bits.uop.inst(HasRd) .asBool
+    val hasRs1   = ibufPort.bits.uop.inst(HasRs1).asBool
+    val hasRs2   = ibufPort.bits.uop.inst(HasRs2).asBool
+    val hasRs3   = ibufPort.bits.uop.inst(HasRs3).asBool
 
     // TODO: multi-port scoreboard ports
     io.scb.readRs1.enable := uopValid && hasRs1
-    io.scb.readRs1.pReg   := ibufPort.bits.inst.rs1
+    io.scb.readRs1.pReg   := ibufPort.bits.uop.inst.rs1
     io.scb.readRs2.enable := uopValid && hasRs2
-    io.scb.readRs2.pReg   := ibufPort.bits.inst.rs2
+    io.scb.readRs2.pReg   := ibufPort.bits.uop.inst.rs2
     io.scb.readRs3.enable := uopValid && hasRs3
-    io.scb.readRs3.pReg   := ibufPort.bits.inst.rs3
+    io.scb.readRs3.pReg   := ibufPort.bits.uop.inst.rs3
     io.scb.readRd.enable  := uopValid && hasRd
-    io.scb.readRd.pReg    := ibufPort.bits.inst.rd
+    io.scb.readRd.pReg    := ibufPort.bits.uop.inst.rd
 
     // RS admission logic
     val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
@@ -57,14 +57,14 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     rsAdmit.valid := uopValid && !hasWAW && !hasWAR
     if (muonParams.debug) {
       when (uopValid && hasWAR) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.wid}, PC=${ibufPort.bits.pc}%x) is gated RS admission due to WAR\n")
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x) is gated RS admission due to WAR\n")
       }.elsewhen (uopValid && hasWAW) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.wid}, PC=${ibufPort.bits.pc}%x) is gated RS admission due to WAW\n")
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x) is gated RS admission due to WAW\n")
       }
     }
 
     val rsEntry = rsAdmit.bits
-    rsEntry.uop := ibufPort.bits
+    rsEntry.ibufEntry := ibufPort.bits
     // don't filter out x0 for valid; collector will handle that
     rsEntry.valid(0) := !hasRs1
     rsEntry.valid(1) := !hasRs2
@@ -112,8 +112,8 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     assert(rsAdmitArbiter.io.chosen === 0.U,
            "TODO: arbiter chose something else than warp 0") // FIXME
 
-    val chosenUop = rsAdmitChosen.bits.uop
-    val hasRd    = chosenUop.inst(HasRd) .asBool
+    val chosenUop = rsAdmitChosen.bits.ibufEntry.uop
+    val hasRd    = chosenUop.inst(HasRd).asBool
     val hasRss   = Seq(chosenUop.inst(HasRs1).asBool,
                        chosenUop.inst(HasRs2).asBool,
                        chosenUop.inst(HasRs3).asBool)
@@ -153,7 +153,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
          "uop entered RS without succeeding scoreboard update")
   if (muonParams.debug) {
     when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb.updateRS.success) {
-      printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.uop.pc}%x) passed hazard check, but " +
+      printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +
              cf"RS admission blocked due to scoreboard overflow\n")
     }
   }

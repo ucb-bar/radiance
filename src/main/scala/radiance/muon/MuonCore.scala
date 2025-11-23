@@ -189,7 +189,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   implicit val m = muonParams
 
   def pcT = UInt(m.archLen.W)
-  def widT = UInt(log2Ceil(m.numWarps).W)
+  def widT = UInt(m.warpIdBits.W)
   def tmaskT = UInt(m.numLanes.W)
   def wmaskT = UInt(m.numWarps.W)
   def instT = UInt(m.instBits.W)
@@ -268,10 +268,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   def uopT = new UOp
   def lsuTokenT = new LsuQueueToken
-  def uopWithTokenT = new Bundle {
-    val uop = uopT
-    val token = lsuTokenT
-  }
+  def ibufEntryT = new InstBufEntry
 
   def ibufEnqIO = new Bundle {
     val count = Input(Vec(m.numWarps, ibufIdxT))
