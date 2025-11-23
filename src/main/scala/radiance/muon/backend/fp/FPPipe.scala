@@ -109,10 +109,8 @@ class FP32Pipe(implicit p: Parameters)
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0).asUInt
 
-  val ioIsFP32 = ioFpOp.dstFmt === FPFormat.FP32
-
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready && ioIsFP32
-  decomposer.get.io.in.valid := io.req.valid && ioIsFP32
+  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
+  decomposer.get.io.in.valid := io.req.fire
   decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
   decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
   decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
@@ -144,10 +142,8 @@ class FP16Pipe(implicit p: Parameters)
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0)
 
-  val ioIsFP16 = ioFpOp.dstFmt === FPFormat.FP16
-
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready && ioIsFP16
-  decomposer.get.io.in.valid := io.req.valid && ioIsFP16
+  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
+  decomposer.get.io.in.valid := io.req.fire
   decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
   decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
   decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
@@ -157,7 +153,7 @@ class FP16Pipe(implicit p: Parameters)
   cvFPUIF.req.bits.operands(0) := VecInit(decomposer.get.io.out.bits.data(0).map(reg => reg.asUInt(15,0))).asUInt
   cvFPUIF.req.bits.operands(1) := VecInit(decomposer.get.io.out.bits.data(1).map(reg => reg.asUInt(15,0))).asUInt
   cvFPUIF.req.bits.operands(2) := VecInit(decomposer.get.io.out.bits.data(2).map(reg => reg.asUInt(15,0))).asUInt
-  
+
   val respIsFp16 = cvFPUIF.resp.bits.tag === reqRd
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp16
   val chunks = VecInit.tabulate(numFP32Lanes * 2)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
@@ -195,11 +191,14 @@ class FPPipe(implicit p: Parameters)
   CVFPU.io.reset := reset
   CVFPU.io.flush := false.B
 
-  FP16Pipe.io.req.valid := io.req.valid
+  val isFP32 = io.req.bits.uop.inst.b(UseFP32Pipe)
+  val isFP16 = io.req.bits.uop.inst.b(UseFP16Pipe)
+
+  FP16Pipe.io.req.valid := io.req.valid && isFP32
   FP16Pipe.io.req.bits := io.req.bits
-  FP32Pipe.io.req.valid := io.req.valid
+  FP32Pipe.io.req.valid := io.req.valid && isFP16
   FP32Pipe.io.req.bits := io.req.bits
-  io.req.ready := FP32Pipe.io.req.ready || FP16Pipe.io.req.ready
+  io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
 
   val rr = Module(new RRArbiter(
     new CVFPUReq(numFP32Lanes * 2, Isa.regBits), 2))
