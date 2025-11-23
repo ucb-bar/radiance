@@ -138,6 +138,17 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     req.bits.no_alloc := false.B // <- might be able to imp writethrough
     req.bits.no_xcpt := true.B // no vm/dp, so no page faults etc
 
+    // on the other hand, stores need to have the real size / address so that NBDCache can 
+    // generate the correct byte mask when storing to its internal data array
+    // (i have no idea what req.bits.mask is actually even being used for? agent claims
+    // it is for AMOALU operations or something)
+    when (tlIn.a.bits.opcode === TLMessages.PutFullData || tlIn.a.bits.opcode === TLMessages.PutPartialData) {
+      req.bits.addr := tlIn.a.bits.address
+      // @richard: do we need to actually do the shift here?
+      req.bits.data := tlIn.a.bits.data 
+      req.bits.size := tlIn.a.bits.size
+    }
+
 //    when (req.fire) {
 //      when (req.bits.cmd === M_XRD) {
 //        printf(" load-req 0x%x", req.bits.addr)
