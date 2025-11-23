@@ -3,11 +3,38 @@
 #include <vpi_user.h>
 #endif
 #include <stdint.h>
+#include <string>
 
 extern "C" {
 
-void cyclotron_init_rs(int num_lanes);
-void cyclotron_init(int num_lanes) { cyclotron_init_rs(num_lanes); }
+const char *cyclotron_get_binary() {
+#ifndef NO_VPI
+  static std::string elf_arg;
+  s_vpi_vlog_info info;
+  if (!vpi_get_vlog_info(&info)) {
+    elf_arg.clear();
+    return elf_arg.c_str();
+  }
+  for (int i = 1; i < info.argc; i++) {
+    const char *arg = info.argv[i];
+    if (arg == nullptr)
+      continue;
+    if (arg[0] == '+' || arg[0] == '-')
+      continue;
+    elf_arg = arg;
+    return elf_arg.c_str();
+  }
+  elf_arg.clear();
+  return elf_arg.c_str();
+#else
+  return "";
+#endif
+}
+
+void cyclotron_init_rs(const char* elfname);
+void cyclotron_init(const char* elfname) {
+  cyclotron_init_rs(elfname);
+}
 
 void cyclotron_frontend_rs(
     const uint8_t* ibuf_ready_vec,

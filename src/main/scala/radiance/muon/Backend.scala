@@ -184,6 +184,7 @@ class Backend(
     issued.ready := execute.io.req.ready
     execute.io.req.valid := issued.valid
     executeIn.uop := issued.bits.uop
+    execute.io.token := issued.bits.token
   }
 
   // ---------

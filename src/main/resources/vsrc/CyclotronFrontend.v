@@ -67,7 +67,8 @@ module CyclotronFrontendBlackBox #(
   // (1) import "DPI-C" declaration
   // (2) C function declaration
   // (3) Verilog DPI calls inside initial/always blocks
-  import "DPI-C" function void cyclotron_init();
+  import "DPI-C" function void cyclotron_init(input string elffile);
+  import "DPI-C" function string cyclotron_get_binary();
   import "DPI-C" function void cyclotron_frontend(
     input  bit     ready[NUM_WARPS],
     output bit     valid[NUM_WARPS],
@@ -158,9 +159,14 @@ module CyclotronFrontendBlackBox #(
 
   bit __in_finished;
 
+  string elffile;
+
   // initialize model at the rtl sim start
+  // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
+  // ELF
   initial begin
-    cyclotron_init();
+    elffile = cyclotron_get_binary();
+    cyclotron_init(elffile);
   end
 
   always @(negedge clock) begin
