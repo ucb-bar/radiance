@@ -268,10 +268,10 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 
   def uopT = new UOp
   def lsuTokenT = new LsuQueueToken
-  def ibufEntryT = new InstBufEntry
 
+  def ibufEntryT = new InstBufEntry
   def ibufEnqIO = new Bundle {
-    val count = Input(Vec(m.numWarps, ibufIdxT))
+    val count = Input(ibufIdxT)
     val entry = Valid(new Bundle {
       val uop = uopT
       val wid = widT

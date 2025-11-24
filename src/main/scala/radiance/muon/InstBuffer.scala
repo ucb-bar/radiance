@@ -91,7 +91,7 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
 
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
-    val enq = Flipped(ibufEnqIO)
+    val enq = Vec(muonParams.numWarps, Flipped(ibufEnqIO))
     val deq = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
     val lsuReserve = Flipped(reservationIO)
   })
@@ -108,9 +108,12 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
     buf.ram.suggestName(s"ibuf")
     buf
   }
-  (warpBufs lazyZip io.deq lazyZip io.lsuReserve).zipWithIndex.foreach { case ((b, deq, reserve), wid) =>
-    b.io.enq.valid := io.enq.entry.valid && (io.enq.entry.bits.wid === wid.U)
-    b.io.enq.bits := io.enq.entry.bits.uop
+  (warpBufs lazyZip io.enq lazyZip io.deq lazyZip io.lsuReserve)
+  .zipWithIndex.foreach { case ((b, enq, deq, reserve), wid) =>
+    b.io.enq.valid := enq.entry.valid
+    b.io.enq.bits := enq.entry.bits.uop
+    assert(!enq.entry.valid || enq.entry.bits.wid === wid.U,
+           "ibuf enq wid mismatch") // TODO remove: wid can be static
     assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
 
     // this is slow (more latency), but safe
@@ -162,6 +165,6 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
       deq.bits.token := DontCare
     }
 
-    io.enq.count(wid) := b.io.count
+    enq.count := b.io.count
   }
 }

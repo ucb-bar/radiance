@@ -27,7 +27,7 @@ class WarpScheduler(implicit p: Parameters)
     val issue = issueIO
     val csr = feCSRIO
     val rename = renameIO
-    val ibuf = ibufEnqIO
+    val ibuf = Vec(muonParams.numWarps, ibufEnqIO)
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
 
     val softReset = Input(Bool())
@@ -316,8 +316,10 @@ class WarpScheduler(implicit p: Parameters)
   }
 
   // misc
-  io.ibuf.entry.valid := false.B
-  io.ibuf.entry.bits := DontCare
+  io.ibuf.foreach { ib =>
+    ib.entry.valid := false.B
+    ib.entry.bits := DontCare
+  }
 }
 
 class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
@@ -331,7 +333,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val stalls = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(stallEntryT)))
 
   stalls.zipWithIndex.foreach { case (entry, wid) =>
-    val ibufReady = (outer.io.ibuf.count(wid) +& outer.icacheInFlights(wid)) < m.ibufDepth.U
+    val ibufReady = (outer.io.ibuf(wid).count +& outer.icacheInFlights(wid)) < m.ibufDepth.U
     entry.stallReason(IBUF) := !ibufReady
   }
 
