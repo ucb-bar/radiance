@@ -82,14 +82,32 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 }
 
 /** Testbench for Muon backend pipe */
-class MuonBackendTestbench(implicit p: Parameters) extends Module {
+class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMuonCoreParameters {
   val io = IO(new Bundle {
     val finished = Bool()
   })
 
+  val ibuf = Module(new InstBuffer)
+  val cfe = Module(new CyclotronFrontend()(p))
   val be = Module(new Backend(test = true)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
+
+  // imem in the ISA model is not used
+  cfe.io.imem.req.valid := false.B
+  cfe.io.imem.req.bits := DontCare
+  cfe.io.imem.resp.ready := false.B
+  cfe.io.trace <> be.io.trace.get
+
+  // cfe -> ibuf enq
+  (ibuf.io.enq zip cfe.io.ibuf).foreach { case (ib, cf) =>
+    // workaround of ibufEnqIO not being a DecoupledIO
+    val ibFull = (ib.count === muonParams.ibufDepth.U)
+    ib.uop.valid := cf.valid && !ibFull
+    cf.ready := !ibFull
+    ib.uop.bits := cf.bits.toUop()
+  }
+
   be.io.dmem.resp.foreach(_.valid := false.B)
   be.io.dmem.resp.foreach(_.bits := DontCare)
   be.io.dmem.req.foreach(_.ready := false.B)
@@ -101,29 +119,13 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.coreId := 0.U
   be.io.softReset := false.B
   be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
-  // TODO: LSU hookup
-  be.io.lsuReserve.foreach { r =>
-    r.req.valid := false.B
-    r.req.bits := DontCare
-  }
 
-  val cfe = Module(new CyclotronFrontend()(p))
-  // Imem in the ISA model is not used
-  cfe.io.imem.req.valid := false.B
-  cfe.io.imem.req.bits := DontCare
-  cfe.io.imem.resp.ready := false.B
-  cfe.io.trace <> be.io.trace.get
+  // ibuf -> be
+  be.io.ibuf <> ibuf.io.deq
+  ibuf.io.lsuReserve <> be.io.lsuReserve
+  dontTouch(be.io)
 
   // TODO: also instantiate CyclotronBackend as the issue downstream
-
-  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
-    b.valid := f.valid
-    f.ready := b.ready
-    b.bits.uop := f.bits.toUop()
-    // TODO: LSU hookup
-    b.bits.token := DontCare
-  }
-  dontTouch(be.io)
 
   // run until all ibufs dry up
   val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
