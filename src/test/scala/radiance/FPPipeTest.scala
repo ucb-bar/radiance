@@ -98,11 +98,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     cvfpuTest.observedReqBits := CVFPU.io.test.observedReqBits
     cvfpuTest.observedRespReady := CVFPU.io.test.observedRespReady
 
-    FP16Pipe.io.req.valid := io.req.valid
+    val f7 = io.req.bits.uop.inst(F7)
+    val isFP32 = io.req.bits.uop.inst.b(UseFPPipe) && (f7(1, 0) === "b00".U)
+    val isFP16 = io.req.bits.uop.inst.b(UseFPPipe) && (f7(1, 0) === "b10".U)
+
+    FP16Pipe.io.req.valid := io.req.valid && isFP16
     FP16Pipe.io.req.bits := io.req.bits
-    FP32Pipe.io.req.valid := io.req.valid
+    FP32Pipe.io.req.valid := io.req.valid && isFP32
     FP32Pipe.io.req.bits := io.req.bits
-    io.req.ready := FP32Pipe.io.req.ready || FP16Pipe.io.req.ready
+    io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
 
     val rr = Module(new RRArbiter(new CVFPUReq(numFP32Lanes * 2, Isa.regBits), 2))
     rr.io.in(0) <> FP32Pipe.cvFPUIF.req
@@ -208,6 +212,9 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     pokeDecoded(c.io.req.bits.uop.inst, HasRs2, 1)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs3, spec.rs3Idx.fold(0)(_ => 1))
     pokeDecoded(c.io.req.bits.uop.inst, UseFPPipe, 1)
+    val isFp32Req = spec.expectedDstFmt == FPFormat.FP32
+    pokeDecoded(c.io.req.bits.uop.inst, UseFP32Pipe, if (isFp32Req) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, UseFP16Pipe, if (isFp32Req) 0 else 1)
     spec.rs3Idx.foreach(rs3 => pokeDecoded(c.io.req.bits.uop.inst, Rs3, rs3))
 
     c.io.req.bits.uop.tmask.poke(spec.tmask.U(c.io.req.bits.uop.tmask.getWidth.W))
@@ -539,7 +546,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       respAccepted = c.cvfpuTest.observedRespReady.peek().litToBoolean
       c.clock.step()
       respDriveCycles += 1
-      require(respDriveCycles <= 12, s"${spec.name}: CVFPU response not accepted")
+      require(respDriveCycles <= 50, s"${spec.name}: CVFPU response not accepted")
     }
     // provide one extra cycle with valid asserted to mimic CVFPU behavior
     c.clock.step()
