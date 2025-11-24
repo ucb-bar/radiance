@@ -63,9 +63,9 @@ module CVFPU
     .clk_i          (clock         ),
     .rst_ni         (~reset        ),
     .operands_i     ('{
+        req_bits_operands_2,
         req_bits_operands_1,
-        req_bits_operands_0,
-        req_bits_operands_2
+        req_bits_operands_0
     }),
     .rnd_mode_i     (req_bits_roundingMode),
     .op_i           (req_bits_op[4:1]     ),
