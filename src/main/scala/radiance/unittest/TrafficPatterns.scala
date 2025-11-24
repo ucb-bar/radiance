@@ -48,8 +48,8 @@ object TrafficPatterns {
     override val name = s"tiled($tileM, $tileN)@$reqSize"
     val tileElems = tileM * tileN
     def elemIdx(t: Int, i: Int): Int = t * lanes + i
-    def tileIdx = elemIdx(_, _) / tileElems
-    def idxInTile = elemIdx(_, _) % tileElems
+    def tileIdx(t: Int, i: Int): Int = elemIdx(t, i) / tileElems
+    def idxInTile(t: Int, i: Int): Int = elemIdx(t, i) % tileElems
     def inTileCoords(t: Int, i: Int): (Int, Int) =
       (idxInTile(t, i) / tileN, idxInTile(t, i) % tileN)
 
