@@ -15,7 +15,12 @@ class UOp(implicit p: Parameters) extends CoreBundle()(p) {
   val wid = widT
 }
 
-trait HasInstBufferEntryFields {
+class InstBufEntry(implicit p: Parameters) extends CoreBundle()(p) {
+  val uop = uopT
+  val token = lsuTokenT
+}
+
+trait HasUOpFields {
   val pc: UInt
   val wid: UInt
   val op: UInt
@@ -33,7 +38,7 @@ trait HasInstBufferEntryFields {
   val raw: UInt
 }
 
-class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasInstBufferEntryFields {
+class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFields {
   val pc = pcT
   val wid = widT
   val op = UInt(Isa.opcodeBits.W)
@@ -87,7 +92,7 @@ class InstBufferEntry(implicit p: Parameters) extends CoreBundle()(p) with HasIn
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     val enq = Flipped(ibufEnqIO)
-    val deq = Vec(muonParams.numWarps, Decoupled(uopWithTokenT))
+    val deq = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
     val lsuReserve = Flipped(reservationIO)
   })
 

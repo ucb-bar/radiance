@@ -111,7 +111,7 @@ object MemOp extends ChiselEnum {
 // Uniquely identifies an entry in load/store queues (warpId, addressSpace, ldq, index)
 // Used as part the request tag into downstream memory interfaces
 class LsuQueueToken(implicit p: Parameters) extends CoreBundle {
-    val warpId = UInt(muonParams.warpIdBits.W)
+    val warpId = widT
     val addressSpace = AddressSpace()
     val ldq = Bool()
     val index = UInt(muonParams.lsu.queueIndexBits.W)

@@ -12,14 +12,17 @@ RADIANCE_VSRC_DIR = $(base_dir)/generators/radiance/src/main/resources/vsrc
 
 CYCLOTRON_SRC_DIR = $(base_dir)/generators/radiance/cyclotron
 CYCLOTRON_BUILD_DIR = $(CYCLOTRON_SRC_DIR)/target/debug
+CYCLOTRON_LIB = $(CYCLOTRON_BUILD_DIR)/libcyclotron.so
+CYCLOTRON_RS_SRCS = $(shell find $(CYCLOTRON_SRC_DIR)/src -name "*.rs")
+CYCLOTRON_CARGO_FILES = $(CYCLOTRON_SRC_DIR)/Cargo.toml $(CYCLOTRON_SRC_DIR)/Cargo.lock
 
-# cargo handles building of Rust files all on its own, so make this a PHONY
-# target to run cargo unconditionally
 .PHONY: cyclotron
-cyclotron:
+cyclotron: $(CYCLOTRON_LIB)
+
+$(CYCLOTRON_LIB): $(CYCLOTRON_RS_SRCS) $(CYCLOTRON_CARGO_FILES)
 	cd $(CYCLOTRON_SRC_DIR) && cargo build # --release
 
-EXTRA_SIM_REQS += cyclotron
+EXTRA_SIM_REQS += $(CYCLOTRON_LIB)
 EXTRA_SIM_LDFLAGS += -L$(CYCLOTRON_BUILD_DIR) -Wl,-rpath,$(CYCLOTRON_BUILD_DIR) -lcyclotron
 
 

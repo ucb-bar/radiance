@@ -837,7 +837,7 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
-    val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(new UOpFlattened))
     val trace = Flipped(Valid(new TraceIO))
     val finished = Output(Bool())
   })
@@ -914,7 +914,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
 
     val imem = Flipped(new InstMemIO)
     // flattened for all numWarps
-    val ibuf = new Bundle with HasInstBufferEntryFields {
+    val ibuf = new Bundle with HasUOpFields {
       val ready = Input(UInt(numWarps.W))
       val valid = Output(UInt(numWarps.W))
       val pc = Output(UInt((numWarps * addressBits).W))
@@ -966,7 +966,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
     val reset = Input(Bool())
 
     val imem = Flipped(new InstMemIO)
-    val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new InstBufferEntry)))
+    val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new UOpFlattened)))
     val commit = schedWritebackT
 
     val finished = Output(Bool())

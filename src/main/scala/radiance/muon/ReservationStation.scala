@@ -5,25 +5,24 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
-  /** uop being admitted to the reservation station. */
-  val uop = uopT
+  /** IBUF entry being admitted to the reservation station. */
+  val ibufEntry = ibufEntryT
   /** Indicates whether each operand reg (rs1/2/3) has been collected.
-   *  If the uop does not use the operand field, sets to 1. */
+   *  If the instruction does not use the operand field, sets to 1. */
   val valid = Vec(Isa.maxNumRegs, Bool())
   /** Indicates whether each operand reg (rs1/2/3) is being written to by an
-   *  in-flight uop in the backend. `busy == 1` means the operand can be
+   *  in-flight instruction in the backend. `busy == 1` means the operand can be
    *  potentially forwarded from EX. */
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(
-  test: Boolean = false
-)(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class ReservationStation(implicit p: Parameters)
+extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
-    /** uop issued to the downstream EX pipe */
-    val issue = Decoupled(uopT)
+    /** instruction issued to the downstream EX pipe */
+    val issue = Decoupled(ibufEntryT)
     /** writeback from the downstream EX pipe */
     val writeback = Flipped(regWritebackT)
     /** writeback pass-through to the hazard module */
@@ -47,12 +46,12 @@ class ReservationStation(
   // whether this table row is valid
   val validTable     = Mem(numEntries, Bool())
   // TODO: optimize; storing all of Decode fields in RS gets expensive
-  val uopTable       = Mem(numEntries, uopT)
-  // whether the uop uses rs1/2/3
-  // not actually a state; combinationally computed from uops
+  val instTable      = Mem(numEntries, ibufEntryT)
+  // whether the instruction uses rs1/2/3
+  // not actually a state; combinationally computed from instTable
   val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))
-  // rs1/2/3 of the uop
-  // not actually a state; combinationally computed from uops
+  // rs1/2/3 of the instruction
+  // not actually a state; combinationally computed from instTable
   val rsTable        = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, pRegT)))
   // whether the used operands has been collected
   val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
@@ -75,7 +74,7 @@ class ReservationStation(
   val collPriorityTable = Wire(Vec(numEntries, Bool()))
 
   (0 until numEntries).map { i =>
-    val uop = uopTable(i)
+    val uop = instTable(i).uop
     hasOpTable(i) := VecInit(Seq(uop.inst(HasRs1).asBool,
                                  uop.inst(HasRs2).asBool,
                                  uop.inst(HasRs3).asBool))
@@ -96,14 +95,14 @@ class ReservationStation(
   when (io.admit.fire) {
     assert(!validTable(emptyRow))
     validTable(emptyRow) := true.B
-    uopTable(emptyRow)   := io.admit.bits.uop
+    instTable(emptyRow)  := io.admit.bits.ibufEntry
     opReadyTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
     collPtrTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(0.U)
 
     if (muonParams.debug) {
-      printf(cf"RS: admitted: PC=${io.admit.bits.uop.pc}%x at row ${emptyRow}\n")
+      printf(cf"RS: admitted: PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
       printTable
     }
   }
@@ -148,7 +147,7 @@ class ReservationStation(
   dontTouch(collRow)
 
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
-  val collUop = uopTable(collRow)
+  val collUop = instTable(collRow).uop
   val collPC = WireDefault(collUop.pc)
   dontTouch(collPC)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
@@ -210,7 +209,7 @@ class ReservationStation(
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          printf(cf"RS: collector response handled at row:${i}, pc:${uopTable(i).pc}%x, rs:${rs}, rsi:${rsi}\n")
+          printf(cf"RS: collector response handled at row:${i}, pc:${instTable(i).uop.pc}%x, rs:${rs}, rsi:${rsi}\n")
         }
       }
     when (updated) {
@@ -223,7 +222,7 @@ class ReservationStation(
   // -----
 
   def issueArbBundleT = new Bundle {
-    val uop = uopT
+    val entry = chiselTypeOf(io.issue.bits)
     val entryId = UInt(log2Ceil(numEntries).W)
   }
 
@@ -254,7 +253,7 @@ class ReservationStation(
 
     val candidate = Wire(Decoupled(issueArbBundleT))
     candidate.valid := eligible
-    candidate.bits.uop := uopTable(i)
+    candidate.bits.entry := instTable(i)
     candidate.bits.entryId := i.U
 
     // deregister upon issue
@@ -314,20 +313,22 @@ class ReservationStation(
   // the SRAM round-trip.
   val collectorSequentialRead = !useCollector
   if (collectorSequentialRead) {
-    val queue = Module(new Queue(gen = uopT, entries = 1, pipe = true))
+    val queue = Module(
+      new Queue(gen = chiselTypeOf(io.issue.bits), entries = 1, pipe = true)
+    )
     queue.io.enq.valid := issueScheduler.io.out.valid
-    queue.io.enq.bits := issueScheduler.io.out.bits.uop
+    queue.io.enq.bits := issueScheduler.io.out.bits.entry
     issueScheduler.io.out.ready := queue.io.enq.ready
     io.issue <> queue.io.deq
   } else {
     io.issue.valid := issueScheduler.io.out.valid
-    io.issue.bits := issueScheduler.io.out.bits.uop
+    io.issue.bits := issueScheduler.io.out.bits.entry
     issueScheduler.io.out.ready := io.issue.ready
   }
 
   if (muonParams.debug) {
     when (io.issue.fire) {
-      printf(cf"RS: issued: PC=${io.issue.bits.pc}%x at row ${issueScheduler.io.out.bits.entryId}:\n")
+      printf(cf"RS: issued: PC=${io.issue.bits.uop.pc}%x at row ${issueScheduler.io.out.bits.entryId}:\n")
       printTable
     }
   }
@@ -339,7 +340,7 @@ class ReservationStation(
 
   // CAM broadcast to wake-up entries
   (0 until numEntries).foreach { i =>
-    val uop = uopTable(i)
+    val uop = instTable(i).uop
     val rss = Seq(uop.inst.rs1, uop.inst.rs2, uop.inst.rs3)
     val hasOps = hasOpTable(i)
     val valid = validTable(i)
@@ -391,7 +392,7 @@ class ReservationStation(
     for (i <- 0 until numEntries) {
       val valid = validTable(i)
       when (valid) {
-        val uop      = uopTable(i)
+        val uop = instTable(i).uop
         printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
                cf"regs: [rd:${uop.inst.rd} rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +

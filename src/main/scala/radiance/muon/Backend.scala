@@ -14,7 +14,7 @@ class Backend(
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopWithTokenT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
@@ -28,14 +28,7 @@ class Backend(
   // -----
 
   val hazard = Module(new Hazard)
-  // @hansung TODO: hazard -> reservation station path needs to be updated to 
-  // include token also
-  // hazard.io.ibuf <> io.ibuf
-  (hazard.io.ibuf zip io.ibuf).foreach {case (hazard_in, ibuf_out) =>
-    hazard_in.bits := ibuf_out.bits.uop
-    hazard_in.valid := ibuf_out.valid
-    ibuf_out.ready := hazard_in.ready
-  }
+  hazard.io.ibuf <> io.ibuf
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.updateRS <> hazard.io.scb.updateRS
@@ -46,7 +39,7 @@ class Backend(
   scoreboard.io.readRs3 <> hazard.io.scb.readRs3
   dontTouch(scoreboard.io)
 
-  val reservStation = Module(new ReservationStation(test = test))
+  val reservStation = Module(new ReservationStation)
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
@@ -58,19 +51,11 @@ class Backend(
     reservStation.reset := true.B
     reservStation.io.issue.ready := false.B
 
-    val issueArb = Module(new RRArbiter(uopWithTokenT, io.ibuf.length))
+    val issueArb = Module(new RRArbiter(ibufEntryT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
-    // @hansung TODO: hazard -> reservation station path needs to be updated to 
-    // include token also
-
-    val issue = Wire(Decoupled(uopWithTokenT))
-    issue.valid := reservStation.io.issue.valid
-    issue.bits.uop := reservStation.io.issue.bits
-    issue.bits.token := DontCare // TODO
-    reservStation.io.issue.ready:= issue.ready
-    issue
+    reservStation.io.issue
   }
 
   // -----------------
@@ -114,17 +99,15 @@ class Backend(
   }
 
   // drive regtrace IO for testing
-  if (test) {
-    io.trace.foreach { traceIO =>
-      traceIO.valid := issued.valid
-      traceIO.bits.pc := issued.bits.uop.pc
-      (traceIO.bits.regs zip operands)
-        .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
-          tReg.enable := issued.bits.uop.inst(haves(rsi))
-          tReg.address := issued.bits.uop.inst(regs(rsi))
-          tReg.data := opnd
-        }
-    }
+  io.trace.foreach { traceIO =>
+    traceIO.valid := issued.fire
+    traceIO.bits.pc := issued.bits.uop.pc
+    (traceIO.bits.regs zip operands)
+      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+        tReg.enable := issued.bits.uop.inst(haves(rsi))
+        tReg.address := issued.bits.uop.inst(regs(rsi))
+        tReg.data := opnd
+      }
   }
 
   // -------
@@ -186,6 +169,7 @@ class Backend(
     issued.ready := execute.io.req.ready
     execute.io.req.valid := issued.valid
     executeIn.uop := issued.bits.uop
+    execute.io.token := issued.bits.token
   }
 
   // ---------

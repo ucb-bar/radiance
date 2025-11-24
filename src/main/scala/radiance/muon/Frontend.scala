@@ -12,7 +12,7 @@ class Frontend(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val imem = new InstMemIO
-    val ibuf = Vec(muonParams.numWarps, Decoupled(uopWithTokenT))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
     val lsuReserve = Flipped(reservationIO)
     // TODO: writeback
     val commit = Flipped(schedWritebackT)
