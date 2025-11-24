@@ -241,15 +241,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     def checkCvReq(): Unit = {
       c.cvFPUIF.resp.valid.poke(false.B)
       if (!cvReqSeen && c.cvFPUIF.req.valid.peek().litToBoolean) {
+        val (expOp0, expOp1, expOp2) =
+          if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            (BigInt(0), packedRs1, packedRs2)
+          } else {
+            (packedRs1, packedRs2, packedRs3)
+          }
         c.cvFPUIF.req.bits.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
         c.cvFPUIF.req.bits.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expandedMask(spec.tmask, env.numFP32Lanes).U, s"${spec.name}: SIMD mask mismatch")
-        c.cvFPUIF.req.bits.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-        c.cvFPUIF.req.bits.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-        c.cvFPUIF.req.bits.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+        c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+        c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+        c.cvFPUIF.req.bits.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
         cvReqSeen = true
       }
     }
@@ -355,15 +361,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     def checkCvReq(): Unit = {
       c.cvFPUIF.resp.valid.poke(false.B)
       if (!cvReqSeen && c.cvFPUIF.req.valid.peek().litToBoolean) {
+        val (expOp0, expOp1, expOp2) =
+          if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            (BigInt(0), packedRs1, packedRs2)
+          } else {
+            (packedRs1, packedRs2, packedRs3)
+          }
         c.cvFPUIF.req.bits.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
         c.cvFPUIF.req.bits.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
-        c.cvFPUIF.req.bits.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-        c.cvFPUIF.req.bits.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-        c.cvFPUIF.req.bits.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+        c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+        c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+        c.cvFPUIF.req.bits.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
         cvReqSeen = true
       }
     }
@@ -505,15 +517,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         val dstFmt = c.cvfpuTest.observedReqBits.dstFormat.peek().litValue
         if (dstFmt == spec.expectedDstFmt.litValue) {
           val observed = c.cvfpuTest.observedReqBits
+          val (expOp0, expOp1, expOp2) =
+            if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+              (BigInt(0), packedRs1, packedRs2)
+            } else {
+              (packedRs1, packedRs2, packedRs3)
+            }
           observed.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
           observed.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
           observed.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
           observed.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
           observed.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
           observed.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
-          observed.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-          observed.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-          observed.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+          observed.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+          observed.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+          observed.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
           cvReqSeen = true
         }
       }
