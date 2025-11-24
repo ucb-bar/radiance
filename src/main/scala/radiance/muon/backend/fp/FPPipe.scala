@@ -194,9 +194,9 @@ class FPPipe(implicit p: Parameters)
   val isFP32 = io.req.bits.uop.inst.b(UseFP32Pipe)
   val isFP16 = io.req.bits.uop.inst.b(UseFP16Pipe)
 
-  FP16Pipe.io.req.valid := io.req.valid && isFP32
+  FP16Pipe.io.req.valid := io.req.valid && isFP16
   FP16Pipe.io.req.bits := io.req.bits
-  FP32Pipe.io.req.valid := io.req.valid && isFP16
+  FP32Pipe.io.req.valid := io.req.valid && isFP32
   FP32Pipe.io.req.bits := io.req.bits
   io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
 
