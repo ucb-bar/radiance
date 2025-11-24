@@ -91,6 +91,10 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     CVFPU.io.reset := reset
     CVFPU.io.flush := false.B
 
+    // tests do not model CSR state; use RM=RNE, flags cleared
+    FP16Pipe.fCSRIO.regData := 0.U
+    FP32Pipe.fCSRIO.regData := 0.U
+
     CVFPU.io.test.forceReqReady := cvfpuTest.forceReqReady
     CVFPU.io.test.forceRespValid := cvfpuTest.forceRespValid
     CVFPU.io.test.respBits := cvfpuTest.respBits
