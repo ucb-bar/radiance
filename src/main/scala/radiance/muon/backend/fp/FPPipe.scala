@@ -81,6 +81,10 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
     val resp = Flipped(Decoupled(new CVFPUResp(numFP32Lanes * 2, Isa.regBits)))
   })
 
+  val fCSRIO = IO(new Bundle {
+    val regData = Input(csrDataT)
+  })
+
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = Reg(new FpOpBundle)
 
@@ -90,7 +94,9 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUReq := Mux(io.req.fire, ioFpOp, req)
 
   cvFPUIF.req.valid := decomposer.get.io.out.valid
-  cvFPUIF.req.bits.roundingMode := cvFPUReq.roundingMode
+  cvFPUIF.req.bits.roundingMode := Mux(cvFPUReq.roundingMode === FPRoundingMode.DYN,
+                                       fCSRIO.regData(7,5).asTypeOf(FPRoundingMode()),
+                                       cvFPUReq.roundingMode)
   cvFPUIF.req.bits.op := cvFPUReq.op
   cvFPUIF.req.bits.srcFormat := cvFPUReq.srcFmt
   cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
@@ -212,6 +218,8 @@ class FPPipe(implicit p: Parameters)
   FP16Pipe.cvFPUIF.resp.valid := CVFPU.io.resp.valid
   CVFPU.io.resp.ready := FP32Pipe.cvFPUIF.resp.ready || FP16Pipe.cvFPUIF.resp.ready
 
+  FP16Pipe.fCSRIO.regData := fCSR
+  FP32Pipe.fCSRIO.regData := fCSR
 
   // if both ready, prioritize fp32
   FP32Pipe.io.resp.ready := io.resp.ready
