@@ -139,7 +139,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
       val newNewValue = MuxCase(newValue, Seq(
         (csrAddr === CSRs.fflags.U) -> ((currentFCSR & 0xe0.U(32.W)) | (newValue & 0x1f.U(32.W))),
         (csrAddr === CSRs.frm.U) -> ((currentFCSR & 0x1f.U(32.W)) | ((newValue & 0x7.U(32.W)) << 5).asUInt),
-        (csrAddr === CSRs.fcsr.U) -> (currentFCSR & 0xff.U(32.W))
+        (csrAddr === CSRs.fcsr.U) -> (newValue & 0xff.U(32.W))
       ))
       when (currentValue =/= newNewValue) {
         csrFile.write(csrAddr, newNewValue)
