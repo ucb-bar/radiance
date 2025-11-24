@@ -272,10 +272,7 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def ibufEntryT = new InstBufEntry
   def ibufEnqIO = new Bundle {
     val count = Input(ibufIdxT)
-    val entry = Valid(new Bundle {
-      val uop = uopT
-      val wid = widT
-    })
+    val uop = Valid(uopT)
   }
 
   def clusterCoreIdT = new Bundle {

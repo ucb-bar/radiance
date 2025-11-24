@@ -317,8 +317,8 @@ class WarpScheduler(implicit p: Parameters)
 
   // misc
   io.ibuf.foreach { ib =>
-    ib.entry.valid := false.B
-    ib.entry.bits := DontCare
+    ib.uop.valid := false.B
+    ib.uop.bits := DontCare
   }
 }
 

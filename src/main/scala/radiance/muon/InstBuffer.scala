@@ -110,10 +110,8 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
   }
   (warpBufs lazyZip io.enq lazyZip io.deq lazyZip io.lsuReserve)
   .zipWithIndex.foreach { case ((b, enq, deq, reserve), wid) =>
-    b.io.enq.valid := enq.entry.valid
-    b.io.enq.bits := enq.entry.bits.uop
-    assert(!enq.entry.valid || enq.entry.bits.wid === wid.U,
-           "ibuf enq wid mismatch") // TODO remove: wid can be static
+    b.io.enq.valid := enq.uop.valid
+    b.io.enq.bits := enq.uop.bits
     assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
 
     // this is slow (more latency), but safe

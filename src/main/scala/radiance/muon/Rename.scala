@@ -105,12 +105,11 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   }
 
   io.ibuf.zipWithIndex.foreach { case (wbuf, wbufId) =>
-    wbuf.entry.valid := RegNext(io.rename.valid && wid === wbufId.U)
-    wbuf.entry.bits.wid := RegNext(wid)
-    wbuf.entry.bits.uop.inst := uop
-    wbuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
-    wbuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
-    wbuf.entry.bits.uop.wid := RegNext(io.rename.bits.wid)
+    wbuf.uop.valid := RegNext(io.rename.valid && wid === wbufId.U)
+    wbuf.uop.bits.inst := uop
+    wbuf.uop.bits.tmask := RegNext(io.rename.bits.tmask)
+    wbuf.uop.bits.pc := RegNext(io.rename.bits.pc)
+    wbuf.uop.bits.wid := RegNext(io.rename.bits.wid)
   }
 
   // create & update counters
