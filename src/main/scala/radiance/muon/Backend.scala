@@ -145,9 +145,9 @@ class Backend(
     }
     issued.ready := !inFlight
 
-    // assumes 1-cycle latency collector
     execute.io.req.valid := inFlight && !hasIssued
     
+    // assumes 1-cycle latency collector
     val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
     val token = RegEnable(issued.bits.token, 0.U.asTypeOf(issued.bits.token.cloneType), issued.fire)
     executeIn.uop := uop
@@ -178,18 +178,21 @@ class Backend(
 
   // to schedule
   val exSchedWb = execute.io.resp.bits.sched.get
-  io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
+  io.schedWb.valid := execute.io.resp.fire && exSchedWb.valid
   io.schedWb.bits := exSchedWb.bits
   // scheduler writeback is valid only
   // TODO: consider collector writeback ready
   execute.io.resp.ready := true.B
 
+  val exRegWb = execute.io.resp.bits.reg.get
+  val exRegWbFire = execute.io.resp.fire && exRegWb.valid
+
   // to RS
-  reservStation.io.writeback <> execute.io.resp.bits.reg.get
+  reservStation.io.writeback.valid := exRegWbFire
+  reservStation.io.writeback.bits := exRegWb.bits
 
   // to collector
-  val exRegWb = execute.io.resp.bits.reg.get
-  collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
+  collector.io.writeReq.bits.regs.head.enable := exRegWbFire
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
   collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
   collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this

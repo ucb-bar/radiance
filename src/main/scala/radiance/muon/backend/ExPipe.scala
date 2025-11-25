@@ -34,7 +34,6 @@ abstract class ExPipe(
     ))
   }
 
-
   val busy = RegInit(false.B)
 
   val uop = io.req.bits.uop

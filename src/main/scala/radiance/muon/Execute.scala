@@ -19,11 +19,9 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
   })
   
   val aluPipe = Module(new ALUPipe())
-  // val fp32Pipe = Module(new FP32Pipe())
-  // val fp16Pipe = Module(new FP16Pipe())
   val fpPipe = Module(new FPPipe())
   val mulDivPipe = Module(new MulDivPipe())
-  val lsuPipe = Module(new LSUPipe()) // TODO: should be lsu pipe
+  val lsuPipe = Module(new LSUPipe())
   val sfuPipe = Module(new SFUPipe())
 
   val inst = io.req.bits.uop.inst
