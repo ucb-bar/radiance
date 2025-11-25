@@ -91,7 +91,6 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val req = Reg(new FpOpBundle)
 
   val cvFPUReq = WireInit(req)
-  val expandedLaneMask = Cat(decomposer.get.io.out.bits.data(3).reverse.map(b => Fill(2, b.asUInt)))
 
   cvFPUReq := Mux(io.req.fire, ioFpOp, req)
 
@@ -107,7 +106,6 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
   cvFPUIF.req.bits.intFormat := IntFormat.INT32
   cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
-  cvFPUIF.req.bits.simdMask := expandedLaneMask
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
 
   fCSRIO.setFStatus.valid := cvFPUIF.resp.valid
@@ -131,9 +129,11 @@ class FP32Pipe(implicit p: Parameters)
   decomposer.get.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
   decomposer.get.io.out.ready := cvFPUIF.req.ready
 
+  val expandedLaneMask = Cat(decomposer.get.io.out.bits.data(3).reverse.map(b => Fill(2, b.asUInt)))
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
   cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operands(1).asUInt, operands(2).asUInt)
+  cvFPUIF.req.bits.simdMask := expandedLaneMask
 
   val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp32
@@ -168,6 +168,7 @@ class FP16Pipe(implicit p: Parameters)
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operandsLower(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operandsLower(0).asUInt, operandsLower(1).asUInt)
   cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operandsLower(1).asUInt, operandsLower(2).asUInt)
+  cvFPUIF.req.bits.simdMask := decomposer.get.io.out.bits.data(3).asUInt
 
   val respIsFp16 = cvFPUIF.resp.bits.tag === reqRd
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp16
