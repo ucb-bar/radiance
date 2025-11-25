@@ -10,13 +10,23 @@ from pathlib import Path
 
 myname = Path(sys.argv[0]).name
 
-def log_has_error(log_path):
+def log_has_error(log_path) -> str:
+    reason = ""
+    failed = False
+    context_lines = 2
+    curr_lines = context_lines
+
     error_regex = re.compile(r"(error|difftest.*fail)", re.IGNORECASE)
     with log_path.open("r", encoding="utf-8", errors="ignore") as log_file:
         for line in log_file:
+            if failed and curr_lines > 0:
+                reason += line
+                curr_lines -= 1
             if error_regex.search(line):
-                return True
-    return False
+                failed = True
+                reason += line
+                curr_lines = context_lines - 1
+    return reason
 
 
 def get_and_check_sim_binary(config, sim_dir):
@@ -85,8 +95,10 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
             print(f"[{myname}] FAIL: {elf}: timeout after {timeout}s")
             return 1
 
-    if status == 0 and log_has_error(log_path):
+    errstring = log_has_error(log_path).rstrip('\n')
+    if status == 0 and errstring:
         print(f"[{myname}] FAIL: {elf}")
+        print(f"{errstring}")
         return 1
     return status
 
@@ -171,7 +183,8 @@ def main():
     print(f"[{myname}] log dir: {log_dir}")
 
     if args.binary:
-        return run_binary(config, sim_binary, Path(args.binary), log_dir, chipyard_dir, sim_dir)
+        elf = Path(args.binary)
+        return run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
     return sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir)
 
 
