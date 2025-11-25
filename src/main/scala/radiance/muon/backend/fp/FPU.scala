@@ -97,11 +97,13 @@ class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
 class CVFPU(
   numFp16Lanes: Int = 16,
   tagWidth: Int = 1,
+  isDivSqrtUnit: Boolean = false,
 )(implicit p: Parameters) extends BlackBox(
   Map(
     "WIDTH" -> numFp16Lanes * 16,
     "LANES" -> numFp16Lanes,
     "TAG_WIDTH" -> tagWidth,
+    "IS_DIVSQRT_UNIT" -> { if (isDivSqrtUnit) 1 else 0 }
   )
 ) with HasBlackBoxResource with HasBlackBoxPath {
 

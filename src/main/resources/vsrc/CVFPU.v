@@ -5,7 +5,8 @@ module CVFPU
 #(
   parameter WIDTH = 512,
   parameter LANES = 16,
-  parameter TAG_WIDTH = 1
+  parameter TAG_WIDTH = 1,
+  parameter IS_DIVSQRT_UNIT = 0
 ) (
   input logic                               clock,
   input logic                               reset,
@@ -37,7 +38,6 @@ module CVFPU
 );
 
   // TODO: wrap raw fpu op into enum in fpnew_pkg
-  // TODO: figure out how fp32 and fp16 can share datapath
 
   fpnew_top #(
     .Features('{
@@ -48,9 +48,15 @@ module CVFPU
       IntFmtMask:    4'b0110   // {int8, int16, int32, int64}
     }),
     .Implementation('{
-      PipeRegs:   '{default: 1},
-      UnitTypes:  '{'{default: fpnew_pkg::PARALLEL}, // ADDMUL
+      PipeRegs:   '{default: 2},
+      UnitTypes:  IS_DIVSQRT_UNIT ?
+                  '{'{default: fpnew_pkg::DISABLED}, // ADDMUL
                     '{default: fpnew_pkg::MERGED},   // DIVSQRT
+                    '{default: fpnew_pkg::DISABLED}, // NONCOMP
+                    '{default: fpnew_pkg::DISABLED}} // CONV
+                  :
+                  '{'{default: fpnew_pkg::MERGED},   // ADDMUL
+                    '{default: fpnew_pkg::DISABLED}, // DIVSQRT
                     '{default: fpnew_pkg::PARALLEL}, // NONCOMP
                     '{default: fpnew_pkg::MERGED}},  // CONV
       PipeConfig: fpnew_pkg::DISTRIBUTED
