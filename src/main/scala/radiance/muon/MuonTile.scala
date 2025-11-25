@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, IdRange, Transf
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.{CacheBlockBytes, HasTilesExternalResetVectorKey, HierarchicalElementCrossingParamsLike}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -91,8 +91,10 @@ object MuonMemTL {
   def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
                                 mresp: Vec[DecoupledIO[MemResponse[T]]],
                                 tl_client: TLClientNode) = {
-    require(mreq.length == tl_client.out.length, f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
-    require(mresp.length == tl_client.out.length, f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
+    require(mreq.length == tl_client.out.length,
+      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
+    require(mresp.length == tl_client.out.length,
+      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
     for ((req, resp, (tl_bundle, tl_edge)) <- mreq lazyZip mresp lazyZip tl_client.out) {
       connectTL(req, resp, tl_bundle, tl_edge)
     }
@@ -102,8 +104,10 @@ object MuonMemTL {
   def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
                                 mresp: Vec[DecoupledIO[MemResponse[T]]],
                                 tl_clients: Seq[TLClientNode]) = {
-    require(mreq.length == tl_clients.length, f"length mismatch (core = ${mreq.length}, tilelink = ${tl_clients.length})")
-    require(mresp.length == tl_clients.length, f"length mismatch (core = ${mresp.length}, tilelink = ${tl_clients.length})")
+    require(mreq.length == tl_clients.length,
+      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_clients.length})")
+    require(mresp.length == tl_clients.length,
+      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_clients.length})")
     for ((req, resp, tl_client) <- mreq lazyZip mresp lazyZip tl_clients) {
       val (tl_bundle, tl_edge) = tl_client.out(0)
       connectTL(req, resp, tl_bundle, tl_edge)
@@ -118,7 +122,8 @@ class MuonTile(
   q: Parameters
 ) extends BaseTile(muonParams, crossing, lookup, q)
   with SinksExternalInterrupts
-  with SourcesExternalNotifications {
+  with SourcesExternalNotifications
+  with MuonTileLike {
 
   // Private constructor ensures altered LazyModule.p is used implicitly
   def this(
@@ -312,7 +317,7 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.innerLsuNodes)
   MuonMemTL.multiConnectTL(muon.io.smem.req, muon.io.smem.resp, outer.innerSmemNodes)
-  
+
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
   outer.reportCease(None)

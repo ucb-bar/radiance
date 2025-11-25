@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory.SourceGenerator
-import radiance.subsystem.{GPUMemParams, GPUMemory, PhysicalCoreParams}
+import radiance.subsystem.{GPUMemParams, GPUMemory, GemminiTileLike, PhysicalCoreParams}
 
 object GemminiCoreParams extends PhysicalCoreParams {
   override val xLen: Int = 64
@@ -102,7 +102,8 @@ class GemminiTile private (
     q: Parameters
 ) extends BaseTile(gemminiParams, crossing, lookup, q)
     with SinksExternalInterrupts
-    with SourcesExternalNotifications {
+    with SourcesExternalNotifications
+    with GemminiTileLike {
 
   def this(params: GemminiTileParams, crossing: HierarchicalElementCrossingParamsLike,
       lookup: LookupByHartIdImpl)(implicit p: Parameters) =

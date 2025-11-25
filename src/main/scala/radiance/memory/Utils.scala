@@ -1,4 +1,5 @@
 package radiance.memory
+import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.diplomacy.lazymodule._
 import org.chipsalliance.diplomacy.DisableMonitors
@@ -37,5 +38,16 @@ object connectXbarName {
 object connectXbar {
   def apply(from: TLNode)(implicit p: Parameters, disableMonitors: Boolean): TLNexusNode = {
     connectXbarName(from, None)
+  }
+}
+
+object idleMaster {
+  def apply(sourceBits: Int = 2, name: String = "idle_master"): TLClientNode = {
+    TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v2(
+        name = name,
+        sourceId = IdRange(0, 1 << sourceBits)
+      ))
+    )))
   }
 }

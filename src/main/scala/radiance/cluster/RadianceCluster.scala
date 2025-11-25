@@ -48,8 +48,10 @@ class RadianceCluster (
   println(f"clsbus width in bytes ${clsbus.beatBytes}")
 
   // make the shared memory srams and interconnects
-  val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
-  val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
+  val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTileLike])
+    .toSeq.asInstanceOf[Seq[GemminiTileLike]]
+  val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTileLike])
+    .toSeq.asInstanceOf[Seq[MuonTileLike]]
 
   val extReqXbar = TLXbar() // this is in 8 bytes
   val extReqForSmem = connectOne(extReqXbar, () => TLWidthWidget(8))(p, false)

@@ -19,8 +19,8 @@ import scala.collection.mutable.ArrayBuffer
 // generic smem implementation is in RadianceSharedMem.scala
 class RadianceSharedMemComponents(
   clusterParams: RadianceClusterParams,
-  gemminiTiles: Seq[GemminiTile],
-  muonTiles: Seq[MuonTile],
+  gemminiTiles: Seq[GemminiTileLike],
+  muonTiles: Seq[MuonTileLike],
   extClients: Seq[TLNode] = Seq(),
 )(implicit p: Parameters) extends RadianceSmemNodeProvider  {
   val smemKey = clusterParams.smemConfig
