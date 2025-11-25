@@ -19,14 +19,21 @@ def log_has_error(log_path):
     return False
 
 
-def get_and_check_sim_binary(config):
+def get_and_check_sim_binary(config, sim_dir):
     if config == "soc":
-        sim_binary = "./simv-chipyard.harness-RadianceTapeoutSimConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimConfig-debug"
     elif config == "backend":
-        sim_binary = "./simv-chipyard.unittest-MuonBackendTestConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
     else:
         print("error: unknown config '{}'", config)
         sys.exit(1)
+
+    p = Path(sim_binary)
+    if not p.exists():
+        print("error: VCS binary not found at {}.  Have you make'd in Chipyard?" \
+              .format(p.resolve()))
+        sys.exit(1)
+
     return sim_binary
 
 
@@ -93,10 +100,12 @@ def iter_elfs(elf_dir):
 
 
 def sweep(config, binary, script_dir, chipyard_dir, sim_dir):
+    radiance_dir = script_dir / ".."
+    cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc":
-        elf_dir = sim_dir / "isa-test-fused"
+        elf_dir = cyclotron_dir / "test" / "fused"
     else:
-        elf_dir = sim_dir / "cyclotron"
+        elf_dir = cyclotron_dir / "test" / "isa-tests"
 
     executables = sorted(iter_elfs(elf_dir))
     statusall = 0
@@ -108,10 +117,10 @@ def sweep(config, binary, script_dir, chipyard_dir, sim_dir):
 
 
 def discover_chipyard(script_dir):
-    root = script_dir.parents[1].resolve()
+    root = script_dir.parents[2].resolve()
     if root.name != "chipyard":
-        print("error: failed to find chipyard/ (PWD={})",
-              script_dir, file=sys.stderr)
+        print(f"error: failed to find chipyard root directory from PWD={script_dir}",
+              file=sys.stderr)
         sys.exit(1)
     return root
 
@@ -131,8 +140,8 @@ def main():
     args = parse_args()
     config = args.config
 
-    sim_binary = get_and_check_sim_binary(config)
-    print(f"[{myname}] {config} config, using VCS binary {sim_binary}")
+    sim_binary = get_and_check_sim_binary(config, sim_dir)
+    print(f"[{myname}] using config: '{config}', binary: {sim_binary}")
 
     if args.binary:
         return run_binary(config, sim_binary, Path(args.binary), script_dir, chipyard_dir, sim_dir)
