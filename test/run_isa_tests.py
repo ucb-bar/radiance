@@ -25,8 +25,7 @@ def get_and_check_sim_binary(config, sim_dir):
     elif config == "backend":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
     else:
-        print("error: unknown config '{}'", config)
-        sys.exit(1)
+        assert False, "unknown config"
 
     p = Path(sim_binary)
     if not p.exists():
@@ -40,7 +39,7 @@ def get_and_check_sim_binary(config, sim_dir):
 def run_binary(config, binary, elf, script_dir, chipyard_dir, sim_dir):
     elf = Path(elf)
     elf_name = elf.name
-    log_dir = script_dir / "isa-test-logs"
+    log_dir = script_dir / "isa-test-logs" / f"{config}"
     fsdb_path = log_dir / f"{elf_name}.fsdb"
     log_path  = log_dir / f"{elf_name}.log"
     out_path  = log_dir / f"{elf_name}.out"
@@ -137,9 +136,18 @@ def discover_chipyard(script_dir):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run Cyclotron ISA tests")
-    parser.add_argument('binary', nargs="?", help="ELF to run; if omitted, sweeps found ELFs on its own")
-    parser.add_argument('-c', '--config', default='soc', help="testbench config to run; (soc|backend)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run integration tests on the RTL using muon-isa-test ELF binaries.\n"
+            "ELF binaries can either be given explicitly, or searched in the filesystem to do a sweep.\n"
+            "Requires VCS simulation binary to be built."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument('binary', nargs="?",
+                        help="ELF to run; if omitted, sweeps found ELFs on its own")
+    parser.add_argument('-c', '--config', default='soc',
+                        help="testbench config to run; (soc|backend). default is 'soc'")
     return parser.parse_args()
 
 
@@ -150,6 +158,9 @@ def main():
 
     args = parse_args()
     config = args.config
+    if not (config == "soc" or config == "backend"):
+        print(f"error: unknown config '{config}'. must be (soc|backend)")
+        sys.exit(1)
 
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     print(f"[{myname}] using config: '{config}', binary: {sim_binary}")
