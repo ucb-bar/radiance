@@ -254,7 +254,8 @@ class MuonTile(
   )))
 
   dcacheNode :=
-    TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth) :=
+    ResponseFIFOFixer() :=
+    TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
     TLWidthWidget(coalescedReqWidth) :=
     l0dOut
   val coalXbar = LazyModule(new TLXbar).suggestName("coal_out_agg_xbar").node
