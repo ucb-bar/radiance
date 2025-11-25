@@ -78,7 +78,14 @@ def run_binary(config, binary, elf, script_dir, chipyard_dir, sim_dir):
             text=True,
             bufsize=1,
         )
-        status = process.wait()
+        try:
+            timeout = 5 * 60 # 5min
+            status = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            status = process.wait()
+            print(f"[{myname}] FAIL: {elf}: timeout after {timeout}s")
+            return 1
 
     if status == 0 and log_has_error(log_path):
         print(f"[{myname}] FAIL: {elf}")
@@ -106,8 +113,12 @@ def sweep(config, binary, script_dir, chipyard_dir, sim_dir):
         elf_dir = cyclotron_dir / "test" / "fused"
     else:
         elf_dir = cyclotron_dir / "test" / "isa-tests"
+    print(f"[{myname}] searching for ELFs in {elf_dir}")
 
     executables = sorted(iter_elfs(elf_dir))
+    if not executables:
+        print(f"error: failed to find any ELF binary in {elf_dir}")
+        sys.exit(1)
     statusall = 0
     for elf in executables:
         status = run_binary(config, binary, elf, script_dir, chipyard_dir, sim_dir)
