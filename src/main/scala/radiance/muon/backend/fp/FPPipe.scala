@@ -167,8 +167,8 @@ class FP16Pipe(implicit p: Parameters)
   val respIsFp16 = cvFPUIF.resp.bits.tag === reqRd
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp16
   val chunks = VecInit.tabulate(numFP32Lanes * 2)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
-  val zeroExtcvFPURes = Cat(chunks.map(reg => Cat(0.U(16.W), reg)).reverse)
-  recomposer.get.io.in.bits.data(0) := zeroExtcvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
+  val signExtcvFPURes = Cat(chunks.map(reg => Cat(Mux(reg(15), 0xffff.U(16.W), 0.U(16.W)), reg)).reverse)
+  recomposer.get.io.in.bits.data(0) := signExtcvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
   recomposer.get.io.out.ready := io.resp.ready
 
   io.resp.valid := recomposer.get.io.out.valid
