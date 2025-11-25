@@ -36,10 +36,9 @@ def get_and_check_sim_binary(config, sim_dir):
     return sim_binary
 
 
-def run_binary(config, binary, elf, script_dir, chipyard_dir, sim_dir):
+def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     elf = Path(elf)
     elf_name = elf.name
-    log_dir = script_dir / "isa-test-logs" / f"{config}"
     fsdb_path = log_dir / f"{elf_name}.fsdb"
     log_path  = log_dir / f"{elf_name}.log"
     out_path  = log_dir / f"{elf_name}.out"
@@ -105,14 +104,14 @@ def iter_elfs(elf_dir):
                 continue
 
 
-def sweep(config, binary, script_dir, chipyard_dir, sim_dir):
-    radiance_dir = script_dir / ".."
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir):
+    radiance_dir = script_dir.parent
     cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc":
         elf_dir = cyclotron_dir / "test" / "fused"
     else:
         elf_dir = cyclotron_dir / "test" / "isa-tests"
-    print(f"[{myname}] searching for ELFs in {elf_dir}")
+    print(f"[{myname}] ELF dir: {elf_dir}")
 
     executables = sorted(iter_elfs(elf_dir))
     if not executables:
@@ -120,7 +119,7 @@ def sweep(config, binary, script_dir, chipyard_dir, sim_dir):
         sys.exit(1)
     statusall = 0
     for elf in executables:
-        status = run_binary(config, binary, elf, script_dir, chipyard_dir, sim_dir)
+        status = run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir)
         if status != 0 and statusall == 0:
             statusall = status
     return statusall
@@ -148,26 +147,32 @@ def parse_args():
                         help="ELF to run; if omitted, sweeps found ELFs on its own")
     parser.add_argument('-c', '--config', default='soc',
                         help="testbench config to run; (soc|backend). default is 'soc'")
+    parser.add_argument('--log-dir', default='isa-test-logs',
+                        help="directory to be created to place the logs. default is 'isa-test-logs'")
     return parser.parse_args()
 
 
 def main():
-    script_dir = Path(__file__).resolve().parent
-    chipyard_dir = discover_chipyard(script_dir)
-    sim_dir = chipyard_dir / "sims/vcs"
-
     args = parse_args()
+    log_dir_name = args.log_dir
     config = args.config
     if not (config == "soc" or config == "backend"):
         print(f"error: unknown config '{config}'. must be (soc|backend)")
         sys.exit(1)
 
+    script_dir = Path(__file__).resolve().parent
+    chipyard_dir = discover_chipyard(script_dir)
+    sim_dir = chipyard_dir / "sims/vcs"
+    log_dir = script_dir / log_dir_name / config
     sim_binary = get_and_check_sim_binary(config, sim_dir)
-    print(f"[{myname}] using config: '{config}', binary: {sim_binary}")
+
+    print(f"[{myname}] using config '{config}'")
+    print(f"[{myname}] sim binary: {sim_binary}")
+    print(f"[{myname}] log dir: {log_dir}")
 
     if args.binary:
-        return run_binary(config, sim_binary, Path(args.binary), script_dir, chipyard_dir, sim_dir)
-    return sweep(config, sim_binary, script_dir, chipyard_dir, sim_dir)
+        return run_binary(config, sim_binary, Path(args.binary), log_dir, chipyard_dir, sim_dir)
+    return sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir)
 
 
 if __name__ == "__main__":
