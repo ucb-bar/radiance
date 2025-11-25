@@ -217,7 +217,7 @@ class FPPipe(implicit p: Parameters)
   CVFPU.io.resp.ready := FP32Pipe.cvFPUIF.resp.ready || FP16Pipe.cvFPUIF.resp.ready
 
   fCSR := MuxCase(fCSR, Seq(
-    fCSRIO.regWrite.valid -> fCSRIO.regWrite.valid,
+    fCSRIO.regWrite.valid -> fCSRIO.regWrite.bits,
     FP16Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP16Pipe.fCSRIO.setFStatus.bits),
     FP32Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP32Pipe.fCSRIO.setFStatus.bits)
   ))
