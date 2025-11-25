@@ -244,6 +244,10 @@ object Decoder {
           MuOpcode.CUSTOM3,
           MuOpcode.OP,
           MuOpcode.OP_FP,
+          MuOpcode.MADD,
+          MuOpcode.MSUB,
+          MuOpcode.NM_SUB,
+          MuOpcode.NM_ADD
         ).contains(op))
       case IsIType =>
         Some(Seq(
