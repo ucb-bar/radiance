@@ -97,6 +97,17 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val operands = decomposer.get.io.out.bits.data
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
 
+  // assume same fpconv across all lanes
+  val fpu_out = recomposer.get.io.out.bits.data(0)
+
+  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
+  decomposer.get.io.in.valid := io.req.fire
+  decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
+  decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
+  decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
+  decomposer.get.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
+  decomposer.get.io.out.ready := cvFPUIF.req.ready
+
   cvFPUIF.req.valid := decomposer.get.io.out.valid
   cvFPUIF.req.bits.roundingMode := Mux(cvFPUReq.roundingMode === FPRoundingMode.DYN,
                                        fCSRIO.regData(7,5).asTypeOf(FPRoundingMode()),
@@ -118,17 +129,6 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 
 class FP32Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.FP32, p(MuonKey).fpPipe.numFP32Lanes) {
-  // assume same fpconv across all lanes
-  val fpu_out = recomposer.get.io.out.bits.data(0).asUInt
-
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
-  decomposer.get.io.in.valid := io.req.fire
-  decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
-  decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
-  decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
-  decomposer.get.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
-  decomposer.get.io.out.ready := cvFPUIF.req.ready
-
   val expandedLaneMask = Cat(decomposer.get.io.out.bits.data(3).reverse.map(b => Fill(2, b.asUInt)))
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
@@ -153,17 +153,6 @@ class FP32Pipe(implicit p: Parameters)
 
 class FP16Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.FP16, p(MuonKey).fpPipe.numFP32Lanes * 2) {
-  // assume same fpconv across all lanes
-  val fpu_out = recomposer.get.io.out.bits.data(0)
-
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
-  decomposer.get.io.in.valid := io.req.fire
-  decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
-  decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
-  decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
-  decomposer.get.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
-  decomposer.get.io.out.ready := cvFPUIF.req.ready
-
   val operandsLower = operands.take(3).map(operand => VecInit(operand.map(reg => reg.asUInt(15, 0))))
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operandsLower(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operandsLower(0).asUInt, operandsLower(1).asUInt)
