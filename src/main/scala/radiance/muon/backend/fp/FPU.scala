@@ -88,9 +88,9 @@ class CVFPUReq(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
   val operands = Vec(3, UInt((numFp16Lanes * 16).W))
 }
 
-class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
+class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1, fStatusBits: Int = 5) extends Bundle {
   val result = UInt((numFp16Lanes * 16).W)
-  val status = UInt(5.W) // {invalid, div by zero, overflow, underflow, inexact}
+  val status = UInt(fStatusBits.W) // {invalid, div by zero, overflow, underflow, inexact}
   val tag = UInt(tagWidth.W)
 }
 

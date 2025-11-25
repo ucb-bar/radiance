@@ -14,6 +14,7 @@ trait HasFPPipeParams extends HasMuonCoreParameters {
   def numFP32Lanes = muonParams.fpPipe.numFP32Lanes
   def numFP16Lanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFPDivLanes = muonParams.fpPipe.numFPDivLanes
+  def fStatusBits = 5
 }
 
 class FpOpBundle extends Bundle {
