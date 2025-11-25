@@ -191,6 +191,18 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   private case class TestEnv(archLen: Int, numLanes: Int, numFP32Lanes: Int)
 
+  private def signExtend(value: BigInt, fromWidth: Int, toWidth: Int): BigInt = {
+    val mask = (BigInt(1) << fromWidth) - 1
+    val signBit = BigInt(1) << (fromWidth - 1)
+    val masked = value & mask
+    val extended = if ((masked & signBit) != 0) {
+      masked | (~mask & ((BigInt(1) << toWidth) - 1))
+    } else {
+      masked
+    }
+    extended & ((BigInt(1) << toWidth) - 1)
+  }
+
   private def issueAndCheck(
       c: FP32Pipe,
       spec: FPRequestSpec,
@@ -325,6 +337,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val packedRs2 = packLanes(spec.rs2Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
     val packedRs3 = packLanes(spec.rs3Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
     val packedResult = packLanes(spec.expectedResultLanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val expectedResultLanes = spec.expectedResultLanes.take(numLanes).map(signExtend(_, 16, archLen))
     val expectedMask = spec.tmask & laneMask.toInt
 
     zeroDecoded(c.io.req.bits.uop.inst)
@@ -416,7 +429,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         c.io.resp.bits.reg.get.valid.expect(true.B, s"${spec.name}: expected register write")
         c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
         c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
-        spec.expectedResultLanes.take(numLanes).zipWithIndex.foreach { case (value, idx) =>
+        expectedResultLanes.zipWithIndex.foreach { case (value, idx) =>
           c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(archLen.W), s"${spec.name}: lane $idx data mismatch")
         }
         respSeen = true
@@ -446,6 +459,12 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val laneCount = if (isFp16) env.numLanes else env.numFP32Lanes
 
     def maskValues(values: Seq[BigInt]) = values.take(laneCount).map(_ & laneMaskPerValue)
+    val expectedResultLanes =
+      if (isFp16) {
+        spec.expectedResultLanes.take(laneCount).map(signExtend(_, 16, archLen))
+      } else {
+        spec.expectedResultLanes.take(laneCount)
+      }
 
     val packedRs1 = packLanes(maskValues(spec.rs1Lanes), laneWidth)
     val packedRs2 = packLanes(maskValues(spec.rs2Lanes), laneWidth)
@@ -589,9 +608,9 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
           c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
           val checkLanes = if (isFp16) env.numLanes else env.numFP32Lanes
-          val maskWidth = if (isFp16) 16 else archLen
+          val maskWidth = archLen
           val laneMask = (BigInt(1) << maskWidth) - 1
-          spec.expectedResultLanes.take(checkLanes).zipWithIndex.foreach { case (value, idx) =>
+          expectedResultLanes.take(checkLanes).zipWithIndex.foreach { case (value, idx) =>
             val observed = c.io.resp.bits.reg.get.bits.data(idx).peekInt()
             val observedMasked = observed & laneMask
             val expectedMasked = value & laneMask
