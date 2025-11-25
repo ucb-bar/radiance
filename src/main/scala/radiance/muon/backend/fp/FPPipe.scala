@@ -79,11 +79,12 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 
   val cvFPUIF = IO(new Bundle {
     val req = Decoupled(new CVFPUReq(numFP32Lanes * 2, Isa.regBits))
-    val resp = Flipped(Decoupled(new CVFPUResp(numFP32Lanes * 2, Isa.regBits)))
+    val resp = Flipped(Decoupled(new CVFPUResp(numFP32Lanes * 2, Isa.regBits, fStatusBits)))
   })
 
   val fCSRIO = IO(new Bundle {
     val regData = Input(csrDataT)
+    val setFStatus = Output(Valid(UInt(fStatusBits.W)))
   })
 
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
@@ -108,6 +109,9 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
   cvFPUIF.req.bits.simdMask := expandedLaneMask
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
+
+  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid
+  fCSRIO.setFStatus.bits := cvFPUIF.resp.bits.status
 
   when (io.req.fire && ioFpOp.dstFmt === fmt) {
     req := ioFpOp
@@ -191,8 +195,7 @@ class FPPipe(implicit p: Parameters)
     val regData = Output(csrDataT)
     val regWrite = Flipped(Valid(csrDataT))
   })
-  val fCSR = RegEnable(fCSRIO.regWrite.bits, 0.U.asTypeOf(csrDataT), fCSRIO.regWrite.valid)
-  fCSRIO.regData := fCSR
+  val fCSR = RegInit(0.U.asTypeOf(csrDataT))
 
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)
@@ -223,8 +226,15 @@ class FPPipe(implicit p: Parameters)
   FP16Pipe.cvFPUIF.resp.valid := CVFPU.io.resp.valid
   CVFPU.io.resp.ready := FP32Pipe.cvFPUIF.resp.ready || FP16Pipe.cvFPUIF.resp.ready
 
+  fCSR := MuxCase(fCSR, Seq(
+    fCSRIO.regWrite.valid -> fCSRIO.regWrite.valid,
+    FP16Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP16Pipe.fCSRIO.setFStatus.bits),
+    FP32Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP32Pipe.fCSRIO.setFStatus.bits)
+  ))
+  fCSRIO.regData := fCSR
   FP16Pipe.fCSRIO.regData := fCSR
   FP32Pipe.fCSRIO.regData := fCSR
+
 
   // if both ready, prioritize fp32
   FP32Pipe.io.resp.ready := io.resp.ready
