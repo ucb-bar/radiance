@@ -67,6 +67,7 @@ object FPFormat extends ChiselEnum {
   val FP64 = Value("b001".U) // unsupported
   val FP16 = Value("b010".U)
   val E5M2 = Value("b011".U) // unsupported
+  val BF16 = Value("b100".U)
   val _w   = Value("b111".U)
 }
 

@@ -44,7 +44,7 @@ module CVFPU
       Width:         (WIDTH),
       EnableVectors: 1'b1,
       EnableNanBox:  1'b1,
-      FpFmtMask:     5'b10100, // {fp32, fp64, fp16, fp8, fp16_alt}
+      FpFmtMask:     5'b10001, // {fp32, fp64, fp16, fp8, fp16_alt}
       IntFmtMask:    4'b0110   // {int8, int16, int32, int64}
     }),
     .Implementation('{

@@ -62,10 +62,10 @@ object FpOpDecoder {
     val result = Wire(new FpOpBundle)
     val decodedOp = decoder(Cat(opcode(6,0), f3, f5, rs2(4,0)), TruthTable(table, BitPat(FPUOp.ADD.litValue.U(fpOpW))))
     result.op := FPUOp.safe(decodedOp)._1
-    val fmtBits = Cat(0.U(1.W), fmt)
-    val srcFmtBits = Mux(result.op === FPUOp.F2F, rs2(2,0), fmtBits)
-    result.srcFmt := FPFormat.safe(srcFmtBits)._1
-    result.dstFmt := FPFormat.safe(fmtBits)._1
+    val fmtBits = FPFormat.safe(Cat(0.U(1.W), fmt))._1
+    val srcFmtBits = Mux(result.op === FPUOp.F2F, FPFormat.safe(rs2(2,0))._1, fmtBits)
+    result.srcFmt := Mux(srcFmtBits === FPFormat.FP16, FPFormat.BF16, srcFmtBits)
+    result.dstFmt := Mux(fmtBits === FPFormat.FP16, FPFormat.BF16, fmtBits)
     result.roundingMode := FPRoundingMode.safe(f3)._1
     result
   }
@@ -162,7 +162,7 @@ class FP32Pipe(implicit p: Parameters)
 
   //dumb hack for cvfpu fp16 conversion
   val respIsFP16Cvt = (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
-                       cvFPUReq.dstFmt === FPFormat.FP16
+                       cvFPUReq.dstFmt === FPFormat.BF16
   recomposer.get.io.in.bits.data(0) := Mux(respIsFP16Cvt,
     signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0)),
     cvFPUIF.resp.bits.result.asTypeOf(recomposer.get.io.in.bits.data(0))
@@ -170,7 +170,7 @@ class FP32Pipe(implicit p: Parameters)
 }
 
 class FP16Pipe(implicit p: Parameters)
-  extends FPPipeBase(FPFormat.FP16, p(MuonKey).fpPipe.numFP32Lanes * 2) {
+  extends FPPipeBase(FPFormat.BF16, p(MuonKey).fpPipe.numFP32Lanes * 2) {
   val operandsLower = operands.take(3).map(operand => VecInit(operand.map(reg => reg.asUInt(15, 0))))
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operandsLower(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operandsLower(0).asUInt, operandsLower(1).asUInt)
