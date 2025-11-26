@@ -165,7 +165,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private def expandedMask(tmask: Int, numFP32Lanes: Int): BigInt = {
     val laneEnables = (0 until numFP32Lanes).map(i => ((tmask >> i) & 0x1) == 1)
     laneEnables.reverse.foldLeft(BigInt(0)) { (acc, active) =>
-      (acc << 2) | (if (active) 0x3 else 0x0)
+      // map each active FP32 lane to two FP16 lanes with pattern 0b01 (upper=0, lower=1)
+      (acc << 2) | (if (active) 0x1 else 0x0)
     }
   }
 
