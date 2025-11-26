@@ -329,7 +329,7 @@ object Decoder {
       case HasRs2 =>
         Some(
           (sd(IsRType) || sd(IsSType) || sd(IsBType)) &&
-            !(op == MuOpcode.OP_FP && f7 == "110?0??") // HACK: FCVT case
+            !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
         )
       case HasRs3 =>
         Some(Seq(
