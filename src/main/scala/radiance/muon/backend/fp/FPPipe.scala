@@ -122,7 +122,7 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   fCSRIO.setFStatus.valid := cvFPUIF.resp.valid
   fCSRIO.setFStatus.bits := cvFPUIF.resp.bits.status
 
-  when (io.req.fire && ioFpOp.dstFmt === fmt) {
+  when (io.req.fire) {
     req := ioFpOp
   }
 }

@@ -128,8 +128,17 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case LuiImm => (decode(Imm24) << 12.U)(31, 0)
-        case UseFP32Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b00".U)
-        case UseFP16Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b10".U)
+        case UseFP32Pipe => decodeB(UseFPPipe) && (
+            decode(F7)(inst)(1, 0) === "b00".U ||
+            decode(F7)(inst)(6, 2) === "b11000".U ||
+            decode(F7)(inst)(6, 2) === "b11010".U ||
+            decode(F7)(inst)(6, 2) === "b01000".U
+          )
+        case UseFP16Pipe => decodeB(UseFPPipe) &&
+          decode(F7)(inst)(1, 0) === "b10".U &&
+          decode(F7)(inst)(6, 2) =/= "b11000".U &&
+          decode(F7)(inst)(6, 2) =/= "b11010".U &&
+          decode(F7)(inst)(6, 2) =/= "b01000".U
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
