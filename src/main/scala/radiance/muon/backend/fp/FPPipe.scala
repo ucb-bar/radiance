@@ -138,7 +138,8 @@ class FP32Pipe(implicit p: Parameters)
 
   val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
   //dumb hack for cvfpu fp16 conversion
-  val respIsFP16Cvt = cvFPUReq.dstFmt === FPFormat.FP16
+  val respIsFP16Cvt = (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
+                       cvFPUReq.dstFmt === FPFormat.FP16
   val chunks = VecInit.tabulate(numFP32Lanes)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
   val signExtcvFPURes = Cat(chunks.map(reg => Cat(Mux(reg(15), 0xffff.U(16.W), 0.U(16.W)), reg)).reverse)
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp32
