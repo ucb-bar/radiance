@@ -454,7 +454,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       applyRespBackpressure: Boolean
   ): Unit = {
     val archLen = env.archLen
-    val isFp16 = spec.expectedDstFmt == FPFormat.FP16
+    val isFp16 = spec.expectedDstFmt == FPFormat.BF16
     val laneWidth = if (isFp16) 16 else archLen
     val laneMaskPerValue = (BigInt(1) << laneWidth) - 1
     val laneCount = if (isFp16) env.numLanes else env.numFP32Lanes
@@ -740,7 +740,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(4)(0L),
           tmask = 0xF,
           expectedOp = FPUOp.F2F,
-          expectedSrcFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
           expectedDstFmt = FPFormat.FP32,
           expectedResultLanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
           responseLatency = 2
@@ -913,8 +913,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.ADD,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
           responseLatency = 2
         ),
@@ -932,8 +932,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SUB,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
           responseLatency = 2
         ),
@@ -951,8 +951,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MINMAX,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
           responseLatency = 2
         )
@@ -989,8 +989,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MUL,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
           responseLatency = 2
         ),
@@ -1008,8 +1008,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SGNJ,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L),
           responseLatency = 2
         )
@@ -1089,7 +1089,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(4)(0L),
           tmask = 0xF,
           expectedOp = FPUOp.F2F,
-          expectedSrcFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
           expectedDstFmt = FPFormat.FP32,
           expectedResultLanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
           responseLatency = 2
@@ -1111,8 +1111,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.ADD,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
           responseLatency = 2
         ),
@@ -1130,8 +1130,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MUL,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
           responseLatency = 2
         ),
@@ -1149,8 +1149,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SGNJ,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00013c00L, 0x0001bc00L, 0x00023c00L, 0x0002bc00L, 0x00033c00L, 0x0003bc00L),
           responseLatency = 2
         )
@@ -1243,8 +1243,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SUB,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
           responseLatency = 2
         ),
@@ -1262,8 +1262,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MINMAX,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
           responseLatency = 2
         )
