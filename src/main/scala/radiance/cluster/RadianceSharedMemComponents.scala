@@ -184,17 +184,39 @@ class RadianceSharedMemComponents(
 class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]
   (override val outer: T) extends RadianceSmemNodeProviderImp[T](outer) {
 
-  val xbars = outer.laneSerialXbars
-  val policies = outer.coreSerialPolicy
-  // for each lane, if any core is valid
-  val coreValids = xbars.map(_._2.in.map(_._1)).transpose.map { core => VecInit(core.map(_.a.valid)).asUInt.orR }
-  val select = xbars.map(_._3.in.map(_._1)).transpose.map { core => VecInit(core.map(_.a.fire)).asUInt.orR }
-  val coreSelect = TLArbiter.roundRobin(outer.numCores, VecInit(coreValids).asUInt, VecInit(select).asUInt.orR)
+  val xbars = outer.laneSerialXbars // (xbar, xi, xo)
+
+  val xbarInNodes = xbars.map(_._2.in.map(_._1)) // (lane, core) => xi
+  val xbarOutNodes = xbars.map(_._3.in.map(_._1)) // (lane, core) => xo
+
+  // the shared memory supports random subbank access for 1 core at a time
+  // (i.e. core-serial access)
+
+  // for each core, if any lane is valid, that core is up for arbitration
+  val anyLaneValidInCore = WireInit(VecInit(xbarInNodes.transpose // (core, lane) => xi
+    .map(lanes => VecInit(lanes.map(_.a.valid)).asUInt.orR)))
+
+  dontTouch(anyLaneValidInCore)
+
+  // a core-serial crossbar fires if any core sent something through
+  val laneOutFire = WireInit(VecInit(xbarOutNodes // (lane, ??) => xo
+    .map(laneOuts => VecInit(laneOuts.map(_.a.fire)).asUInt.orR)))
+  dontTouch(laneOutFire)
+
+  require(anyLaneValidInCore.length == outer.numCores)
+  require(laneOutFire.length == outer.numLanes)
+
+  // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
+  val coreSelect = TLArbiter.roundRobin(
+    outer.numCores,
+    anyLaneValidInCore.asUInt,
+    laneOutFire.asUInt.orR)
+
   // TODO: roll this into XbarWithExtPolicy
   xbars.foreach { lane =>
     (lane._2.in.map(_._1) lazyZip lane._2.out.map(_._1) lazyZip coreSelect.asBools).foreach { case (li, lo, cs) =>
       lo.a.valid := li.a.valid && cs
     }
   }
-  policies.foreach { _.out.head._1.hint := coreSelect }
+  outer.coreSerialPolicy.foreach { _.out.head._1.hint := coreSelect }
 }
