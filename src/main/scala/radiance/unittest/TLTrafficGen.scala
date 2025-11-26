@@ -10,7 +10,7 @@ import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory.SourceGenerator
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths}
 
 case class ScalaTLA(
   address: BigInt,
@@ -71,9 +71,12 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
   println(s"generating trace for ${outer.nodeName}")
 
   val (tlNode, tlEdge) = outer.node.out.head
-  val scalaReqs = Seq.tabulate(outer.n)(outer.reqFn)
-  val reqData = scalaReqs.map(_.toChisel(tlNode.params))
-  val storage = Module(new StoredBitVec(outer.nodeName, reqData))
+  val storage = StoredBitVec(
+    outer.nodeName,
+    outer.n,
+    new ChiselTLA(tlNode.params),
+    Seq.tabulate(outer.n)(outer.reqFn).map(_.toChisel(tlNode.params))
+  )
 
   // run time
   // ========
@@ -115,24 +118,49 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
   dontTouch(tlNode.d)
 }
 
-class StoredBitVec[T <: Bundle](val filename: String, val sequence: Seq[T])
-                               (implicit p: Parameters) extends Module {
-  val addrWidth = log2Ceil(sequence.length)
-  val filePath = Paths.get(s"./generators/radiance/src/test/resources/traffic/${filename}.mem")
-  val fileContent = sequence.map { record =>
-    record.litOption.get.toString(16) // dontcares -> 0
-  }.mkString("\n")
-  Files.write(filePath, fileContent.getBytes(StandardCharsets.UTF_8))
+object StoredBitVec {
+  def apply[T <: Bundle](
+    filename: String,
+    depth: Int,
+    dataT: T,
+    sequence: => Seq[T]
+  )(implicit p: Parameters): StoredBitVec[T] = {
+    val filePath = Paths.get(s"./generators/radiance/src/test/resources/traffic/${filename}.mem")
+    if (!Files.exists(filePath)) {
+      val parentDir = filePath.getParent
+      if (parentDir != null) {
+        Files.createDirectories(parentDir)
+      }
 
-  val bb = Module(new StoredBitVecBlackBox(
-    filePath.toAbsolutePath.toString, addrWidth, sequence.length, sequence.head.cloneType.getWidth
+      val writer = Files.newBufferedWriter(filePath, StandardCharsets.UTF_8)
+      try {
+        sequence.iterator.foreach { record =>
+          val hexValue = record.litOption.getOrElse(BigInt(0)).toString(16) // dontcares -> 0
+          writer.write(hexValue)
+          writer.newLine()
+        }
+      } finally {
+        writer.close()
+      }
+    }
+
+    Module(new StoredBitVec(filePath, depth, dataT))
+  }
+}
+
+class StoredBitVec[T <: Bundle](filePath: Path, depth: Int, dataT: T)
+                               (implicit p: Parameters) extends Module {
+  private val addrWidth = log2Ceil(depth)
+
+  private val bb = Module(new StoredBitVecBlackBox(
+    filePath.toAbsolutePath.toString, addrWidth, depth, dataT.getWidth
   ))
   val io = IO(new Bundle {
     val addr = Input(UInt(addrWidth.W))
-    val data = Output(sequence.head.cloneType)
+    val data = Output(dataT.cloneType)
   })
   bb.io.addr := io.addr
-  io.data := bb.io.data.asTypeOf(sequence.head.cloneType)
+  io.data := bb.io.data.asTypeOf(dataT.cloneType)
 }
 
 class StoredBitVecBlackBox(filePath: String, addrWidth: Int, seqLength: Int, dataWidth: Int)

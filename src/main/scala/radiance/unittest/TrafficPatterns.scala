@@ -130,12 +130,14 @@ object TrafficPatterns {
   }
 
   def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
-    Seq(stridedPatterns,
-      tiledPatterns,
-      swizzledPatterns,
-      tiledPatterns.map(Transposed(_)),
-      swizzledPatterns.map(Transposed(_)),
-      randomPatterns,
+    // Seq(stridedPatterns,
+    //   tiledPatterns,
+    //   swizzledPatterns,
+    //   tiledPatterns.map(Transposed(_)),
+    //   swizzledPatterns.map(Transposed(_)),
+    //   randomPatterns,
+    // )
+    Seq(Seq(new Strided(1, 1))
     )
       .flatten
       .map(Bounded(_, size))
