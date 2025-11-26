@@ -3,17 +3,13 @@
 package radiance.unittest
 
 import chisel3._
-import org.chipsalliance.cde.config._
 import freechips.rocketchip.subsystem.BaseSubsystemConfig
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
-import radiance.memory._
 import freechips.rocketchip.unittest._
-import radiance.subsystem.{WithMuonCores, WithSIMTConfig}
-import radiance.muon.MuonCore
-import radiance.virgo.TensorCoreDecoupledTest
+import org.chipsalliance.cde.config._
+import radiance.memory._
 import radiance.muon.MuonLoadStoreUnitDebugIdKey
+import radiance.subsystem.{WithMuonCores, WithSIMTConfig}
+import radiance.virgo.TensorCoreDecoupledTest
 
 case object TestDurationMultiplier extends Field[Int]
 

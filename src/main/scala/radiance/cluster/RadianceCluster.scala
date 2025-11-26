@@ -7,15 +7,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
-import freechips.rocketchip.rocket.{BTBParams, DCacheParams, ICacheParams, NonBlockingDCache}
+import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tile.{CoreParams, TileKey, TileParams, TileVisibilityNodeKey}
+import freechips.rocketchip.tile.TileVisibilityNodeKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
-import org.chipsalliance.diplomacy.lazymodule._
 import org.chipsalliance.diplomacy.DisableMonitors
+import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
-import radiance.muon._
 import radiance.subsystem._
 
 case class RadianceClusterParams(
@@ -103,7 +102,7 @@ class RadianceCluster (
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
   // cbus -> clcbus/smem
-  clcbus.inwardNode := TLFragmenter(8, 128) := extReqXbar
+  clcbus.inwardNode := TLFragmenter(8, 128, alwaysMin = true) := extReqXbar
   extReqXbar := ccbus.outwardNode
   // ccbus is connected to cbus automatically
 

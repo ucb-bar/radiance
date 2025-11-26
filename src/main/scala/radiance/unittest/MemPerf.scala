@@ -1,5 +1,8 @@
 package radiance.unittest
 
+import chisel3._
+import chisel3.util._
+
 import freechips.rocketchip.interrupts.IntOutwardNode
 import freechips.rocketchip.prci._
 import freechips.rocketchip.resources.{Device, SimpleDevice}
@@ -10,7 +13,7 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.SoftResetFinishNode
-import radiance.memory.idleMaster
+import radiance.memory.{connectOne, idleMaster}
 import radiance.muon.MuonTileParams
 import radiance.subsystem.{MuonTileAttachParams, MuonTileLike}
 
@@ -34,16 +37,15 @@ class WithMemPerfMuonTileReplacement(
 case class MemPerfMuonTileParams(
   m: MuonTileParams,
 ) extends InstantiableTileParams[MemPerfMuonTile] {
-
-  override val core: CoreParams = m.core
-  override val icache: Option[ICacheParams] = m.icache
-  override val dcache: Option[DCacheParams] = m.dcache
-  override val btb: Option[BTBParams] = m.btb
-  override val tileId: Int = m.tileId
-  override val blockerCtrlAddr: Option[BigInt] = m.blockerCtrlAddr
-  override val baseName: String = m.baseName + "_mem"
-  override val uniqueName: String = m.uniqueName
-  override val clockSinkParams: ClockSinkParameters = m.clockSinkParams
+  val core: CoreParams = m.core
+  val icache: Option[ICacheParams] = m.icache
+  val dcache: Option[DCacheParams] = m.dcache
+  val btb: Option[BTBParams] = m.btb
+  val tileId: Int = m.tileId
+  val blockerCtrlAddr: Option[BigInt] = m.blockerCtrlAddr
+  val baseName: String = m.baseName + "_mem"
+  val uniqueName: String = m.uniqueName
+  val clockSinkParams: ClockSinkParameters = m.clockSinkParams
 
   def instantiate(
     crossing: HierarchicalElementCrossingParamsLike,
@@ -62,10 +64,10 @@ abstract class BaseTileBase(
   with SinksExternalInterrupts
   with SourcesExternalNotifications {
 
-  override def intOutwardNode: Option[IntOutwardNode] = None
-  override def cpuDevice: Device = new SimpleDevice("gpu", Seq())
-  override def masterNode: TLOutwardNode = TLIdentityNode()
-  override def slaveNode: TLInwardNode = TLIdentityNode()
+  val intOutwardNode: Option[IntOutwardNode] = None
+  val cpuDevice: Device = new SimpleDevice("gpu", Seq())
+  val masterNode: TLOutwardNode = TLIdentityNode()
+  val slaveNode: TLInwardNode = TLIdentityNode()
 
   override protected def visibleManagers = Seq()
   override protected def visiblePhysAddrBits = 33
@@ -80,16 +82,30 @@ class MemPerfMuonTile(
 
   val muonParams: MuonTileParams = memMuonParams.m
 
-  // private val patterns = TrafficPatterns.smemPatterns(muonParams.clusterId).head
+  val reqSourceBits = 4
+  val reqsPerPattern = 4096
 
-  val smemNodes: Seq[TLNode] = Seq.tabulate(muonParams.core.numLanes) { i =>
-    LazyModule(new TLTrafficGen(
-      nodeName = s"smem_$i",
-      sourceBits = 4,
-      n = 1,
-      reqFn = new TrafficPatterns.Strided(1, 1).getSmem(muonParams.clusterId)(_, i),
-    )).node
+  private val patterns = TrafficPatterns.smemPatterns(muonParams.clusterId)
+
+  val trafficGenerators = Seq.tabulate(muonParams.core.numLanes) { lane =>
+    patterns.map { case (name, pattern) =>
+      LazyModule(new TLTrafficGen(
+        nodeName = s"smem_${lane}_$name",
+        sourceBits = reqSourceBits,
+        n = reqsPerPattern,
+        reqFn = pattern(_, lane),
+      ))
+    }
   }
+
+  val trafficXbars = trafficGenerators.map { gens =>
+    // lowest index so that all patterns go in order
+    val xbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst)).node
+    gens.foreach(xbar := _.node)
+    xbar
+  }
+
+  val smemNodes: Seq[TLNode] = trafficXbars.map(connectOne(_, TLEphemeralNode.apply)(p, false))
   val icacheNode: TLNode = idleMaster()
   val dcacheNode: TLNode = visibilityNode
   val softResetFinishSlave = SoftResetFinishNode.Slave()
@@ -98,5 +114,34 @@ class MemPerfMuonTile(
 
   lazy val module = new BaseTileModuleImp[MemPerfMuonTile](this) {
 
+    val time = Counter(true.B, Int.MaxValue)._1
+
+    val patternLanes = outer.trafficGenerators.transpose
+
+    def allFinished(lanes: Seq[TLTrafficGen]) =
+      VecInit(lanes.map(_.module.io.finished)).asUInt.andR
+
+    // valid sequencing
+    patternLanes.head.foreach(_.module.io.started := true.B)
+    patternLanes.reduceLeft { (prevPattern, currPattern) =>
+      val prevFinished = allFinished(prevPattern)
+      currPattern.foreach(_.module.io.started := RegNext(prevFinished))
+
+      // rising edge
+      when (prevFinished && !RegNext(prevFinished)) {
+        printf(cf"[MEM PERF] ${prevPattern.head.nodeName} finished at time $time\n")
+        printf(cf"[MEM PERF] ${currPattern.head.nodeName} starting\n")
+      }
+      currPattern
+    }
+
+    val lastFinished = allFinished(patternLanes.last)
+    when (RegNext(lastFinished)) {
+      printf(cf"[MEM PERF] ${patternLanes.last.head.nodeName} finished at time $time\n")
+      stop()
+    }
+
+    outer.reportCease(None)
+    outer.reportWFI(None)
   }
 }

@@ -88,6 +88,26 @@ object TrafficPatterns {
       rng.between(min, max) * reqSize
   }
 
+  object Delayed {
+    def apply(pattern: TrafficPattern, by: Int): TrafficPattern = {
+      new TrafficPattern {
+        override val name = pattern.name + s"+$by"
+        def offset(t: Int, i: Int) =
+          pattern.offset(t + by, i)
+      }
+    }
+  }
+
+  object Bounded {
+    def apply(pattern: TrafficPattern, within: Int): TrafficPattern = {
+      new TrafficPattern {
+        override val name = pattern.name
+        final def offset(t: Int, i: Int) = // Bounded must come last
+          pattern.offset(t, i) % within
+      }
+    }
+  }
+
 
   val strideGrid = for { x <- Seq(1, 2, 4, 8); y <- Seq(0, 1, 2, 4) } yield (x, y)
   val tileGrid = Seq(8, 16, 32, 64, 128)
@@ -109,15 +129,20 @@ object TrafficPatterns {
     new RandomAccess(0, 131072 >> lgSize)
   }
 
-  def smemPatterns(clusterId: Int) = {
+  def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
     Seq(stridedPatterns,
       tiledPatterns,
       swizzledPatterns,
       tiledPatterns.map(Transposed(_)),
       swizzledPatterns.map(Transposed(_)),
       randomPatterns,
-    ).flatten.flatMap(x => Seq(
-      x.getSmem(_), x.putSmem(_)
-    ).map(_(clusterId)))
+    )
+      .flatten
+      .map(Bounded(_, size))
+      .flatMap(x =>
+        Seq(
+          (x.name + "_r", x.getSmem(clusterId)),
+          (x.name + "_w", x.putSmem(clusterId)),
+        ))
   }
 }

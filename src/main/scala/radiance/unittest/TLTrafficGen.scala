@@ -61,48 +61,58 @@ class TLTrafficGen(val nodeName: String, val sourceBits: Int,
     )),
   )))
 
-  lazy val module = new LazyModuleImp(this) {
-    // elaboration time
+  lazy val module = new TLTrafficGenImp(this)
+}
 
-    val (tlNode, tlEdge) = node.out.head
-    val scalaReqs = Seq.tabulate(n)(reqFn)
-    val reqData = scalaReqs.map(_.toChisel(tlNode.params))
-    val storage = Module(new StoredBitVec(nodeName, reqData))
+class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
 
-    // run time
+  // elaboration time
+  // ================
+  println(s"generating trace for ${outer.nodeName}")
 
-    val sourceGen = Module(new SourceGenerator(sourceBits))
-    val (counter, ended) = Counter(tlNode.a.fire, n)
+  val (tlNode, tlEdge) = outer.node.out.head
+  val scalaReqs = Seq.tabulate(outer.n)(outer.reqFn)
+  val reqData = scalaReqs.map(_.toChisel(tlNode.params))
+  val storage = Module(new StoredBitVec(outer.nodeName, reqData))
 
-    val finished = IO(Output(Bool()))
-    val finishedReg = RegEnable(true.B, false.B, ended)
+  // run time
+  // ========
 
-    storage.io.addr := counter
-    val storedReq = storage.io.data
+  val io = IO(new Bundle {
+    val started = Input(Bool())
+    val finished = Output(Bool())
+  })
 
-    tlNode.a.bits := Mux(
-      storedReq.hasData,
-      Mux(
-        storedReq.hasMask,
-        tlEdge.Put(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize,
-          storedReq.data, storedReq.mask)._2,
-        tlEdge.Put(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize,
-          storedReq.data)._2
-      ),
-      tlEdge.Get(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize)._2,
-    )
+  val sourceGen = Module(new SourceGenerator(outer.sourceBits))
+  val (counter, ended) = Counter(tlNode.a.fire, outer.n)
 
-    sourceGen.io.gen := tlNode.a.ready && !finishedReg
-    tlNode.a.valid := sourceGen.io.id.valid && !finishedReg
+  val finishedReg = RegEnable(true.B, false.B, ended)
 
-    tlNode.d.ready := true.B
-    sourceGen.io.reclaim.valid := tlNode.d.fire
-    sourceGen.io.reclaim.bits := tlNode.d.bits.source
+  storage.io.addr := counter
+  val storedReq = storage.io.data
 
-    finished := finishedReg && !sourceGen.io.inflight
+  tlNode.a.bits := Mux(
+    storedReq.hasData,
+    Mux(
+      storedReq.hasMask,
+      tlEdge.Put(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize,
+        storedReq.data, storedReq.mask)._2,
+      tlEdge.Put(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize,
+        storedReq.data)._2
+    ),
+    tlEdge.Get(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize)._2,
+  )
 
-    dontTouch(tlNode.d)
-  }
+  sourceGen.io.gen := tlNode.a.ready && !finishedReg
+  tlNode.a.valid := io.started && sourceGen.io.id.valid && !finishedReg
+
+  tlNode.d.ready := true.B
+  sourceGen.io.reclaim.valid := tlNode.d.fire
+  sourceGen.io.reclaim.bits := tlNode.d.bits.source
+
+  io.finished := finishedReg && !sourceGen.io.inflight
+
+  dontTouch(tlNode.d)
 }
 
 class StoredBitVec[T <: Bundle](val filename: String, val sequence: Seq[T])
