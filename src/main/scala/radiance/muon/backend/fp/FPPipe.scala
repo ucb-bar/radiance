@@ -118,11 +118,13 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
 
-  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid
+  // again dumb hack because CVFPU doesnt return input simd mask
+  val fStatusSet = RegInit(false.B)
   fCSRIO.setFStatus.bits := cvFPUIF.resp.bits.status
 
   when (io.req.fire) {
     req := ioFpOp
+    fStatusSet := false.B
   }
 }
 
@@ -152,6 +154,9 @@ class FP32Pipe(implicit p: Parameters)
   io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
   io.resp.bits.reg.get.bits.tmask := reqTmask
 
+  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid && respIsFp32 && !fStatusSet
+  fStatusSet := fCSRIO.setFStatus.valid
+
   when (io.req.fire) {
     cvFPUReq := ioFpOp
   }
@@ -177,6 +182,9 @@ class FP16Pipe(implicit p: Parameters)
   io.resp.bits.reg.get.bits.rd := reqRd
   io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
   io.resp.bits.reg.get.bits.tmask := reqTmask
+
+  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid && respIsFp16 && !fStatusSet
+  fStatusSet := fCSRIO.setFStatus.valid
 
   when (io.req.fire) {
     cvFPUReq := ioFpOp
