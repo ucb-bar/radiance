@@ -15,6 +15,15 @@ trait HasFPPipeParams extends HasMuonCoreParameters {
   def numFP16Lanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFPDivLanes = muonParams.fpPipe.numFPDivLanes
   def fStatusBits = 5
+
+  def signExtendFp16Lanes(numLanes: Int, data: UInt): UInt = {
+    val lanes = VecInit.tabulate(numLanes) { idx =>
+      data(16 * (idx + 1) - 1, 16 * idx)
+    }
+    Cat(lanes.map { lane =>
+      Cat(Mux(lane(15), 0xffff.U(16.W), 0.U(16.W)), lane)
+    }.reverse)
+  }
 }
 
 class FpOpBundle extends Bundle {
@@ -95,6 +104,8 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 
   val operands = decomposer.get.io.out.bits.data
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
+  val respIsMine = cvFPUIF.resp.bits.tag === reqRd
+  val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result)
 
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0)
@@ -118,13 +129,26 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
 
+  recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsMine
+  recomposer.get.io.out.ready := io.resp.ready
+
+
+  io.resp.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
+  io.resp.bits.reg.get.bits.rd := reqRd
+  io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
+  io.resp.bits.reg.get.bits.tmask := reqTmask
+
   // again dumb hack because CVFPU doesnt return input simd mask
   val fStatusSet = RegInit(false.B)
   fCSRIO.setFStatus.bits := cvFPUIF.resp.bits.status
+  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid && respIsMine && !fStatusSet
+  fStatusSet := fCSRIO.setFStatus.valid
 
   when (io.req.fire) {
     req := ioFpOp
     fStatusSet := false.B
+    cvFPUReq := ioFpOp
   }
 }
 
@@ -136,31 +160,13 @@ class FP32Pipe(implicit p: Parameters)
   cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operands(1).asUInt, operands(2).asUInt)
   cvFPUIF.req.bits.simdMask := expandedLaneMask
 
-  val respIsFp32 = cvFPUIF.resp.bits.tag === reqRd
   //dumb hack for cvfpu fp16 conversion
   val respIsFP16Cvt = (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
                        cvFPUReq.dstFmt === FPFormat.FP16
-  val chunks = VecInit.tabulate(numFP32Lanes)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
-  val signExtcvFPURes = Cat(chunks.map(reg => Cat(Mux(reg(15), 0xffff.U(16.W), 0.U(16.W)), reg)).reverse)
-  recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp32
   recomposer.get.io.in.bits.data(0) := Mux(respIsFP16Cvt,
-    signExtcvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0)),
+    signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0)),
     cvFPUIF.resp.bits.result.asTypeOf(recomposer.get.io.in.bits.data(0))
   )
-  recomposer.get.io.out.ready := io.resp.ready
-
-  io.resp.valid := recomposer.get.io.out.valid
-  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
-  io.resp.bits.reg.get.bits.rd := reqRd
-  io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
-  io.resp.bits.reg.get.bits.tmask := reqTmask
-
-  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid && respIsFp32 && !fStatusSet
-  fStatusSet := fCSRIO.setFStatus.valid
-
-  when (io.req.fire) {
-    cvFPUReq := ioFpOp
-  }
 }
 
 class FP16Pipe(implicit p: Parameters)
@@ -171,25 +177,7 @@ class FP16Pipe(implicit p: Parameters)
   cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operandsLower(1).asUInt, operandsLower(2).asUInt)
   cvFPUIF.req.bits.simdMask := decomposer.get.io.out.bits.data(3).asUInt
 
-  val respIsFp16 = cvFPUIF.resp.bits.tag === reqRd
-  recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsFp16
-  val chunks = VecInit.tabulate(numFP32Lanes * 2)(idx => cvFPUIF.resp.bits.result(16 * (idx + 1) - 1, 16 * idx))
-  val signExtcvFPURes = Cat(chunks.map(reg => Cat(Mux(reg(15), 0xffff.U(16.W), 0.U(16.W)), reg)).reverse)
-  recomposer.get.io.in.bits.data(0) := signExtcvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
-  recomposer.get.io.out.ready := io.resp.ready
-
-  io.resp.valid := recomposer.get.io.out.valid
-  io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
-  io.resp.bits.reg.get.bits.rd := reqRd
-  io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
-  io.resp.bits.reg.get.bits.tmask := reqTmask
-
-  fCSRIO.setFStatus.valid := cvFPUIF.resp.valid && respIsFp16 && !fStatusSet
-  fStatusSet := fCSRIO.setFStatus.valid
-
-  when (io.req.fire) {
-    cvFPUReq := ioFpOp
-  }
+  recomposer.get.io.in.bits.data(0) := signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
 }
 
 class FPPipe(implicit p: Parameters)
