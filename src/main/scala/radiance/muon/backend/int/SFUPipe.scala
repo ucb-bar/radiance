@@ -6,8 +6,9 @@ import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
+import radiance.muon.backend.int._
 
-class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBundles {
+class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBundles {
   val idIO = IO(clusterCoreIdT)
   val csrIO = IO(new Bundle {
     val fe = Flipped(feCSRIO)
@@ -42,6 +43,14 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
 
   writeback.bits.pc := uop.pc
   writeback.bits.wid := uop.wid
+
+  val regWriteback = Wire(regWritebackT)
+
+  regWriteback.valid := inst.b(IsCSR)
+
+  regWriteback.bits.rd := inst(Rd)
+  regWriteback.bits.data := DontCare
+  regWriteback.bits.tmask := uop.tmask
 
   when (inst.b(IsTMC)) {
     writeback.bits.setTmask.bits := firstRs1
@@ -130,15 +139,23 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, false) with HasCoreBu
       val newNewValue = MuxCase(newValue, Seq(
         (csrAddr === CSRs.fflags.U) -> ((currentFCSR & 0xe0.U(32.W)) | (newValue & 0x1f.U(32.W))),
         (csrAddr === CSRs.frm.U) -> ((currentFCSR & 0x1f.U(32.W)) | ((newValue & 0x7.U(32.W)) << 5).asUInt),
-        (csrAddr === CSRs.fcsr.U) -> (currentFCSR & 0xff.U(32.W))
+        (csrAddr === CSRs.fcsr.U) -> (newValue & 0xff.U(32.W))
       ))
       when (currentValue =/= newNewValue) {
         csrFile.write(csrAddr, newNewValue)
       }
+
+      // add lane offset to mhartid, thread id
+      regWriteback.bits.data := Mux(
+        (csrAddr === CSRs.mhartid.U) || (csrAddr === 0xcc0.U),
+        VecInit.tabulate(m.numLanes)(currentValue + _.U),
+        VecInit.fill(m.numLanes)(currentValue),
+      )
     }
   }
 
   io.req.ready := !busy || io.resp.fire
   io.resp.valid := busy
   io.resp.bits.sched.get := RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire)
+  io.resp.bits.reg.get := RegEnable(regWriteback, 0.U.asTypeOf(regWritebackT), io.req.fire)
 }

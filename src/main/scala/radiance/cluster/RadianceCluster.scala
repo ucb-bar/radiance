@@ -7,15 +7,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
-import freechips.rocketchip.rocket.{BTBParams, DCacheParams, ICacheParams, NonBlockingDCache}
+import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tile.{CoreParams, TileKey, TileParams, TileVisibilityNodeKey}
+import freechips.rocketchip.tile.TileVisibilityNodeKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
-import org.chipsalliance.diplomacy.lazymodule._
 import org.chipsalliance.diplomacy.DisableMonitors
+import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
-import radiance.muon._
 import radiance.subsystem._
 
 case class RadianceClusterParams(
@@ -24,6 +23,7 @@ case class RadianceClusterParams(
   baseAddr: BigInt,
   smemConfig: RadianceSharedMemKey,
   l1Config: DCacheParams,
+  peripheralAddrOffset: Int = 0x80000,
 ) extends InstantiableClusterParams[RadianceCluster] {
   val baseName = "radiance_cluster"
   val uniqueName = s"${baseName}_$clusterId"
@@ -47,8 +47,10 @@ class RadianceCluster (
   println(f"clsbus width in bytes ${clsbus.beatBytes}")
 
   // make the shared memory srams and interconnects
-  val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTile]).toSeq.asInstanceOf[Seq[GemminiTile]]
-  val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTile]).toSeq.asInstanceOf[Seq[MuonTile]]
+  val gemminiTiles = leafTiles.values.filter(_.isInstanceOf[GemminiTileLike])
+    .toSeq.asInstanceOf[Seq[GemminiTileLike]]
+  val muonTiles = leafTiles.values.filter(_.isInstanceOf[MuonTileLike])
+    .toSeq.asInstanceOf[Seq[MuonTileLike]]
 
   val extReqXbar = TLXbar() // this is in 8 bytes
   val extReqForSmem = connectOne(extReqXbar, () => TLWidthWidget(8))(p, false)
@@ -87,10 +89,20 @@ class RadianceCluster (
     dummySinkNode := HackAtomicNode(8) := clcbus.outwardNode
   }
 
+  // clcbus -> print buffer
+  val printBuf = TLRAM(
+    address = AddressSet(thisClusterParams.baseAddr +
+      thisClusterParams.peripheralAddrOffset, 0x100 * muonTiles.length - 1),
+    cacheable = false,
+    atomics = true,
+    beatBytes = 8
+  )
+  printBuf := clcbus.outwardNode
+
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
   // cbus -> clcbus/smem
-  clcbus.inwardNode := TLFragmenter(8, 128) := extReqXbar
+  clcbus.inwardNode := TLFragmenter(8, 128, alwaysMin = true) := extReqXbar
   extReqXbar := ccbus.outwardNode
   // ccbus is connected to cbus automatically
 
@@ -113,6 +125,7 @@ class RadianceCluster (
     id = clusterId,
     cache = thisClusterParams.l1Config,
     cacheTagBits = muonTiles.head.muonParams.core.l1ReqTagBits,
+    overrideDChannelSize = Some(log2Ceil(thisClusterParams.l1Config.blockBytes)),
   ))(
     p.alterMap(Map(
       TileVisibilityNodeKey -> visibilityNode,

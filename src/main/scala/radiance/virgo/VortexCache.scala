@@ -361,7 +361,7 @@ class VortexBankImp(
     tlOutToL2.a.valid := vxCache.io.mem_req_valid && sourceGen.io.id.valid
 
     sourceGen.io.gen := tlOutToL2.a.fire
-    sourceGen.io.meta := vxCache.io.mem_req_tag // save the old read id
+    sourceGen.io.meta.get := vxCache.io.mem_req_tag // save the old read id
 
     writeOutputFire := tlOutToL2.a.fire && vxCache.io.mem_req_rw
 
@@ -392,7 +392,7 @@ class VortexBankImp(
 
     vxCache.io.mem_rsp_valid :=
       tlOutToL2.d.valid && (tlOutToL2.d.bits.opcode === TLMessages.AccessAckData)
-    vxCache.io.mem_rsp_tag := sourceGen.io.peek
+    vxCache.io.mem_rsp_tag := sourceGen.io.peek.get
     vxCache.io.mem_rsp_data := tlOutToL2.d.bits.data
 
     sourceGen.io.reclaim.valid := tlOutToL2.d.fire

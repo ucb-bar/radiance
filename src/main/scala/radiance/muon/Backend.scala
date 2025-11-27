@@ -4,10 +4,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.fp.CVFPU
-import radiance.unittest.RegTraceIO
+import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
-  /** backend-as-top testbench config with register IOs */
   test: Boolean = false
 )(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
   val io = IO(new Bundle {
@@ -15,12 +14,13 @@ class Backend(
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(uopT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val softReset = Input(Bool())
-    val regTrace = Option.when(test)(Valid(new RegTraceIO))
+    /** PC/reg trace IO for diff-testing against model */
+    val trace = Option.when(test)(Valid(new TraceIO))
   })
 
   // -----
@@ -39,20 +39,19 @@ class Backend(
   scoreboard.io.readRs3 <> hazard.io.scb.readRs3
   dontTouch(scoreboard.io)
 
-  val reservStation = Module(new ReservationStation(test = test))
+  val reservStation = Module(new ReservationStation)
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
-  io.regTrace.foreach(_ <> reservStation.io.regTrace.get)
 
-  val bypass = true
+  val bypass = false
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
     reservStation.reset := true.B
     reservStation.io.issue.ready := false.B
 
-    val issueArb = Module(new RRArbiter(uopT, io.ibuf.length))
+    val issueArb = Module(new RRArbiter(ibufEntryT, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
@@ -63,19 +62,22 @@ class Backend(
   // operand collector
   // -----------------
 
+  val haves = Seq(HasRs1, HasRs2, HasRs3)
+  val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (bypass) {
     // on bypass, manage collector entirely after issue
-    val haves = Seq(HasRs1, HasRs2, HasRs3)
-    val regs = Seq(Rs1, Rs2, Rs3)
-    (haves lazyZip regs lazyZip collector.io.readReq.bits.regs).foreach { case (has, reg, collReq) =>
-      val pReg = issued.bits.inst(reg)
-      collReq.enable := issued.valid && issued.bits.inst.b(has)
-      collReq.pReg := pReg
-    }
-    collector.io.readData.regs.foreach(_.enable := true.B)
-    collector.io.readData.regs.foreach(_.collEntry := 0.U) // DuplicatedCollector has 1 entry
+    (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
+      .foreach { case (has, reg, readData, collReq) =>
+        val pReg = issued.bits.uop.inst(reg)
+        collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
+        collReq.pReg := pReg
+        readData.enable := issued.valid && issued.bits.uop.inst.b(has)
+        readData.pReg.get := pReg
+        readData.collEntry := DontCare
+      }
+    collector.io.readReq.bits.rsEntryId := DontCare
 
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
@@ -96,6 +98,18 @@ class Backend(
     opnd := port.data
   }
 
+  // drive regtrace IO for testing
+  io.trace.foreach { traceIO =>
+    traceIO.valid := issued.fire
+    traceIO.bits.pc := issued.bits.uop.pc
+    (traceIO.bits.regs zip operands)
+      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+        tReg.enable := issued.bits.uop.inst(haves(rsi))
+        tReg.address := issued.bits.uop.inst(regs(rsi))
+        tReg.data := opnd
+      }
+  }
+
   // -------
   // execute
   // -------
@@ -113,22 +127,49 @@ class Backend(
 
   if (bypass) {
     // fallback issue: stall every instruction until writeback
+    // or execute req fire, for instructions that don't need writeback (i.e. stores, fences)
     val inFlight = RegInit(false.B)
+    val hasIssued = RegInit(false.B)
+    val willWriteback = RegInit(false.B)
+
     when (issued.fire) {
       inFlight := true.B
+      willWriteback := true.B
+      hasIssued := false.B
+
+      val isLsuInst = issued.bits.uop.inst.b(UseLSUPipe)
+      when (isLsuInst) {
+        val memOp = LsuOpDecoder.decode(issued.bits.uop.inst.opcode, issued.bits.uop.inst.f3)
+        willWriteback := MemOp.isLoad(memOp) || MemOp.isAtomic(memOp)
+      }
     }
     issued.ready := !inFlight
+
+    execute.io.req.valid := inFlight && !hasIssued
+    
     // assumes 1-cycle latency collector
-    execute.io.req.valid := RegNext(issued.fire)
-    executeIn.uop := RegNext(issued.bits, 0.U.asTypeOf(executeIn.uop.cloneType))
-    assert(RegNext(issued.fire) === execute.io.req.fire)
-    when (execute.io.resp.fire) {
+    val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
+    val token = RegEnable(issued.bits.token, 0.U.asTypeOf(issued.bits.token.cloneType), issued.fire)
+    executeIn.uop := uop
+    execute.io.token := token
+
+    when (execute.io.req.fire) {
+      when (willWriteback) {
+        hasIssued := true.B
+      }
+      .otherwise {
+        inFlight := false.B
+      }
+    }
+    
+    when (execute.io.resp.fire && willWriteback) {
       inFlight := false.B
     }
   } else {
     issued.ready := execute.io.req.ready
     execute.io.req.valid := issued.valid
-    executeIn.uop := issued.bits
+    executeIn.uop := issued.bits.uop
+    execute.io.token := issued.bits.token
   }
 
   // ---------
@@ -137,20 +178,24 @@ class Backend(
 
   // to schedule
   val exSchedWb = execute.io.resp.bits.sched.get
-  io.schedWb.valid := execute.io.resp.valid && exSchedWb.valid
+  io.schedWb.valid := execute.io.resp.fire && exSchedWb.valid
   io.schedWb.bits := exSchedWb.bits
   // scheduler writeback is valid only
   // TODO: consider collector writeback ready
   execute.io.resp.ready := true.B
 
+  val exRegWb = execute.io.resp.bits.reg.get
+  val exRegWbFire = execute.io.resp.fire && exRegWb.valid
+
   // to RS
-  reservStation.io.writeback <> execute.io.resp.bits.reg.get
+  reservStation.io.writeback.valid := exRegWbFire
+  reservStation.io.writeback.bits := exRegWb.bits
 
   // to collector
-  val exRegWb = execute.io.resp.bits.reg.get
-  collector.io.writeReq.bits.regs.head.enable := execute.io.resp.fire && exRegWb.valid
+  collector.io.writeReq.bits.regs.head.enable := exRegWbFire
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
   collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
+  collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this
   collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
   collector.io.writeResp.ports.foreach(_.ready := true.B)

@@ -128,8 +128,17 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case LuiImm => (decode(Imm24) << 12.U)(31, 0)
-        case UseFP32Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b00".U)
-        case UseFP16Pipe => decodeB(UseFPPipe) && (decode(F7)(inst)(1, 0) === "b10".U)
+        case UseFP32Pipe => decodeB(UseFPPipe) && (
+            decode(F7)(inst)(1, 0) === "b00".U ||
+            decode(F7)(inst)(6, 2) === "b11000".U ||
+            decode(F7)(inst)(6, 2) === "b11010".U ||
+            decode(F7)(inst)(6, 2) === "b01000".U
+          )
+        case UseFP16Pipe => decodeB(UseFPPipe) &&
+          decode(F7)(inst)(1, 0) === "b10".U &&
+          decode(F7)(inst)(6, 2) =/= "b11000".U &&
+          decode(F7)(inst)(6, 2) =/= "b11010".U &&
+          decode(F7)(inst)(6, 2) =/= "b01000".U
         case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
@@ -244,6 +253,10 @@ object Decoder {
           MuOpcode.CUSTOM3,
           MuOpcode.OP,
           MuOpcode.OP_FP,
+          MuOpcode.MADD,
+          MuOpcode.MSUB,
+          MuOpcode.NM_SUB,
+          MuOpcode.NM_ADD
         ).contains(op))
       case IsIType =>
         Some(Seq(
@@ -314,7 +327,10 @@ object Decoder {
       case HasRs1 =>
         Some(!sd(IsUJType))
       case HasRs2 =>
-        Some(sd(IsRType) || sd(IsSType) || sd(IsBType))
+        Some(
+          (sd(IsRType) || sd(IsSType) || sd(IsBType)) &&
+            !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
+        )
       case HasRs3 =>
         Some(Seq(
           MuOpcode.MADD,
@@ -356,8 +372,8 @@ object Decoder {
       case IsJoin =>    Some(op == MuOpcode.CUSTOM0 && f3 == 3)
       case IsBar =>     Some(op == MuOpcode.CUSTOM0 && f3 == 4)
       case IsPred =>    Some(op == MuOpcode.CUSTOM0 && f3 == 5)
-      case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == "??0")
-      case IsCSR =>     Some(op == MuOpcode.SYSTEM  && f3 == "??1")
+      case IsToHost =>  Some(op == MuOpcode.SYSTEM  && f3 == "000")
+      case IsCSR =>     Some(op == MuOpcode.SYSTEM  && (f3 == "??1" || f3 == "?10" || f3 == "100"))
       case IsCSRRW =>   Some(op == MuOpcode.SYSTEM  && f3 == 1)
       case IsCSRRS =>   Some(op == MuOpcode.SYSTEM  && f3 == 2)
       case IsCSRRC =>   Some(op == MuOpcode.SYSTEM  && f3 == 3)

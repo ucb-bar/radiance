@@ -946,7 +946,7 @@ class VortexTLAdapter(
   sourceGen.io.gen := io.outReq.fire // use up a source ID only when request is created
   sourceGen.io.reclaim.valid := io.outResp.fire
   sourceGen.io.reclaim.bits := io.outResp.bits.source
-  sourceGen.io.meta := io.inReq.bits.source
+  sourceGen.io.meta.get := io.inReq.bits.source
 
   // io passthrough logic
   // TLBundleA <> VortexBundleA
@@ -980,5 +980,5 @@ class VortexTLAdapter(
   io.outReq.valid := io.inReq.valid && sourceGen.io.id.valid
   io.outReq.bits.source := sourceGen.io.id.bits
   // translate upstream response back to its old sourceId
-  io.inResp.bits.source := sourceGen.io.peek
+  io.inResp.bits.source := sourceGen.io.peek.get
 }

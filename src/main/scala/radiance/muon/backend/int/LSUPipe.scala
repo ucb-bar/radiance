@@ -20,10 +20,10 @@ import radiance.muon.LsuQueueToken
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
-class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false)  with HasCoreBundles {
+class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) with HasCoreBundles {
     val reserveIO = IO(reservationIO)
     
-    val tokenIO = IO(Input(new LsuQueueToken))
+    val tokenIO = IO(Input(lsuTokenT))
 
     val memIO = IO(memoryIO)
     
@@ -43,10 +43,11 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     lsu.io.coreReq.valid := io.req.valid
     io.req.ready := lsu.io.coreReq.ready
 
-    // we use the recomposer in a bit of a weird way
+    // we use the recomposer in a bit of a weird way, compose numPackets
+    // LsuResponse bundles
     val lsuRecomposer = Module(new LaneRecomposer(
-      inLanes = 1,
-      outLanes = lsuDerived.numPackets,
+      inLanes = lsuDerived.numPackets,
+      outLanes = 1,
       elemTypes = Seq(new LsuResponse)
     ))
 
@@ -94,6 +95,8 @@ object LsuOpDecoder {
       (BitPat(MuOpcode.STORE) ## BitPat("b000")) -> BitPat(MemOp.storeByte.litValue.U(MemOp.getWidth.W)),
       (BitPat(MuOpcode.STORE) ## BitPat("b001")) -> BitPat(MemOp.storeHalf.litValue.U(MemOp.getWidth.W)),
       (BitPat(MuOpcode.STORE) ## BitPat("b010")) -> BitPat(MemOp.storeWord.litValue.U(MemOp.getWidth.W)),
+    
+      (BitPat(MuOpcode.MISC_MEM) ## BitPat("b000") -> BitPat(MemOp.fence.litValue.U(MemOp.getWidth.W))),
     )
     
     val memOpUint = decoder(Cat(opcode(6, 0), f3), TruthTable(table, BitPat(MemOp.loadWord.litValue.U(MemOp.getWidth.W))))

@@ -91,6 +91,10 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     CVFPU.io.reset := reset
     CVFPU.io.flush := false.B
 
+    // tests do not model CSR state; use RM=RNE, flags cleared
+    FP16Pipe.fCSRIO.regData := 0.U
+    FP32Pipe.fCSRIO.regData := 0.U
+
     CVFPU.io.test.forceReqReady := cvfpuTest.forceReqReady
     CVFPU.io.test.forceRespValid := cvfpuTest.forceRespValid
     CVFPU.io.test.respBits := cvfpuTest.respBits
@@ -98,11 +102,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     cvfpuTest.observedReqBits := CVFPU.io.test.observedReqBits
     cvfpuTest.observedRespReady := CVFPU.io.test.observedRespReady
 
-    FP16Pipe.io.req.valid := io.req.valid
+    val f7 = io.req.bits.uop.inst(F7)
+    val isFP32 = io.req.bits.uop.inst.b(UseFPPipe) && (f7(1, 0) === "b00".U)
+    val isFP16 = io.req.bits.uop.inst.b(UseFPPipe) && (f7(1, 0) === "b10".U)
+
+    FP16Pipe.io.req.valid := io.req.valid && isFP16
     FP16Pipe.io.req.bits := io.req.bits
-    FP32Pipe.io.req.valid := io.req.valid
+    FP32Pipe.io.req.valid := io.req.valid && isFP32
     FP32Pipe.io.req.bits := io.req.bits
-    io.req.ready := FP32Pipe.io.req.ready || FP16Pipe.io.req.ready
+    io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
 
     val rr = Module(new RRArbiter(new CVFPUReq(numFP32Lanes * 2, Isa.regBits), 2))
     rr.io.in(0) <> FP32Pipe.cvFPUIF.req
@@ -157,7 +165,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private def expandedMask(tmask: Int, numFP32Lanes: Int): BigInt = {
     val laneEnables = (0 until numFP32Lanes).map(i => ((tmask >> i) & 0x1) == 1)
     laneEnables.reverse.foldLeft(BigInt(0)) { (acc, active) =>
-      (acc << 2) | (if (active) 0x3 else 0x0)
+      // map each active FP32 lane to two FP16 lanes with pattern 0b01 (upper=0, lower=1)
+      (acc << 2) | (if (active) 0x1 else 0x0)
     }
   }
 
@@ -182,6 +191,18 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   )
 
   private case class TestEnv(archLen: Int, numLanes: Int, numFP32Lanes: Int)
+
+  private def signExtend(value: BigInt, fromWidth: Int, toWidth: Int): BigInt = {
+    val mask = (BigInt(1) << fromWidth) - 1
+    val signBit = BigInt(1) << (fromWidth - 1)
+    val masked = value & mask
+    val extended = if ((masked & signBit) != 0) {
+      masked | (~mask & ((BigInt(1) << toWidth) - 1))
+    } else {
+      masked
+    }
+    extended & ((BigInt(1) << toWidth) - 1)
+  }
 
   private def issueAndCheck(
       c: FP32Pipe,
@@ -208,6 +229,9 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     pokeDecoded(c.io.req.bits.uop.inst, HasRs2, 1)
     pokeDecoded(c.io.req.bits.uop.inst, HasRs3, spec.rs3Idx.fold(0)(_ => 1))
     pokeDecoded(c.io.req.bits.uop.inst, UseFPPipe, 1)
+    val isFp32Req = spec.expectedDstFmt == FPFormat.FP32
+    pokeDecoded(c.io.req.bits.uop.inst, UseFP32Pipe, if (isFp32Req) 1 else 0)
+    pokeDecoded(c.io.req.bits.uop.inst, UseFP16Pipe, if (isFp32Req) 0 else 1)
     spec.rs3Idx.foreach(rs3 => pokeDecoded(c.io.req.bits.uop.inst, Rs3, rs3))
 
     c.io.req.bits.uop.tmask.poke(spec.tmask.U(c.io.req.bits.uop.tmask.getWidth.W))
@@ -230,15 +254,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     def checkCvReq(): Unit = {
       c.cvFPUIF.resp.valid.poke(false.B)
       if (!cvReqSeen && c.cvFPUIF.req.valid.peek().litToBoolean) {
+        val (expOp0, expOp1, expOp2) =
+          if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            (BigInt(0), packedRs1, packedRs2)
+          } else {
+            (packedRs1, packedRs2, packedRs3)
+          }
         c.cvFPUIF.req.bits.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
         c.cvFPUIF.req.bits.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expandedMask(spec.tmask, env.numFP32Lanes).U, s"${spec.name}: SIMD mask mismatch")
-        c.cvFPUIF.req.bits.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-        c.cvFPUIF.req.bits.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-        c.cvFPUIF.req.bits.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+        c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+        c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+        c.cvFPUIF.req.bits.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
         cvReqSeen = true
       }
     }
@@ -308,6 +338,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val packedRs2 = packLanes(spec.rs2Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
     val packedRs3 = packLanes(spec.rs3Lanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
     val packedResult = packLanes(spec.expectedResultLanes.take(numLanes).map(_ & 0xffff), laneWidthFp)
+    val expectedResultLanes = spec.expectedResultLanes.take(numLanes).map(signExtend(_, 16, archLen))
     val expectedMask = spec.tmask & laneMask.toInt
 
     zeroDecoded(c.io.req.bits.uop.inst)
@@ -344,15 +375,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     def checkCvReq(): Unit = {
       c.cvFPUIF.resp.valid.poke(false.B)
       if (!cvReqSeen && c.cvFPUIF.req.valid.peek().litToBoolean) {
+        val (expOp0, expOp1, expOp2) =
+          if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            (BigInt(0), packedRs1, packedRs2)
+          } else {
+            (packedRs1, packedRs2, packedRs3)
+          }
         c.cvFPUIF.req.bits.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
         c.cvFPUIF.req.bits.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
-        c.cvFPUIF.req.bits.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-        c.cvFPUIF.req.bits.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-        c.cvFPUIF.req.bits.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+        c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+        c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+        c.cvFPUIF.req.bits.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
         cvReqSeen = true
       }
     }
@@ -393,7 +430,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         c.io.resp.bits.reg.get.valid.expect(true.B, s"${spec.name}: expected register write")
         c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
         c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
-        spec.expectedResultLanes.take(numLanes).zipWithIndex.foreach { case (value, idx) =>
+        expectedResultLanes.zipWithIndex.foreach { case (value, idx) =>
           c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(archLen.W), s"${spec.name}: lane $idx data mismatch")
         }
         respSeen = true
@@ -417,12 +454,18 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       applyRespBackpressure: Boolean
   ): Unit = {
     val archLen = env.archLen
-    val isFp16 = spec.expectedDstFmt == FPFormat.FP16
+    val isFp16 = spec.expectedDstFmt == FPFormat.BF16
     val laneWidth = if (isFp16) 16 else archLen
     val laneMaskPerValue = (BigInt(1) << laneWidth) - 1
     val laneCount = if (isFp16) env.numLanes else env.numFP32Lanes
 
     def maskValues(values: Seq[BigInt]) = values.take(laneCount).map(_ & laneMaskPerValue)
+    val expectedResultLanes =
+      if (isFp16) {
+        spec.expectedResultLanes.take(laneCount).map(signExtend(_, 16, archLen))
+      } else {
+        spec.expectedResultLanes.take(laneCount)
+      }
 
     val packedRs1 = packLanes(maskValues(spec.rs1Lanes), laneWidth)
     val packedRs2 = packLanes(maskValues(spec.rs2Lanes), laneWidth)
@@ -494,15 +537,21 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         val dstFmt = c.cvfpuTest.observedReqBits.dstFormat.peek().litValue
         if (dstFmt == spec.expectedDstFmt.litValue) {
           val observed = c.cvfpuTest.observedReqBits
+          val (expOp0, expOp1, expOp2) =
+            if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+              (BigInt(0), packedRs1, packedRs2)
+            } else {
+              (packedRs1, packedRs2, packedRs3)
+            }
           observed.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
           observed.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
           observed.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
           observed.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
           observed.tag.expect(spec.rd.U, s"${spec.name}: tag mismatch")
           observed.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
-          observed.operands(0).expect(packedRs1.U, s"${spec.name}: operand0 mismatch")
-          observed.operands(1).expect(packedRs2.U, s"${spec.name}: operand1 mismatch")
-          observed.operands(2).expect(packedRs3.U, s"${spec.name}: operand2 mismatch")
+          observed.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
+          observed.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
+          observed.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
           cvReqSeen = true
         }
       }
@@ -539,7 +588,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       respAccepted = c.cvfpuTest.observedRespReady.peek().litToBoolean
       c.clock.step()
       respDriveCycles += 1
-      require(respDriveCycles <= 12, s"${spec.name}: CVFPU response not accepted")
+      require(respDriveCycles <= 50, s"${spec.name}: CVFPU response not accepted")
     }
     // provide one extra cycle with valid asserted to mimic CVFPU behavior
     c.clock.step()
@@ -560,9 +609,9 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           c.io.resp.bits.reg.get.bits.rd.expect(spec.rd.U, s"${spec.name}: rd mismatch")
           c.io.resp.bits.reg.get.bits.tmask.expect(spec.tmask.U, s"${spec.name}: tmask mismatch")
           val checkLanes = if (isFp16) env.numLanes else env.numFP32Lanes
-          val maskWidth = if (isFp16) 16 else archLen
+          val maskWidth = archLen
           val laneMask = (BigInt(1) << maskWidth) - 1
-          spec.expectedResultLanes.take(checkLanes).zipWithIndex.foreach { case (value, idx) =>
+          expectedResultLanes.take(checkLanes).zipWithIndex.foreach { case (value, idx) =>
             val observed = c.io.resp.bits.reg.get.bits.data(idx).peekInt()
             val observedMasked = observed & laneMask
             val expectedMasked = value & laneMask
@@ -691,7 +740,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(4)(0L),
           tmask = 0xF,
           expectedOp = FPUOp.F2F,
-          expectedSrcFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
           expectedDstFmt = FPFormat.FP32,
           expectedResultLanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
           responseLatency = 2
@@ -864,8 +913,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.ADD,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
           responseLatency = 2
         ),
@@ -883,8 +932,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SUB,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
           responseLatency = 2
         ),
@@ -902,8 +951,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MINMAX,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
           responseLatency = 2
         )
@@ -940,8 +989,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MUL,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
           responseLatency = 2
         ),
@@ -959,8 +1008,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SGNJ,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L, 0x00003c00L, 0x0000bc00L),
           responseLatency = 2
         )
@@ -1040,7 +1089,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(4)(0L),
           tmask = 0xF,
           expectedOp = FPUOp.F2F,
-          expectedSrcFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
           expectedDstFmt = FPFormat.FP32,
           expectedResultLanes = Seq(0x3f000000L, 0x40000000L, 0x40400000L, 0x40800000L),
           responseLatency = 2
@@ -1062,8 +1111,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.ADD,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00004200L, 0x00004400L, 0x00004600L, 0x00004800L, 0x00004400L, 0x00004200L, 0x00003e00L, 0x00003c00L),
           responseLatency = 2
         ),
@@ -1081,8 +1130,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MUL,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x00004000L, 0x00004000L, 0x00004400L, 0x00004200L, 0x00004600L, 0x00004400L, 0x00004800L),
           responseLatency = 2
         ),
@@ -1100,8 +1149,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SGNJ,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003c00L, 0x0000bc00L, 0x00013c00L, 0x0001bc00L, 0x00023c00L, 0x0002bc00L, 0x00033c00L, 0x0003bc00L),
           responseLatency = 2
         )
@@ -1194,8 +1243,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.SUB,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00000500L, 0x00000800L, 0x00000b00L, 0x00000e00L, 0x00001100L, 0x00001400L, 0x00001700L, 0x00001a00L),
           responseLatency = 2
         ),
@@ -1213,8 +1262,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           rs3Lanes = Seq.fill(8)(0L),
           tmask = 0xFF,
           expectedOp = FPUOp.MINMAX,
-          expectedSrcFmt = FPFormat.FP16,
-          expectedDstFmt = FPFormat.FP16,
+          expectedSrcFmt = FPFormat.BF16,
+          expectedDstFmt = FPFormat.BF16,
           expectedResultLanes = Seq(0x00003400L, 0x00003800L, 0x00003c00L, 0x00004000L, 0x00004400L, 0x00004800L, 0x00004c00L, 0x00005000L),
           responseLatency = 2
         )

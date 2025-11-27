@@ -121,7 +121,6 @@ class EmulatorImp(
       sourceGen.io.gen := tlOut.a.fire
       sourceGen.io.reclaim.valid := tlOut.d.fire
       sourceGen.io.reclaim.bits := tlOut.d.bits.source
-      sourceGen.io.meta := DontCare
 
       val (plegal, pbits) = edge.Put(
         fromSource = sourceGen.io.id.bits,

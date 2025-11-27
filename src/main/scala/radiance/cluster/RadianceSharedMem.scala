@@ -165,7 +165,8 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
           // connect memory
           config.memType match {
             case TwoPort => {
-              val subbankRXbar = TLXbar(TLArbiter.lowestIndexFirst, Some(s"smem_b${bid}_w${wid}_r_xbar"))
+              val subbankRXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
+                .suggestName(s"smem_b${bid}_w${wid}_r_xbar").node
               subbankRXbar := uniformNodesOut.head(bid)(wid)
               nonuniformRNodes.foreach( subbankRXbar :=* _ )
               readPorts.head := subbankRXbar
@@ -176,7 +177,8 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             }
           }
 
-          val subbankWXbar = TLXbar(TLArbiter.lowestIndexFirst, Some(s"smem_b${bid}_w${wid}_w_xbar"))
+          val subbankWXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
+            .suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
           writePort := subbankWXbar
           subbankWXbar := uniformNodesOut.last(bid)(wid)
           nonuniformWNodes.foreach( subbankWXbar :=* _ )

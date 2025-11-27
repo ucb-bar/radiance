@@ -13,7 +13,7 @@ import radiance.subsystem.GPUMemory
 
 
 class TLCToTLULNode(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
-    val atom = TransferSizes(1, beatBytes)
+  val atom = TransferSizes(1, beatBytes)
   val node = TLAdapterNode(
     clientFn  = c => {
       c.v2copy(masters = c.masters.map { m =>
@@ -82,6 +82,8 @@ class TLULNBDCacheModule(outer: TLULNBDCache) extends LazyModuleImp(outer)
   }
   // C channel ReleaseData translates to PutFull, A channel AcquireBlock translates to Get
   tlOut.a.bits.opcode := Mux(tlIn.c.valid, TLMessages.PutFullData, TLMessages.Get)
+  // squash A channel param to 0 (normally represents permission change, we don't want this)
+  tlOut.a.bits.param := 0.U
 
   assert(!tlIn.a.valid || (tlIn.a.bits.opcode === TLMessages.AcquireBlock))
   assert(!tlIn.c.valid || (tlIn.c.bits.opcode === TLMessages.ReleaseData))

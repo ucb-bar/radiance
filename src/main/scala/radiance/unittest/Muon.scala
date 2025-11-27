@@ -82,14 +82,32 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 }
 
 /** Testbench for Muon backend pipe */
-class MuonBackendTestbench(implicit p: Parameters) extends Module {
+class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMuonCoreParameters {
   val io = IO(new Bundle {
     val finished = Bool()
   })
 
+  val ibuf = Module(new InstBuffer)
+  val cfe = Module(new CyclotronFrontend()(p))
   val be = Module(new Backend(test = true)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
+
+  // imem in the ISA model is not used
+  cfe.io.imem.req.valid := false.B
+  cfe.io.imem.req.bits := DontCare
+  cfe.io.imem.resp.ready := false.B
+  cfe.io.trace <> be.io.trace.get
+
+  // cfe -> ibuf enq
+  (ibuf.io.enq zip cfe.io.ibuf).foreach { case (ib, cf) =>
+    // workaround of ibufEnqIO not being a DecoupledIO
+    val ibFull = (ib.count === muonParams.ibufDepth.U)
+    ib.uop.valid := cf.valid && !ibFull
+    cf.ready := !ibFull
+    ib.uop.bits := cf.bits.toUop()
+  }
+
   be.io.dmem.resp.foreach(_.valid := false.B)
   be.io.dmem.resp.foreach(_.bits := DontCare)
   be.io.dmem.req.foreach(_.ready := false.B)
@@ -102,36 +120,16 @@ class MuonBackendTestbench(implicit p: Parameters) extends Module {
   be.io.softReset := false.B
   be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
 
-  val cfe = Module(new CyclotronFrontend()(p))
-  // Imem in the ISA model is not used
-  cfe.io.imem.req.valid := false.B
-  cfe.io.imem.req.bits := DontCare
-  cfe.io.imem.resp.ready := false.B
-  cfe.io.regTrace <> be.io.regTrace.get
+  // ibuf -> be
+  be.io.ibuf <> ibuf.io.deq
+  ibuf.io.lsuReserve <> be.io.lsuReserve
+  dontTouch(be.io)
 
   // TODO: also instantiate CyclotronBackend as the issue downstream
-
-  (be.io.ibuf zip cfe.io.ibuf).foreach { case (b, f) =>
-    b.valid := f.valid
-    f.ready := b.ready
-    b.bits := f.bits.toUop()
-  }
-  dontTouch(be.io)
 
   // run until all ibufs dry up
   val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
   io.finished := cfe.io.finished && ibufDry
-}
-
-/** Backend IO to Cyclotron testbench that logs trace of register read data at
- *  every issue.  Used for differential testing vs. instruction trace. */
-class RegTraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
-  val pc = pcT
-  val regs = Vec(Isa.maxNumRegs, new Bundle {
-    val enable = Bool()
-    val address = pRegT
-    val data = Vec(numLanes, regDataT)
-  })
 }
 
 /** Testbench for Muon backend LSU pipe */
@@ -141,22 +139,24 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCorePara
   // every lsu lane is a separate TL client
   def masterParams = (lane: Int) => {
     val sourceId = IdRange(
-      lane * sourceIdsPerLane,
-      (lane + 1) * sourceIdsPerLane
+      0,
+      sourceIdsPerLane
     )
 
     TLMasterParameters.v1(
-      name = f"lsu-lane$lane",
+      name = f"lsu-gmem-lane$lane",
       sourceId = sourceId,
       requestFifo = false
     )
   }
 
-  val node = TLClientNode(Seq.tabulate(muonParams.lsu.numLsuLanes) { lane =>
-    TLMasterPortParameters.v1(
-      Seq(masterParams(lane))
-    )
-  })
+  val lsuNodes = Seq.tabulate(muonParams.lsu.numLsuLanes) {lane => 
+    TLClientNode(Seq(
+      TLMasterPortParameters.v1(
+        Seq(masterParams(lane))
+      )
+    ))
+  }
 
   lazy val module = new LSUWrapperImpl
   class LSUWrapperImpl extends LazyModuleImp(this) {
@@ -194,7 +194,7 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCorePara
     MuonMemTL.multiConnectTL(
       lsuAdapter.io.core.dmem.req,
       lsuAdapter.io.core.dmem.resp,
-      node
+      lsuNodes
     )
 
     // tie off shared mem
@@ -484,9 +484,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
 
   val scalaStimulus = stimulus(0)
 
-  // convert it down into 1 module per memory operation
-  // this is "synthesizable" in some sense :)
-  class StimulusModule(memoryOp: MemoryOperation) extends CoreModule {
+  class StimulusModuleV1(memoryOp: MemoryOperation) extends CoreModule {
     val io = IO(new Bundle {
       val coreReservationReq = Decoupled(new LsuReservationReq)
       val coreReservationResp = Flipped(Valid(new LsuReservationResp))
@@ -551,6 +549,88 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     io.done := state === s_done
   }
 
+  class SynthesizableMemoryOperation extends Bundle {
+    val warpId = UInt(muonParams.warpIdBits.W)
+    val memOp = MemOp()
+    val address = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+    val imm = UInt(muonParams.archLen.W)
+    val data = Vec(muonParams.numLanes, UInt(muonParams.archLen.W))
+    val tmask = Vec(muonParams.numLanes, Bool())
+    val destReg = UInt(muonParams.pRegBits.W)
+
+    val reservationAt = UInt(32.W)
+    val operandsDelay = UInt(32.W)
+
+    val debugId = UInt(lsuDerived.debugIdBits.get.W)
+  }
+  
+  class StimulusModuleV2 extends CoreModule {
+    val io = IO(new Bundle {
+      val stimulus = Input(new SynthesizableMemoryOperation)
+
+      val coreReservationReq = Decoupled(new LsuReservationReq)
+      val coreReservationResp = Flipped(Valid(new LsuReservationResp))
+      
+      val coreReq = Decoupled(new LsuRequest)
+      val done = Bool()
+    })
+
+    val s_idle :: s_reserve :: s_operandsDelay :: s_issueReq :: s_done :: Nil = Enum(5)
+    val state = RegInit(s_idle)
+    val token = RegInit(0.U.asTypeOf(new LsuQueueToken))
+    val (cycleCounter, _) = Counter(true.B, Int.MaxValue)
+
+    io.coreReservationReq.valid := false.B
+    io.coreReservationReq.bits := DontCare
+
+    io.coreReq.valid := false.B
+    io.coreReq.bits := DontCare
+    
+    switch (state) {
+      is(s_idle) {
+        when (cycleCounter >= io.stimulus.reservationAt) {
+          state := s_reserve
+        }
+      }
+      
+      is (s_reserve) {
+        io.coreReservationReq.valid := true.B
+        io.coreReservationReq.bits.addressSpace := AddressSpace.globalMemory
+        io.coreReservationReq.bits.op := io.stimulus.memOp
+        io.coreReservationReq.bits.debugId.get := io.stimulus.debugId
+        when (io.coreReservationReq.fire) {
+          token := io.coreReservationResp.bits.token
+          state := s_operandsDelay
+        }
+      }
+
+      is (s_operandsDelay) {
+        when (cycleCounter >= (io.stimulus.reservationAt + io.stimulus.operandsDelay)) {
+          state := s_issueReq
+        }
+      }
+
+      is (s_issueReq) {
+        io.coreReq.valid := true.B
+        io.coreReq.bits.op := io.stimulus.memOp
+        io.coreReq.bits.address := io.stimulus.address
+        io.coreReq.bits.imm := io.stimulus.imm
+        io.coreReq.bits.storeData := io.stimulus.data
+        io.coreReq.bits.tmask := io.stimulus.tmask
+        io.coreReq.bits.destReg := io.stimulus.destReg
+        io.coreReq.bits.token := token
+
+        when (io.coreReq.fire) {
+          state := s_done
+        }
+      }
+
+      is(s_done) {/* nop */}
+    }
+
+    io.done := state === s_done
+  }
+
   class ResponseChecker(implicit p: Parameters) extends CoreModule {
     val io = IO(new Bundle {
       val coreResp = Flipped(Decoupled(new LsuResponse))
@@ -598,10 +678,11 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     val gotResponse = RegInit(VecInit(
       flattenedStimulus.map(s => s.expectedWriteback.isEmpty.B).toSeq
     ))
+
     // collect packets together
     val recomposer = Module(new LaneRecomposer(
-      inLanes = 1,
-      outLanes = muonParams.numLanes / muonParams.lsu.numLsuLanes,
+      inLanes = lsuDerived.numPackets,
+      outLanes = 1,
       elemTypes = Seq(new LsuResponse)
     ))
 
@@ -658,10 +739,37 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
     io.done := gotResponse.reduce(_ && _)
   }
 
-  val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModule]()
+  // val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModuleV2]()
+  val allStimulusModules = scala.collection.mutable.ArrayBuffer[StimulusModuleV1]()
+  val stimulusBundleT = new SynthesizableMemoryOperation
   for (i <- 0 until muonParams.numWarps) {
-    val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModule(op)))
+    // val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModuleV2))
+    // val stimulusBundles = scalaStimulus(i).map(op => {
+    //   val addressLit = op.address.map(_.U(muonParams.archLen.W))
+    //   val dataLit = op.data.map(_.U(muonParams.archLen.W))
+    //   val tmaskLit = op.tmask.map(_.B)
+
+    //   stimulusBundleT.Lit(
+    //     _.warpId -> op.warpId.U(muonParams.warpIdBits.W),
+    //     _.memOp -> op.memOp,
+    //     _.address -> Vec.Lit(addressLit: _*),
+    //     _.imm -> op.imm.U(muonParams.archLen.W),
+    //     _.data -> Vec.Lit(dataLit: _*),
+    //     _.tmask -> Vec.Lit(tmaskLit: _*),
+    //     _.destReg -> op.destReg.U(muonParams.pRegBits.W),
+    //     _.reservationAt -> op.reservationAt.U(32.W),
+    //     _.operandsDelay -> op.operandsDelay.U(32.W),
+    //     _.debugId -> op.debugId.U(lsuDerived.debugIdBits.get.W),
+    //   )
+    // })
+    // val stimulusBundlesVec = VecInit(stimulusBundles)
     
+    // (stimulusModules zip stimulusBundlesVec).foreach { case (module, bundle) => 
+    //   module.io.stimulus := bundle
+    // }
+    
+    val stimulusModules = scalaStimulus(i).map(op => Module(new StimulusModuleV1(op)))
+
     if (stimulusModules.length == 0) {
       io.coreReservations(i).req.valid := false.B
       io.coreReservations(i).req.bits := DontCare
@@ -706,7 +814,9 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   // leads to combinational loop if there is no buffer between. this is not compliant
   // with TL standard (which states valid should never depend on ready), but should probably
   // be safe.
-  xbar :=* TLBuffer() :=* lsuWrapper.node
+  for (lane <- 0 until p(MuonKey).numLanes) {
+    xbar := TLBuffer() := lsuWrapper.lsuNodes(lane)
+  }
   fakeGmem := xbar
   
   lazy val module = new MuonLSUTestbenchImp
@@ -729,8 +839,8 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
-    val ibuf = Vec(muonParams.numWarps, Decoupled(new InstBufferEntry))
-    val regTrace = Flipped(Valid(new RegTraceIO))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(new UOpFlattened))
+    val trace = Flipped(Valid(new TraceIO))
     val finished = Output(Bool())
   })
 
@@ -776,9 +886,9 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     connectToSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
     connectToSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
   }
-  cfbox.io.regTrace.valid := io.regTrace.valid
-  cfbox.io.regTrace.pc := io.regTrace.bits.pc
-  (cfbox.io.regTrace.regs zip io.regTrace.bits.regs).foreach { case (boxtr, tr) =>
+  cfbox.io.trace.valid := io.trace.valid
+  cfbox.io.trace.pc := io.trace.bits.pc
+  (cfbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
     boxtr.enable := tr.enable
     boxtr.address := tr.address
     boxtr.data := tr.data.asUInt
@@ -806,7 +916,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
 
     val imem = Flipped(new InstMemIO)
     // flattened for all numWarps
-    val ibuf = new Bundle with HasInstBufferEntryFields {
+    val ibuf = new Bundle with HasUOpFields {
       val ready = Input(UInt(numWarps.W))
       val valid = Output(UInt(numWarps.W))
       val pc = Output(UInt((numWarps * addressBits).W))
@@ -825,7 +935,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
       val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
-    val regTrace = Input(new Bundle {
+    val trace = Input(new Bundle {
       val valid = Bool()
       val pc = pcT
       val regs = Vec(Isa.maxNumRegs, new Bundle {
@@ -858,7 +968,7 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
     val reset = Input(Bool())
 
     val imem = Flipped(new InstMemIO)
-    val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new InstBufferEntry)))
+    val issue = Flipped(Vec(muonParams.numWarps, Decoupled(new UOpFlattened)))
     val commit = schedWritebackT
 
     val finished = Output(Bool())

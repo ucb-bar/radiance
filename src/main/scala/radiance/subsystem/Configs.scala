@@ -198,7 +198,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
     }).get
 
     val skipRecoding = false
-    val tileParams = GemminiTileParams(
+    val tileParams = FloatGemminiTileParams(
       gemminiConfig = {
         implicit val arithmetic: Arithmetic[Float] =
           Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
@@ -256,8 +256,7 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
       ),
       tileId = idOffset,
       tileSize = tileSize,
-      slaveAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
-      hasAccSlave = hasAccSlave,
+      mmioAddress = smKey.address + smKey.size + 0x3000 + 0x100 * numPrevGemminis,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -294,70 +293,84 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     val prev = up(TilesLocated(`location`))
     val idOffset = up(NumTiles)
 
-    val clusterParams = (location match {
+    val clusterParams = ((location match {
       case InCluster(id) => Some(site(ClustersLocated(InSubsystem))(id))
       case _ => None
-    }).get.clusterParams
-
-    val smKey = (clusterParams match {
-      case params: RadianceClusterParams => Some(params.smemConfig)
+    }).get.clusterParams match {
+      case params: RadianceClusterParams => Some(params)
       case _ =>
         assert(false, "this config requires a radiance cluster")
         None
     }).get
+    val smKey = clusterParams.smemConfig
 
-    val tileParams = GemminiTileParams(
-      gemminiConfig = {
-        implicit val arithmetic: Arithmetic[Float] =
-          Arithmetic.FloatArithmetic.asInstanceOf[Arithmetic[Float]]
-        GemminiFPConfigs.FP16DefaultConfig.copy(
-          acc_scale_args = Some(ScaleArguments(
-            (t: Float, u: Float) => {t},
-            1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
-          )),
-          mvin_scale_args = Some(ScaleArguments(
-            (t: Float, u: Float) => t * u,
-            1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
-          )),
-          mvin_scale_acc_args = None,
-          has_training_convs = false,
-          spatialArrayInputType = Float(5, 11, isRecoded = false),
-          spatialArrayWeightType = Float(5, 11, isRecoded = false),
-          spatialArrayOutputType = Float(8, 24, isRecoded = false),
-          accType = Float(8, 24),
-          acc_read_full_width = false, // set to true to output fp32
-          num_counter = 0,
-          dataflow = Dataflow.WS,
-          ex_read_from_acc = false,
-          ex_write_to_spad = false,
-          has_max_pool = false,
-          use_tl_ext_mem = true,
-          sp_singleported = false,
-          spad_read_delay = 4,
-          use_shared_ext_mem = true,
-          acc_sub_banks = 1,
-          has_normalizations = false,
-          meshRows = dim,
-          meshColumns = dim,
-          tile_latency = 0,
-          mesh_output_delay = 1,
-          acc_latency = 3,
-          dma_maxbytes = site(CacheBlockBytes),
-          dma_buswidth = site(CacheBlockBytes),
-          tl_ext_mem_base = smKey.address,
-          sp_banks = smKey.numBanks,
-          sp_capacity = CapacityInKilobytes(smKey.size >> 10),
-          acc_capacity = CapacityInKilobytes(accSizeInKB),
-        )
-      },
+    val tileParams = MxGemminiTileParams(
+      mxGemminiConfig = GemminiMxFPConfigs.defaultMxFPConfig.copy(
+        // acc_scale_args = Some(ScaleArguments(
+        //   (t: Float, u: Float) => {t},
+        //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
+        // )),
+        // mvin_scale_args = Some(ScaleArguments(
+        //   (t: Float, u: Float) => t * u,
+        //   1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
+        // )),
+        // mvin_scale_acc_args = None,
+        has_training_convs = false,
+        inputType = MxFloat(5, 3, 1),
+        weightType = MxFloat(5, 3, 1),
+        accType = MxFloat(8, 8, 1),
+        spatialArrayInputType = MxFloat(5, 3, 1),
+        spatialArrayWeightType = MxFloat(5, 3, 1),
+        spatialArrayOutputType = MxFloat(8, 8, 1),
+        meshProdPrecisionList = Seq.fill(16)(8, 8),
+        meshAccPrecisionList = Seq.fill(16)(MxFloat(8, 8, 1)),
+        acc_read_full_width = false, // set to true to output fp32
+        num_counter = 0,
+        dataflow = Dataflow.WS,
+        ex_read_from_acc = false,
+        ex_write_to_spad = false,
+        has_max_pool = false,
+        use_tl_ext_mem = true,
+        sp_singleported = false,
+        spad_read_delay = 4,
+        use_shared_ext_mem = true,
+        acc_sub_banks = 1,
+        has_normalizations = false,
+        meshRows = dim,
+        meshColumns = dim,
+        tile_latency = 0,
+        mesh_output_delay = 1,
+        acc_latency = 3,
+        dma_maxbytes = site(CacheBlockBytes),
+        dma_buswidth = site(CacheBlockBytes),
+        tl_ext_mem_base = clusterParams.baseAddr, // TODO: no longer need this with address rewriting
+        sp_banks = smKey.numBanks,
+        sp_capacity = CapacityInKilobytes(smKey.size >> 10),
+        acc_capacity = CapacityInKilobytes(accSizeInKB),
+      ),
       tileId = idOffset,
       tileSize = Left(tileSize),
-      slaveAddress = smKey.address + smKey.size + 0x3000,
+      mmioAddress = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x4000,
       scalingFactorMem = Some(GemminiScalingFactorMemConfig(
+        baseAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x8000,
         sizeInBytes = 16 << 10,
         sramLineSizeInBytes = 256 / 8,
-        logicalLineSizeInBytes = 512 / 8,
-      ))
+        numBanks = 4,
+      )),
+      requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
+        baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
+        numInputLanes = simt.numLanes,
+        // numOutputLanes = 32,
+        // gpuMaxFactor = 2,
+        // gpuWordSize = 4,
+        // inputBits = 16,
+        // minOutputBits = 4,
+        // maxOutputBits = 8,
+        // outputIdBits = 3,
+      )),
+      lookupTable = Some(GemminiLUTConfig(
+        numBits = 96
+      )),
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -416,7 +429,7 @@ class WithRadianceCluster(
   l1Config: DCacheParams,
 ) extends Config((site, here, up) => {
   case ClustersLocated(`location`) => {
-    val baseAddress = x"4000_0000" + x"4_0000" * clusterId
+    val baseAddress = x"4000_0000" + x"10_0000" * clusterId
     up(ClustersLocated(location)) :+ RadianceClusterAttachParams(
       RadianceClusterParams(
         clusterId = clusterId,
@@ -507,7 +520,7 @@ class WithExtGPUMem(address: BigInt = x"1_0000_0000",
   })
 })
 case class GPUMemParams(address: BigInt = BigInt("0x100000000", 16), size: BigInt = 0x80000000)
-case object GPUMemory extends Field[Option[GPUMemParams]](None)
+case object GPUMemory extends Field[Option[GPUMemParams]](Some(GPUMemParams(0, x"8000_0000")))
 
 object RadianceSimArgs extends Field[Option[Boolean]](None)
 

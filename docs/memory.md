@@ -173,29 +173,59 @@ mangling the data.  **TODO: Include this in the above mapping scheme.**
 SMEM bandwidth is provisioned so that it can fully saturate the SIMT compute
 throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 
-
 ### Core serialization
 * add serializing coreside crossbar to create uniform requests
   * register to hold result, as well as a valid bit mask
-  * 
 
 ### Shared Memory Map
 
-| GPU Address |  Size     | Description |
+| GPU Address    |  Size     | Description                     |
 |----------------|-----------|-------------------------------- |
-| `0x0000_0000`  | `0x10000` | Shared memory cluster local     |
-| `0x0002_0000`  |   `0x200` | Core 0 print and perf buffer    |
-| `0x0002_0200`  |   `0x200` | Core 1 print and perf buffer    |
-| `0x0002_3000`  |   `0x100` | Cluster local Gemmini MMIO      |
-| `0x0002_3100`  |   `0x100` | Cluster local Gemmini CISC MMIO |
-| `0x0002_8000`  |  `0x8000` | Gemmini scaling factor memory |
+| `0x0000_0000`  | `0x20000` | Shared memory cluster local     |
+| `0x0004_0000`  | `0x40000` | Requantized shared memory       |
+| `0x0008_0000`  |   `0x200` | Core 0 print and perf buffer    |
+| `0x0008_0200`  |   `0x200` | Core 1 print and perf buffer    |
+| `0x0008_4000`  |   `0x100` | Gemmini MMIO                    |
+| `0x0008_8000`  |  `0x4000` | Gemmini scaling factor memory   |
+
+Gemmini MMIO has the following address map:
+
+| Address | Bits | Description       |
+|---------|------|-------------------|
+| `0x00`  |   32 | RoCC instruction  |
+| `0x10`  |   32 | RoCC RS1 LSB      |
+| `0x14`  |   32 | RoCC RS1 MSB      |
+| `0x18`  |   32 | RoCC RS2 LSB      |
+| `0x1c`  |   32 | RoCC RS2 MSB      |
+| `0x20`  |   32 | Busy              |
+| `0x28`  |   32 | Num running loops |
+| `0x30`  |   32 | CISC instruction  |
+| `0x40`  |   32 | LUT word 0        |
+| `0x44`  |   32 | LUT word 1        |
+| `0x48`  |   32 | LUT word 2 (RV)   |
+
+
+GPU to requantizer: fp16 in, fp8 out; addressing scheme: magnify by 2x.
+
+Requantizer input interface:
+
+* Data: FP16, 16 elements
+* Address: destination address stride (in 4 byte increments for FP4, 8 byte
+  increments for FP8, starting from 0)
+* Data type: FP8/FP6/FP4
+
+Requantizer output interface:
+
+* Number of bytes, byte address, data
+
+Requantizer will only see data intended to be requantized and not passthroughed.
 
 ## Global Memory Map
 
-|  CPU Address |  Size         | Description |
+|  CPU Address    |  Size         | Description                     |
 |-----------------|---------------|---------------------------------|
-|   `0x4000_0000` | `0x40000`     | Cluster 0 SMEM (inc. Gemmini)   |
-|   `0x4004_0000` | `0x40000`     | Cluster 1 SMEM (inc. Gemmini)   |
+|   `0x4000_0000` | `0x100000`    | Cluster 0 SMEM (inc. Gemmini)   |
+|   `0x4010_0000` | `0x100000`    | Cluster 1 SMEM (inc. Gemmini)   |
 |   `0x6000_0000` | `0x10000`     | GPU device command processor    |
 |   `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)             |
 | `0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable |
@@ -203,8 +233,10 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 GPU will live in the illusion that addresses start at 0; when its requests leave
 unified L1, it will be rewritten to append the 33rd bit before arriving at L2.
 
+<!--
 The Command Processor will need to have its own BootROM to act as failsafe when
 the CPU fails to schedule work on the SIMT cores.
+-->
 
 ## Fabric
 

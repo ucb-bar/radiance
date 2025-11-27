@@ -12,7 +12,7 @@ class Frontend(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val imem = new InstMemIO
-    val ibuf = Vec(muonParams.numWarps, Decoupled(uopT))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
     val lsuReserve = Flipped(reservationIO)
     // TODO: writeback
     val commit = Flipped(schedWritebackT)
@@ -79,16 +79,16 @@ class Frontend(implicit p: Parameters)
     assert(!resp.fire || userQueueDeq.valid, "user queue entries got dropped")
 
     // other stuff
-    warpScheduler.io.ibuf.count := ibuffer.io.enq.count
+    (warpScheduler.io.ibuf zip ibuffer.io.enq).foreach { case (ws, ib) =>
+      ws.count := ib.count
+    }
     warpScheduler.io.softReset := io.softReset
     io.finished := warpScheduler.io.finished
   }
 
   { // rename
     renamer.io.rename := warpScheduler.io.rename
-    ibuffer.io.enq.entry.bits := renamer.io.ibuf.entry.bits
-    ibuffer.io.enq.entry.valid := renamer.io.ibuf.entry.valid
-    renamer.io.ibuf.count := ibuffer.io.enq.count
+    ibuffer.io.enq <> renamer.io.ibuf
     renamer.io.softReset := io.softReset
   }
 

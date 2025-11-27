@@ -34,7 +34,6 @@ abstract class ExPipe(
     ))
   }
 
-
   val busy = RegInit(false.B)
 
   val uop = io.req.bits.uop
@@ -47,9 +46,9 @@ abstract class ExPipe(
   def reqWid = latchedUop.wid
   def reqRd = reqInst(Rd)
 
-  when (io.req.fire && !io.resp.fire) {
+  when (io.req.fire) {
     busy := true.B
-  }.elsewhen (!io.req.fire && io.resp.fire) {
+  }.elsewhen (io.resp.fire) {
     busy := false.B
-  } // otherwise busy stays as is
+  }
 }

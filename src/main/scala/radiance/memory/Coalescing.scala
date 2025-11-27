@@ -5,9 +5,9 @@ package radiance.memory
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.diplomacy.{IdRange, AddressSet, BufferParams}
+import freechips.rocketchip.diplomacy.{AddressRange, AddressSet, BufferParams, IdRange, TransferSizes}
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.util.{Code, MultiPortQueue, OnePortLanePositionedQueue}
+import freechips.rocketchip.util.{BundleField, Code, MultiPortQueue, OnePortLanePositionedQueue}
 import freechips.rocketchip.unittest._
 import freechips.rocketchip.tilelink._
 import radiance.subsystem.{SIMTCoreKey, SIMTCoreParams}
@@ -114,31 +114,53 @@ class CoalescingUnit(config: CoalescerConfig)(implicit p: Parameters) extends La
     clientFn = { seq =>
       require(seq.length == config.numLanes, 
         s"Expected ${config.numLanes} client ports, got ${seq.length}")
-      
-      // Aggregate all client parameters with remapped source IDs
-      // NOTE: This is ONLY for diplomacy - hardware doesn't remap!
-      val allMasters = seq.zipWithIndex.flatMap { case (clientParams, lane) =>
-        clientParams.masters.map { master =>
-          val newSourceId = IdRange(
-            master.sourceId.start + lane * config.numOldSrcIds,
-            master.sourceId.end + lane * config.numOldSrcIds
-          )
-          master.v1copy(sourceId = newSourceId)
-        }
-      }
-      
-      // Add coalesced master
-      val coalescedMaster = TLMasterParameters.v1(
-        name = "CoalescerNode",
-        sourceId = config.coalescedSourceIdRange
-      )
-      
-      TLMasterPortParameters.v1(allMasters :+ coalescedMaster)
+
+      TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
+        name = "coalesced_node",
+        sourceId = IdRange(0, config.numNewSrcIds)
+      )))
     },
     managerFn = { seq =>
-      seq.head
+      val addrRanges = AddressRange.fromSets(seq.flatMap(_.slaves.flatMap(_.address)))
+      require(addrRanges.length == 1)
+      seq.head.v1copy(
+        responseFields = BundleField.union(seq.flatMap(_.responseFields)),
+        beatBytes = 4, // hardcoded to be word-sized
+        requestKeys = seq.flatMap(_.requestKeys).distinct,
+        minLatency = seq.map(_.minLatency).min,
+        endSinkId = 0, // dont support TLC
+        managers = Seq(TLSlaveParameters.v2(
+          name = Some(s"coalescer_manager"),
+          address = addrRanges.map(r => AddressSet(r.base, r.size - 1)),
+          // supports = seq.map(_.anySupportClaims).reduce(_ mincover _),
+          supports = TLMasterToSlaveTransferSizes(
+            get = seq.flatMap(_.slaves.map(_.supportsGet)).reduce(_ mincover _),
+            putFull = seq.flatMap(_.slaves.map(_.supportsPutFull)).reduce(_ mincover _),
+            putPartial = seq.flatMap(_.slaves.map(_.supportsPutPartial)).reduce(_ mincover _),
+          ),
+          fifoId = Some(0),
+        )),
+      )
     }
   )
+
+  // using a single nexus node unfortunately necessitates one of two things:
+  // 1. assign per-lane source ranges and then doing manual routing for non coalesced lanes
+  //    in the nexus node imp for responses, like a xbar, and exposing just one master
+  // 2. declare disjoint source ranges but don't actually assign disjoint source ids, instead
+  //    relying on a subsequent tlxbar to handle routing. this will duplicate bits in the
+  //    source id that pertains to lane id
+  // this is because we have to use single port multiple masters, instead of multiple ports
+  // single master with nexusnode. we prioritize a narrower source id here, so the workaround
+  // is to provide multiple ports each with a single master by creating a bunch of clientnodes.
+  val passthroughNodes = Seq.tabulate(config.numLanes) { i =>
+    TLClientNode(Seq(TLMasterPortParameters.v2(
+      masters = Seq(TLMasterParameters.v2(
+        name = s"noncoalesced_lane_$i",
+        sourceId = IdRange(0, config.numOldSrcIds)
+      ))
+    )))
+  }
 
   lazy val module = new CoalescingUnitImp(this, config)
 }
@@ -249,16 +271,12 @@ class SourceGenerator[T <: Data](
     metadata: Option[T] = None,
     ignoreInUse: Boolean = false
 ) extends Module {
-  def getMetadataType = metadata match {
-    case Some(gen) => gen.cloneType
-    case None      => UInt(0.W)
-  }
   val io = IO(new Bundle {
     val gen = Input(Bool())
     val reclaim = Input(Valid(UInt(sourceWidth.W)))
     val id = Output(Valid(UInt(sourceWidth.W)))
-    val meta = Input(getMetadataType)
-    val peek = Output(getMetadataType)
+    val meta = metadata.map(Input(_))
+    val peek = metadata.map(Output(_))
     val inflight = Output(Bool())
   })
   val head = RegInit(UInt(sourceWidth.W), 0.U)
@@ -269,7 +287,7 @@ class SourceGenerator[T <: Data](
 
   val numSourceId = 1 << sourceWidth
   val occupancyTable = Mem(numSourceId, Bool())
-  val metadataTable = Mem(numSourceId, getMetadataType)
+  val metadataTable = metadata.map(Mem(numSourceId, _))
   
   when(reset.asBool) {
     (0 until numSourceId).foreach { occupancyTable(_) := false.B }
@@ -285,8 +303,8 @@ class SourceGenerator[T <: Data](
   when(io.gen && io.id.valid) {
     when (!io.reclaim.valid || io.reclaim.bits =/= io.id.bits) {
       occupancyTable(io.id.bits) := true.B
-      if (metadata.isDefined) {
-        metadataTable(io.id.bits) := io.meta
+      metadataTable.foreach { table =>
+        table(io.id.bits) := io.meta.get
       }
     }
   }
@@ -294,9 +312,10 @@ class SourceGenerator[T <: Data](
   when(io.reclaim.valid) {
     occupancyTable(io.reclaim.bits) := false.B
   }
-  
-  io.peek := {
-    if (metadata.isDefined) metadataTable(io.reclaim.bits) else 0.U
+
+
+  metadataTable.foreach { table =>
+    io.peek.get := table(io.reclaim.bits)
   }
 
   when(io.gen && io.id.valid) {
@@ -395,7 +414,6 @@ class CoalescerSourceGen(
   sourceGen.io.gen := io.outReq.fire
   sourceGen.io.reclaim.valid := io.outResp.fire
   sourceGen.io.reclaim.bits := io.outResp.bits.source
-  sourceGen.io.meta := DontCare
 
   io.outReq <> io.inReq
   io.inResp <> io.outResp
@@ -422,12 +440,6 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
     outer.nexusNode.in.length == config.numLanes,
     s"number of incoming edges (${outer.nexusNode.in.length}) is not the same as " +
       s"config.numLanes (${config.numLanes})"
-  )
-
-  require(
-    outer.nexusNode.out.length == config.numLanes + 1,
-    s"number of outgoing edges (${outer.nexusNode.out.length}) should be " +
-      s"${config.numLanes + 1} (n lanes + 1 coalesced)"
   )
 
   val oldSourceWidth = outer.nexusNode.in.head._1.params.sourceBits
@@ -470,7 +482,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   
   // OUTPUT: Non-coalesced passthrough to nexusNode outputs (lanes 0 to n-1)
   // NO source ID remapping - use local IDs
-  (outer.nexusNode.out.take(config.numLanes) zip reqBuffers).zipWithIndex.foreach {
+  (outer.passthroughNodes.flatMap(_.out) zip reqBuffers).zipWithIndex.foreach {
     case (((tlOut, edgeOut), reqBuf), lane) =>
       val shouldPassthrough = reqBuf.io.deq.valid && !coalescer.io.consumed(lane)
       
@@ -486,7 +498,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   }
 
   // OUTPUT: Coalesced requests to nexusNode output (lane n)
-  val (tlCoal, edgeCoal) = outer.nexusNode.out.last
+  val (tlCoal, edgeCoal) = outer.nexusNode.out.head
 
   val coalSourceGen = Module(
     new CoalescerSourceGen(config, coalReqT, tlCoal.d.bits)
@@ -527,7 +539,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
 
   // INPUT: Responses from nexusNode outputs (non-coalesced, lanes 0 to n-1)
   // NO source ID remapping - responses use local IDs
-  (outer.nexusNode.in zip outer.nexusNode.out.take(config.numLanes)).zipWithIndex.foreach {
+  (outer.nexusNode.in zip outer.passthroughNodes.flatMap(_.out)).zipWithIndex.foreach {
     case (((tlIn, edgeIn), (tlOut, _)), lane) =>
       val respQueue = respQueues(lane)
       val resp = Wire(respQueueEntryT)
@@ -937,7 +949,7 @@ class MemTraceDriverImp(
       // mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
       wordData := Mux(subword, req.bits.data << (offsetInWord * 8.U), req.bits.data)
       val wordAlignedAddress =
-        req.bits.address & ~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)
+        req.bits.address & (~((1 << log2Ceil(config.wordSizeInBytes)) - 1).U(addrW.W)).asUInt
       val wordAlignedSize = Mux(subword, 2.U, req.bits.size)
 
       val sourceGen = sourceGens(lane)
@@ -945,7 +957,6 @@ class MemTraceDriverImp(
       // assert(sourceGen.io.id.valid)
       sourceGen.io.reclaim.valid := tlOut.d.fire
       sourceGen.io.reclaim.bits := tlOut.d.bits.source
-      sourceGen.io.meta := DontCare
 
       val (plegal, pbits) = edge.Put(
         fromSource = sourceGen.io.id.bits,
@@ -1160,16 +1171,16 @@ class MemTraceLogger(
         // where HIGH bits in the mask may not be contiguous.
         when(tlIn.a.valid) { // && tlIn.a.bits.opcode === TLMessages.PutFullData
           assert(
-            PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size),
+            PopCount(tlIn.a.bits.mask) === (1.U << tlIn.a.bits.size).asUInt,
             "mask HIGH popcount do not match the TL size. " +
               "Partial masks are not allowed for PutFull"
           )
         }
         val trailingZerosInMask = trailingZeros(tlIn.a.bits.mask)
         val dataW = tlIn.params.dataBits
-        val sizeInBits = (1.U(1.W) << tlIn.a.bits.size) << 3.U
-        val mask = ~(~(0.U(dataW.W)) << sizeInBits)
-        req.bits.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U))
+        val sizeInBits = ((1.U(1.W) << tlIn.a.bits.size) << 3.U).asUInt
+        val mask = (~(~(0.U(dataW.W)) << sizeInBits)).asUInt
+        req.bits.data := mask & (tlIn.a.bits.data >> (trailingZerosInMask * 8.U)).asUInt
         // when (req.bits.valid) {
         //   printf("trailingZerosInMask=%d, mask=%x, data=%x\n", trailingZerosInMask, mask, req.bits.data)
         // }
@@ -1204,13 +1215,13 @@ class MemTraceLogger(
       }
     val reqBytesThisCycle =
       laneReqs
-        .map { l => Mux(l.valid, 1.U(64.W) << l.bits.size, 0.U(64.W)) }
+        .map { l => Mux(l.valid, (1.U(64.W) << l.bits.size).asTypeOf(UInt(64.W)), 0.U(64.W)) }
         .reduce { (b0, b1) =>
           b0 + b1
         }
     val respBytesThisCycle =
       laneResps
-        .map { l => Mux(l.valid, 1.U(64.W) << l.bits.size, 0.U(64.W)) }
+        .map { l => Mux(l.valid, (1.U(64.W) << l.bits.size).asTypeOf(UInt(64.W)), 0.U(64.W)) }
         .reduce { (b0, b1) =>
           b0 + b1
         }
@@ -1430,14 +1441,13 @@ class MemFuzzerImp(
       // mask := Mux(subword, (~((~0.U(64.W)) << sizeInBytes)) << offsetInWord, ~0.U)
       wordData := Mux(subword, req.bits.data << (offsetInWord * 8.U), req.bits.data)
       val wordAlignedAddress =
-        req.bits.address & ~((1 << log2Ceil(wordSizeInBytes)) - 1).U(addrW.W)
+        req.bits.address & (~((1 << log2Ceil(wordSizeInBytes)) - 1).U(addrW.W)).asUInt
       val wordAlignedSize = Mux(subword, 2.U, req.bits.size)
 
       val sourceGen = sourceGens(lane)
       sourceGen.io.gen := tlOut.a.fire
       sourceGen.io.reclaim.valid := tlOut.d.fire
       sourceGen.io.reclaim.bits := tlOut.d.bits.source
-      sourceGen.io.meta := DontCare
 
       val (plegal, pbits) = edge.Put(
         fromSource = sourceGen.io.id.bits,
@@ -1624,7 +1634,7 @@ class DummyCoalescer(implicit p: Parameters) extends LazyModule {
   coal.nexusNode :=* driver.node
   
   (0 until config.numLanes).foreach { i =>
-    xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.nexusNode
+    xbar.node := TLWidthWidget(config.wordSizeInBytes) := coal.passthroughNodes(i)
   }
   xbar.node := coal.nexusNode
   
@@ -1668,7 +1678,7 @@ class TLRAMCoalescerLogger(filename: String)(implicit p: Parameters)
   
   // Non-coalesced outputs (need width widget)
   (0 until config.numLanes).foreach { i =>
-    xbar.node := TLWidthWidget(config.wordSizeInBytes) := memSideLogger.node := coal.nexusNode
+    xbar.node := TLWidthWidget(config.wordSizeInBytes) := memSideLogger.node := coal.passthroughNodes(i)
   }
   // Coalesced output (already full width)
   xbar.node := memSideLogger.node := coal.nexusNode

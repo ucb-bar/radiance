@@ -5,10 +5,9 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
-
   val io = IO(new Bundle {
     val rename = Flipped(renameIO)
-    val ibuf = ibufEnqIO
+    val ibuf = Vec(muonParams.numWarps, ibufEnqIO)
     val softReset = Input(Bool())
   })
 
@@ -105,12 +104,13 @@ class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
     uop(r) := Mux(RegNext(hasReg(i)), bypassAndShortCircuit(arAddr(i), prAddr(i)), decodedReg(r))
   }
 
-  io.ibuf.entry.valid := RegNext(io.rename.valid)
-  io.ibuf.entry.bits.wid := RegNext(wid)
-  io.ibuf.entry.bits.uop.inst := uop
-  io.ibuf.entry.bits.uop.tmask := RegNext(io.rename.bits.tmask)
-  io.ibuf.entry.bits.uop.pc := RegNext(io.rename.bits.pc)
-  io.ibuf.entry.bits.uop.wid := RegNext(io.rename.bits.wid)
+  io.ibuf.zipWithIndex.foreach { case (wbuf, wbufId) =>
+    wbuf.uop.valid := RegNext(io.rename.valid && wid === wbufId.U)
+    wbuf.uop.bits.inst := uop
+    wbuf.uop.bits.tmask := RegNext(io.rename.bits.tmask)
+    wbuf.uop.bits.pc := RegNext(io.rename.bits.pc)
+    wbuf.uop.bits.wid := RegNext(io.rename.bits.wid)
+  }
 
   // create & update counters
   val counters = VecInit.tabulate(m.numWarps) { counterId =>

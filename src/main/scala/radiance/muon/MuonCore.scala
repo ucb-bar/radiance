@@ -32,8 +32,12 @@ case class MuonCoreParams(
   // issue
   numIssueQueueEntries: Int = 8, // RS
   maxPendingReads: Int = 3,      // scoreboard
-  numRegBanks: Int = 4,          // collector
-  numCollectorEntries: Int = 1,  // collector
+  // collector
+  // if true, use a bank-conflict-avoiding operand collector
+  // if false, use a simple rs1/2/3-duplicated register file
+  useCollector: Boolean = false,
+  numRegBanks: Int = 4,          // when useCollector true
+  numCollectorEntries: Int = 1,  // when useCollector true
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),
@@ -51,13 +55,12 @@ case class MuonCoreParams(
   def l0dReqTagBits: Int = {
     val packetBits = log2Up(numLanes / lsu.numLsuLanes) // from lsu derived params
     val sourceIdBits = LsuQueueToken.width(this) + packetBits
-    println("l0d tag bits", packetBits + sourceIdBits)
-
     val laneBits = log2Ceil(numLanes)
-    val perLaneBits = sourceIdBits + packetBits // = coalescer new ids
-
-    // the coalescer crossbar has n inputs and n+1 outputs
-    perLaneBits + laneBits * 2 + 1
+    val coalVsNonCoal = 1
+    val sizeTagBits = 3 // store the size in the cache tag
+    val totalBits = sourceIdBits + laneBits + coalVsNonCoal + sizeTagBits
+    println("l0d tag bits", totalBits)
+    totalBits
   }
   def l0iReqTagBits: Int = {
     println("l0i tag bits", warpIdBits + log2Ceil(ibufDepth))
@@ -108,7 +111,7 @@ class MemResponse[T <: Bundle] (
   val metadata = metadataT.cloneType
 }
 
-/** Derived parameters from the op-level MuonCoreParams. */
+/** derived parameters from MuonCoreParams */
 trait HasMuonCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
@@ -117,12 +120,7 @@ trait HasMuonCoreParameters {
   val archLen = muonParams.archLen
   val numLaneBytes = muonParams.numLanes * muonParams.archLen / 8
 
-  // compute "derived" LSU parameters
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
-
-  val numLsqEntries = {
-    muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
-  }
   val addressBits = muonParams.archLen
   val dmemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
   val dmemDataBits = muonParams.archLen // FIXME: needs to be cache line
@@ -176,11 +174,22 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
   ).cloneType))
 }
 
+/** Trace IO to software testbench that logs PC and register read data at
+ *  issue time. */
+class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val pc = pcT
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
+    val address = pRegT
+    val data = Vec(numLanes, regDataT)
+  })
+}
+
 trait HasCoreBundles extends HasMuonCoreParameters {
   implicit val m = muonParams
 
   def pcT = UInt(m.archLen.W)
-  def widT = UInt(log2Ceil(m.numWarps).W)
+  def widT = UInt(m.warpIdBits.W)
   def tmaskT = UInt(m.numLanes.W)
   def wmaskT = UInt(m.numWarps.W)
   def instT = UInt(m.instBits.W)
@@ -258,13 +267,12 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   })
 
   def uopT = new UOp
+  def lsuTokenT = new LsuQueueToken
 
+  def ibufEntryT = new InstBufEntry
   def ibufEnqIO = new Bundle {
-    val count = Input(Vec(m.numWarps, ibufIdxT))
-    val entry = Valid(new Bundle {
-      val uop = uopT
-      val wid = widT
-    })
+    val count = Input(ibufIdxT)
+    val uop = Valid(uopT)
   }
 
   def clusterCoreIdT = new Bundle {
@@ -282,7 +290,9 @@ trait HasCoreBundles extends HasMuonCoreParameters {
 }
 
 /** Muon core and core-private L0 caches */
-class MuonCore(implicit p: Parameters) extends CoreModule {
+class MuonCore(
+  test: Boolean = false
+)(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
@@ -291,11 +301,10 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val finished = Output(Bool())
+    /** PC/reg trace IO for diff-testing against model */
+    val trace = Option.when(test)(Valid(new TraceIO))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
-
-  // TODO: L0
-
   dontTouch(io)
 
   val fe = Module(new Frontend)
@@ -303,13 +312,14 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
-  val be = Module(new Backend)
+  val be = Module(new Backend(test))
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
+  be.io.feCSR := fe.io.csr
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset
-  be.io.feCSR := fe.io.csr
+  be.io.trace.foreach(_ <> io.trace.get)
 
   fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb

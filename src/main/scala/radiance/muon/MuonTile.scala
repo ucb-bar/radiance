@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, IdRange, Transf
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
-import freechips.rocketchip.subsystem.{CacheBlockBytes, HasTilesExternalResetVectorKey, HierarchicalElementCrossingParamsLike}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -87,12 +87,29 @@ object MuonMemTL {
     connectTL(mreq, mresp, in, ie)
   }
 
+  // use when TLClientNode has multiple out-edges
   def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
                                 mresp: Vec[DecoupledIO[MemResponse[T]]],
                                 tl_client: TLClientNode) = {
-    require(mreq.length == tl_client.out.length, f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
-    require(mresp.length == tl_client.out.length, f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
+    require(mreq.length == tl_client.out.length,
+      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
+    require(mresp.length == tl_client.out.length,
+      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
     for ((req, resp, (tl_bundle, tl_edge)) <- mreq lazyZip mresp lazyZip tl_client.out) {
+      connectTL(req, resp, tl_bundle, tl_edge)
+    }
+  }
+
+  // use when you have multiple TLClientNodes
+  def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
+                                mresp: Vec[DecoupledIO[MemResponse[T]]],
+                                tl_clients: Seq[TLClientNode]) = {
+    require(mreq.length == tl_clients.length,
+      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_clients.length})")
+    require(mresp.length == tl_clients.length,
+      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_clients.length})")
+    for ((req, resp, tl_client) <- mreq lazyZip mresp lazyZip tl_clients) {
+      val (tl_bundle, tl_edge) = tl_client.out(0)
       connectTL(req, resp, tl_bundle, tl_edge)
     }
   }
@@ -105,7 +122,8 @@ class MuonTile(
   q: Parameters
 ) extends BaseTile(muonParams, crossing, lookup, q)
   with SinksExternalInterrupts
-  with SourcesExternalNotifications {
+  with SourcesExternalNotifications
+  with MuonTileLike {
 
   // Private constructor ensures altered LazyModule.p is used implicitly
   def this(
@@ -119,7 +137,8 @@ class MuonTile(
   val slaveNode = TLIdentityNode()
   val masterNode = TLIdentityNode()
 
-  val smemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
+  // see comment below about innerLsuNodes / lsuNodes
+  val innerSmemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
     TLClientNode(
       Seq(
         TLMasterPortParameters.v1(
@@ -141,6 +160,10 @@ class MuonTile(
       )
     )
   }
+
+  val smemNodes = innerSmemNodes.map(node => {
+    TLBuffer() := node
+  })
 
   val icacheWordNode = muonParams.icache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
@@ -182,7 +205,10 @@ class MuonTile(
 
   val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
   val lsuSourceIdBits = lsuDerived.sourceIdBits
-  val lsuNodes = Seq.tabulate(muonParams.core.numLanes) { lid =>
+  
+  // LSU expects all-lanes-at-once requests, so request valid is dependent on whether all lanes are ready
+  // This interacts poorly with downstream request arbitration (e.g. XBar), so we need buffer to decouple
+  val innerLsuNodes = Seq.tabulate(muonParams.core.numLanes) { lid =>
     TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
         name = s"muon_tile${muonParams.coreId}_lsu_$lid",
@@ -191,6 +217,11 @@ class MuonTile(
     )))
   }
 
+  val lsuNodes = innerLsuNodes.map(node => {
+    TLBuffer() := node
+  })
+
+  
   val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
 
   val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
@@ -223,15 +254,17 @@ class MuonTile(
   )))
 
   dcacheNode :=
-    TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth) :=
+    ResponseFIFOFixer() :=
+    TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
     TLWidthWidget(coalescedReqWidth) :=
     l0dOut
-  val coalXbar = TLXbar(nameSuffix = Some("coal_out_agg_xbar"))
-  val nonCoalXbar = TLXbar(nameSuffix = Some("coal_out_nc_xbar"))
+  val coalXbar = LazyModule(new TLXbar).suggestName("coal_out_agg_xbar").node
+  val nonCoalXbar = LazyModule(new TLXbar).suggestName("coal_out_nc_xbar").node
   l0dIn := coalXbar
 
-  (0 until muonParams.core.numLanes).foreach(_ => nonCoalXbar := coalescer.nexusNode)
+  // (0 until muonParams.core.numLanes).foreach(_ => nonCoalXbar := coalescer.nexusNode)
   coalXbar := coalescer.nexusNode
+  coalescer.passthroughNodes.foreach(nonCoalXbar := _)
   coalXbar := TLWidthWidget(muonParams.core.archLen / 8) := nonCoalXbar
 
   lsuNodes.foreach(coalescer.nexusNode := _)
@@ -283,13 +316,9 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   val muon = Module(new MuonCore())
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
-  // TODO: both dmem and smem should be a vector of bundles
-//  MuonMemTL.connectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.dcacheNode_)
-//  MuonMemTL.connectTL(muon.io.smem.req, muon.io.smem.resp, outer.smemNodes)
+  MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.innerLsuNodes)
+  MuonMemTL.multiConnectTL(muon.io.smem.req, muon.io.smem.resp, outer.innerSmemNodes)
 
-//  muon.io.imem.req
-  muon.io.dmem <> DontCare
-  muon.io.smem <> DontCare
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
   outer.reportCease(None)

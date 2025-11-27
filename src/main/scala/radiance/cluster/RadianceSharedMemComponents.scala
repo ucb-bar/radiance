@@ -19,8 +19,8 @@ import scala.collection.mutable.ArrayBuffer
 // generic smem implementation is in RadianceSharedMem.scala
 class RadianceSharedMemComponents(
   clusterParams: RadianceClusterParams,
-  gemminiTiles: Seq[GemminiTile],
-  muonTiles: Seq[MuonTile],
+  gemminiTiles: Seq[GemminiTileLike],
+  muonTiles: Seq[MuonTileLike],
   extClients: Seq[TLNode] = Seq(),
 )(implicit p: Parameters) extends RadianceSmemNodeProvider  {
   val smemKey = clusterParams.smemConfig
@@ -58,7 +58,7 @@ class RadianceSharedMemComponents(
   assert(!filterAligned, "this feature is only for virgo")
 
   // (core, lane) = rw node
-  val radianceSmemFanout: List[List[TLNode]] = muonTiles.zipWithIndex.map { case (tile, cid) =>
+  val muonSmemFanout: List[List[TLNode]] = muonTiles.zipWithIndex.map { case (tile, cid) =>
     tile.smemNodes.zipWithIndex.map { case (m, lid) =>
       val smemFanoutXbar = LazyModule(new TLXbar())
       smemFanoutXbar.suggestName(f"rad_smem_fanout_cl${clusterParams.clusterId}_c${cid}_l${lid}_xbar")
@@ -67,11 +67,11 @@ class RadianceSharedMemComponents(
     }.toList
   }.toList
   // (lane, core) = rw node
-  val fanoutTransposed = radianceSmemFanout.transpose
+  val fanoutTransposed = muonSmemFanout.transpose
 
   val muonClcBusXbar = LazyModule(new TLXbar()).suggestName("muon_clc_xbar").node
   val muonClcBusClient = TLEphemeralNode()
-  radianceSmemFanout.flatten.foreach(muonClcBusXbar := _)
+  muonSmemFanout.flatten.foreach(muonClcBusXbar := _)
   muonClcBusClient := TLFragmenter(8, 8) := TLWidthWidget(4) := muonClcBusXbar
 
   val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
@@ -97,23 +97,22 @@ class RadianceSharedMemComponents(
     prealignBuffers.foreach(alignmentXbar := _)
   }
 
-  // TODO: dedupe this with virgo code
-  def distAndDuplicate(nodes: Seq[TLNode], suffix: String): Seq[Seq[TLNexusNode]] = {
-    val wordFanoutNodes = gemminis.zip(nodes).zipWithIndex.map { case ((gemmini, node), gemminiIdx) =>
-      val spWidthBytes = gemmini.config.sp_width / 8
-      val spSubbanks = spWidthBytes / wordSize
-      val dist = DistributorNode(from = spWidthBytes, to = wordSize)
+  def distAndDuplicate(nodesAndWidths: Seq[(TLNode, Int)], suffix: String): Seq[Seq[TLNexusNode]] = {
+    val wordFanoutNodes = nodesAndWidths.zipWithIndex.map { case ((node, width), i) =>
+      val spSubbanks = width / wordSize
+      val dist = DistributorNode(from = width, to = wordSize)
       guardMonitors { implicit p =>
         dist := node
       }
       val fanout = Seq.tabulate(spSubbanks) { w =>
+        // TODO: do we need this skid buffer
         val buf = TLBuffer(BufferParams(2, false, false), BufferParams(0))
         buf := dist
-        connectXbarName(buf, Some(s"spad_g${gemminiIdx}w${w}_fanout_$suffix"))
+        connectXbarName(buf, Some(s"dist_fanout_$suffix${i}w${w}"))
       }
-      Seq.fill(smemWidth / spWidthBytes)(fanout).flatten // smem wider than spad, duplicate masters
+      Seq.fill(smemWidth / width)(fanout).flatten // smem wider than spad, duplicate masters
     }
-    if (nodes.isEmpty) {
+    if (nodesAndWidths.isEmpty) {
       Seq.fill(smemSubbanks)(Seq())
     } else {
       // (gemmini, word) => (word, gemmini)
@@ -121,18 +120,47 @@ class RadianceSharedMemComponents(
     }
   }
 
-  gemminis.foreach(g => assert(g.spad.spad_writer.isDefined))
+  gemminis.foreach(g => require(g.spad.spad_writer.isDefined))
 
   // (banks, subbanks, gemminis)
-  val spadReadNodes = Seq.fill(smemBanks)(distAndDuplicate(gemminis.map(_.spad_read_nodes), "r"))
+  val spadReadNodes = Seq.fill(smemBanks) {
+    distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width / 8)), "gemmini_r")
+  }
   // TODO: these nodes probably dont do anything, eliminate?
-  val spadWriteNodes = Seq.fill(smemBanks)(distAndDuplicate(gemminis.map(_.spad_write_nodes), "w"))
-  val spadSpWriteNodesSingleBank = distAndDuplicate(gemminis.map(_.spad.spad_writer.get.node), "ws")
+  val spadWriteNodes = Seq.fill(smemBanks) {
+    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width / 8)), "gemmini_w")
+  }
+  val spadSpWriteNodesSingleBank = distAndDuplicate(
+    gemminis.map(g => (g.spad.spad_writer.get.node, g.config.sp_width / 8)), "gemmini_ws")
   val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
 
   val muonSplitterNodes = Seq.tabulate(smemSubbanks)(wid =>
     connectOne(alignmentXbar, () => RWSplitterNode(f"muon_aligned_splitter_$wid")))
   val muonAligned = Seq.tabulate(2)(_ => muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
+
+  val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
+    .map(q => q.numOutputLanes * q.maxOutputBits / 8))
+  val quantOutputNodesSingleBank = distAndDuplicate(
+    gemminiTiles.flatMap(_.requantizerSmemClient).map(x =>
+      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.head)
+    ), "quant_w")
+  val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
+
+  // connect requantizer managers directly here TODO: move outside, make smemNodes xbars
+  gemminiTiles.flatMap(_.requantizerMuonManager).foreach { qm =>
+    val destBytes = qm.portParams.head.beatBytes
+    require(2 * numLanes == destBytes, "requantizer input width mismatch: not lanes * 2B")
+    // pack lanes into a single wide request per core
+    val collectors = muonSmemFanout.map { lanesInCore =>
+      val quantCollector = CollectorNode(2, destBytes)
+      lanesInCore.foreach(quantCollector := TLWidthWidget(4) := _)
+      quantCollector
+    }
+    // multiple cores, but only one requantizer
+    val collectedXbar = LazyModule(new TLXbar()).suggestName("collected_xbar").node
+    collectors.foreach(collectedXbar := _)
+    qm := collectedXbar
+  }
 
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
@@ -141,8 +169,10 @@ class RadianceSharedMemComponents(
     (grb zip muonAligned.head).map { case (grw, mrw) => Seq(mrw) ++ grw }
   })
   override val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]] =
-    (spadWriteNodes zip spadSpWriteNodes).map { case (gwb, gwsb) =>
-      (gwb lazyZip gwsb lazyZip muonAligned.last).map { case (gww, gwsw, mww) => Seq(mww) ++ gww ++ gwsw }
+    (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
+      (gwb lazyZip gwsb lazyZip muonAligned.last lazyZip qb).map { case (gww, gwsw, mww, qw) =>
+        Seq(mww) ++ gww ++ gwsw ++ qw
+      }
     }
 
   // these nodes are random access
@@ -154,17 +184,39 @@ class RadianceSharedMemComponents(
 class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]
   (override val outer: T) extends RadianceSmemNodeProviderImp[T](outer) {
 
-  val xbars = outer.laneSerialXbars
-  val policies = outer.coreSerialPolicy
-  // for each lane, if any core is valid
-  val coreValids = xbars.map(_._2.in.map(_._1)).transpose.map { core => VecInit(core.map(_.a.valid)).asUInt.orR }
-  val select = xbars.map(_._3.in.map(_._1)).transpose.map { core => VecInit(core.map(_.a.fire)).asUInt.orR }
-  val coreSelect = TLArbiter.roundRobin(outer.numCores, VecInit(coreValids).asUInt, VecInit(select).asUInt.orR)
+  val xbars = outer.laneSerialXbars // (xbar, xi, xo)
+
+  val xbarInNodes = xbars.map(_._2.in.map(_._1)) // (lane, core) => xi
+  val xbarOutNodes = xbars.map(_._3.in.map(_._1)) // (lane, core) => xo
+
+  // the shared memory supports random subbank access for 1 core at a time
+  // (i.e. core-serial access)
+
+  // for each core, if any lane is valid, that core is up for arbitration
+  val anyLaneValidInCore = WireInit(VecInit(xbarInNodes.transpose // (core, lane) => xi
+    .map(lanes => VecInit(lanes.map(_.a.valid)).asUInt.orR)))
+
+  dontTouch(anyLaneValidInCore)
+
+  // a core-serial crossbar fires if any core sent something through
+  val laneOutFire = WireInit(VecInit(xbarOutNodes // (lane, ??) => xo
+    .map(laneOuts => VecInit(laneOuts.map(_.a.fire)).asUInt.orR)))
+  dontTouch(laneOutFire)
+
+  require(anyLaneValidInCore.length == outer.numCores)
+  require(laneOutFire.length == outer.numLanes)
+
+  // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
+  val coreSelect = TLArbiter.roundRobin(
+    outer.numCores,
+    anyLaneValidInCore.asUInt,
+    laneOutFire.asUInt.orR)
+
   // TODO: roll this into XbarWithExtPolicy
   xbars.foreach { lane =>
     (lane._2.in.map(_._1) lazyZip lane._2.out.map(_._1) lazyZip coreSelect.asBools).foreach { case (li, lo, cs) =>
       lo.a.valid := li.a.valid && cs
     }
   }
-  policies.foreach { _.out.head._1.hint := coreSelect }
+  outer.coreSerialPolicy.foreach { _.out.head._1.hint := coreSelect }
 }

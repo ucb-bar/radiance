@@ -41,14 +41,11 @@ case class DummyCacheTileParams(
   override val dcache: Option[DCacheParams] = Some(params.cache)
 }
 
-class TLNBDCache(params: TLNBDCacheParams)
+class TLNBDCache(val params: TLNBDCacheParams)
                 (implicit p: Parameters) extends LazyModule {
 
   val beatBytes = params.cache.blockBytes
   require(params.cache.blockBytes == (params.cache.rowBits / 8))
-
-  // pretty hacky, might want to figure out a better way
-  val dChannelSize = params.overrideDChannelSize.getOrElse(log2Ceil(beatBytes))
 
   val inNode = TLManagerNode(Seq(
     TLSlavePortParameters.v1(
@@ -79,7 +76,7 @@ class TLNBDCache(params: TLNBDCacheParams)
     // TileVisibilityNodeKey -> visibilityNode,
   ))
 
-  val nbdCache = LazyModule(new NonBlockingDCache(params.id)(q))
+  val nbdCache = LazyModule(new WideNonBlockingDCache(params.id)(q))
 
   val outNode = nbdCache.node
   override lazy val module = new TLNBDCacheModule(this)(q)
@@ -101,15 +98,25 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     val resp = inIF.io.requestor.resp
 
     inIF.io.requestor <> 0.U.asTypeOf(inIF.io.requestor)
+    // following example of Saturn's HellaInterface
+    inIF.io.requestor.s1_kill := false.B
+    inIF.io.requestor.s1_data := DontCare
+    inIF.io.requestor.s2_kill := false.B
     inIF.io.requestor.keep_clock_enabled := true.B
+
+    val dChSize = outer.params.overrideDChannelSize
+    val sizeTagWidth = dChSize match {
+      case Some(_) => 0
+      case None => tlIn.params.sizeBits
+    }
 
     // A
     req.valid := tlIn.a.valid
     tlIn.a.ready := req.ready
     req.bits := 0.U.asTypeOf(req.bits.cloneType)
-    req.bits.tag := tlIn.a.bits.source
-    assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth,
-      s"cache tag bits doesnt match source: ${req.bits.tag.getWidth} != ${tlIn.a.bits.source.getWidth}")
+    assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth + sizeTagWidth,
+      s"cache tag bits doesnt match source:" +
+      s"${req.bits.tag.getWidth} != ${tlIn.a.bits.source.getWidth} + $sizeTagWidth")
 
     // every read is cache line sized. this is because the output always starts at lsb
     // regardless of address. i.e. this logic does not use active byte lanes that
@@ -131,6 +138,17 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     req.bits.no_alloc := false.B // <- might be able to imp writethrough
     req.bits.no_xcpt := true.B // no vm/dp, so no page faults etc
 
+    // on the other hand, stores need to have the real size / address so that NBDCache can 
+    // generate the correct byte mask when storing to its internal data array
+    // (i have no idea what req.bits.mask is actually even being used for? agent claims
+    // it is for AMOALU operations or something)
+    when (tlIn.a.bits.opcode === TLMessages.PutFullData || tlIn.a.bits.opcode === TLMessages.PutPartialData) {
+      req.bits.addr := tlIn.a.bits.address
+      // @richard: do we need to actually do the shift here?
+      req.bits.data := tlIn.a.bits.data 
+      req.bits.size := tlIn.a.bits.size
+    }
+
 //    when (req.fire) {
 //      when (req.bits.cmd === M_XRD) {
 //        printf(" load-req 0x%x", req.bits.addr)
@@ -146,8 +164,6 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     assert(!resp.valid || tlIn.d.ready, "response must be ready!")
     tlIn.d.valid := resp.valid
     tlIn.d.bits.data := resp.bits.data
-    tlIn.d.bits.size := outer.dChannelSize.U
-    tlIn.d.bits.source := resp.bits.tag
     tlIn.d.bits.opcode := MuxCase(TLMessages.AccessAckData, Seq(
       (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,
       (resp.bits.cmd === M_XWR) -> TLMessages.AccessAck,
@@ -155,6 +171,18 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     assert(!resp.fire || resp.bits.cmd === M_XRD || resp.bits.cmd === M_XWR)
     assert(!resp.fire || (resp.bits.has_data === (resp.bits.cmd === M_XRD)))
     // tlIn.d.bits.user := ???
+
+    outer.params.overrideDChannelSize match {
+      case Some(size) =>
+        req.bits.tag := tlIn.a.bits.source
+        tlIn.d.bits.size := size.U
+        tlIn.d.bits.source := resp.bits.tag
+      case None =>
+        req.bits.tag := Cat(tlIn.a.bits.size, tlIn.a.bits.source)
+        tlIn.d.bits.size := resp.bits.tag >> tlIn.params.sourceBits
+        tlIn.d.bits.source := resp.bits.tag(tlIn.params.sourceBits - 1, 0)
+    }
+
   }
 
   // simple if <-> cache
@@ -162,12 +190,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   val cacheIO = outer.nbdCache.module.io
 
   cacheIO.cpu <> inIF.io.cache
-  // cacheIO.cpu.req <> inIF.io.cache.req
-  cacheIO.cpu.s1_kill := false.B
-  cacheIO.cpu.s1_data := 0.U.asTypeOf(cacheIO.cpu.s1_data.cloneType)
-  cacheIO.cpu.s2_kill := false.B
-  cacheIO.cpu.keep_clock_enabled := true.B
-
+  
   inIF.io.cache.resp := cacheIO.cpu.resp
   inIF.io.cache.perf := cacheIO.cpu.perf
 //  inIF.io.cache.s2_nack := cacheIO.cpu.s2_nack

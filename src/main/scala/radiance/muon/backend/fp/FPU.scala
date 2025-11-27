@@ -67,6 +67,7 @@ object FPFormat extends ChiselEnum {
   val FP64 = Value("b001".U) // unsupported
   val FP16 = Value("b010".U)
   val E5M2 = Value("b011".U) // unsupported
+  val BF16 = Value("b100".U)
   val _w   = Value("b111".U)
 }
 
@@ -88,20 +89,22 @@ class CVFPUReq(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
   val operands = Vec(3, UInt((numFp16Lanes * 16).W))
 }
 
-class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1) extends Bundle {
+class CVFPUResp(numFp16Lanes: Int = 16, tagWidth: Int = 1, fStatusBits: Int = 5) extends Bundle {
   val result = UInt((numFp16Lanes * 16).W)
-  val status = UInt(5.W) // {invalid, div by zero, overflow, underflow, inexact}
+  val status = UInt(fStatusBits.W) // {invalid, div by zero, overflow, underflow, inexact}
   val tag = UInt(tagWidth.W)
 }
 
 class CVFPU(
   numFp16Lanes: Int = 16,
   tagWidth: Int = 1,
+  isDivSqrtUnit: Boolean = false,
 )(implicit p: Parameters) extends BlackBox(
   Map(
     "WIDTH" -> numFp16Lanes * 16,
     "LANES" -> numFp16Lanes,
     "TAG_WIDTH" -> tagWidth,
+    "IS_DIVSQRT_UNIT" -> { if (isDivSqrtUnit) 1 else 0 }
   )
 ) with HasBlackBoxResource with HasBlackBoxPath {
 
