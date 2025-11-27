@@ -88,24 +88,19 @@ class MemPerfMuonTile(
   private val patterns = TrafficPatterns.smemPatterns(muonParams.clusterId)
 
   val trafficGenerators = Seq.tabulate(muonParams.core.numLanes) { lane =>
-    patterns.map { case (name, pattern) =>
-      LazyModule(new TLTrafficGen(
-        nodeName = s"smem_${lane}_$name",
-        sourceBits = reqSourceBits,
-        n = reqsPerPattern,
-        reqFn = pattern(_, lane),
-      ))
+    val lanePatterns = patterns.map { case (name, pattern) =>
+      (name, pattern(_, lane))
     }
+    LazyModule(new TLTrafficGen(
+      nodeName = s"smem_$lane",
+      sourceBits = reqSourceBits,
+      n = reqsPerPattern,
+      patterns = lanePatterns,
+    )).suggestName(s"traffic_smem_$lane")
   }
 
-  val trafficXbars = trafficGenerators.map { gens =>
-    // lowest index so that all patterns go in order
-    val xbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst)).node
-    gens.foreach(xbar := _.node)
-    xbar
-  }
-
-  val smemNodes: Seq[TLNode] = trafficXbars.map(connectOne(_, TLEphemeralNode.apply)(p, false))
+  val smemNodes: Seq[TLNode] = trafficGenerators
+    .map(x => connectOne(x.node, TLEphemeralNode.apply)(p, false))
   val icacheNode: TLNode = idleMaster()
   val dcacheNode: TLNode = visibilityNode
   val softResetFinishSlave = SoftResetFinishNode.Slave()
@@ -116,32 +111,29 @@ class MemPerfMuonTile(
 
     val time = Counter(true.B, Int.MaxValue)._1
 
-    val patternLanes = outer.trafficGenerators.transpose
+    val allLanesFinished = VecInit(outer.trafficGenerators.map(_.module.io.finished)).asUInt.andR
+    outer.trafficGenerators.foreach(_.module.io.start := allLanesFinished)
 
-    def allFinished(lanes: Seq[TLTrafficGen]) =
-      VecInit(lanes.map(_.module.io.finished)).asUInt.andR
+    val allPatternsDone = VecInit(outer.trafficGenerators.map(_.module.io.allFinished)).asUInt.andR
+    outer.softResetFinishSlave.in.head._1.finished := RegNext(allPatternsDone)
 
-    // valid sequencing
-    patternLanes.head.foreach(_.module.io.started := true.B)
-    patternLanes.reduceLeft { (prevPattern, currPattern) =>
-      val prevFinished = allFinished(prevPattern)
-      currPattern.foreach(_.module.io.started := RegNext(prevFinished))
-
-      // rising edge
-      when (prevFinished && !RegNext(prevFinished)) {
-        printf(cf"[MEM PERF] ${prevPattern.head.nodeName} finished at time $time\n")
-        printf(cf"[MEM PERF] ${currPattern.head.nodeName} starting\n")
+    val finishPulse = allLanesFinished && !RegNext(allLanesFinished) // shouldn't be necessary
+    val patternCount = Counter(finishPulse, patterns.length)._1
+    val finishOut = outer.softResetFinishSlave.in.head._1.finished
+    finishOut := false.B
+    when (finishPulse) {
+      outer.patterns.map(_._1).zipWithIndex.foreach { case (name, i) =>
+        when (patternCount === i.U) {
+          printf(cf"[TRAFFIC] core ${muonParams.coreId} ${name} finished at time $time\n")
+          if (i == outer.patterns.length - 1) {
+            printf(cf"[TRAFFIC] all done!")
+            finishOut := true.B
+          }
+        }
       }
-      currPattern
     }
 
-    val lastFinished = allFinished(patternLanes.last)
-    when (RegNext(lastFinished)) {
-      printf(cf"[MEM PERF] ${patternLanes.last.head.nodeName} finished at time $time\n")
-      stop()
-    }
-
-    outer.reportCease(None)
+    outer.reportCease(Some(RegNext(allPatternsDone)))
     outer.reportWFI(None)
   }
 }

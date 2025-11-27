@@ -51,7 +51,7 @@ class ChiselTLA(params: TLBundleParameters) extends Bundle {
 }
 
 class TLTrafficGen(val nodeName: String, val sourceBits: Int,
-                   val n: Int, val reqFn: Int => ScalaTLA)
+                   val n: Int, val patterns: Seq[(String, Int => ScalaTLA)])
                   (implicit p: Parameters) extends LazyModule {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v2(
@@ -68,30 +68,47 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
 
   // elaboration time
   // ================
-  println(s"generating trace for ${outer.nodeName}")
-
   val (tlNode, tlEdge) = outer.node.out.head
+  val patternNames = outer.patterns.map(_._1)
   val storage = StoredBitVec(
-    outer.nodeName,
-    outer.n,
+    s"${outer.nodeName}_${patternNames.mkString("_")}",
+    outer.n * outer.patterns.length,
     new ChiselTLA(tlNode.params),
-    Seq.tabulate(outer.n)(outer.reqFn).map(_.toChisel(tlNode.params))
+    outer.patterns.flatMap { case (_, fn) =>
+      Seq.tabulate(outer.n)(fn).map(_.toChisel(tlNode.params))
+    }
   )
 
   // run time
   // ========
 
   val io = IO(new Bundle {
-    val started = Input(Bool())
+    val start = Input(Bool())
     val finished = Output(Bool())
+    val allFinished = Output(Bool())
   })
 
   val sourceGen = Module(new SourceGenerator(outer.sourceBits))
-  val (counter, ended) = Counter(tlNode.a.fire, outer.n)
+  // val reqCounter = RegInit(0.U(log2Ceil(outer.n max 2).W))
+  // val patternCounter = RegInit(0.U(log2Ceil(outer.patterns.size max 2).W))
 
-  val finishedReg = RegEnable(true.B, false.B, ended)
+  val (reqCounter, reqWrap) = Counter(tlNode.a.fire, outer.n)
+  val (patternCounter, patternWrap) = Counter(reqWrap, outer.patterns.length)
 
-  storage.io.addr := counter
+  val reqFinishedReg = RegEnable(
+    Mux(io.start, false.B, true.B),
+    false.B,
+    reqWrap || io.start)
+  val allReqFinishedReg = RegEnable(true.B, false.B, patternWrap)
+  val patternActive = !reqFinishedReg && !allReqFinishedReg
+
+  sourceGen.io.gen := patternActive && tlNode.a.ready
+  tlNode.a.valid := patternActive && sourceGen.io.id.valid
+
+  io.finished := reqFinishedReg && !sourceGen.io.inflight
+  io.allFinished := allReqFinishedReg && io.finished
+
+  storage.io.addr := patternCounter * outer.n.U + reqCounter
   val storedReq = storage.io.data
 
   tlNode.a.bits := Mux(
@@ -106,14 +123,9 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
     tlEdge.Get(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize)._2,
   )
 
-  sourceGen.io.gen := tlNode.a.ready && !finishedReg
-  tlNode.a.valid := io.started && sourceGen.io.id.valid && !finishedReg
-
   tlNode.d.ready := true.B
   sourceGen.io.reclaim.valid := tlNode.d.fire
   sourceGen.io.reclaim.bits := tlNode.d.bits.source
-
-  io.finished := finishedReg && !sourceGen.io.inflight
 
   dontTouch(tlNode.d)
 }
@@ -125,7 +137,8 @@ object StoredBitVec {
     dataT: T,
     sequence: => Seq[T]
   )(implicit p: Parameters): StoredBitVec[T] = {
-    val filePath = Paths.get(s"./generators/radiance/src/test/resources/traffic/${filename}.mem")
+    val hashName = filename.hashCode.toHexString
+    val filePath = Paths.get(s"./generators/radiance/src/test/resources/traffic/${hashName}.mem")
     if (!Files.exists(filePath)) {
       val parentDir = filePath.getParent
       if (parentDir != null) {

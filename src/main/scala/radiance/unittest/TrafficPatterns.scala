@@ -16,7 +16,7 @@ abstract class TrafficPattern {
     require(reqSize <= busSize)
     val addr = baseAddr + offset(time, index)
     new ScalaTLA(
-      address = addr,
+      address = (addr / busSize) * busSize,
       lgSize = lgSize,
       data = None,
       mask = Some(((1 << reqSize) - 1) << (addr % busSize))
@@ -61,7 +61,7 @@ object TrafficPatterns {
 
   class Swizzled(val tileSize: Int = 16,
                  override val lgSize: Int = 2)extends Tiled(tileSize, tileSize) {
-    override val name = s"swizzled($tileSize)"
+    override val name = s"swizzled($tileSize)@$reqSize"
     override def offset(t: Int, i: Int) = {
       val (row, col) = inTileCoords(t, i)
       val rotatedCol = (col - row % tileSize + tileSize) % tileSize
@@ -83,6 +83,7 @@ object TrafficPatterns {
 
   class RandomAccess(min: Int, max: Int, seed: Int = 0,
                      override val lgSize: Int = 2) extends TrafficPattern {
+    override val name = s"random($seed)"
     val rng = new Random(seed)
     def offset(t: Int, i: Int) =
       rng.between(min, max) * reqSize
@@ -109,9 +110,9 @@ object TrafficPatterns {
   }
 
 
-  val strideGrid = for { x <- Seq(1, 2, 4, 8); y <- Seq(0, 1, 2, 4) } yield (x, y)
+  val strideGrid = for { x <- Seq(1, 2); y <- Seq(1, 2, 8, 0) } yield (x, y)
   val tileGrid = Seq(8, 16, 32, 64, 128)
-  val dataTypes = Seq(2, 1) // 4B, 2B
+  val dataTypes = Seq(1, 2) // 4B, 2B
 
   val stridedPatterns = dataTypes.flatMap { lgSize =>
     strideGrid.map(x => new Strided(x._1, x._2, lgSize))
@@ -125,26 +126,26 @@ object TrafficPatterns {
     tileGrid.map(x => new Swizzled(x, lgSize))
   }
 
-  val randomPatterns = dataTypes.map { lgSize =>
-    new RandomAccess(0, 131072 >> lgSize)
+  val randomPatterns = dataTypes.flatMap { lgSize =>
+    Seq(0, 1).map(new RandomAccess(0, 131072 >> lgSize, _))
   }
 
   def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
-    // Seq(stridedPatterns,
-    //   tiledPatterns,
-    //   swizzledPatterns,
-    //   tiledPatterns.map(Transposed(_)),
-    //   swizzledPatterns.map(Transposed(_)),
-    //   randomPatterns,
-    // )
-    Seq(Seq(new Strided(1, 1))
-    )
-      .flatten
-      .map(Bounded(_, size))
-      .flatMap(x =>
-        Seq(
-          (x.name + "_r", x.getSmem(clusterId)),
-          (x.name + "_w", x.putSmem(clusterId)),
-        ))
+    Seq(("r", (x: TrafficPattern) => x.getSmem _),
+      ("w", (x: TrafficPattern) => x.putSmem _))
+      .flatMap { case (suffix, func) =>
+
+      Seq(
+        // stridedPatterns,
+        // randomPatterns,
+        // tiledPatterns,
+        // tiledPatterns.map(Transposed(_)),
+        swizzledPatterns,
+        swizzledPatterns.map(Transposed(_)),
+      )
+        .flatten
+        .map(Bounded(_, size))
+        .map(x => (s"${x.name}_$suffix", func(x)(clusterId)))
+    }
   }
 }
