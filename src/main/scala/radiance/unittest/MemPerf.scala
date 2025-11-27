@@ -119,15 +119,15 @@ class MemPerfMuonTile(
 
     val finishPulse = allLanesFinished && !RegNext(allLanesFinished) // shouldn't be necessary
     val patternCount = Counter(finishPulse, patterns.length)._1
-    val finishOut = outer.softResetFinishSlave.in.head._1.finished
-    finishOut := false.B
+    val allFinishPulse = WireInit(false.B)
+    outer.softResetFinishSlave.in.head._1.finished := RegEnable(true.B, false.B, allFinishPulse)
     when (finishPulse) {
       outer.patterns.map(_._1).zipWithIndex.foreach { case (name, i) =>
         when (patternCount === i.U) {
           printf(cf"[TRAFFIC] core ${muonParams.coreId} ${name} finished at time $time\n")
           if (i == outer.patterns.length - 1) {
-            printf(cf"[TRAFFIC] all done!")
-            finishOut := true.B
+            printf(cf"[TRAFFIC] core ${muonParams.coreId} all done!\n")
+            allFinishPulse := true.B
           }
         }
       }

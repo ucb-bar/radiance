@@ -55,7 +55,7 @@ class RadianceSharedMemComponents(
   implicit val disableMonitors: Boolean = smemKey.disableMonitors // otherwise it generate 1k+ different tl monitors
 
   assert(strideByWord, "radiance smem must stride by word")
-  assert(!filterAligned, "this feature is only for virgo")
+  // assert(!filterAligned, "this feature is only for virgo")
 
   // (core, lane) = rw node
   val muonSmemFanout: List[List[TLNode]] = muonTiles.zipWithIndex.map { case (tile, cid) =>
@@ -76,26 +76,53 @@ class RadianceSharedMemComponents(
 
   val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
 
-  // uniform mux select for selecting lanes from a single core in unison
-  val prealignBufComponents = fanoutTransposed.zipWithIndex.map { case (coresRW, lid) =>
-    val (xbar, xi, xo) = XbarWithExtPolicyNoFallback(Some(f"lane_${lid}_serial_in_xbar"))
-    coresRW.foreach(xi := _)
-    val policyNode = ExtPolicyMasterNode(numCores)
-    xbar.policySlaveNode := policyNode
-    val prealignBuffer = TLBuffer(BufferParams(smemKey.prealignBufDepth, false, false))
-    prealignBuffer := xo
+  val (prealignNodes, laneSerialXbars, coreSerialPolicy) = serialization match {
+    case CoreSerialized =>
+      // uniform mux select for selecting lanes from a single core in unison
+      val components = fanoutTransposed.zipWithIndex.map { case (coresRW, lid) =>
+        val prealignBuffer = TLBuffer(BufferParams(smemKey.prealignBufDepth, false, false))
 
-    (prealignBuffer, (xbar, xi, xo), policyNode)
+        val (xbar, xi, xo) = XbarWithExtPolicyNoFallback(Some(f"lane_${lid}_serial_in_xbar"))
+        coresRW.foreach(xi := _)
+        val policyNode = ExtPolicyMasterNode(numCores)
+        xbar.policySlaveNode := policyNode
+        prealignBuffer := xo
+
+        (prealignBuffer, (xbar, xi, xo), policyNode)
+      }
+      (components.map(_._1), Some(components.map(_._2)), Some(components.map(_._3)))
+
+    case FullySerialized =>
+      val fullSerializationXbar = LazyModule(new TLXbar()).suggestName("serial_xbar").node
+      fanoutTransposed.flatten.foreach(fullSerializationXbar := _)
+      (List(connectEphemeral(fullSerializationXbar)), None, None)
+
+    case NotSerialized =>
+      val allNodes = if (filterAligned) {
+        val addresses = Seq.tabulate(smemSubbanks)(wid =>
+          AddressSet(smemBase + wordSize * wid, (smemSize - 1) - (smemSubbanks - 1) * wordSize))
+        val nodes = (muonSmemFanout zip addresses).flatMap { case (cores, addr) =>
+          cores.map { x =>
+            val filterNode = AlignFilterNode(Seq(addr))
+            guardMonitors { implicit p => filterNode := x }
+            List.fill(2)(connectEphemeral(filterNode))
+          }
+        }
+        val List(aligned, unaligned) = nodes.transpose
+        val unalignedXbar = TLXbar()
+        unaligned.foreach(unalignedXbar := _)
+        aligned :+ connectEphemeral(unalignedXbar)
+      } else {
+        fanoutTransposed.flatten.map(connectEphemeral(_))
+      }
+      (allNodes, None, None)
   }
-
-  val prealignBuffers = prealignBufComponents.map(_._1)
-  val laneSerialXbars = prealignBufComponents.map(_._2)
-  val coreSerialPolicy = prealignBufComponents.map(_._3)
 
   val alignmentXbar = LazyModule(new TLXbar()).suggestName("alignment_xbar").node
   guardMonitors { implicit p =>
-    prealignBuffers.foreach(alignmentXbar := _)
+    prealignNodes.foreach(alignmentXbar := _)
   }
+
 
   def distAndDuplicate(nodesAndWidths: Seq[(TLNode, Int)], suffix: String): Seq[Seq[TLNexusNode]] = {
     val wordFanoutNodes = nodesAndWidths.zipWithIndex.map { case ((node, width), i) =>
@@ -184,39 +211,43 @@ class RadianceSharedMemComponents(
 class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]
   (override val outer: T) extends RadianceSmemNodeProviderImp[T](outer) {
 
-  val xbars = outer.laneSerialXbars // (xbar, xi, xo)
+  outer.serialization match {
+    case CoreSerialized =>
+      val xbars = outer.laneSerialXbars.get // (xbar, xi, xo)
 
-  val xbarInNodes = xbars.map(_._2.in.map(_._1)) // (lane, core) => xi
-  val xbarOutNodes = xbars.map(_._3.in.map(_._1)) // (lane, core) => xo
+      val xbarInNodes = xbars.map(_._2.in.map(_._1)) // (lane, core) => xi
+      val xbarOutNodes = xbars.map(_._3.in.map(_._1)) // (lane, core) => xo
 
-  // the shared memory supports random subbank access for 1 core at a time
-  // (i.e. core-serial access)
+      // the shared memory supports random subbank access for 1 core at a time
+      // (i.e. core-serial access)
 
-  // for each core, if any lane is valid, that core is up for arbitration
-  val anyLaneValidInCore = WireInit(VecInit(xbarInNodes.transpose // (core, lane) => xi
-    .map(lanes => VecInit(lanes.map(_.a.valid)).asUInt.orR)))
+      // for each core, if any lane is valid, that core is up for arbitration
+      val anyLaneValidInCore = WireInit(VecInit(xbarInNodes.transpose // (core, lane) => xi
+        .map(lanes => VecInit(lanes.map(_.a.valid)).asUInt.orR)))
 
-  dontTouch(anyLaneValidInCore)
+      dontTouch(anyLaneValidInCore)
 
-  // a core-serial crossbar fires if any core sent something through
-  val laneOutFire = WireInit(VecInit(xbarOutNodes // (lane, ??) => xo
-    .map(laneOuts => VecInit(laneOuts.map(_.a.fire)).asUInt.orR)))
-  dontTouch(laneOutFire)
+      // a core-serial crossbar fires if any core sent something through
+      val laneOutFire = WireInit(VecInit(xbarOutNodes // (lane, ??) => xo
+        .map(laneOuts => VecInit(laneOuts.map(_.a.fire)).asUInt.orR)))
+      dontTouch(laneOutFire)
 
-  require(anyLaneValidInCore.length == outer.numCores)
-  require(laneOutFire.length == outer.numLanes)
+      require(anyLaneValidInCore.length == outer.numCores)
+      require(laneOutFire.length == outer.numLanes)
 
-  // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
-  val coreSelect = TLArbiter.roundRobin(
-    outer.numCores,
-    anyLaneValidInCore.asUInt,
-    laneOutFire.asUInt.orR)
+      // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
+      val coreSelect = TLArbiter.roundRobin(
+        outer.numCores,
+        anyLaneValidInCore.asUInt,
+        laneOutFire.asUInt.orR)
 
-  // TODO: roll this into XbarWithExtPolicy
-  xbars.foreach { lane =>
-    (lane._2.in.map(_._1) lazyZip lane._2.out.map(_._1) lazyZip coreSelect.asBools).foreach { case (li, lo, cs) =>
-      lo.a.valid := li.a.valid && cs
-    }
+      // TODO: roll this into XbarWithExtPolicy
+      xbars.foreach { lane =>
+        (lane._2.in.map(_._1) lazyZip lane._2.out.map(_._1) lazyZip coreSelect.asBools).foreach { case (li, lo, cs) =>
+          lo.a.valid := li.a.valid && cs
+        }
+      }
+      outer.coreSerialPolicy.get.foreach { _.out.head._1.hint := coreSelect }
+    case _ =>
   }
-  outer.coreSerialPolicy.foreach { _.out.head._1.hint := coreSelect }
 }

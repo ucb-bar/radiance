@@ -164,7 +164,7 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
 
   // TODO: do we want to aggregate across all clusters
-  val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.orR
+  val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.andR
   val (_, stopSim) = Counter(0 until 8192, finished, !finished)
   when (stopSim) {
     stop("no more active warps for 8k cycles\n")

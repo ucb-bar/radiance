@@ -41,6 +41,12 @@ object connectXbar {
   }
 }
 
+object connectEphemeral {
+  def apply(from: TLNode)(implicit p: Parameters): TLEphemeralNode = {
+    connectOne(from, TLEphemeralNode.apply)(p, true)
+  }
+}
+
 object idleMaster {
   def apply(sourceBits: Int = 2, name: String = "idle_master"): TLClientNode = {
     TLClientNode(Seq(TLMasterPortParameters.v2(
