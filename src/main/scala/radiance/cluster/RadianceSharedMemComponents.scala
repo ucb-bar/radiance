@@ -3,17 +3,12 @@ package radiance.cluster
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams}
-import freechips.rocketchip.subsystem.BaseClusterParams
 import freechips.rocketchip.tilelink._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
-import org.chipsalliance.diplomacy.{DisableMonitors, ValName}
 import radiance.memory._
-import radiance.muon.MuonTile
 import radiance.subsystem._
-
-import scala.collection.mutable.ArrayBuffer
 
 // virgo-specific tilelink nodes
 // generic smem implementation is in RadianceSharedMem.scala
@@ -26,7 +21,6 @@ class RadianceSharedMemComponents(
   val smemKey = clusterParams.smemConfig
 
   val wordSize = smemKey.wordSize
-  val smemBase = smemKey.address
   val smemBanks = smemKey.numBanks
   val smemWidth = smemKey.numWords * smemKey.wordSize
   val smemDepth = smemKey.size / smemWidth / smemBanks
@@ -90,7 +84,15 @@ class RadianceSharedMemComponents(
 
         (prealignBuffer, (xbar, xi, xo), policyNode)
       }
-      (components.map(_._1), Some(components.map(_._2)), Some(components.map(_._3)))
+      // coalesce single addresses
+      val prealignNodes = if (true) {
+        val (coalescerAdapter, coalescerClient) = SingleAddrCoalescer(3)
+        components.foreach(x => coalescerAdapter := x._1)
+        Seq(coalescerAdapter, coalescerClient)
+      } else {
+        components.map(_._1)
+      }
+      (prealignNodes, Some(components.map(_._2)), Some(components.map(_._3)))
 
     case FullySerialized =>
       val fullSerializationXbar = LazyModule(new TLXbar()).suggestName("serial_xbar").node
@@ -99,8 +101,8 @@ class RadianceSharedMemComponents(
 
     case NotSerialized =>
       val allNodes = if (filterAligned) {
-        val addresses = Seq.tabulate(smemSubbanks)(wid =>
-          AddressSet(smemBase + wordSize * wid, (smemSize - 1) - (smemSubbanks - 1) * wordSize))
+        val addresses = Seq.tabulate(muonSmemFanout.length)(wid =>
+          AddressSet(clusterParams.baseAddr + wordSize * wid, (smemSize - 1) - (smemSubbanks - 1) * wordSize))
         val nodes = (muonSmemFanout zip addresses).flatMap { case (cores, addr) =>
           cores.map { x =>
             val filterNode = AlignFilterNode(Seq(addr))
@@ -109,7 +111,7 @@ class RadianceSharedMemComponents(
           }
         }
         val List(aligned, unaligned) = nodes.transpose
-        val unalignedXbar = TLXbar()
+        val unalignedXbar = LazyModule(new TLXbar()).suggestName("unaligned_xbar").node
         unaligned.foreach(unalignedXbar := _)
         aligned :+ connectEphemeral(unalignedXbar)
       } else {
@@ -120,7 +122,7 @@ class RadianceSharedMemComponents(
 
   val alignmentXbar = LazyModule(new TLXbar()).suggestName("alignment_xbar").node
   guardMonitors { implicit p =>
-    prealignNodes.foreach(alignmentXbar := _)
+    prealignNodes.foreach(alignmentXbar :=* _)
   }
 
 

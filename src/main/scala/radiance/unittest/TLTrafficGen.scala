@@ -81,6 +81,8 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
 
   // run time
   // ========
+  // TODO: get rid of this fix
+  val resetFix = !(reset.asBool || RegNext(reset.asBool))
 
   val io = IO(new Bundle {
     val start = Input(Bool())
@@ -100,7 +102,7 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
     false.B,
     reqWrap || io.start)
   val allReqFinishedReg = RegEnable(true.B, false.B, patternWrap)
-  val patternActive = !reqFinishedReg && !allReqFinishedReg
+  val patternActive = !reqFinishedReg && !allReqFinishedReg && resetFix
 
   sourceGen.io.gen := patternActive && tlNode.a.ready
   tlNode.a.valid := patternActive && sourceGen.io.id.valid

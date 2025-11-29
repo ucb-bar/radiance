@@ -1,4 +1,6 @@
 package radiance.memory
+
+import chisel3._
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.diplomacy.lazymodule._
@@ -55,5 +57,17 @@ object idleMaster {
         sourceId = IdRange(0, 1 << sourceBits)
       ))
     )))
+  }
+}
+
+object BoolArrayUtils {
+  implicit class BoolSeqUtils(v: Seq[Bool]) {
+    def orR: Bool = VecInit(v).orR
+    def andR: Bool = VecInit(v).andR
+  }
+
+  implicit class BoolVecUtils(v: Vec[Bool]) {
+    def orR: Bool = if (v.isEmpty) false.B else v.asUInt.orR
+    def andR: Bool = if (v.isEmpty) true.B else v.asUInt.andR
   }
 }
