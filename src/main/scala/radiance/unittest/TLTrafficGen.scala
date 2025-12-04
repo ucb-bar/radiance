@@ -91,8 +91,6 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
   })
 
   val sourceGen = Module(new SourceGenerator(outer.sourceBits))
-  // val reqCounter = RegInit(0.U(log2Ceil(outer.n max 2).W))
-  // val patternCounter = RegInit(0.U(log2Ceil(outer.patterns.size max 2).W))
 
   val (reqCounter, reqWrap) = Counter(tlNode.a.fire, outer.n)
   val (patternCounter, patternWrap) = Counter(reqWrap, outer.patterns.length)

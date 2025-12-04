@@ -60,23 +60,34 @@ object TrafficPatterns {
   }
 
   class Swizzled(val tileSize: Int = 16,
-                 override val lgSize: Int = 2)extends Tiled(tileSize, tileSize) {
+                 override val lgSize: Int = 2) extends Tiled(tileSize, tileSize, lgSize) {
     override val name = s"swizzled($tileSize)@$reqSize"
-    override def offset(t: Int, i: Int) = {
+    override def offset(t: Int, i: Int): Int = {
       val (row, col) = inTileCoords(t, i)
-      val rotatedCol = (col - row % tileSize + tileSize) % tileSize
+      val rotatedCol = Math.floorMod(col + row, tileSize)
       (tileIdx(t, i) * tileElems + row * tileSize + rotatedCol) * reqSize
     }
   }
 
+
   object Transposed {
-    def apply(tiled: Tiled): TrafficPattern = {
-      new Tiled {
-        override val name = tiled.name + ".T"
-        override def inTileCoords(t: Int, i: Int) = {
-          val (a, b) = tiled.inTileCoords(t, i)
-          (b, a)
-        }
+    def apply(pattern: Tiled): TrafficPattern = {
+      def swapCoords(t: Int, i: Int) = {
+        val (row, col) = pattern.inTileCoords(t, i)
+        (col, row)
+      }
+
+      pattern match {
+        case sw: Swizzled =>
+          new Swizzled(sw.tileSize, sw.lgSize) {
+            override val name = pattern.name + ".T"
+            override def inTileCoords(t: Int, i: Int) = swapCoords(t, i)
+          }
+        case _ =>
+          new Tiled(pattern.tileN, pattern.tileM, pattern.lgSize) {
+            override val name = pattern.name + ".T"
+            override def inTileCoords(t: Int, i: Int) = swapCoords(t, i)
+          }
       }
     }
   }
@@ -112,7 +123,7 @@ object TrafficPatterns {
 
   val strideGrid = for { x <- Seq(1, 2); y <- Seq(1, 2, 8, 0) } yield (x, y)
   val tileGrid = Seq(8, 16, 32, 64, 128)
-  val dataTypes = Seq(1, 2) // 4B, 2B
+  val dataTypes = Seq(2, 1) // 4B, 2B
 
   val stridedPatterns = dataTypes.flatMap { lgSize =>
     strideGrid.map(x => new Strided(x._1, x._2, lgSize))
@@ -136,10 +147,10 @@ object TrafficPatterns {
       .flatMap { case (suffix, func) =>
 
       Seq(
-        // stridedPatterns,
-        // randomPatterns,
-        // tiledPatterns,
-        // tiledPatterns.map(Transposed(_)),
+        stridedPatterns,
+        randomPatterns,
+        tiledPatterns,
+        tiledPatterns.map(Transposed(_)),
         swizzledPatterns,
         swizzledPatterns.map(Transposed(_)),
       )

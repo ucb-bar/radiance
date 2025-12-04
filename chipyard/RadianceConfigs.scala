@@ -1,14 +1,11 @@
 package chipyard
 
-import chipyard.stage.phases.TargetDirKey
-import freechips.rocketchip.devices.tilelink.BootROMLocated
 import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
 import org.chipsalliance.cde.config.Config
 import radiance.subsystem._
 import radiance.unittest.WithMemPerfMuonTileReplacement
-import radiance.virgo._
 import testchipip.serdes.TLSerdesser
 
 // ----------------
