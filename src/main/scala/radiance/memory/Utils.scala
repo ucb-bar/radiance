@@ -49,6 +49,12 @@ object connectEphemeral {
   }
 }
 
+object connectIdentity {
+  def apply(from: TLNode)(implicit p: Parameters): TLIdentityNode = {
+    connectOne(from, TLIdentityNode.apply)(p, true)
+  }
+}
+
 object idleMaster {
   def apply(sourceBits: Int = 2, name: String = "idle_master"): TLClientNode = {
     TLClientNode(Seq(TLMasterPortParameters.v2(
