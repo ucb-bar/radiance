@@ -49,7 +49,7 @@ class RadianceSharedMemComponents(
   implicit val disableMonitors: Boolean = smemKey.disableMonitors // otherwise it generate 1k+ different tl monitors
 
   assert(strideByWord, "radiance smem must stride by word")
-  // assert(!filterAligned, "this feature is only for virgo")
+  assert(!filterAligned, "this feature is only for virgo")
 
   // (core, lane) = rw node
   val muonSmemFanout: List[List[TLNode]] = muonTiles.zipWithIndex.map { case (tile, cid) =>
@@ -70,7 +70,7 @@ class RadianceSharedMemComponents(
 
   val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
 
-  val (prealignNodes, alignedNodes, laneSerialXbars, coreSerialPolicy) = serialization match {
+  val (prealignNodes, laneSerialXbars, coreSerialPolicy) = serialization match {
     case CoreSerialized =>
       // uniform mux select for selecting lanes from a single core in unison
       val components = fanoutTransposed.zipWithIndex.map { case (coresRW, lid) =>
@@ -92,38 +92,15 @@ class RadianceSharedMemComponents(
       } else {
         components.map(_._1)
       }
-      (prealignNodes, None, Some(components.map(_._2)), Some(components.map(_._3)))
+      (prealignNodes, Some(components.map(_._2)), Some(components.map(_._3)))
 
     case FullySerialized =>
       val fullSerializationXbar = LazyModule(new TLXbar()).suggestName("serial_xbar").node
       fanoutTransposed.flatten.foreach(fullSerializationXbar := _)
-      (List(connectIdentity(fullSerializationXbar)), None, None, None)
+      (List(connectIdentity(fullSerializationXbar)), None, None)
 
-    case NotSerialized => // TODO: clean up this mess 🤮
-      val (unaligned, aligned) = if (filterAligned) {
-        val addresses = Seq.tabulate(fanoutTransposed.length)(wid =>
-          AddressSet(clusterParams.baseAddr + wordSize * wid, (smemSize - 1) - (smemSubbanks - 1) * wordSize))
-        val nodes = (fanoutTransposed zip addresses).map { case (cores, addr) =>
-          val Seq(a, ua) = cores.map { x =>
-            val (filterNode, filterUnalignedNode) = AlignFilterNode(Seq(addr), sourceBits = 4)
-            guardMonitors { implicit p => filterNode := x }
-            Seq(filterNode, filterUnalignedNode)
-          }.transpose
-          val alignedXbar = TLXbar()
-          a.foreach(alignedXbar := _)
-          (alignedXbar, ua)
-        }
-        val alignedOut = nodes.map(_._1)
-        val unalignedOut = nodes.flatMap(_._2)
-
-        val unalignedXbar = LazyModule(new TLXbar()).suggestName("unaligned_xbar").node
-        unalignedOut.foreach(unalignedXbar := _)
-
-        (Seq(connectIdentity(unalignedXbar)), Some(alignedOut))
-      } else {
-        (fanoutTransposed.flatten.map(connectEphemeral(_)), None)
-      }
-      (unaligned, aligned, None, None)
+    case NotSerialized =>
+      (fanoutTransposed.flatten.map(connectEphemeral(_)), None, None)
   }
 
   val alignmentXbar = LazyModule(new TLXbar()).suggestName("alignment_xbar").node
@@ -169,19 +146,7 @@ class RadianceSharedMemComponents(
     gemminis.map(g => (g.spad.spad_writer.get.node, g.config.sp_width / 8)), "gemmini_ws")
   val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
 
-  val alignmentXbarOutNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))
-  val preSplitterNodes = alignedNodes match {
-    case Some(alignedNodesGet) =>
-      require(alignedNodesGet.length == smemSubbanks, s"got ${alignedNodesGet}")
-      (alignmentXbarOutNodes zip alignedNodesGet).map { case (xbar, aligned) =>
-        val laneXbar = TLXbar()
-        laneXbar := xbar
-        laneXbar := aligned
-        laneXbar
-      }
-    case None =>
-      alignmentXbarOutNodes
-  }
+  val preSplitterNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))
   val muonSplitterNodes = preSplitterNodes
     .map(connectOne(_, () => RWSplitterNode(f"muon_aligned_splitter")))
   val muonAligned = Seq.fill(2)(muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
