@@ -20,11 +20,9 @@ class RadianceBaseConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(x"1_0000_0000") ++
-//  new chipyard.config.WithRadBootROM() ++
-  new WithRadianceSimParams(true) ++
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
-  new freechips.rocketchip.subsystem.WithEdgeDataBits(256) ++
+  new freechips.rocketchip.subsystem.WithEdgeDataBits(64) ++
 
   new WithRadianceControlBus ++
   new WithNoMbusScratchpad ++

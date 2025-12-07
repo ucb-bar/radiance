@@ -60,62 +60,6 @@ class WarpScheduler(implicit p: Parameters)
   val fetchArbiter = Module(new RRArbiter(UInt(), m.numWarps))
   val issueArbiter = Module(new RRArbiter(UInt(), m.numWarps))
 
-  val fullThreadMask = (-1).S(m.numLanes.W).asUInt
-  // handle new warps
-  io.cmdProc match {
-    case Some(cmdProc) =>
-      val numActiveWarps = RegInit(0.U(log2Ceil(m.numWarps + 1).W))
-      when(cmdProc.valid) {
-        assert(numActiveWarps =/= m.numWarps.U, "cannot spawn more warps")
-        val wid = numActiveWarps
-
-        // initialize thread mask, pc, stall
-        threadMasks(wid) := fullThreadMask
-        pcTracker(wid).bits := cmdProc.bits.schedule
-        pcTracker(wid).valid := true.B
-        stallTracker.unstall(wid)
-
-        numActiveWarps := numActiveWarps + 1.U
-      }
-    case None =>
-      // tree reduce the warp spawn bundle: smallest warp wins
-
-      def winnerT = new Bundle {
-        val valid = Bool()
-        val bits = wspawnT
-      }
-
-      val wspawn = io.commit.bits.wspawn
-      // val wspawn = VecInit(io.commit.map { c =>
-      //   val base = Wire(winnerT)
-      //   base.valid := c.valid && c.bits.wspawn.valid
-      //   base.bits := c.bits.wspawn.bits
-      //   base
-      // }).reduceTree { case (c0, c1) =>
-      //   val winner = Wire(winnerT)
-      //   winner.valid := c0.valid || c1.valid
-      //   winner.bits := Mux(c0.valid, c0.bits, c1.bits)
-      //   winner
-      // }
-
-      when(io.commit.valid && wspawn.valid) {
-        val wspawnMask = ((1.U << wspawn.bits.count).asUInt - 1.U).asTypeOf(wmaskT)
-
-        wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
-          when(en) {
-            when (!pcTracker(wid).valid) {
-              // only set thread mask if warp not already active
-              threadMasks(wid) := fullThreadMask
-            }
-            pcTracker(wid).bits := wspawn.bits.pc
-            pcTracker(wid).valid := true.B
-            // spawning(wid) := true.B
-            stallTracker.unstall(wid.U)
-          }
-        }
-      }
-  }
-
   // increment/set PCs, fetch from i$
   io.icache.in.bits := 0.U.asTypeOf(io.icache.in.bits)
   io.icache.in.bits.wid := fetchWid
@@ -304,6 +248,48 @@ class WarpScheduler(implicit p: Parameters)
   //   io.csr.resp := RegNext(csrData)
   // }
 
+  // handle new warps
+  // wspawn: happen last to override all pc and discard changes
+
+  val fullThreadMask = (-1).S(m.numLanes.W).asUInt
+  io.cmdProc match {
+    case Some(cmdProc) =>
+      require(false)
+      val numActiveWarps = RegInit(0.U(log2Ceil(m.numWarps + 1).W))
+      when(cmdProc.valid) {
+        assert(numActiveWarps =/= m.numWarps.U, "cannot spawn more warps")
+        val wid = numActiveWarps
+
+        // initialize thread mask, pc, stall
+        threadMasks(wid) := fullThreadMask
+        pcTracker(wid).bits := cmdProc.bits.schedule
+        pcTracker(wid).valid := true.B
+        stallTracker.unstall(wid)
+
+        numActiveWarps := numActiveWarps + 1.U
+      }
+    case None =>
+      val wspawn = io.commit.bits.wspawn
+
+      when(io.commit.valid && wspawn.valid) {
+        val wspawnMask = ((1.U << wspawn.bits.count).asUInt - 1.U).asTypeOf(wmaskT)
+
+        wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
+          when(en) {
+            when (!pcTracker(wid).valid) {
+              // only set thread mask if warp not already active
+              threadMasks(wid) := fullThreadMask
+            }
+            pcTracker(wid).bits := wspawn.bits.pc
+            pcTracker(wid).valid := true.B
+            // spawning(wid) := true.B
+            stallTracker.unstall(wid.U)
+          }
+        }
+      }
+  }
+
+
   // soft reset procedure
   when (io.softReset) {
     // TODO
@@ -319,6 +305,11 @@ class WarpScheduler(implicit p: Parameters)
   io.ibuf.foreach { ib =>
     ib.uop.valid := false.B
     ib.uop.bits := DontCare
+  }
+
+  when (io.rename.fire) {
+    val e = io.rename.bits
+    printf(cf"[DISPATCH]  wid=${e.wid} pc=${e.pc}%x tmask=${e.tmask}%b\n")
   }
 }
 
@@ -338,7 +329,12 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   }
 
   def stall(wid: UInt, pc: UInt) = {
-    assert(!stalls(wid).stallReason(HAZARD))
+    when(stalls(wid).stallReason(HAZARD)) {
+      printf(cf"============WARNING============\n")
+      printf(cf"stalling stalled warp id $wid for pc=$pc%x\n")
+      printf(cf"this is most likely due to wspawn being called")
+      printf(cf"by multiple warps\n")
+    }
     stalls(wid).pc := pc
     stalls(wid).stallReason(HAZARD) := true.B
   }

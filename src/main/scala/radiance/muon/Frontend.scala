@@ -70,7 +70,7 @@ class Frontend(implicit p: Parameters)
 
     val userQueueDeq = Queue(
       userQueueEnq,
-      entries = muonParams.ibufDepth,
+      entries = muonParams.ibufDepth * muonParams.numWarps,
       useSyncReadMem = false)
 
     userQueueDeq.ready := resp.fire
