@@ -4,43 +4,19 @@ package radiance.memory
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.{Field, Parameters}
-import freechips.rocketchip.diplomacy.{AddressRange, AddressSet, BufferParams, IdRange, TransferSizes}
-import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.util.{BundleField, Code, MultiPortQueue, OnePortLanePositionedQueue}
-import freechips.rocketchip.unittest._
+import freechips.rocketchip.diplomacy.{AddressRange, AddressSet, IdRange}
 import freechips.rocketchip.tilelink._
-import radiance.subsystem.{SIMTCoreKey, SIMTCoreParams}
+import freechips.rocketchip.unittest._
+import freechips.rocketchip.util.{BundleField, MultiPortQueue}
+import org.chipsalliance.cde.config.{Field, Parameters}
+import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import radiance.subsystem.SIMTCoreKey
 
 case class CoalXbarParam()
 
 case object CoalescerKey
     extends Field[Option[CoalescerConfig]](None /*default*/ )
 case object CoalXbarKey extends Field[Option[CoalXbarParam]](None /*default*/ )
-
-trait InFlightTableSizeEnum extends ChiselEnum {
-  val INVALID: Type
-  val FOUR: Type
-  def logSizeToEnum(x: UInt): Type
-  def enumToLogSize(x: Type): UInt
-}
-
-object DefaultInFlightTableSizeEnum extends InFlightTableSizeEnum {
-  val INVALID = Value(0.U)
-  val FOUR = Value(1.U)
-
-  def logSizeToEnum(x: UInt): Type = {
-    MuxCase(INVALID, Seq(
-      (x === 2.U) -> FOUR
-    ))
-  }
-
-  def enumToLogSize(x: Type): UInt = {
-    MuxCase(0.U, Seq(
-      (x === FOUR) -> 2.U
-    ))
-  }
-}
 
 // Simplified config for spatial-only coalescing
 case class CoalescerConfig(
@@ -53,7 +29,6 @@ case class CoalescerConfig(
   numOldSrcIds: Int,      // num of outstanding requests per lane, from processor
   numNewSrcIds: Int,      // num of outstanding coalesced requests
   respQueueDepth: Int,    // depth of the response fifo queues
-  sizeEnum: InFlightTableSizeEnum,
   numCoalReqs: Int,       // total number of coalesced requests we can generate in one cycle
 ) {
   def maxCoalLogSize: Int = {
@@ -71,26 +46,8 @@ case class CoalescerConfig(
     coalLogSize
   }
   def wordSizeWidth: Int = {
-    val w = log2Ceil(wordSizeInBytes)
-    require(
-      wordSizeInBytes == 1 << w,
-      s"wordSizeInBytes (${wordSizeInBytes}) is not power of two"
-    )
-    w
-  }
-  
-  // Calculate total source ID space needed
-  def totalSourceIds: Int = numLanes * numOldSrcIds + numNewSrcIds
-  
-  // Get source ID range for a specific lane
-  def laneSourceIdRange(lane: Int): IdRange = {
-    require(lane >= 0 && lane < numLanes, s"Invalid lane $lane")
-    IdRange(lane * numOldSrcIds, (lane + 1) * numOldSrcIds)
-  }
-  
-  // Get source ID range for coalesced requests
-  def coalescedSourceIdRange: IdRange = {
-    IdRange(numLanes * numOldSrcIds, numLanes * numOldSrcIds + numNewSrcIds)
+    require(isPow2(wordSizeInBytes))
+    log2Ceil(log2Ceil(wordSizeInBytes) + 1)
   }
 }
 
@@ -104,7 +61,6 @@ object DefaultCoalescerConfig extends CoalescerConfig(
   numOldSrcIds = 8,
   numNewSrcIds = 8,
   respQueueDepth = 4,
-  sizeEnum = DefaultInFlightTableSizeEnum,
   numCoalReqs = 1,
 )
 
@@ -626,22 +582,21 @@ class Uncoalescer(
   )
 
   val tableRow = tablePipeRegDeq
-  (uncoalPipeRegs zip tableRow.bits.lanes).zipWithIndex.foreach {
-    case ((laneRegs, tableLane), laneNum) =>
+  (uncoalPipeRegs zip tableRow.bits.lanes).foreach {
+    case (laneRegs, tableLane) =>
       val pipeReg = laneRegs.head
       val tableReq = tableLane
       val enqIO = pipeReg.io.enq
-      
+
       enqIO.valid := tableRow.fire && tableReq.valid
       enqIO.bits.op := tableReq.op
       enqIO.bits.source := tableReq.source
-      val logSize = tableRow.bits.sizeEnumT.enumToLogSize(tableReq.sizeEnum)
-      enqIO.bits.size := logSize
+      enqIO.bits.size := tableReq.size
       enqIO.bits.data := getCoalescedDataChunk(
         coalRespPipeRegDeq.bits.data,
         coalRespPipeRegDeq.bits.data.getWidth,
         tableReq.offset,
-        logSize
+        tableReq.size
       )
       enqIO.bits.error := DontCare
   }
@@ -666,7 +621,7 @@ class InFlightTable(
     log2Ceil(config.numOldSrcIds),
     log2Ceil(config.numNewSrcIds),
     config.maxCoalLogSize,
-    config.sizeEnum
+    config.wordSizeWidth
   )
   val entries = config.numNewSrcIds
   val newSourceWidth = log2Ceil(config.numNewSrcIds)
@@ -689,11 +644,7 @@ class InFlightTable(
     (0 until entries).foreach { i =>
       table(i).valid := false.B
       table(i).bits.lanes.foreach { l =>
-        l.valid := false.B
-        l.op := false.B
-        l.source := 0.U
-        l.offset := 0.U
-        l.sizeEnum := config.sizeEnum.INVALID
+        l := 0.U.asTypeOf(l.cloneType)
       }
     }
   }
@@ -713,7 +664,7 @@ class InFlightTable(
         laneEntry.op := req.op
         laneEntry.source := req.source
         laneEntry.offset := ((req.address % (1 << config.maxCoalLogSize).U) >> config.wordSizeWidth)
-        laneEntry.sizeEnum := config.sizeEnum.logSizeToEnum(req.size)
+        laneEntry.size := req.size
     }
     dontTouch(newEntry)
     newEntry
@@ -758,14 +709,14 @@ class InFlightTableEntry(
     val oldSourceWidth: Int,
     val newSourceWidth: Int,
     val offsetBits: Int,
-    val sizeEnumT: InFlightTableSizeEnum
+    val sizeBits: Int,
 ) extends Bundle {
   class PerLane extends Bundle {
     val valid = Bool()
     val op = Bool() // 0=READ 1=WRITE
     val source = UInt(oldSourceWidth.W)
     val offset = UInt(offsetBits.W)
-    val sizeEnum = sizeEnumT()
+    val size = UInt(sizeBits.W)
   }
   
   val source = UInt(newSourceWidth.W)

@@ -48,7 +48,7 @@ class CSRFile(
   case object ThreadId   extends MuonCSR(0xcc0, accessor = wrap(threadId))
   case object WarpId     extends MuonCSR(0xcc1, accessor = wrap(warpId))
   case object CoreId     extends MuonCSR(0xcc2, accessor = wrap(coreId))
-  case object ClusterId  extends MuonCSR(0xcc3, accessor = wrap(clusterId))
+  case object ClusterId  extends MuonCSR(0xcd0, accessor = wrap(clusterId))
   case object NumLanes   extends MuonCSR(0xfc0, m.numLanes.U)
   case object NumWarps   extends MuonCSR(0xfc1, m.numWarps.U)
   case object NumCores   extends MuonCSR(0xfc2, m.numCores.U)

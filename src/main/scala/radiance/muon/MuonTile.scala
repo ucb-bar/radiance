@@ -2,15 +2,13 @@ package radiance.muon
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, IdRange, TransferSizes}
+import freechips.rocketchip.diplomacy.{BufferParams, IdRange, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
 import freechips.rocketchip.resources._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.SoftResetFinishNode
@@ -249,7 +247,6 @@ class MuonTile(
     numOldSrcIds = 1 << lsuSourceIdBits,
     numNewSrcIds = 1 << 5,
     respQueueDepth = 4,
-    sizeEnum = DefaultInFlightTableSizeEnum,
     numCoalReqs = 1,
   )))
 
