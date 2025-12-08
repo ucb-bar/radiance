@@ -77,7 +77,7 @@ class WarpScheduler(implicit p: Parameters)
       val currPC = Mux(joinPC.valid, joinPC.bits, entry.bits)
       io.icache.in.bits.pc := currPC
       io.icache.in.bits.wid := wid.U
-      assert((entry.valid && (!stallTracker.isStalled(wid.U)._1 || joinPC.valid)) || !io.icache.in.valid)
+      assert((entry.valid && (!stallTracker.isStalled(wid.U) || joinPC.valid)) || !io.icache.in.valid)
       // when the request fires, we increment
       when(io.icache.in.fire) {
         latestFetchPC(wid) := currPC // combinational override
@@ -215,7 +215,7 @@ class WarpScheduler(implicit p: Parameters)
   // select warp for fetch
   fetchArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>
     arb.bits := wid.U
-    arb.valid := pcTracker(wid).valid && !stallTracker.isStalled(wid.U)._1
+    arb.valid := pcTracker(wid).valid && !stallTracker.isStalled(wid.U)
   }
   fetchArbiter.io.out.ready := true.B
   fetchWid := fetchArbiter.io.out.bits
@@ -319,14 +319,14 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 
   val stallEntryT = new Bundle {
     val pc = outer.pcT
-    val stallReason = Vec(2, Bool()) // hazard, ibuf backpressure
+    val stallReason = Vec(1, Bool()) // hazard, ibuf backpressure
   }
   val stalls = RegInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(stallEntryT)))
 
-  stalls.zipWithIndex.foreach { case (entry, wid) =>
-    val ibufReady = (outer.io.ibuf(wid).count +& outer.icacheInFlights(wid)) < m.ibufDepth.U
-    entry.stallReason(IBUF) := !ibufReady
-  }
+  // stalls.zipWithIndex.foreach { case (entry, wid) =>
+  //   val ibufReady = (outer.io.ibuf(wid).count +& outer.icacheInFlights(wid)) < m.ibufDepth.U
+  //   entry.stallReason(IBUF) := !ibufReady
+  // }
 
   def stall(wid: UInt, pc: UInt) = {
     when(stalls(wid).stallReason(HAZARD)) {
@@ -340,12 +340,15 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   }
 
   def unstall(wid: UInt) = {
-//    assert(stalls(wid).stallReason(HAZARD))
+    // assert(stalls(wid).stallReason(HAZARD))
     stalls(wid).stallReason(HAZARD) := false.B
   }
 
   def isStalled(wid: UInt) = {
-    (stalls(wid).stallReason.asUInt.orR, stalls(wid).stallReason)
+    // all in flights = icache in flight + rename stage
+    val ibufReady = (outer.io.ibuf(wid).count +&
+      RegNext(outer.icacheInFlights(wid))) +& 1.U < m.ibufDepth.U
+    stalls(wid).stallReason.asUInt.orR || (!ibufReady)
   }
 }
 

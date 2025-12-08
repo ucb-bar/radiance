@@ -112,7 +112,7 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBun
   .zipWithIndex.foreach { case ((b, enq, deq, reserve), wid) =>
     b.io.enq.valid := enq.uop.valid
     b.io.enq.bits := enq.uop.bits
-    assert(!b.io.enq.valid || b.io.enq.ready, s"$wid ibuf full")
+    assert(!b.io.enq.valid || b.io.enq.ready, s"warp $wid ibuf full")
 
     // this is slow (more latency), but safe
     // for memory instructions, we first acquire LSU token, then dequeue,
