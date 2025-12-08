@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import radiance.muon.backend.fp.CVFPU
 import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(

@@ -38,7 +38,14 @@ class WideNonBlockingDCacheModule(outer: NonBlockingDCache) extends NonBlockingD
         }
     }
 
-    wideAmoalu.io.mask := new StoreGen(s2_req.size, s2_req.addr, 0.U, wordBits/8).mask
+    when (s1_clk_en) {
+      when (s1_write) {
+        s2_req.mask := s1_req.mask
+      }
+    }
+
+    // wideAmoalu.io.mask := new StoreGen(s2_req.size, s2_req.addr, 0.U, wordBits/8).mask
+    wideAmoalu.io.mask := s2_req.mask
     wideAmoalu.io.cmd := s2_req.cmd
     wideAmoalu.io.lhs := s2_data_word
     wideAmoalu.io.rhs := s2_req.data

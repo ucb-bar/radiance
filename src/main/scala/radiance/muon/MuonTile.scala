@@ -48,13 +48,6 @@ object MuonMemTL {
       edge.Put(m.tag, m.address, m.size, m.data, m.mask)._2,
       edge.Get(m.tag, m.address, m.size)._2
     )
-    
-    // don't check full mask when valid is low. 
-    // TODO: fix this (e.g. address is 0x02, size is 1, mask is 0b1100)
-    // val fullMaskUnshifted = ((1.U << (1.U << m.size).asUInt).asUInt - 1.U)
-    // assert(!valid || m.mask === fullMaskUnshifted,
-    //  cf"full mask required for now (mask = ${m.mask}, size = ${m.size})")
-    
     tla
   }
 
@@ -67,15 +60,22 @@ object MuonMemTL {
 
   def connectTL[T <: Bundle](mreq: DecoupledIO[MemRequest[T]],
                              mresp: DecoupledIO[MemResponse[T]],
-                             tl_bundle: TLBundle,
-                             tl_edge: TLEdgeOut): Unit = {
-    tl_bundle.a.bits := MuonMemTL.toTLA(mreq.bits, mreq.valid, tl_edge)
-    tl_bundle.a.valid := mreq.valid
-    mreq.ready := tl_bundle.a.ready
+                             tlBundle: TLBundle,
+                             tlEdge: TLEdgeOut,
+                             normalizeStores: Boolean = false): Unit = {
+    tlBundle.a.bits := MuonMemTL.toTLA(mreq.bits, mreq.valid, tlEdge)
+    if (normalizeStores) {
+      when (mreq.bits.store) {
+        tlBundle.a.bits.address := mreq.bits.address & (-4.S).asTypeOf(tlBundle.a.bits.address)
+        tlBundle.a.bits.size := 2.U
+      }
+    }
+    tlBundle.a.valid := mreq.valid
+    mreq.ready := tlBundle.a.ready
 
-    mresp.valid := tl_bundle.d.valid
-    mresp.bits := MuonMemTL.fromTLD(tl_bundle.d.bits, mresp.bits)
-    tl_bundle.d.ready := mresp.ready
+    mresp.valid := tlBundle.d.valid
+    mresp.bits := MuonMemTL.fromTLD(tlBundle.d.bits, mresp.bits)
+    tlBundle.d.ready := mresp.ready
   }
 
   def connectTL[T <: Bundle](mreq: DecoupledIO[MemRequest[T]],
@@ -85,30 +85,16 @@ object MuonMemTL {
     connectTL(mreq, mresp, in, ie)
   }
 
-  // use when TLClientNode has multiple out-edges
   def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
-                                mresp: Vec[DecoupledIO[MemResponse[T]]],
-                                tl_client: TLClientNode) = {
-    require(mreq.length == tl_client.out.length,
-      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_client.out.length})")
-    require(mresp.length == tl_client.out.length,
-      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_client.out.length})")
-    for ((req, resp, (tl_bundle, tl_edge)) <- mreq lazyZip mresp lazyZip tl_client.out) {
-      connectTL(req, resp, tl_bundle, tl_edge)
-    }
-  }
-
-  // use when you have multiple TLClientNodes
-  def multiConnectTL[T <: Bundle](mreq: Vec[DecoupledIO[MemRequest[T]]],
-                                mresp: Vec[DecoupledIO[MemResponse[T]]],
-                                tl_clients: Seq[TLClientNode]) = {
-    require(mreq.length == tl_clients.length,
-      f"length mismatch (core = ${mreq.length}, tilelink = ${tl_clients.length})")
-    require(mresp.length == tl_clients.length,
-      f"length mismatch (core = ${mresp.length}, tilelink = ${tl_clients.length})")
-    for ((req, resp, tl_client) <- mreq lazyZip mresp lazyZip tl_clients) {
-      val (tl_bundle, tl_edge) = tl_client.out(0)
-      connectTL(req, resp, tl_bundle, tl_edge)
+                                  mresp: Vec[DecoupledIO[MemResponse[T]]],
+                                  tlClients: Seq[TLClientNode],
+                                  normalizeStores: Boolean = false) = {
+    require(mreq.length == tlClients.length,
+      f"length mismatch (core = ${mreq.length}, tilelink = ${tlClients.length})")
+    require(mresp.length == tlClients.length,
+      f"length mismatch (core = ${mresp.length}, tilelink = ${tlClients.length})")
+    for ((req, resp, (tlBundle, tlEdge)) <- mreq lazyZip mresp lazyZip tlClients.flatMap(_.out)) {
+      connectTL(req, resp, tlBundle, tlEdge)
     }
   }
 }
