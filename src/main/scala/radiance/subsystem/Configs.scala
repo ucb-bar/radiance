@@ -522,10 +522,10 @@ class WithExtGPUMem(address: BigInt = x"1_0000_0000",
 case class GPUMemParams(address: BigInt = BigInt("0x100000000", 16), size: BigInt = 0x80000000)
 case object GPUMemory extends Field[Option[GPUMemParams]](Some(GPUMemParams(0, x"8000_0000")))
 
-object RadianceSimArgs extends Field[Option[Boolean]](None)
+object RadianceSimArgs extends Field[Boolean](true)
 
 class WithRadianceSimParams(enabled: Boolean) extends Config((_, _, _) => {
-  case RadianceSimArgs => Some(enabled)
+  case RadianceSimArgs => enabled
 })
 
 case class MuonTileAttachParams(

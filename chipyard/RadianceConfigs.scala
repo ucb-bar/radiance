@@ -1,5 +1,6 @@
 package chipyard
 
+import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
@@ -7,6 +8,7 @@ import org.chipsalliance.cde.config.Config
 import radiance.subsystem._
 import radiance.unittest.WithMemPerfMuonTileReplacement
 import testchipip.serdes.TLSerdesser
+import testchipip.soc.OBUS
 
 // ----------------
 // Radiance Configs
@@ -21,7 +23,7 @@ class RadianceBaseConfig extends Config(
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(x"1_0000_0000") ++
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
-  new freechips.rocketchip.subsystem.WithNMemoryChannels(2) ++
+  new freechips.rocketchip.subsystem.WithNMemoryChannels(1) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(64) ++
 
   new WithRadianceControlBus ++
@@ -104,26 +106,78 @@ class RadianceTapeoutSimConfig extends Config(
 // note: this config might throw assertions due to tlserdesser source id implementation?
 // so use sim config for now
 class RadianceTapeoutConfig extends Config(
-  new testchipip.serdes.WithSerialTL(Seq(testchipip.serdes.SerialTLParams(
-    manager = Some(
-      testchipip.serdes.SerialTLManagerParams(
-        memParams = Seq(testchipip.serdes.ManagerRAMParams(
+  new testchipip.soc.WithChipIdPin ++                               // Add pin to identify chips
+  new chipyard.harness.WithSerialTLTiedOff(tieoffs=Some(Seq(1))) ++ // Tie-off the chip-to-chip link in single-chip sims
+  new testchipip.serdes.WithSerialTL(Seq(
+    testchipip.serdes.SerialTLParams(                               // 0th serial-tl is chip-to-bringup-fpga
+      manager = Some(testchipip.serdes.SerialTLManagerParams(       // port acts as a manager of offchip memory
+        memParams = Seq(testchipip.serdes.ManagerRAMParams(         // 4 GB of off-chip memory
           address = BigInt("80000000", 16),
           size    = BigInt("100000000", 16)
         )),
         isMemoryDevice = true,
         slaveWhere = MBUS
-      )
+      )),
+      client = Some(testchipip.serdes.SerialTLClientParams()),      // bringup serial-tl acts only as a client
+      phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(
+        phitWidth = 32,
+        flitWidth = 32,
+      ),  // bringup serial-tl is sync'd to external clock
     ),
-    client = Some(testchipip.serdes.SerialTLClientParams()), // TODO: override id bits here?
-    phyParams = testchipip.serdes.DecoupledExternalSyncSerialPhyParams(phitWidth=32, flitWidth=32),
-    bundleParams = TLSerdesser.STANDARD_TLBUNDLE_PARAMS.copy(
-      dataBits = 256
-    )
-  ))) ++
+    testchipip.serdes.SerialTLParams(                               // 1st serial-tl is chip-to-chip
+      client = Some(testchipip.serdes.SerialTLClientParams()),      // chip-to-chip serial-tl acts as a client
+      manager = Some(testchipip.serdes.SerialTLManagerParams(       // chip-to-chip serial-tl managers other chip's memory
+        memParams = Seq(testchipip.serdes.ManagerRAMParams(
+          address = 0,
+          size = 1L << 33,
+        )),
+        slaveWhere = OBUS
+      )),
+      phyParams = testchipip.serdes.CreditedSourceSyncSerialPhyParams(phitWidth=16) // narrow link
+    ),
+  )) ++
+  new testchipip.soc.WithOffchipBusClient(MBUS,       // obus provides path to other chip's memory, and also backs mbus
+    blockRange = Seq(AddressSet(0, (1L << 33) - 1)),  // The lower 8GB is mapped to this chip
+    replicationBase = Some(1L << 33)                  // The upper 8GB goes off-chip
+  ) ++
+  new testchipip.soc.WithOffchipBus ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
+  new WithRadianceSimParams(false) ++
   new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v") ++
   new RadianceTapeoutSimConfig)
+
+class RadianceBringupHostConfig extends Config(
+  //=============================
+  // Set up TestHarness for standalone-sim
+  //=============================
+  new chipyard.harness.WithAbsoluteFreqHarnessClockInstantiator ++  // Generate absolute frequencies
+  new chipyard.harness.WithSerialTLTiedOff ++                       // when doing standalone sim, tie off the serial-tl port
+  new chipyard.harness.WithSimTSIToUARTTSI ++                       // Attach SimTSI-over-UART to the UART-TSI port
+  new chipyard.iobinders.WithSerialTLPunchthrough ++                // Don't generate IOCells for the serial TL (this design maps to FPGA)
+  new testchipip.serdes.WithSerialTL(Seq(testchipip.serdes.SerialTLParams(
+    manager = Some(testchipip.serdes.SerialTLManagerParams(
+      memParams = Seq(testchipip.serdes.ManagerRAMParams(           // Bringup platform can access all memory from 0 to DRAM_BASE
+        address = BigInt("00000000", 16),
+        size    = BigInt("80000000", 16)
+      ))
+    )),
+    client = Some(testchipip.serdes.SerialTLClientParams()),        // Allow chip to access this device's memory (DRAM)
+    phyParams = testchipip.serdes.DecoupledInternalSyncSerialPhyParams(phitWidth=32, flitWidth=32, freqMHz = 75) // bringup platform provides the clock
+  ))) ++
+  new testchipip.soc.WithOffchipBusClient(SBUS,                     // offchip bus hangs off the SBUS
+    blockRange = AddressSet.misaligned(0x80000000L, (BigInt(1) << 30) * 4)) ++ // offchip bus should not see the main memory of the testchip, since that can be accessed directly
+  new testchipip.soc.WithOffchipBus ++                                         // offchip bus
+  new freechips.rocketchip.subsystem.WithExtMemSize((1 << 30) * 4L) ++         // match what the chip believes the max size should be
+  new testchipip.tsi.WithUARTTSIClient(initBaudRate = BigInt(921600)) ++       // nonstandard baud rate to improve performance
+  new chipyard.clocking.WithPassthroughClockGenerator ++ // pass all the clocks through, since this isn't a chip
+  new chipyard.config.WithUniformBusFrequencies(75.0) ++   // run all buses of this system at 75 MHz
+  new chipyard.NoCoresConfig)
+
+class TetheredRadianceTapeoutConfig extends Config(
+  new chipyard.harness.WithAbsoluteFreqHarnessClockInstantiator ++   // use absolute freqs for sims in the harness
+  new chipyard.harness.WithMultiChipSerialTL(0, 1) ++                // connect the serial-tl ports of the chips together
+  new chipyard.harness.WithMultiChip(0, new RadianceTapeoutConfig) ++ // ChipTop0 is the design-to-be-taped-out
+  new chipyard.harness.WithMultiChip(1, new RadianceBringupHostConfig))  // ChipTop1 is the bringup design
 
 class RadianceClusterConfig extends Config(
   new WithRadianceGemmini(location = InCluster(0), dim = 16, accSizeInKB = 16, tileSize = Right(8), hasAccSlave = false) ++

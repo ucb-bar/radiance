@@ -201,11 +201,7 @@ class VortexTile private(
   // memory requests so that Chisel and Verilog are in agreement on bitwidths.
   // See VX_gpu_pkg.sv
   val NW_WIDTH = (if (numWarps == 1) 1 else log2Ceil(numWarps))
-  val UUID_WIDTH = p(RadianceSimArgs) match {
-    case Some(true) => 44
-    case Some(false) => 1
-    case None => 1
-  }
+  val UUID_WIDTH = if (p(RadianceSimArgs)) 44 else 1
   val imemTagWidth = UUID_WIDTH + NW_WIDTH
 
   require(numWarps >= numLsuLanes,

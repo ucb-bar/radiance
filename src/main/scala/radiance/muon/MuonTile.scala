@@ -257,7 +257,7 @@ class MuonTile(
   override protected def visibleManagers = Seq()
   // this overrides the reset vector nexus node to be consistent with the other tiles (gemmini tile)
   // otherwise it results in a really obscure diplomacy error
-  override protected def visiblePhysAddrBits = 33
+  override protected def visiblePhysAddrBits = if (p(RadianceSimArgs)) 33 else 34
 
   org.chipsalliance.diplomacy.DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
   val dtimProperty = Nil
