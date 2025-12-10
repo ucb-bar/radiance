@@ -75,37 +75,7 @@ class WithRadianceControlBus extends Config ((site, here, up) => {
   // this bus key propagates to ccbus and clcbus, might need to split off
 })
 
-class RadianceMuonConfig extends Config(
-  new WithMuonCores(1, location = InCluster(0)) ++
-  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
-  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
-  new RadianceBaseConfig)
-
-/*
-class RadianceCyclotronConfig extends Config(
-  new WithCyclotronCores(1) ++
-  new WithCoalescer(nNewSrcIds = 16) ++
-  new WithVortexL1Banks(nBanks = 8) ++
-  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
-  new RadianceBaseConfig)
-*/
-
-class RadianceTapeoutSimConfig extends Config(
-  // new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 128, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
-  new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
-  // new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 128, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
-  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
-  new WithExtGPUMem() ++
-  new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
-  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
-  new RadianceBaseConfig
-)
-
-// note: this config might throw assertions due to tlserdesser source id implementation?
-// so use sim config for now
-class RadianceTapeoutConfig extends Config(
+class WithRadianceTapeoutPeripherals extends Config(
   new testchipip.soc.WithChipIdPin ++                               // Add pin to identify chips
   new chipyard.harness.WithSerialTLTiedOff(tieoffs=Some(Seq(1))) ++ // Tie-off the chip-to-chip link in single-chip sims
   new testchipip.serdes.WithSerialTL(Seq(
@@ -143,8 +113,8 @@ class RadianceTapeoutConfig extends Config(
   new testchipip.soc.WithOffchipBus ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
   new WithRadianceSimParams(false) ++
-  new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v") ++
-  new RadianceTapeoutSimConfig)
+  new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v")
+)
 
 class RadianceBringupHostConfig extends Config(
   //=============================
@@ -173,10 +143,41 @@ class RadianceBringupHostConfig extends Config(
   new chipyard.config.WithUniformBusFrequencies(75.0) ++   // run all buses of this system at 75 MHz
   new chipyard.NoCoresConfig)
 
+class RadianceMuonConfig extends Config(
+  new WithMuonCores(1, location = InCluster(0)) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new RadianceBaseConfig)
+
+/*
+class RadianceCyclotronConfig extends Config(
+  new WithCyclotronCores(1) ++
+  new WithCoalescer(nNewSrcIds = 16) ++
+  new WithVortexL1Banks(nBanks = 8) ++
+  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
+  new RadianceBaseConfig)
+*/
+
+class RadianceTapeoutSimConfig extends Config(
+  // new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 128, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  // new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 128, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
+  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new RadianceBaseConfig
+)
+
 class TetheredRadianceTapeoutConfig extends Config(
   new chipyard.harness.WithAbsoluteFreqHarnessClockInstantiator ++   // use absolute freqs for sims in the harness
   new chipyard.harness.WithMultiChipSerialTL(0, 1) ++                // connect the serial-tl ports of the chips together
-  new chipyard.harness.WithMultiChip(0, new RadianceTapeoutConfig) ++ // ChipTop0 is the design-to-be-taped-out
+  new chipyard.harness.WithMultiChip(0, new Config(
+    new WithRadianceTapeoutPeripherals ++
+    new RadianceTapeoutSimConfig)
+  ) ++ // ChipTop0 is the design-to-be-taped-out
   new chipyard.harness.WithMultiChip(1, new RadianceBringupHostConfig))  // ChipTop1 is the bringup design
 
 class RadianceClusterConfig extends Config(
@@ -185,10 +186,6 @@ class RadianceClusterConfig extends Config(
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new RadianceBaseConfig)
-
-class RadianceClusterSynConfig extends Config(
-  new WithRadianceSimParams(false) ++
-  new RadianceClusterConfig)
 
 class RadianceMemPerfConfig extends Config(
   new WithMemPerfMuonTileReplacement(InCluster(0)) ++
