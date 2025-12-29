@@ -15,7 +15,7 @@ jobs:
         shell: bash -el {0}
 
     env:
-      MAKEFLAGS: "-j$(nproc)"
+      MAKEFLAGS: "-j2"
 
     steps:
       - name: System info
@@ -47,6 +47,10 @@ jobs:
       - name: Chipyard setup
         run: |
           .github/scripts/setup-chipyard.sh
+
+      - name: Print conda envs
+        run: |
+          conda env list
 
       # - name: radiance
       #   run: |

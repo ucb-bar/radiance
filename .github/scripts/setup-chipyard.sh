@@ -13,7 +13,7 @@ git clone "https://github.com/ucb-bar/chipyard.git"
 cd "${CHIPYARD_DIR}"
 git checkout main
 
-export MAKEFLAGS="${MAKEFLAGS:-"-j$(nproc)"}"
+echo "MAKEFLAGS is ${MAKEFLAGS}"
 
 ./build-setup.sh riscv-tools -s 6 -s 7 -s 8 -s 9
 
