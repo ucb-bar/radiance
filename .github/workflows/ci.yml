@@ -15,7 +15,9 @@ jobs:
         shell: bash -el {0}
 
     env:
-      MAKEFLAGS: "-j2"
+      CHIPYARD_DIR: ${{ github.workspace }}/chipyard
+      # github runner knocks out with -jN>=4
+      MAKEFLAGS: "-j3"
 
     steps:
       - name: System info
@@ -26,27 +28,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup conda
+      - name: Checkout Chipyard
+        run: |
+          rm -rf "${CHIPYARD_DIR}"
+          git clone "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
+          cd "${CHIPYARD_DIR}"
+          git checkout main
+          echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+
+      - name: Install conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           auto-activate: true
           activate-environment: ""
 
-      - name: Cache Scala deps
+      # - name: Cache Scala deps
+      #   uses: actions/cache@v5
+      #   with:
+      #     path: |
+      #       ~/.ivy2/cache
+      #       ~/.sbt
+      #       ~/.cache/coursier
+      #     key: ${{ runner.os }}-scala-${{ hashFiles('**/*.sbt', '**/project/**') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-scala-
+
+      - name: Cache conda-env
+        id: cache-conda-env
         uses: actions/cache@v5
         with:
           path: |
-            ~/.ivy2/cache
-            ~/.sbt
-            ~/.cache/coursier
-          key: ${{ runner.os }}-scala-${{ hashFiles('**/*.sbt', '**/project/**') }}
-          restore-keys: |
-            ${{ runner.os }}-scala-
+            ${{ env.CHIPYARD_DIR }}/.conda-env
+          key: conda-${{ runner.os }}-${{ env.CHIPYARD_HASH }}
 
-      - name: Chipyard setup
+      - name: Setup Chipyard
         run: |
-          .github/scripts/setup-chipyard.sh
+          .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
 
       - name: Print conda envs
         run: |

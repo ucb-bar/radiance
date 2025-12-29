@@ -2,26 +2,13 @@
 
 set -euo pipefail
 
-WORKDIR="${GITHUB_WORKSPACE:-$(pwd)}"
-CHIPYARD_DIR="${WORKDIR}/chipyard"
+CACHE_HIT="${1:-false}"
 
-echo "[CI] WORKDIR=${WORKDIR}"
-echo "[CI] CHIPYARD_DIR=${CHIPYARD_DIR}"
-
-rm -rf "${CHIPYARD_DIR}"
-git clone "https://github.com/ucb-bar/chipyard.git"
 cd "${CHIPYARD_DIR}"
-git checkout main
 
-echo "MAKEFLAGS is ${MAKEFLAGS}"
-
-./build-setup.sh riscv-tools -s 6 -s 7 -s 8 -s 9
-
-# export CHIPYARD_DIR to later workflow steps
-if [[ -n "${GITHUB_ENV:-}" ]]; then
-  {
-    echo "CHIPYARD_DIR=${CHIPYARD_DIR}"
-  } >> "${GITHUB_ENV}"
+if [[ "${CACHE_HIT}" == "true" ]]; then
+    echo "[CI] conda cache hit! Skipping conda and toolchain steps"
+    ./build-setup.sh riscv-tools --skip-conda --skip-toolchain --skip-firesim --skip-marshal
+else
+    ./build-setup.sh riscv-tools --skip-firesim --skip-marshal
 fi
-
-echo "[CI] Chipyard setup complete in ${CHIPYARD_DIR}"
