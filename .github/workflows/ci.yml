@@ -5,23 +5,25 @@ on:
     branches: [ ci ]
   pull_request:
 
+defaults:
+  run:
+    # for conda
+    shell: bash -el {0}
+
+env:
+  CHIPYARD_DIR: ${{ github.workspace }}/chipyard
+  # flip to force-reset cache
+  CACHE_NUMBER: 0
+
 jobs:
-  chipyard-setup:
+  setup:
+    name: setup
     runs-on: as4
-
-    defaults:
-      run:
-        # for conda activation
-        shell: bash -el {0}
-
-    env:
-      CHIPYARD_DIR: ${{ github.workspace }}/chipyard
-      # flip to force-reset cache
-      CACHE_NUMBER: 0
 
     steps:
       - name: Setup system
         run: |
+          set -x
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
@@ -75,19 +77,23 @@ jobs:
           du -sh "${CHIPYARD_DIR}/.conda-env"
           du -sh "${CHIPYARD_DIR}/.conda-env/riscv-tools"
 
-      - name: Run something
+      - name: Setup Radiance
+        # move radiance to under chipyard/generators
         run: |
-          set -x
-          cd "${CHIPYARD_DIR}"
-          cat env.sh
-          source env.sh
-          echo "RISCV=$RISCV"
-          conda env list
-          which verilator
-          cd sims/verilator
-          make CONFIG=RocketConfig run-binary BINARY="$RISCV/riscv64-unknown-elf/share/riscv-tests/isa/rv64uf-p-fadd"
+          set -eux
+          rm -rf "${CHIPYARD_DIR}/generators/radiance"
+          rsync -av --exclude "chipyard" \
+            "${GITHUB_WORKSPACE}/" "${CHIPYARD_DIR}/generators/radiance/"
 
-      # - name: radiance
-      #   run: |
-      #     source "$CHIPYARD_DIR/env.sh"
-      #     ...
+      - name: Run Radiance
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          conda env list
+          cd sims/verilator
+          make debug CONFIG=RadianceTapeoutSimConfig
+
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
