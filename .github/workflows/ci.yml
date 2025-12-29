@@ -18,8 +18,6 @@ jobs:
       # CHIPYARD_DIR: ${{ github.workspace }}/chipyard
       WORKDIR: /mnt/work
       CHIPYARD_DIR: /mnt/work/chipyard
-      # github runner knocks out with -jN>=4
-      MAKEFLAGS: "-j3"
 
     steps:
       - name: Setup system
@@ -75,8 +73,20 @@ jobs:
         run: |
           conda env list
           df -h
-          du -sh "${{ env.CHIPYARD_DIR }}/.conda-env"
-          du -sh "${{ env.CHIPYARD_DIR }}/.conda-env/riscv-tools"
+          du -sh "${CHIPYARD_DIR}/.conda-env"
+          du -sh "${CHIPYARD_DIR}/.conda-env/riscv-tools"
+
+      - name: Run something
+        run: |
+          set -ex
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          echo $RISCV
+          conda env list
+          conda list | grep verilator
+          which verilator
+          cd sims/verilator
+          make CONFIG=RocketConfig run-binary BINARY="$RISCV/riscv64-unknown-elf/share/riscv-tests/isa/rv64uf-p-fadd"
 
       # - name: radiance
       #   run: |
