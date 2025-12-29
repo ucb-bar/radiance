@@ -40,7 +40,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          auto-activate: true
+          auto-activate-base: true
           activate-environment: ""
 
       # - name: Cache Scala deps
@@ -69,6 +69,9 @@ jobs:
       - name: Print conda envs
         run: |
           conda env list
+          du -sh "${{ env.CHIPYARD_DIR }}/.conda-env"
+          du -sh "${{ env.CHIPYARD_DIR }}/.conda-env/riscv-tools"
+
 
       # - name: radiance
       #   run: |
