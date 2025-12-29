@@ -8,7 +8,7 @@ on:
 defaults:
   run:
     # for conda
-    shell: bash -el {0}
+    shell: bash -leo pipefail {0}
 
 env:
   CHIPYARD_DIR: ${{ github.workspace }}/chipyard
@@ -36,9 +36,8 @@ jobs:
       - name: Checkout Chipyard
         run: |
           rm -rf "${CHIPYARD_DIR}"
-          git clone "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
+          git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
-          git checkout graphics
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
 
       - name: Install conda
