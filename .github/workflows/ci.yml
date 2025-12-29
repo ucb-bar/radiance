@@ -16,8 +16,7 @@ env:
   CACHE_NUMBER: 0
 
 jobs:
-  setup:
-    name: setup
+  everything:
     runs-on: as4
 
     steps:
@@ -31,13 +30,15 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Checkout Chipyard
         run: |
           rm -rf "${CHIPYARD_DIR}"
           git clone "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
-          git checkout main
+          git checkout graphics
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
 
       - name: Install conda
@@ -69,14 +70,6 @@ jobs:
         run: |
           .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
 
-      - name: Print conda envs
-        run: |
-          cd "${CHIPYARD_DIR}"
-          conda env list
-          df -h
-          du -sh "${CHIPYARD_DIR}/.conda-env"
-          du -sh "${CHIPYARD_DIR}/.conda-env/riscv-tools"
-
       - name: Setup Radiance
         # move radiance to under chipyard/generators
         run: |
@@ -85,13 +78,17 @@ jobs:
           rsync -av --exclude "chipyard" \
             "${GITHUB_WORKSPACE}/" "${CHIPYARD_DIR}/generators/radiance/"
 
-      - name: Run Radiance
+      - name: Elaborate Radiance RTL
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
-          conda env list
           cd sims/verilator
           make debug CONFIG=RadianceTapeoutSimConfig
+
+      - name: Run Muon ISA tests
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/run_isa_tests.py
 
       - name: Cleanup workspace
         if: always()
