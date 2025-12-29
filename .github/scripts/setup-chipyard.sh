@@ -18,3 +18,6 @@ if [[ "${CACHE_HIT}" == "true" ]]; then
 else
     ./build-setup.sh riscv-tools --skip-precompile --skip-firesim --skip-marshal
 fi
+
+# don't break make RTL
+# unset MAKEFLAGS

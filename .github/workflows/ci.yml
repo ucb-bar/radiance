@@ -18,6 +18,8 @@ jobs:
       # CHIPYARD_DIR: ${{ github.workspace }}/chipyard
       WORKDIR: /mnt/work
       CHIPYARD_DIR: /mnt/work/chipyard
+      # flip to force-reset cache
+      CACHE_NUMBER: 0
 
     steps:
       - name: Setup system
@@ -63,7 +65,8 @@ jobs:
         with:
           path: |
             ${{ env.CHIPYARD_DIR }}/.conda-env
-          key: conda-${{ runner.os }}-${{ env.CHIPYARD_HASH }}
+            ${{ env.CHIPYARD_DIR }}/env.sh
+          key: conda-${{ runner.os }}-${{ env.CHIPYARD_HASH }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
@@ -71,6 +74,7 @@ jobs:
 
       - name: Print conda envs
         run: |
+          cd "${CHIPYARD_DIR}"
           conda env list
           df -h
           du -sh "${CHIPYARD_DIR}/.conda-env"
@@ -78,12 +82,12 @@ jobs:
 
       - name: Run something
         run: |
-          set -ex
+          set -x
           cd "${CHIPYARD_DIR}"
+          cat env.sh
           source env.sh
-          echo $RISCV
+          echo "RISCV=$RISCV"
           conda env list
-          conda list | grep verilator
           which verilator
           cd sims/verilator
           make CONFIG=RocketConfig run-binary BINARY="$RISCV/riscv64-unknown-elf/share/riscv-tests/isa/rv64uf-p-fadd"
