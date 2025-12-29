@@ -7,7 +7,7 @@ on:
 
 jobs:
   chipyard-setup:
-    runs-on: ubuntu-latest
+    runs-on: as4
 
     defaults:
       run:
@@ -15,20 +15,16 @@ jobs:
         shell: bash -el {0}
 
     env:
-      # CHIPYARD_DIR: ${{ github.workspace }}/chipyard
-      WORKDIR: /mnt/work
-      CHIPYARD_DIR: /mnt/work/chipyard
+      CHIPYARD_DIR: ${{ github.workspace }}/chipyard
       # flip to force-reset cache
       CACHE_NUMBER: 0
 
     steps:
       - name: Setup system
         run: |
-          cat /proc/cpuinfo
+          cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
-          sudo mkdir -p "${WORKDIR}"
-          sudo chown -R $USER:$USER "${WORKDIR}"
 
       - name: Checkout
         uses: actions/checkout@v4

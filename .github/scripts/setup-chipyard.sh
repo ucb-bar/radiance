@@ -5,7 +5,7 @@ set -exo pipefail
 CACHE_HIT="${1:-false}"
 
 # github runner knocks out with -jN>=4
-export MAKEFLAGS="-j3"
+export MAKEFLAGS="-j"
 
 cd "${CHIPYARD_DIR}"
 
@@ -18,6 +18,3 @@ if [[ "${CACHE_HIT}" == "true" ]]; then
 else
     ./build-setup.sh riscv-tools --skip-precompile --skip-firesim --skip-marshal
 fi
-
-# don't break make RTL
-# unset MAKEFLAGS
