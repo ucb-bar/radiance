@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [ ci ]
+  pull_request:
+
+jobs:
+  chipyard-setup:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        # for conda activation
+        shell: bash -el {0}
+
+    env:
+      MAKEFLAGS: "-j$(nproc)"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-variant: Miniforge3
+          miniforge-version: latest
+          auto-update-conda: true
+          auto-activate: true
+          activate-environment: ""
+          # needed for conda caching
+          use-only-tar-bz2: true
+
+      - name: Setup conda
+        # conda install -n base conda-libmamba-solver
+        # conda config --set solver libmamba
+        # conda install -n base conda-lock==1.4.0
+        run: |
+          conda activate base
+
+      - name: Cache Scala deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.ivy2/cache
+            ~/.sbt
+            ~/.cache/coursier
+          key: ${{ runner.os }}-scala-${{ hashFiles('**/*.sbt', '**/project/**') }}
+          restore-keys: |
+            ${{ runner.os }}-scala-
+
+      - name: Chipyard setup
+        run: |
+          .github/scripts/setup-chipyard.sh
+
+      # - name: radiance
+      #   run: |
+      #     source "$CHIPYARD_DIR/env.sh"
+      #     ...
