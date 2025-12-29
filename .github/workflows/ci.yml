@@ -18,26 +18,20 @@ jobs:
       MAKEFLAGS: "-j$(nproc)"
 
     steps:
+      - name: System info
+        run: |
+          cat /proc/cpuinfo
+          vmstat -SM
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install conda
+      - name: Setup conda
         uses: conda-incubator/setup-miniconda@v3
         with:
-          miniforge-variant: Miniforge3
-          miniforge-version: latest
           auto-update-conda: true
           auto-activate: true
           activate-environment: ""
-          # needed for conda caching
-          use-only-tar-bz2: true
-
-      - name: Setup conda
-        # conda install -n base conda-libmamba-solver
-        # conda config --set solver libmamba
-        # conda install -n base conda-lock==1.4.0
-        run: |
-          conda activate base
 
       - name: Cache Scala deps
         uses: actions/cache@v5
