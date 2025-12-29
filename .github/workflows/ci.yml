@@ -25,6 +25,7 @@ jobs:
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,25 +45,23 @@ jobs:
           auto-activate-base: true
           activate-environment: ""
 
-      # - name: Cache Scala deps
-      #   uses: actions/cache@v5
-      #   with:
-      #     path: |
-      #       ~/.ivy2/cache
-      #       ~/.sbt
-      #       ~/.cache/coursier
-      #     key: ${{ runner.os }}-scala-${{ hashFiles('**/*.sbt', '**/project/**') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-scala-
+      - name: Cache Scala deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.ivy2/cache
+            ~/.sbt
+            ~/.cache/coursier
+          key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Cache conda-env
         id: cache-conda-env
         uses: actions/cache@v5
         with:
           path: |
-            ${{ env.CHIPYARD_DIR }}/.conda-env
-            ${{ env.CHIPYARD_DIR }}/env.sh
-          key: conda-${{ runner.os }}-${{ env.CHIPYARD_HASH }}-${{ env.CACHE_NUMBER }}
+            chipyard/.conda-env
+            chipyard/env.sh
+          key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
