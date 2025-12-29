@@ -15,16 +15,20 @@ jobs:
         shell: bash -el {0}
 
     env:
-      CHIPYARD_DIR: ${{ github.workspace }}/chipyard
+      # CHIPYARD_DIR: ${{ github.workspace }}/chipyard
+      WORKDIR: /mnt/work
+      CHIPYARD_DIR: /mnt/work/chipyard
       # github runner knocks out with -jN>=4
       MAKEFLAGS: "-j3"
 
     steps:
-      - name: System info
+      - name: Setup system
         run: |
           cat /proc/cpuinfo
           vmstat -SM
           df -h
+          sudo mkdir -p "${WORKDIR}"
+          sudo chown -R $USER:$USER "${WORKDIR}"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,7 +64,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ${{ env.CHIPYARD_DIR }}/.conda-env/riscv-tools
+            ${{ env.CHIPYARD_DIR }}/.conda-env
           key: conda-${{ runner.os }}-${{ env.CHIPYARD_HASH }}
 
       - name: Setup Chipyard
