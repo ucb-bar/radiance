@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -exo pipefail
 
 CACHE_HIT="${1:-false}"
 
@@ -8,6 +8,9 @@ cd "${CHIPYARD_DIR}"
 
 if [[ "${CACHE_HIT}" == "true" ]]; then
     echo "[CI] Cache hit! Skipping conda and toolchain steps"
+    export RISCV="${CHIPYARD_DIR}/.conda-env/riscv-tools"
+    source $(conda info --base)/etc/profile.d/conda.sh
+    conda activate "${CHIPYARD_DIR}/.conda-env"
     ./build-setup.sh riscv-tools --skip-conda --skip-toolchain --skip-firesim --skip-marshal
 else
     ./build-setup.sh riscv-tools --skip-firesim --skip-marshal
