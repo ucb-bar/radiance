@@ -15,6 +15,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
     val token = Input(lsuTokenT)
     val lsuReserve = reservationIO
     val feCSR = Flipped(feCSRIO)
+    val barrier = barrierIO
     val softReset = Input(Bool())
   })
   
@@ -28,6 +29,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundle
 
   sfuPipe.csrIO.fcsr <> fpPipe.fCSRIO
   sfuPipe.idIO := io.id
+  sfuPipe.barIO <> io.barrier
 
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve

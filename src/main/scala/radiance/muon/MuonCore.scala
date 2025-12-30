@@ -45,6 +45,8 @@ case class MuonCoreParams(
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
+  // misc
+  barrierBits: Int = 4,
   // debug bundles and prints
   debug: Boolean = true
 ) extends PhysicalCoreParams {
@@ -287,16 +289,23 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   def aluOpT = UInt(ALU.SZ_ALU_FN.W)
 
   def csrDataT = UInt(32.W)
+
+  def barrierIO = new BarrierBundle(BarrierParams(
+    haveBits = m.warpIdBits,
+    barrierBits = m.barrierBits,
+    wantBits = m.warpIdBits + m.coreIdBits,
+  ))
 }
 
 /** Muon core and core-private L0 caches */
 class MuonCore(
   test: Boolean = false
-)(implicit p: Parameters) extends CoreModule {
+)(implicit p: Parameters) extends CoreModule with HasCoreBundles {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
     val smem = new SharedMemIO
+    val barrier = barrierIO
     val softReset = Input(Bool())
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
@@ -316,6 +325,7 @@ class MuonCore(
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
   be.io.feCSR := fe.io.csr
+  be.io.barrier <> io.barrier
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset

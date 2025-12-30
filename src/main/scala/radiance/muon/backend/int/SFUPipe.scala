@@ -19,6 +19,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
       val regWrite = Valid(csrDataT)
     }
   })
+  val barIO = IO(barrierIO)
 
   val firstLidOH = PriorityEncoderOH(uop.tmask)
   val firstRs1 = Mux1H(firstLidOH, io.req.bits.rs1Data.get)
@@ -26,6 +27,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
   val rs1Mask = VecInit(io.req.bits.rs1Data.get.map(_(0))).asUInt
 
   val writeback = Wire(schedWritebackT)
+
+  val barrierStart = inst.b(IsNuInvoke)
+  val barrierInProgress = RegInit(0.U.asTypeOf(Valid(barIO.req.bits.cloneType)))
+  val barrierFinish = barIO.resp.valid && (barIO.resp.bits.id === barrierInProgress.bits.id)
+  val barrierReqSent = RegInit(false.B)
 
   writeback.valid := true.B
 
@@ -151,11 +157,34 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
         VecInit.tabulate(m.numLanes)(currentValue + _.U),
         VecInit.fill(m.numLanes)(currentValue),
       )
+    }.elsewhen (barrierStart) {
+      barrierInProgress.valid := true.B
+      barrierInProgress.bits.id := firstRs1.asTypeOf(barIO.req.bits.id)
+      barrierInProgress.bits.have := 1.U
+      barrierInProgress.bits.want := inst(NuNumElems) +& 1.U
+      assert(!barrierReqSent)
+      assert(inst(F3) === 1.U(3.W), "only support sync, imm retire for neutrino")
+      assert(!barrierInProgress.valid, "cannot start barrier when one is in progress")
     }
   }
 
+  barIO.req.valid := barrierInProgress.valid && !barrierReqSent
+  barIO.req.bits.id := barrierInProgress.bits.id
+  barIO.req.bits.have := barrierInProgress.bits.have
+  barIO.req.bits.want := barrierInProgress.bits.want
+
+  when (barIO.req.fire) {
+    barrierReqSent := true.B
+  }
+
+  when (barrierFinish) {
+    barrierInProgress.valid := false.B
+    barrierReqSent := false.B
+  }
+
   io.req.ready := !busy || io.resp.fire
-  io.resp.valid := busy
+  // for barriers, dont respond until the cycle of barrier finish
+  io.resp.valid := busy && !(barrierStart || (barrierInProgress.valid && !barrierFinish))
   io.resp.bits.sched.get := RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire)
   io.resp.bits.reg.get := RegEnable(regWriteback, 0.U.asTypeOf(regWritebackT), io.req.fire)
 }

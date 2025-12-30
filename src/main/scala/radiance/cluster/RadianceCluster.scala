@@ -15,6 +15,7 @@ import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
+import radiance.muon.{BarrierJunction, MuonTile, Synchronizer}
 import radiance.subsystem._
 
 case class RadianceClusterParams(
@@ -136,6 +137,12 @@ class RadianceCluster (
 
   // connect barriers
   val numCoresInCluster = muonTiles.length
+
+  val barrierJunction = LazyModule(new BarrierJunction())
+  val barrierSynchronizer = LazyModule(new Synchronizer())
+
+  muonTiles.foreach(barrierJunction.node := _.asInstanceOf[MuonTile].barrierMaster)
+  barrierSynchronizer.node := barrierJunction.node
 
   // val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
   // muonTiles.foreach { tile =>

@@ -95,6 +95,8 @@ case object CsrImm           extends DecodeField(8, true)
 case object ShAmt            extends DecodeField(7)
 case object ShOp             extends DecodeField(5)
 case object LuiImm           extends DecodeField(32)
+case object IsNuInvoke       extends DecodeField
+case object NuNumElems       extends DecodeField(6)
 case object Raw              extends DecodeField(64)
 
 class Decoded(full: Boolean = true) extends Bundle {
@@ -128,6 +130,7 @@ class Decoded(full: Boolean = true) extends Bundle {
         case ShAmt => decode(Imm24).asUInt(6, 0)
         case ShOp  => decode(Imm24).asUInt(11, 7)
         case LuiImm => (decode(Imm24) << 12.U)(31, 0)
+        case NuNumElems => decode(Imm24).asUInt(23, 18)
         case UseFP32Pipe => decodeB(UseFPPipe) && (
             decode(F7)(inst)(1, 0) === "b00".U ||
             decode(F7)(inst)(6, 2) === "b11000".U ||
@@ -216,7 +219,8 @@ object Decoder {
       MuOpcode.LOAD, MuOpcode.CUSTOM0, MuOpcode.MISC_MEM, MuOpcode.OP_IMM, MuOpcode.AUIPC,
       MuOpcode.STORE, MuOpcode.CUSTOM1, MuOpcode.OP, MuOpcode.LUI, MuOpcode.MADD, MuOpcode.MSUB,
       MuOpcode.NM_SUB, MuOpcode.NM_ADD, MuOpcode.OP_FP, MuOpcode.CUSTOM2, MuOpcode.BRANCH,
-      MuOpcode.JALR, MuOpcode.JAL, MuOpcode.SYSTEM, MuOpcode.CUSTOM3
+      MuOpcode.JALR, MuOpcode.JAL, MuOpcode.SYSTEM, MuOpcode.CUSTOM3,
+      MuOpcode.NU_INVOKE, MuOpcode.NU_INVOKE_IMM
     )
   }
 
@@ -229,7 +233,9 @@ object Decoder {
       UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
-      ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, LuiImm, Raw
+      ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, LuiImm,
+      IsNuInvoke, NuNumElems,
+      Raw
     )
   }
 
@@ -344,10 +350,17 @@ object Decoder {
           MuOpcode.JALR,
           MuOpcode.JAL,
           MuOpcode.SYSTEM,
-          MuOpcode.BRANCH
+          MuOpcode.BRANCH,
+          MuOpcode.NU_INVOKE,
+          MuOpcode.NU_INVOKE_IMM,
         ).contains(op) ||
           sd(IsTMC) || sd(IsSplit) || sd(IsPred) || sd(IsWSpawn) || sd(IsBar)
         )
+      case IsNuInvoke =>
+        Some(Seq(
+          MuOpcode.NU_INVOKE,
+          MuOpcode.NU_INVOKE_IMM,
+        ).contains(op))
       case Rs1IsPC =>
         Some(Seq(
           MuOpcode.AUIPC,

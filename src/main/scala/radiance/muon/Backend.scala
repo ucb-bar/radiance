@@ -13,6 +13,7 @@ class Backend(
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
+    val barrier = barrierIO
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
@@ -43,7 +44,7 @@ class Backend(
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
 
-  val bypass = false
+  val bypass = true
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
@@ -118,8 +119,9 @@ class Backend(
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
+  execute.io.barrier <> io.barrier
   execute.io.req.bits := executeIn
-  
+
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
@@ -140,6 +142,9 @@ class Backend(
       when (isLsuInst) {
         val memOp = LsuOpDecoder.decode(issued.bits.uop.inst.opcode, issued.bits.uop.inst.f3)
         willWriteback := MemOp.isLoad(memOp) || MemOp.isAtomic(memOp)
+      }
+      when (issued.bits.uop.inst.expand().b(IsNuInvoke)) {
+        willWriteback := false.B
       }
     }
     issued.ready := !inFlight

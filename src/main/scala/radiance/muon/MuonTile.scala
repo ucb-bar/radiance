@@ -254,6 +254,8 @@ class MuonTile(
 
   val softResetFinishSlave = SoftResetFinishNode.Slave()
 
+  val barrierMaster = BarrierNode.Master(log2Ceil(muonParams.core.numWarps))
+
   override protected def visibleManagers = Seq()
   // this overrides the reset vector nexus node to be consistent with the other tiles (gemmini tile)
   // otherwise it results in a really obscure diplomacy error
@@ -301,6 +303,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.innerLsuNodes)
   MuonMemTL.multiConnectTL(muon.io.smem.req, muon.io.smem.resp, outer.innerSmemNodes)
+
+  val (barrier, _) = outer.barrierMaster.out.head
+  barrier.req <> muon.io.barrier.req
+  barrier.resp <> muon.io.barrier.resp
 
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
