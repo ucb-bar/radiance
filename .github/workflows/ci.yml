@@ -56,6 +56,8 @@ jobs:
           path: |
             ~/.ivy2/cache
             ~/.sbt
+            ${{ env.CHIPYARD_RELPATH }}/.ivy2/cache
+            ${{ env.CHIPYARD_RELPATH }}/.sbt
             ~/.cache/coursier
           key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
@@ -91,7 +93,10 @@ jobs:
 
       - name: Run Muon ISA tests
         run: |
-          cd "${CHIPYARD_DIR}/generators/radiance"
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
           python3 test/run_isa_tests.py
 
       - name: Cleanup workspace
