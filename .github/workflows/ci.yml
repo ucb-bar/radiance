@@ -97,7 +97,7 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py
+          python3 test/run_isa_tests.py -j "$(nproc)"
 
       - name: Cleanup workspace
         if: always()
