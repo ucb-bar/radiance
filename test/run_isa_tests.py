@@ -6,10 +6,29 @@ import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 myname = Path(sys.argv[0]).name
+SIM_TIMEOUT = 5 * 60  # seconds
+
+
+@dataclass
+class RunningTest:
+    elf: Path
+    process: subprocess.Popen
+    log_path: Path
+    log_file: TextIO
+    err_file: TextIO
+    start_time: float
+    timed_out: bool = False
+
+    def close_streams(self):
+        self.log_file.close()
+        self.err_file.close()
+
 
 def log_has_error(log_path) -> str:
     reason = ""
@@ -47,15 +66,22 @@ def get_and_check_sim_binary(config, sim_dir):
     return sim_binary
 
 
-def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
+def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     elf = Path(elf)
     elf_name = elf.name
     fsdb_path = log_dir / f"{elf_name}.fsdb"
-    log_path  = log_dir / f"{elf_name}.log"
-    out_path  = log_dir / f"{elf_name}.out"
+    log_path = log_dir / f"{elf_name}.log"
+    out_path = log_dir / f"{elf_name}.out"
 
-    dramsim_ini = \
-        chipyard_dir/"generators"/"testchipip"/"src"/"main"/"resources"/"dramsim2_ini"
+    dramsim_ini = (
+        chipyard_dir
+        / "generators"
+        / "testchipip"
+        / "src"
+        / "main"
+        / "resources"
+        / "dramsim2_ini"
+    )
 
     cmd = [
         binary,
@@ -75,33 +101,53 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
 
     print(f"[{myname}] running {elf}")
 
-    with log_path.open("w", encoding="utf-8") as log_file, out_path.open(
-        "w", encoding="utf-8"
-    ) as err_file:
-        process = subprocess.Popen(
-            cmd,
-            cwd=sim_dir,
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=err_file,
-            text=True,
-            bufsize=1,
-        )
-        try:
-            timeout = 5 * 60 # 5min
-            status = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            status = process.wait()
-            print(f"[{myname}] FAIL: {elf}: timeout after {timeout}s")
+    log_file = log_path.open("w", encoding="utf-8")
+    err_file = out_path.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        cmd,
+        cwd=sim_dir,
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=err_file,
+        text=True,
+        bufsize=1,
+    )
+    return RunningTest(
+        elf=elf,
+        process=process,
+        log_path=log_path,
+        log_file=log_file,
+        err_file=err_file,
+        start_time=time.monotonic(),
+    )
+
+
+def finalize_test(test: RunningTest, status: int) -> int:
+    try:
+        if test.timed_out:
+            print(f"[{myname}] FAIL: {test.elf}: timeout after {SIM_TIMEOUT}s")
             return 1
 
-    errstring = log_has_error(log_path).rstrip('\n')
-    if status == 0 and errstring:
-        print(f"[{myname}] FAIL: {elf}")
-        print(f"{errstring}")
-        return 1
-    return status
+        errstring = log_has_error(test.log_path).rstrip("\n")
+        if status == 0 and errstring:
+            print(f"[{myname}] FAIL: {test.elf}")
+            print(f"{errstring}")
+            return 1
+        return status
+    finally:
+        test.close_streams()
+
+
+# single-threaded
+def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
+    test = launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
+    try:
+        status = test.process.wait(timeout=SIM_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        test.timed_out = True
+        test.process.kill()
+        status = test.process.wait()
+    return finalize_test(test, status)
 
 
 def iter_elfs(elf_dir):
@@ -134,22 +180,58 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
         sys.exit(1)
 
     statusall = 0
-    with ProcessPoolExecutor(max_workers=jobs) as executor:
-        future_to_elf = {
-            executor.submit(
-                run_binary, config, binary, elf, log_dir, chipyard_dir, sim_dir
-            ): elf
-            for elf in executables
-        }
-        for future in as_completed(future_to_elf):
-            elf = future_to_elf[future]
+    running = []
+    executables_iter = iter(executables)
+    pending_exhausted = False
+
+    try:
+        while True:
+            while len(running) < jobs and not pending_exhausted:
+                try:
+                    elf = next(executables_iter)
+                except StopIteration:
+                    pending_exhausted = True
+                    break
+                running.append(
+                    launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
+                )
+
+            if not running:
+                break
+
+            still_running = []
+            for test in running:
+                status = test.process.poll()
+                if status is None:
+                    elapsed = time.monotonic() - test.start_time
+                    if elapsed > SIM_TIMEOUT:
+                        test.timed_out = True
+                        test.process.kill()
+                        status = test.process.wait()
+                if status is None:
+                    still_running.append(test)
+                    continue
+                result = finalize_test(test, status)
+                if result != 0 and statusall == 0:
+                    statusall = result
+
+            running = still_running
+
+            if running:
+                time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        print(f"[{myname}] Terminating...", file=sys.stderr)
+        for test in running:
+            test.process.kill()
+        for test in running:
             try:
-                status = future.result()
-            except Exception as exc:
-                print(f"[{myname}] FAIL: {elf} raised {exc}", file=sys.stderr)
-                status = 1
-            if status != 0 and statusall == 0:
-                statusall = status
+                test.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            test.close_streams()
+        raise
+
     return statusall
 
 
