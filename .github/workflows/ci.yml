@@ -81,7 +81,6 @@ jobs:
 
       - name: Build Radiance sim binary
         run: |
-          set -x
           cd "${CHIPYARD_DIR}"
           source env.sh
           cd sims/vcs
