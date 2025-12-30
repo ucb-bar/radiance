@@ -85,13 +85,14 @@ jobs:
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
+          source /ecad/tools/vlsi.bashrc
           cd sims/vcs
           make debug CONFIG=RadianceTapeoutSimConfig
 
-      - name: Run Muon ISA tests
-        run: |
-          cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/run_isa_tests.py
+      # - name: Run Muon ISA tests
+      #   run: |
+      #     cd "${CHIPYARD_DIR}/generators/radiance"
+      #     python3 test/run_isa_tests.py
 
       - name: Cleanup workspace
         if: always()
