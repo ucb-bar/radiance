@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 myname = Path(sys.argv[0]).name
@@ -116,7 +117,9 @@ def iter_elfs(elf_dir):
                 continue
 
 
-def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir):
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
+    print(f"[{myname}] sweeping all ISA tests using {jobs} parallel jobs")
+
     radiance_dir = script_dir.parent
     cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc":
@@ -129,11 +132,24 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir):
     if not executables:
         print(f"error: failed to find any ELF binary in {elf_dir}")
         sys.exit(1)
+
     statusall = 0
-    for elf in executables:
-        status = run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir)
-        if status != 0 and statusall == 0:
-            statusall = status
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        future_to_elf = {
+            executor.submit(
+                run_binary, config, binary, elf, log_dir, chipyard_dir, sim_dir
+            ): elf
+            for elf in executables
+        }
+        for future in as_completed(future_to_elf):
+            elf = future_to_elf[future]
+            try:
+                status = future.result()
+            except Exception as exc:
+                print(f"[{myname}] FAIL: {elf} raised {exc}", file=sys.stderr)
+                status = 1
+            if status != 0 and statusall == 0:
+                statusall = status
     return statusall
 
 
@@ -161,6 +177,8 @@ def parse_args():
                         help="testbench config to run; (soc|backend). default is 'soc'")
     parser.add_argument('--log-dir', default='isa-test-logs',
                         help="directory to be created to place the logs. default is 'isa-test-logs'")
+    parser.add_argument('-j', '--jobs', type=int, default=1,
+                        help="maximum number of parallel simulations (default: 1)")
     return parser.parse_args()
 
 
@@ -177,6 +195,7 @@ def main():
     sim_dir = chipyard_dir / "sims/vcs"
     log_dir = script_dir / log_dir_name / config
     sim_binary = get_and_check_sim_binary(config, sim_dir)
+    jobs = args.jobs if args.jobs and args.jobs > 0 else 1
 
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
@@ -185,7 +204,7 @@ def main():
     if args.binary:
         elf = Path(args.binary)
         return run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
-    return sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir)
+    return sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs)
 
 
 if __name__ == "__main__":
