@@ -155,7 +155,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
 
 def discover_chipyard(script_dir):
     root = script_dir.parents[2].resolve()
-    if root.name != "chipyard":
+    if not root.name.startswith("chipyard"):
         print(f"error: failed to find chipyard root directory from PWD={script_dir}",
               file=sys.stderr)
         sys.exit(1)
