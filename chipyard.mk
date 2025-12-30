@@ -11,7 +11,8 @@ CYCLOTRON_SRC_DIR = $(base_dir)/generators/radiance/cyclotron
 CYCLOTRON_BUILD_DIR = $(CYCLOTRON_SRC_DIR)/target/debug
 CYCLOTRON_LIB = $(CYCLOTRON_BUILD_DIR)/libcyclotron.so
 CYCLOTRON_RS_SRCS = $(shell find $(CYCLOTRON_SRC_DIR)/src -name "*.rs")
-CYCLOTRON_CARGO_FILES = $(CYCLOTRON_SRC_DIR)/Cargo.toml $(CYCLOTRON_SRC_DIR)/Cargo.lock
+CYCLOTRON_CARGO_FILES = $(CYCLOTRON_SRC_DIR)/Cargo.toml \
+			$(wildcard $(CYCLOTRON_SRC_DIR)/Cargo.lock)
 
 .PHONY: cyclotron
 cyclotron: $(CYCLOTRON_LIB)
@@ -21,7 +22,6 @@ $(CYCLOTRON_LIB): $(CYCLOTRON_RS_SRCS) $(CYCLOTRON_CARGO_FILES)
 
 EXTRA_SIM_REQS += $(CYCLOTRON_LIB)
 EXTRA_SIM_LDFLAGS += -L$(CYCLOTRON_BUILD_DIR) -Wl,-rpath,$(CYCLOTRON_BUILD_DIR) -lcyclotron
-
 
 EXT_INCDIRS += \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/common_cells/include \
