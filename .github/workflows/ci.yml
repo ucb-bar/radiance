@@ -11,7 +11,8 @@ defaults:
     shell: bash -leo pipefail {0}
 
 env:
-  CHIPYARD_DIR: ${{ github.workspace }}/chipyard
+  CHIPYARD_RELPATH: chipyard-work
+  CHIPYARD_DIR: ${{ github.workspace }}/chipyard-work
   # flip to force-reset cache
   CACHE_NUMBER: 0
 
@@ -35,7 +36,7 @@ jobs:
 
       - name: Checkout Chipyard
         run: |
-          rm -rf "${CHIPYARD_DIR}"
+          [ -d "${CHIPYARD_DIR}" ] && echo "${CHIPYARD_DIR} already exists, aborting" && exit 1
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
@@ -61,8 +62,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            chipyard/.conda-env
-            chipyard/env.sh
+            ${{ env.CHIPYARD_RELPATH }}/.conda-env
+            ${{ env.CHIPYARD_RELPATH }}/env.sh
           key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
@@ -74,7 +75,7 @@ jobs:
         run: |
           set -eux
           rm -rf "${CHIPYARD_DIR}/generators/radiance"
-          rsync -a --exclude "/chipyard/" \
+          rsync -a --exclude "/${CHIPYARD_RELPATH}/" \
             "${GITHUB_WORKSPACE}/" "${CHIPYARD_DIR}/generators/radiance/"
           ls -al "${CHIPYARD_DIR}/generators/radiance"
 
