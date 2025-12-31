@@ -132,11 +132,13 @@ class Backend(
     val inFlight = RegInit(false.B)
     val hasIssued = RegInit(false.B)
     val willWriteback = RegInit(false.B)
+    val inFlightWarp = RegInit(0.U.asTypeOf(widT))
 
     when (issued.fire) {
       inFlight := true.B
       willWriteback := true.B
       hasIssued := false.B
+      inFlightWarp := issued.bits.uop.wid
 
       val isLsuInst = issued.bits.uop.inst.b(UseLSUPipe)
       when (isLsuInst) {
@@ -167,7 +169,11 @@ class Backend(
     }
     
     when (execute.io.resp.fire && willWriteback) {
-      inFlight := false.B
+      val sched = execute.io.resp.bits.sched.get
+      when (!sched.valid || (inFlightWarp === sched.bits.wid)) {
+        assert(inFlight)
+        inFlight := false.B
+      }
     }
   } else {
     issued.ready := execute.io.req.ready

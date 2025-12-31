@@ -280,10 +280,13 @@ class WarpScheduler(implicit p: Parameters)
               // only set thread mask if warp not already active
               threadMasks(wid) := fullThreadMask
             }
-            pcTracker(wid).bits := wspawn.bits.pc
-            pcTracker(wid).valid := true.B
-            // spawning(wid) := true.B
-            stallTracker.unstall(wid.U)
+            when ((io.commit.bits.wid === wid.U) || (!pcTracker(wid).valid)) {
+              // set pc if warp is 1. initiator of wspawn or 2. disabled
+              pcTracker(wid).bits := wspawn.bits.pc
+              pcTracker(wid).valid := true.B
+              // spawning(wid) := true.B
+              stallTracker.unstall(wid.U)
+            }
           }
         }
       }

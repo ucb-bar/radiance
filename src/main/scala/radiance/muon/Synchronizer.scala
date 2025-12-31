@@ -84,7 +84,7 @@ class Synchronizer(implicit p: Parameters) extends LazyModule with HasMuonCorePa
     }
 
     req.ready := true.B
-    resp.valid := resolved
-    resp.bits.id := req.bits.id
+    resp.valid := RegNext(resolved)
+    resp.bits.id := RegNext(req.bits.id)
   }
 }

@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
+import radiance.memory.BoolArrayUtils.BoolSeqUtils
 import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
@@ -20,6 +21,8 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
     }
   })
   val barIO = IO(barrierIO)
+  // to fix scala lsp issues
+  val barReqT = barIO.req.bits.cloneType.asInstanceOf[barIO.req.bits.type]
 
   val firstLidOH = PriorityEncoderOH(uop.tmask)
   val firstRs1 = Mux1H(firstLidOH, io.req.bits.rs1Data.get)
@@ -28,10 +31,16 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
 
   val writeback = Wire(schedWritebackT)
 
-  val barrierStart = inst.b(IsNuInvoke)
-  val barrierInProgress = RegInit(0.U.asTypeOf(Valid(barIO.req.bits.cloneType)))
-  val barrierFinish = barIO.resp.valid && (barIO.resp.bits.id === barrierInProgress.bits.id)
-  val barrierReqSent = RegInit(false.B)
+  case class BarrierFields(inProgress: Valid[barIO.req.bits.type],
+                           writeback: Valid[SchedWriteback],
+                           start: Bool, reqSent: Bool, respReceived: Bool)
+  val barriers = Seq.tabulate(m.numWarps) { wid => BarrierFields(
+    inProgress = RegInit(0.U.asTypeOf(Valid(barReqT))),
+    writeback = RegInit(0.U.asTypeOf(schedWritebackT)),
+    start = WireInit(io.req.fire && (wid.U === io.req.bits.uop.wid) && inst.b(IsNuInvoke)),
+    reqSent = RegInit(false.B),
+    respReceived = RegInit(false.B)
+  )}
 
   writeback.valid := true.B
 
@@ -157,34 +166,77 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBun
         VecInit.tabulate(m.numLanes)(currentValue + _.U),
         VecInit.fill(m.numLanes)(currentValue),
       )
-    }.elsewhen (barrierStart) {
-      barrierInProgress.valid := true.B
-      barrierInProgress.bits.id := firstRs1.asTypeOf(barIO.req.bits.id)
-      barrierInProgress.bits.have := 1.U
-      barrierInProgress.bits.want := inst(NuNumElems) +& 1.U
-      assert(!barrierReqSent)
-      assert(inst(F3) === 1.U(3.W), "only support sync, imm retire for neutrino")
-      assert(!barrierInProgress.valid, "cannot start barrier when one is in progress")
     }
   }
 
-  barIO.req.valid := barrierInProgress.valid && !barrierReqSent
-  barIO.req.bits.id := barrierInProgress.bits.id
-  barIO.req.bits.have := barrierInProgress.bits.have
-  barIO.req.bits.want := barrierInProgress.bits.want
+  barriers.zipWithIndex.foreach { case (b, wid) =>
+    when (b.start) {
+      when (b.inProgress.valid) {
+        printf("WARNING: duplicate barrier request, may lead to weird behavior\n")
+      }
+      b.inProgress.valid := true.B
+      b.inProgress.bits.id := firstRs1.asTypeOf(barIO.req.bits.id)
+      b.inProgress.bits.have := 1.U
+      b.inProgress.bits.want := inst(NuNumElems) +& 1.U
+      b.writeback := writeback
+      assert(!b.reqSent)
+      assert(inst(F3) === 1.U(3.W), "only support sync, imm retire for neutrino")
+      assert(!b.inProgress.valid, "cannot start barrier when one is in progress")
+    }
 
-  when (barIO.req.fire) {
-    barrierReqSent := true.B
+    val finish = b.inProgress.valid && barIO.resp.valid && (barIO.resp.bits.id === b.inProgress.bits.id)
+    when (finish) {
+      when (b.respReceived) {
+        printf("WARNING: duplicate barrier response, likely reused barrier id\n")
+      }
+      b.respReceived := true.B
+    }
+
+    // val wbFire = io.resp.fire && respIsBarrier && (wid.U === io.resp.bits.sched.get.bits.wid)
+    // when (wbFire) {
+    //   b.inProgress.valid := false.B
+    //   b.reqSent := false.B
+    // }
   }
 
-  when (barrierFinish) {
-    barrierInProgress.valid := false.B
-    barrierReqSent := false.B
+  // arbitrate barIO req to one warp
+  val barReqArbiter = Module(new RRArbiter(barReqT, m.numWarps))
+  (barReqArbiter.io.in zip barriers).foreach { case (arbIn, b) =>
+    arbIn.valid := b.inProgress.valid && !b.reqSent
+    arbIn.bits := b.inProgress.bits
+    when (arbIn.fire) {
+      b.reqSent := true.B
+    }
   }
+  barIO.req <> barReqArbiter.io.out
 
-  io.req.ready := !busy || io.resp.fire
-  // for barriers, dont respond until the cycle of barrier finish
-  io.resp.valid := busy && !(barrierStart || (barrierInProgress.valid && !barrierFinish))
-  io.resp.bits.sched.get := RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire)
-  io.resp.bits.reg.get := RegEnable(regWriteback, 0.U.asTypeOf(regWritebackT), io.req.fire)
+  // arbitrate writeback port
+  val barRespArbiter = Module(new RRArbiter(barriers.head.writeback.cloneType, m.numWarps))
+  (barRespArbiter.io.in zip barriers).foreach { case (arbIn, b) =>
+    arbIn.valid := b.respReceived && b.inProgress.valid
+    arbIn.bits := b.writeback
+    when (arbIn.fire) {
+      b.inProgress.valid := false.B
+      b.reqSent := false.B
+      b.respReceived := false.B
+    }
+  }
+  // non-barrier instructions have writeback priority for simplicity
+  barRespArbiter.io.out.ready := io.resp.ready && !busy
+
+  io.req.ready := !busy || io.resp.fire // TODO: might be able to unset ready if bar wb pending
+  io.resp.valid := busy || barRespArbiter.io.out.valid
+  io.resp.bits.sched.get := Mux(busy,
+    RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire),
+    barRespArbiter.io.out.bits
+  )
+  io.resp.bits.reg.get := Mux(busy,
+    RegEnable(regWriteback, 0.U.asTypeOf(regWritebackT), io.req.fire),
+    0.U.asTypeOf(regWritebackT)
+  )
+
+  // override busy
+  when (io.req.fire) {
+    busy := !inst.b(IsNuInvoke)
+  }
 }
