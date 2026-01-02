@@ -136,18 +136,14 @@ class RadianceCluster (
   clsbus.inwardNode := visibilityNode := l1cache.outNode
 
   // connect barriers
-  val numCoresInCluster = muonTiles.length
+  val realMuons = muonTiles.filter(_.isInstanceOf[MuonTile]).map(_.asInstanceOf[MuonTile])
+  if (realMuons.nonEmpty) {
+    val barrierJunction = LazyModule(new BarrierJunction())
+    val barrierSynchronizer = LazyModule(new Synchronizer())
 
-  val barrierJunction = LazyModule(new BarrierJunction())
-  val barrierSynchronizer = LazyModule(new Synchronizer())
-
-  muonTiles.foreach(barrierJunction.node := _.asInstanceOf[MuonTile].barrierMaster)
-  barrierSynchronizer.node := barrierJunction.node
-
-  // val barrierSlaveNode = BarrierSlaveNode(numCoresInCluster)
-  // muonTiles.foreach { tile =>
-  //   barrierSlaveNode := tile.barrierMasterNode
-  // }
+    realMuons.foreach(barrierJunction.node := _.barrierMaster)
+    barrierSynchronizer.node := barrierJunction.node
+  }
 
 //  val l1InNodes = muonTiles.map(_.dcacheNode)
   val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))

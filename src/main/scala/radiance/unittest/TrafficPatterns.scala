@@ -141,22 +141,41 @@ object TrafficPatterns {
     Seq(0, 1).map(new RandomAccess(0, 131072 >> lgSize, _))
   }
 
-  def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
-    Seq(("r", (x: TrafficPattern) => x.getSmem _),
-      ("w", (x: TrafficPattern) => x.putSmem _))
-      .flatMap { case (suffix, func) =>
+  // def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
+  //   Seq(("w", (x: TrafficPattern) => x.putSmem _),
+  //     ("r", (x: TrafficPattern) => x.getSmem _))
+  //     .flatMap { case (suffix, func) =>
 
-      Seq(
-        stridedPatterns,
-        randomPatterns,
-        tiledPatterns,
-        tiledPatterns.map(Transposed(_)),
-        swizzledPatterns,
-        swizzledPatterns.map(Transposed(_)),
+  //     Seq(
+  //       stridedPatterns,
+  //       randomPatterns,
+  //       tiledPatterns,
+  //       tiledPatterns.map(Transposed(_)),
+  //       swizzledPatterns,
+  //       swizzledPatterns.map(Transposed(_)),
+  //     )
+  //       .flatten
+  //       .map(Bounded(_, size))
+  //       .map(x => (s"${x.name}_$suffix", func(x)(clusterId)))
+  //   }
+  // }
+
+  def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
+    Seq(
+      stridedPatterns,
+      randomPatterns,
+      tiledPatterns,
+      tiledPatterns.map(Transposed(_)),
+      swizzledPatterns,
+      swizzledPatterns.map(Transposed(_)),
+    )
+      .flatten
+      .map(Bounded(_, size))
+      .flatMap(x =>
+        Seq(("w", (x: TrafficPattern) => x.putSmem _),
+            ("r", (x: TrafficPattern) => x.getSmem _)).map { case (suffix, func) =>
+          (s"${x.name}_$suffix", func(x)(clusterId))
+        }
       )
-        .flatten
-        .map(Bounded(_, size))
-        .map(x => (s"${x.name}_$suffix", func(x)(clusterId)))
-    }
   }
 }

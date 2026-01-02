@@ -84,8 +84,8 @@ class RadianceSharedMemComponents(
 
         (prealignBuffer, (xbar, xi, xo), policyNode)
       }
-      // coalesce single addresses TODO: return leg is really hacky, disabled for now
-      val prealignNodes = if (false) {
+      // coalesce single addresses
+      val prealignNodes = if (true) {
         val (coalescerAdapter, coalescerClient) = SingleAddrCoalescer(3)
         components.foreach(x => coalescerAdapter := x._1)
         Seq(coalescerAdapter, coalescerClient)

@@ -39,7 +39,7 @@ class SingleAddrCoalescer(val sourceBits: Int = 2)
       out.a.valid := in.a.valid && !coalescibleOut
       in.a.ready := Mux(coalescibleOut, coalOut.a.ready && coalSource.io.id.valid, out.a.ready)
 
-      in.d.valid := out.d.valid // || coalescedIn // TODO FIXME HACK, ASSUMES UNIFORM D READY
+      in.d.valid := out.d.valid && !coalescedIn // TODO FIXME HACK, ASSUMES UNIFORM D READY
       out.d.ready := in.d.ready && !coalescedIn // coalesced response has priority
     }
 
@@ -66,24 +66,44 @@ class SingleAddrCoalescer(val sourceBits: Int = 2)
     // coalesced D input
     val inD = node.in.map(_._1.d)
 
-    // TODO TODO TODO TODO TODO TODO TODO TODO TODO: MASSIVE HACK
-    assert(!coalescedIn ||
-      // coalesced response must fire at once back at all lanes (for now)
-      inD.map(x => !x.valid || (x.ready === inD.head.ready)).andR)
+    val currDFires = inD.map(_.fire)
+    val pendingDResp = RegInit(VecInit.fill(numLanes)(false.B))
+    val storedDResp = RegEnable(coalOut.d.bits, 0.U.asTypeOf(coalOut.d.bits), coalOut.d.fire)
+    val peekMeta = coalSource.io.peek.get
+    val storedDMeta = RegEnable(peekMeta, 0.U.asTypeOf(peekMeta), coalOut.d.fire)
+    val partialMode = pendingDResp.asUInt.orR
 
-    coalescedIn := coalOut.d.valid
-    val allDReady = inD.map(x => !x.valid || x.ready).andR
-    coalOut.d.ready := allDReady
+    // enter partial mode when cannot clear all D lanes in one cycle
+    val currDFireOrInvalid = (currDFires zip peekMeta).map { case (df, pm) =>
+      df || (!pm.valid)
+    }
+    when (coalOut.d.fire && !currDFireOrInvalid.andR) {
+      assert(pendingDResp.asUInt === 0.U)
+      // unfired and valid lanes
+      pendingDResp := VecInit(currDFireOrInvalid.map(!_))
+    }
+    // when in partial mode, clear lanes that fire
+    when (partialMode) {
+      (pendingDResp zip currDFires).foreach { case (p, f) => p := p && !f }
+    }
+
+    coalescedIn := coalOut.d.valid || partialMode
+    // we only drive uncoalesced D inputs when there's a coalesced response,
+    // otherwise, passthrough nodes drive the inputs
+    when (coalescedIn) {
+      // when partial, in D is stored if that lane hasn't cleared yet; otherwise, it's out D
+      val metas = Mux(partialMode, storedDMeta, peekMeta)
+      (inD lazyZip pendingDResp lazyZip metas).foreach { case (in, pending, meta) =>
+        in.valid := Mux(partialMode, pending, coalOut.d.valid) && meta.valid
+        in.bits := Mux(partialMode, storedDResp, coalOut.d.bits)
+        in.bits.source := meta.bits
+      }
+    }
+    // take a new D resp when there's nothing pending
+    coalOut.d.ready := pendingDResp.asUInt === 0.U
 
     coalSource.io.reclaim.valid := coalOut.d.fire
     coalSource.io.reclaim.bits := coalOut.d.bits.source
-    when (coalescedIn) { // override passthrough D
-      (inD zip coalSource.io.peek.get).foreach { case (d, sv) =>
-        d.valid := sv.valid
-        d.bits := coalOut.d.bits
-        d.bits.source := sv.bits
-      }
-    }
   }
 }
 

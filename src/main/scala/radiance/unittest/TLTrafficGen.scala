@@ -3,6 +3,7 @@ package radiance.unittest
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
+import chisel3.util.random.LFSR
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
@@ -65,6 +66,7 @@ class TLTrafficGen(val nodeName: String, val sourceBits: Int,
 }
 
 class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
+  val verificationMode = true
 
   // elaboration time
   // ================
@@ -90,7 +92,10 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
     val allFinished = Output(Bool())
   })
 
-  val sourceGen = Module(new SourceGenerator(outer.sourceBits))
+  val sourceGen = Module(new SourceGenerator(
+    sourceWidth = outer.sourceBits,
+    metadata = Option.when(verificationMode)(UInt(tlNode.params.dataBits.W))
+  ))
 
   val (reqCounter, reqWrap) = Counter(tlNode.a.fire, outer.n)
   val (patternCounter, patternWrap) = Counter(reqWrap, outer.patterns.length)
@@ -123,7 +128,17 @@ class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
     tlEdge.Get(sourceGen.io.id.bits, storedReq.address, storedReq.lgSize)._2,
   )
 
-  tlNode.d.ready := true.B
+  if (verificationMode) {
+    sourceGen.io.meta.get := tlNode.a.bits.address.asTypeOf(sourceGen.io.meta.get)
+    val readyGen = LFSR(width = 16, seed = Some(outer.nodeName.hashCode >>> 16))
+    tlNode.d.ready := readyGen(0)
+    when (tlNode.d.fire && (tlNode.d.bits.opcode === TLMessages.AccessAckData)) {
+      assert(tlNode.d.bits.data === sourceGen.io.peek.get)
+    }
+  } else {
+    tlNode.d.ready := true.B
+  }
+
   sourceGen.io.reclaim.valid := tlNode.d.fire
   sourceGen.io.reclaim.bits := tlNode.d.bits.source
 
