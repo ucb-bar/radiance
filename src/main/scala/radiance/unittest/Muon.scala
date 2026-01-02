@@ -897,7 +897,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   io.finished := cfbox.io.finished
 }
 
-class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"     -> p(MuonKey).archLen,
       "INST_BITS"    -> p(MuonKey).instBits,
       "NUM_WARPS"    -> p(MuonKey).numWarps,
@@ -907,8 +907,10 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       "IMM_BITS"     -> 32,
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
-    ))
-    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+))
+
+class CyclotronFrontendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
@@ -951,18 +953,8 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"     -> p(MuonKey).archLen,
-      "INST_BITS"    -> p(MuonKey).instBits,
-      "NUM_WARPS"    -> p(MuonKey).numWarps,
-      "NUM_LANES"    -> p(MuonKey).numLanes,
-      "OP_BITS"      -> Isa.opcodeBits,
-      "REG_BITS"     -> Isa.regBits,
-      "IMM_BITS"     -> 32,
-      "CSR_IMM_BITS" -> Isa.csrImmBits,
-      "PRED_BITS"    -> Isa.predBits,
-    ))
-    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+class CyclotronBackendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -978,18 +970,8 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"  -> p(MuonKey).archLen,
-      "NUM_WARPS" -> p(MuonKey).numWarps,
-      "NUM_LANES" -> p(MuonKey).numLanes,
-      "OP_BITS"   -> Isa.opcodeBits,
-      "REG_BITS"  -> Isa.regBits,
-      "IMM_BITS"  -> 32,
-      "PRED_BITS" -> Isa.predBits,
-      "TAG_BITS"  -> 32,
-      "LSU_LANES" -> p(MuonKey).lsu.numLsuLanes,
-    ))
-    with HasBlackBoxResource {
+class CyclotronMemBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource {
 
   val archLen = p(MuonKey).archLen
   val lsuLanes = p(MuonKey).lsu.numLsuLanes
