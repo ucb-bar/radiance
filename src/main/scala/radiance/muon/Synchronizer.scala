@@ -59,7 +59,7 @@ class BarrierJunction(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class Synchronizer(implicit p: Parameters) extends LazyModule with HasMuonCoreParameters {
+class Synchronizer(implicit p: Parameters) extends LazyModule with HasCoreParameters {
 
   val maxWantBits = log2Ceil(muonParams.numWarps * muonParams.numCores)
   val node = BarrierNode.Slave(muonParams.barrierBits, maxWantBits)

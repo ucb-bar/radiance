@@ -9,7 +9,7 @@ import org.chipsalliance.cde.config.Parameters
  *  the module resolves WAW/WAR hazards by stalling.  RAW hazards are handled
  *  inside the reservation station.
  */
-class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))

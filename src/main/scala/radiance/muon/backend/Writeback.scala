@@ -11,20 +11,17 @@ class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
   val tmask = tmaskT
 }
 
-class IssueIF(implicit val p: Parameters)
-  extends Bundle with HasMuonCoreParameters {
+class IssueIF(implicit p: Parameters) extends CoreBundle()(p) {
   val regAddr = UInt(Isa.regBits.W)
   val data = Vec(numLanes, UInt(archLen.W))
   val wmask = UInt(numLaneBytes.W)
 }
 
-class SchedIF(implicit val p: Parameters)
-  extends Bundle with HasMuonCoreParameters {
+class SchedIF(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = UInt(muonParams.archLen.W)
 }
 
-class Writeback(implicit p: Parameters)
-  extends CoreModule with HasCoreBundles {
+class Writeback(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(writebackT()))
     val rfWIssueIF = Output(Valid(new IssueIF))

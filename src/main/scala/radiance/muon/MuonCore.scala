@@ -114,9 +114,11 @@ class MemResponse[T <: Bundle] (
 }
 
 /** derived parameters from MuonCoreParams */
-trait HasMuonCoreParameters {
+trait HasCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
+  implicit val m = muonParams
+
   val numLanes = muonParams.numLanes
   val numWarps = muonParams.numWarps
   val archLen = muonParams.archLen
@@ -134,61 +136,6 @@ trait HasMuonCoreParameters {
   require(muonParams.maxPendingReads > 0, "wrong maxPendingReads for scoreboard")
   val scoreboardReadCountBits = log2Ceil(muonParams.maxPendingReads + 1)
   val scoreboardWriteCountBits = 1 // 0 or 1
-}
-
-abstract class CoreModule(implicit val p: Parameters) extends Module
-  with HasMuonCoreParameters
-
-abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
-  with HasMuonCoreParameters with HasCoreBundles
-
-class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val req = Vec(
-    muonParams.lsu.numLsuLanes,
-    Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
-  )
-  val resp = Vec(
-    muonParams.lsu.numLsuLanes,
-    Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
-  )
-}
-
-class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val req = Vec(
-    muonParams.lsu.numLsuLanes,
-    Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
-  )
-  val resp = Vec(
-    muonParams.lsu.numLsuLanes,
-    Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
-  )
-}
-
-class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreBundles {
-  val req = Decoupled(new MemRequest(
-    tagBits = imemTagBits,
-    addressBits = addressBits,
-    dataBits = imemDataBits,
-  ).cloneType)
-  val resp = Flipped(Decoupled(new MemResponse(
-    tagBits = imemTagBits,
-    dataBits = imemDataBits,
-  ).cloneType))
-}
-
-/** Trace IO to software testbench that logs PC and register read data at
- *  issue time. */
-class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
-  val pc = pcT
-  val regs = Vec(Isa.maxNumRegs, new Bundle {
-    val enable = Bool()
-    val address = pRegT
-    val data = Vec(numLanes, regDataT)
-  })
-}
-
-trait HasCoreBundles extends HasMuonCoreParameters {
-  implicit val m = muonParams
 
   def pcT = UInt(m.archLen.W)
   def widT = UInt(m.warpIdBits.W)
@@ -297,10 +244,61 @@ trait HasCoreBundles extends HasMuonCoreParameters {
   ))
 }
 
+abstract class CoreModule(implicit val p: Parameters) extends Module
+  with HasCoreParameters
+
+abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
+  with HasCoreParameters
+
+class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(dmemTagBits, dmemDataBits)))
+  )
+}
+
+class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val req = Vec(
+    muonParams.lsu.numLsuLanes,
+    Decoupled(new MemRequest(smemTagBits, addressBits, smemDataBits))
+  )
+  val resp = Vec(
+    muonParams.lsu.numLsuLanes,
+    Flipped(Decoupled(new MemResponse(smemTagBits, smemDataBits)))
+  )
+}
+
+class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreParameters {
+  val req = Decoupled(new MemRequest(
+    tagBits = imemTagBits,
+    addressBits = addressBits,
+    dataBits = imemDataBits,
+  ).cloneType)
+  val resp = Flipped(Decoupled(new MemResponse(
+    tagBits = imemTagBits,
+    dataBits = imemDataBits,
+  ).cloneType))
+}
+
+/** Trace IO to software testbench that logs PC and register read data at
+ *  issue time. */
+class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val pc = pcT
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
+    val address = pRegT
+    val data = Vec(numLanes, regDataT)
+  })
+}
+
 /** Muon core and core-private L0 caches */
 class MuonCore(
   test: Boolean = false
-)(implicit p: Parameters) extends CoreModule with HasCoreBundles {
+)(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO

@@ -82,7 +82,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 }
 
 /** Testbench for Muon backend pipe */
-class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMuonCoreParameters {
+class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCoreParameters {
   val io = IO(new Bundle {
     val finished = Bool()
   })
@@ -133,7 +133,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMu
 }
 
 /** Testbench for Muon backend LSU pipe */
-class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCoreParameters {
+class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
   
   // every lsu lane is a separate TL client
@@ -910,7 +910,7 @@ abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Ma
 ))
 
 class CyclotronFrontendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
-with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+with HasBlackBoxResource with HasCoreParameters {
 
   val io = IO(new Bundle {
     val clock = Input(Clock())
@@ -954,7 +954,7 @@ with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
 }
 
 class CyclotronBackendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
-with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())

@@ -16,8 +16,7 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(implicit p: Parameters)
-extends CoreModule()(p) with HasCoreBundles {
+class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
@@ -407,7 +406,7 @@ extends CoreModule()(p) with HasCoreBundles {
   }
 }
 
-class FakeWriteback(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class FakeWriteback(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val issue = Flipped(Decoupled(uopT))
     val writeback = regWritebackT

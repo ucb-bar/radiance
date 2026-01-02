@@ -12,7 +12,7 @@ abstract class ExPipe(
   recomposerTypes: Option[Seq[Data]] = None,
   outLanes: Option[Int] = None,
   requiresRs3: Boolean = false,
-)(implicit p: Parameters) extends CoreModule with HasCoreBundles {
+)(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = requiresRs3)))
     val resp = Decoupled(writebackT(writebackSched, writebackReg))

@@ -10,7 +10,7 @@ import radiance.muon.backend._
 case class FPPipeParams (val numFP32Lanes: Int = 8,
                          val numFPDivLanes: Int = 8)
 
-trait HasFPPipeParams extends HasMuonCoreParameters {
+trait HasFPPipeParams extends HasCoreParameters {
   def numFP32Lanes = muonParams.fpPipe.numFP32Lanes
   def numFP16Lanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFPDivLanes = muonParams.fpPipe.numFPDivLanes

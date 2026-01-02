@@ -89,7 +89,7 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
   }
 }
 
-class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val enq = Vec(muonParams.numWarps, Flipped(ibufEnqIO))
     val deq = Vec(muonParams.numWarps, Decoupled(ibufEntryT))

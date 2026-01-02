@@ -14,7 +14,7 @@ class ALUPipe(implicit p: Parameters)
     recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), Bool())),
     outLanes = Some(p(MuonKey).intPipe.numALULanes),
     writebackSched = true, writebackReg = true)
-    with HasIntPipeParams with HasCoreBundles with HasNonDiplomaticTileParameters {
+    with HasIntPipeParams with HasNonDiplomaticTileParameters {
 
   assert(xLen == 32, "alu requires 32 bit xlen")
 

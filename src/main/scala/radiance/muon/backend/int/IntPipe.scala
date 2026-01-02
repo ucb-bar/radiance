@@ -61,7 +61,7 @@ case class IntPipeParams(numALULanes: Int = 8,
                          numMulDivLanes: Int = 8,
                          mulDivParams: MulDivParams = MulDivParams())
 
-trait HasIntPipeParams extends HasMuonCoreParameters {
+trait HasIntPipeParams extends HasCoreParameters {
   def numALULanes = muonParams.intPipe.numALULanes
   def numMulDivLanes = muonParams.intPipe.numMulDivLanes
   def mulDivParams = muonParams.intPipe.mulDivParams

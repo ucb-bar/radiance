@@ -9,7 +9,7 @@ import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
 
-class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) with HasCoreBundles {
+class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val idIO = IO(clusterCoreIdT)
   val csrIO = IO(new Bundle {
     val fe = Flipped(feCSRIO)
