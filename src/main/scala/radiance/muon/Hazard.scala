@@ -52,7 +52,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     val hasWAW = hasRd && (io.scb.readRd.pendingWrites =/= 0.U)
     val hasWAR = hasRd && (io.scb.readRd.pendingReads =/= 0.U)
 
-    // TODO: for now simply gates WAR into RS; relax this into stalling at
+    // @perf: for now simply gates WAR into RS; relax this into stalling at
     // writeback
     rsAdmit.valid := uopValid && !hasWAW && !hasWAR
     if (muonParams.debug) {
@@ -81,6 +81,11 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles
     wid match {
       case 0 => tryWarp(ibPort)
       case _ => {
+        when (ibPort.valid) {
+          assert(false.B,
+            cf"hazard: TODO: ibuf for warpId>0 not handled yet " +
+            cf"(pc=0x${ibPort.bits.uop.pc}%x, warpId=${ibPort.bits.uop.wid})")
+        }
         val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
         rsAdmit.valid := false.B
         rsAdmit.bits := DontCare
