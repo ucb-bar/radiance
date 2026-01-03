@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class Rename(implicit p: Parameters) extends CoreModule with HasCoreBundles {
+class Rename(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val rename = Flipped(renameIO)
     val ibuf = Vec(muonParams.numWarps, ibufEnqIO)

@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int._
 import radiance.muon.backend.fp._
 
-class Execute(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
     val resp = Decoupled(writebackT())

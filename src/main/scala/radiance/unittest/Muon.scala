@@ -44,7 +44,7 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
-/** Testbench for Muon frontend pipe */
+/** Testbench for Muon frontend as top */
 class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -81,14 +81,15 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   dontTouch(fe.io)
 }
 
-/** Testbench for Muon backend pipe */
-class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMuonCoreParameters {
+/** Testbench for Muon backend as top */
+class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCoreParameters {
   val io = IO(new Bundle {
     val finished = Bool()
   })
 
   val ibuf = Module(new InstBuffer)
   val cfe = Module(new CyclotronFrontend()(p))
+  val cdiff = Module(new CyclotronDiffTest()(p))
   val be = Module(new Backend(test = true)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
@@ -97,7 +98,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMu
   cfe.io.imem.req.valid := false.B
   cfe.io.imem.req.bits := DontCare
   cfe.io.imem.resp.ready := false.B
-  cfe.io.trace <> be.io.trace.get
+  cdiff.io.trace <> be.io.trace.get
 
   // cfe -> ibuf enq
   (ibuf.io.enq zip cfe.io.ibuf).foreach { case (ib, cf) =>
@@ -119,21 +120,23 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasMu
   be.io.coreId := 0.U
   be.io.softReset := false.B
   be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
+  // TODO: barriers not handled
+  be.io.barrier.req.ready := false.B
+  be.io.barrier.resp.valid := false.B
+  be.io.barrier.resp.bits := DontCare
 
   // ibuf -> be
   be.io.ibuf <> ibuf.io.deq
   ibuf.io.lsuReserve <> be.io.lsuReserve
   dontTouch(be.io)
 
-  // TODO: also instantiate CyclotronBackend as the issue downstream
-
   // run until all ibufs dry up
   val ibufDry = !be.io.ibuf.map(_.valid).reduce(_ || _)
   io.finished := cfe.io.finished && ibufDry
 }
 
-/** Testbench for Muon backend LSU pipe */
-class LSUWrapper(implicit p: Parameters) extends LazyModule with HasMuonCoreParameters {
+/** Testbench for Muon backend LSU as top */
+class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
   
   // every lsu lane is a separate TL client
@@ -840,7 +843,6 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)
     val ibuf = Vec(muonParams.numWarps, Decoupled(new UOpFlattened))
-    val trace = Flipped(Valid(new TraceIO))
     val finished = Output(Bool())
   })
 
@@ -886,18 +888,11 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
     connectToSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
     connectToSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
   }
-  cfbox.io.trace.valid := io.trace.valid
-  cfbox.io.trace.pc := io.trace.bits.pc
-  (cfbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
-    boxtr.enable := tr.enable
-    boxtr.address := tr.address
-    boxtr.data := tr.data.asUInt
-  }
 
   io.finished := cfbox.io.finished
 }
 
-class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Map(
       "ARCH_LEN"     -> p(MuonKey).archLen,
       "INST_BITS"    -> p(MuonKey).instBits,
       "NUM_WARPS"    -> p(MuonKey).numWarps,
@@ -907,9 +902,10 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       "IMM_BITS"     -> 32,
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
-    ))
-    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+))
 
+class CyclotronFrontendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -935,34 +931,16 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       val tmask = Output(UInt((numWarps * muonParams.numLanes).W))
       val raw = Output(UInt((numWarps * muonParams.instBits).W))
     }
-    val trace = Input(new Bundle {
-      val valid = Bool()
-      val pc = pcT
-      val regs = Vec(Isa.maxNumRegs, new Bundle {
-        val enable = Bool()
-        val address = pRegT
-        val data = UInt((muonParams.numLanes * muonParams.archLen).W)
-      })
-    })
     val finished = Output(Bool())
   })
 
   addResource("/vsrc/CyclotronFrontend.v")
+  addResource("/vsrc/Cyclotron.vh")
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"     -> p(MuonKey).archLen,
-      "INST_BITS"    -> p(MuonKey).instBits,
-      "NUM_WARPS"    -> p(MuonKey).numWarps,
-      "NUM_LANES"    -> p(MuonKey).numLanes,
-      "OP_BITS"      -> Isa.opcodeBits,
-      "REG_BITS"     -> Isa.regBits,
-      "IMM_BITS"     -> 32,
-      "CSR_IMM_BITS" -> Isa.csrImmBits,
-      "PRED_BITS"    -> Isa.predBits,
-    ))
-    with HasBlackBoxResource with HasMuonCoreParameters with HasCoreBundles {
+class CyclotronBackendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
@@ -975,21 +953,52 @@ class CyclotronBackendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   })
 
   addResource("/vsrc/CyclotronBackend.v")
+  addResource("/vsrc/Cyclotron.vh")
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
-      "ARCH_LEN"  -> p(MuonKey).archLen,
-      "NUM_WARPS" -> p(MuonKey).numWarps,
-      "NUM_LANES" -> p(MuonKey).numLanes,
-      "OP_BITS"   -> Isa.opcodeBits,
-      "REG_BITS"  -> Isa.regBits,
-      "IMM_BITS"  -> 32,
-      "PRED_BITS" -> Isa.predBits,
-      "TAG_BITS"  -> 32,
-      "LSU_LANES" -> p(MuonKey).lsu.numLsuLanes,
-    ))
-    with HasBlackBoxResource {
+class CyclotronDiffTest(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val trace = Flipped(Valid(new TraceIO))
+  })
+
+  val cbox = Module(new CyclotronDiffTestBlackBox()(p))
+  cbox.io.clock := clock
+  cbox.io.reset := reset.asBool
+
+  cbox.io.trace.valid := io.trace.valid
+  cbox.io.trace.pc := io.trace.bits.pc
+  (cbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
+    boxtr.enable := tr.enable
+    boxtr.address := tr.address
+    boxtr.data := tr.data.asUInt
+  }
+}
+
+class CyclotronDiffTestBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasCoreParameters {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    val trace = Input(new Bundle {
+      val valid = Bool()
+      val pc = pcT
+      val regs = Vec(Isa.maxNumRegs, new Bundle {
+        val enable = Bool()
+        val address = pRegT
+        val data = UInt((muonParams.numLanes * muonParams.archLen).W)
+      })
+    })
+  })
+
+  addResource("/vsrc/CyclotronDiffTest.v")
+  addResource("/vsrc/Cyclotron.vh")
+  addResource("/csrc/Cyclotron.cc")
+}
+
+class CyclotronMemBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource {
 
   val archLen = p(MuonKey).archLen
   val lsuLanes = p(MuonKey).lsu.numLsuLanes
@@ -1021,6 +1030,7 @@ class CyclotronMemBlackBox(implicit val p: Parameters) extends BlackBox(Map(
   })
 
   addResource("/vsrc/CyclotronMem.v")
+  addResource("/vsrc/Cyclotron.vh")
   addResource("/csrc/Cyclotron.cc")
 }
 

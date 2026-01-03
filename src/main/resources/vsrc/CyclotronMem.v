@@ -41,6 +41,8 @@ module CyclotronMemBlackBox #(
     $error("Tag size exceeds 32 bits");
   end
 
+  `include "Cyclotron.vh"
+
   import "DPI-C" function chandle cyclotron_mem_init(
     input longint num_lanes
   );

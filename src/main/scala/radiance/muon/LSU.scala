@@ -847,7 +847,7 @@ class FreeListAllocator(entries: Int) extends Module {
 }
 
 object Utils {
-    def selectPacket[T <: Data](vec: Vec[T], packet: UInt)(p: HasMuonCoreParameters): Vec[T] = {
+    def selectPacket[T <: Data](vec: Vec[T], packet: UInt)(p: HasCoreParameters): Vec[T] = {
         require(vec.length == p.muonParams.numLanes, "Vec length must be equal to numLanes")
         val out = Wire(Vec(p.muonParams.lsu.numLsuLanes, vec.head.cloneType))
         for (i <- 0 until p.muonParams.lsu.numLsuLanes) {

@@ -89,6 +89,7 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd sims/vcs
+          make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
       - name: Run Muon ISA tests

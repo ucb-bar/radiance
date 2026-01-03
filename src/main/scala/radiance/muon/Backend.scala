@@ -7,7 +7,7 @@ import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
   test: Boolean = false
-)(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+)(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val lsuReserve = reservationIO
     val dmem = new DataMemIO
@@ -44,7 +44,7 @@ class Backend(
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
 
-  val bypass = true
+  val bypass = false
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B

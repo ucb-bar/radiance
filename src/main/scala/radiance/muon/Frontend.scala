@@ -7,8 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 
 
 class Frontend(implicit p: Parameters)
-  extends CoreModule()(p)
-  with HasCoreBundles {
+  extends CoreModule()(p) {
 
   val io = IO(new Bundle {
     val imem = new InstMemIO

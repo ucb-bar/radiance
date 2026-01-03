@@ -302,11 +302,8 @@ module CyclotronBackendBlackBox #(
 
   output logic        finished
 );
-  // whenever you change these interfaces, make sure to update:
-  // (1) import "DPI-C" declaration
-  // (2) C function declaration
-  // (3) Verilog DPI calls inside initial/always blocks
-  import "DPI-C" function void cyclotron_init();
+  `include "Cyclotron.vh"
+
   import "DPI-C" function void cyclotron_backend(
     input  byte issue_valid,
     input  byte issue_warp_id,
@@ -346,21 +343,6 @@ module CyclotronBackendBlackBox #(
     output int  writeback_ipdom_else_mask,
     output int  writeback_ipdom_else_pc,
     output byte finished
-  );
-
-  import "DPI-C" function void cyclotron_imem(
-    output byte imem_req_ready,
-    input  byte imem_req_valid,
-    input  byte imem_req_bits_store,
-    input  int  imem_req_bits_address,
-    input  byte imem_req_bits_size,
-    input  byte imem_req_bits_tag,
-    input  longint imem_req_bits_data,
-    input  byte imem_req_bits_mask,
-    input  byte imem_resp_ready,
-    output byte imem_resp_valid,
-    output byte imem_resp_bits_tag,
-    output longint imem_resp_bits_data
   );
 
   // number of issue ports (mirror the scalar issue_0..issue_7 ports)

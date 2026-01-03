@@ -29,7 +29,7 @@ class CSRFile(
 
   fcsr: UInt,
   fcsrWrite: UInt => Unit,
-)(implicit m: MuonCoreParams, implicit val p: Parameters) extends HasCoreBundles {
+)(implicit m: MuonCoreParams, implicit val p: Parameters) extends HasCoreParameters {
   def wrap(x: UInt) = Some(() => x)
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
   case object MArchId    extends MuonCSR(CSRs.marchid, 0x6D756F6E.U)

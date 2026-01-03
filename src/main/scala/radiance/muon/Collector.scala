@@ -65,7 +65,7 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
  *  Guarantees no bank conflicts and 1-cycle read/write accesses, at the
  *  expense of large area.
  */
-class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with HasCoreBundles {
+class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     /** Request collection of a single uop with full rs1/2/3 combination. */
     val readReq  = CollectorRequest(Isa.maxNumRegs, isWrite = false)

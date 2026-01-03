@@ -16,8 +16,7 @@ class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 class WarpScheduler(implicit p: Parameters)
-  extends CoreModule
-  with HasCoreBundles {
+  extends CoreModule {
 
   val cmdProcOpt = None
 

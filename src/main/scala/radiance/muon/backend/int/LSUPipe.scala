@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.ExPipe
-import radiance.muon.HasCoreBundles
 import radiance.muon.LoadStoreUnit
 import radiance.muon.LsuReservationReq
 import radiance.muon.LsuReservationResp
@@ -20,7 +19,7 @@ import radiance.muon.LsuQueueToken
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
-class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) with HasCoreBundles {
+class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) {
     val reserveIO = IO(reservationIO)
     
     val tokenIO = IO(Input(lsuTokenT))
