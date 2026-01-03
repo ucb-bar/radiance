@@ -7,7 +7,7 @@
 
 extern "C" {
 
-const char *cyclotron_get_binary() {
+const char *vpi_get_binary() {
 #ifndef NO_VPI
   static std::string elf_arg;
   s_vpi_vlog_info info;

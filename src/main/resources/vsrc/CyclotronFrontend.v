@@ -49,26 +49,10 @@ module CyclotronFrontendBlackBox #(
   output logic [(NUM_WARPS*NUM_LANES)-1:0]    ibuf_tmask,
   output logic [(NUM_WARPS*INST_BITS)-1:0]    ibuf_raw,
 
-  input  logic                            trace_valid,
-  input  logic [ARCH_LEN-1:0]             trace_pc,
-  input  logic                            trace_regs_0_enable,
-  input  logic [REG_BITS-1:0]             trace_regs_0_address,
-  input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_0_data,
-  input  logic                            trace_regs_1_enable,
-  input  logic [REG_BITS-1:0]             trace_regs_1_address,
-  input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_1_data,
-  input  logic                            trace_regs_2_enable,
-  input  logic [REG_BITS-1:0]             trace_regs_2_address,
-  input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_2_data,
-
   output logic finished
 );
-  // whenever you change these interfaces, make sure to update:
-  // (1) import "DPI-C" declaration
-  // (2) C function declaration
-  // (3) Verilog DPI calls inside initial/always blocks
-  import "DPI-C" function void cyclotron_init(input string elffile);
-  import "DPI-C" function string cyclotron_get_binary();
+  `include "Cyclotron.vh"
+
   import "DPI-C" function void cyclotron_frontend(
     input  bit     ready[NUM_WARPS],
     output bit     valid[NUM_WARPS],
@@ -88,35 +72,6 @@ module CyclotronFrontendBlackBox #(
     output int     tmask[NUM_WARPS],
     output longint raw[NUM_WARPS],
     output bit     finished
-  );
-
-  import "DPI-C" function cyclotron_difftest_reg(
-    input bit  trace_valid,
-    input int  trace_pc,
-    input bit  trace_regs_0_enable,
-    input byte trace_regs_0_address,
-    input int  trace_regs_0_data[NUM_LANES],
-    input bit  trace_regs_1_enable,
-    input byte trace_regs_1_address,
-    input int  trace_regs_1_data[NUM_LANES],
-    input bit  trace_regs_2_enable,
-    input byte trace_regs_2_address,
-    input int  trace_regs_2_data[NUM_LANES]
-  );
-
-  import "DPI-C" function void cyclotron_imem(
-    output bit     imem_req_ready,
-    input  bit     imem_req_valid,
-    input  byte    imem_req_bits_store,
-    input  int     imem_req_bits_address,
-    input  byte    imem_req_bits_size,
-    input  byte    imem_req_bits_tag,
-    input  longint imem_req_bits_data,
-    input  byte    imem_req_bits_mask,
-    input  bit     imem_resp_ready,
-    output bit     imem_resp_valid,
-    output byte    imem_resp_bits_tag,
-    output longint imem_resp_bits_data
   );
 
   bit  __imem_req_ready;
@@ -145,18 +100,6 @@ module CyclotronFrontendBlackBox #(
   int     __in_ibuf_tmask  [0:NUM_WARPS-1];
   longint __in_ibuf_raw    [0:NUM_WARPS-1];
 
-  bit     __out_trace_valid;
-  int     __out_trace_pc;
-  bit     __out_trace_regs_0_enable;
-  byte    __out_trace_regs_0_address;
-  int     __out_trace_regs_0_data [0:NUM_LANES-1];
-  bit     __out_trace_regs_1_enable;
-  byte    __out_trace_regs_1_address;
-  int     __out_trace_regs_1_data [0:NUM_LANES-1];
-  bit     __out_trace_regs_2_enable;
-  byte    __out_trace_regs_2_address;
-  int     __out_trace_regs_2_data [0:NUM_LANES-1];
-
   bit __in_finished;
 
   string elffile;
@@ -165,7 +108,7 @@ module CyclotronFrontendBlackBox #(
   // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
   // ELF
   initial begin
-    elffile = cyclotron_get_binary();
+    elffile = vpi_get_binary();
     cyclotron_init(elffile);
   end
 
@@ -239,23 +182,6 @@ module CyclotronFrontendBlackBox #(
     end
   endgenerate
 
-  // connect regtrace signals
-  assign __out_trace_valid = trace_valid;
-  assign __out_trace_pc = trace_pc;
-  assign __out_trace_regs_0_enable  = trace_regs_0_enable;
-  assign __out_trace_regs_0_address = trace_regs_0_address;
-  assign __out_trace_regs_1_enable  = trace_regs_1_enable;
-  assign __out_trace_regs_1_address = trace_regs_1_address;
-  assign __out_trace_regs_2_enable  = trace_regs_2_enable;
-  assign __out_trace_regs_2_address = trace_regs_2_address;
-  generate
-    for (g = 0; g < NUM_LANES; g = g + 1) begin
-      assign __out_trace_regs_0_data[g] = trace_regs_0_data[ARCH_LEN*g +: ARCH_LEN];
-      assign __out_trace_regs_1_data[g] = trace_regs_1_data[ARCH_LEN*g +: ARCH_LEN];
-      assign __out_trace_regs_2_data[g] = trace_regs_2_data[ARCH_LEN*g +: ARCH_LEN];
-    end
-  endgenerate
-
   assign finished = __in_finished;
 
   always @(posedge clock) begin
@@ -298,20 +224,6 @@ module CyclotronFrontendBlackBox #(
         __in_ibuf_tmask,
         __in_ibuf_raw,
         __in_finished
-      );
-
-      cyclotron_difftest_reg(
-        __out_trace_valid,
-        __out_trace_pc,
-        __out_trace_regs_0_enable,
-        __out_trace_regs_0_address,
-        __out_trace_regs_0_data,
-        __out_trace_regs_1_enable,
-        __out_trace_regs_1_address,
-        __out_trace_regs_1_data,
-        __out_trace_regs_2_enable,
-        __out_trace_regs_2_address,
-        __out_trace_regs_2_data
       );
     end
   end
