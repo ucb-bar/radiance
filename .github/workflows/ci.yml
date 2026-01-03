@@ -11,7 +11,8 @@ defaults:
 
 env:
   CHIPYARD_RELPATH: chipyard-work
-  CHIPYARD_DIR: ${{ github.workspace }}/chipyard-work
+  # need to be persistent cross-action
+  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard-${{ github.run_id }}-${{ github.run_attempt }}"
   # flip to force-reset cache
   CACHE_NUMBER: 0
 
@@ -26,7 +27,7 @@ jobs:
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"/*
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,7 +37,9 @@ jobs:
       - name: Checkout Chipyard
         run: |
           [ -d "${CHIPYARD_DIR}" ] && echo "${CHIPYARD_DIR} already exists, aborting" && exit 1
+          mkdir -p "${CHIPYARD_DIR}"
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
+          ln -sf "${CHIPYARD_DIR}" "${CHIPYARD_RELPATH}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
 
@@ -103,4 +106,5 @@ jobs:
       - name: Cleanup workspace
         if: always()
         run: |
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"/*
+          [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
