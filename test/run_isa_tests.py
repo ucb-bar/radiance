@@ -129,9 +129,10 @@ def finalize_test(test: RunningTest, status: int) -> int:
             return 1
 
         errstring = log_has_error(test.log_path).rstrip("\n")
-        if status == 0 and errstring:
-            print(f"[{myname}] FAIL: {test.elf}")
-            print(f"{errstring}")
+        if status != 0 or errstring:
+            print(f"[{myname}] FAIL: {test.elf} (status: {status})")
+            if errstring:
+                print(f"{errstring}")
             return 1
         return status
     finally:
