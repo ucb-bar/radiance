@@ -14,6 +14,7 @@ import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.SoftResetFinishNode
 import radiance.memory._
 import radiance.subsystem._
+import radiance.unittest.CyclotronDiffTest
 
 case object NumMuonCores extends Field[Int](0)
 
@@ -297,8 +298,8 @@ class MuonTile(
 }
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
+  val muon = Module(new MuonCore(test = true))
 
-  val muon = Module(new MuonCore())
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
   MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.innerLsuNodes)
@@ -315,4 +316,7 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
+
+  val cdiff = Module(new CyclotronDiffTest)
+  cdiff.io.trace <> muon.io.trace.get
 }
