@@ -76,7 +76,7 @@ class TLNBDCache(val params: TLNBDCacheParams)
     // TileVisibilityNodeKey -> visibilityNode,
   ))
 
-  val nbdCache = LazyModule(new WideNonBlockingDCache(params.id)(q))
+  val nbdCache = LazyModule(new MuonNonBlockingDCache(params.id)(q))
 
   val outNode = nbdCache.node
   override lazy val module = new TLNBDCacheModule(this)(q)
