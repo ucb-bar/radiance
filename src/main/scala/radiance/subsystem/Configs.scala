@@ -353,13 +353,13 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
       mmioAddress = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x4000,
       scalingFactorMem = Some(GemminiScalingFactorMemConfig(
         baseAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset + 0x8000,
-        sizeInBytes = 16 << 10,
-        sramLineSizeInBytes = 256 / 8,
-        numBanks = 4,
+        // sizeInBytes = 16 << 10,
+        // sramLineSizeInBytes = 256 / 8,
+        // numBanks = 8,
       )),
       requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
         baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
-        numInputLanes = simt.numLanes,
+        numGPUInputLanes = simt.numLanes,
         // numOutputLanes = 32,
         // gpuMaxFactor = 2,
         // gpuWordSize = 4,

@@ -245,7 +245,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // scaling factor
-  val scalingFacIO = outer.scalingFacNode.foreach { scalingFacNode =>
+  outer.scalingFacNode.foreach { scalingFacNode =>
     val conf = outer.gemminiParams.scalingFactorMem.get
     val (node, edge) = scalingFacNode.in.head
 
@@ -273,12 +273,10 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     assert(!node.a.valid || (node.a.bits.size === 3.U))
 
     outer.gemmini.module.mx_io.get.scale_mem <> scalingFacWriteReq
-
-    scalingFacWriteReq
   }
 
   // requantizer
-  val requantizerIO = outer.gemminiParams.requantizer.map { q =>
+  outer.gemminiParams.requantizer.foreach { q =>
     val in = Wire(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
     val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
@@ -336,19 +334,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       node.d.ready := true.B
     }
 
-    out.valid := false.B // TODO connect requantizer module from Gemmini
-    out.bits := DontCare
-    in.ready := false.B
-
-    dontTouch(in)
-    dontTouch(out)
-    (in, out)
+    outer.gemmini.module.mx_io.get.requant_in <> in
+    outer.gemmini.module.mx_io.get.requant_out <> out
   }
 
   // lut
-  val lutIO = outer.gemminiParams.lookupTable.map(c => Wire(Decoupled(UInt(c.numBits.W))))
-  lutIO.foreach(_.ready := false.B) // TODO connect lut io from Gemmini
-  lutIO.foreach(dontTouch(_))
+  val lutIO = outer.gemminiParams.lookupTable.map { c =>
+    val lut = Wire(Decoupled(UInt(c.numBits.W)))
+    outer.gemmini.module.mx_io.get.lut <> lut
+    lut
+  }
+
 
   // cisc
   val cisc = new GemminiCISC(
