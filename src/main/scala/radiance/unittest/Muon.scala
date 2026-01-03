@@ -968,6 +968,7 @@ class CyclotronDiffTest(implicit p: Parameters) extends CoreModule {
 
   cbox.io.trace.valid := io.trace.valid
   cbox.io.trace.pc := io.trace.bits.pc
+  cbox.io.trace.warpId := io.trace.bits.warpId
   (cbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
     boxtr.enable := tr.enable
     boxtr.address := tr.address
@@ -984,6 +985,7 @@ with HasBlackBoxResource with HasCoreParameters {
     val trace = Input(new Bundle {
       val valid = Bool()
       val pc = pcT
+      val warpId = widT
       val regs = Vec(Isa.maxNumRegs, new Bundle {
         val enable = Bool()
         val address = pRegT
