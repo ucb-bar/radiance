@@ -97,6 +97,7 @@ jobs:
           make debug CONFIG=RadianceTapeoutSimConfig
 
   run:
+    name: run
     runs-on: as4
     needs: build
     steps:
@@ -108,8 +109,12 @@ jobs:
           cd generators/radiance
           python3 test/run_isa_tests.py -j "$(nproc)"
 
-      - name: Cleanup workspace
-        if: always()
+  clean:
+    runs-on: as4
+    needs: run
+    if: always()
+    steps:
+      - name: Cleanup workspace and chipyard
         run: |
           [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
           [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
