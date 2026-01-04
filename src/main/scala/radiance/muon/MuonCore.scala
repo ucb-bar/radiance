@@ -288,6 +288,7 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
  *  issue time. */
 class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = pcT
+  val warpId = widT
   val regs = Vec(Isa.maxNumRegs, new Bundle {
     val enable = Bool()
     val address = pRegT

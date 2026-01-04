@@ -18,6 +18,7 @@ module CyclotronDiffTestBlackBox #(
 
   input  logic                            trace_valid,
   input  logic [ARCH_LEN-1:0]             trace_pc,
+  input  logic [WARP_ID_BITS-1:0]         trace_warpId,
   input  logic                            trace_regs_0_enable,
   input  logic [REG_BITS-1:0]             trace_regs_0_address,
   input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_0_data,
@@ -36,6 +37,7 @@ module CyclotronDiffTestBlackBox #(
   // need to be in ascending order to match with C array memory layout
   bit     __out_trace_valid;
   int     __out_trace_pc;
+  int     __out_trace_warpId;
   bit     __out_trace_regs_0_enable;
   byte    __out_trace_regs_0_address;
   int     __out_trace_regs_0_data [0:NUM_LANES-1];
@@ -61,6 +63,7 @@ module CyclotronDiffTestBlackBox #(
   // connect regtrace signals
   assign __out_trace_valid = trace_valid;
   assign __out_trace_pc = trace_pc;
+  assign __out_trace_warpId = trace_warpId;
   assign __out_trace_regs_0_enable  = trace_regs_0_enable;
   assign __out_trace_regs_0_address = trace_regs_0_address;
   assign __out_trace_regs_1_enable  = trace_regs_1_enable;
@@ -82,6 +85,7 @@ module CyclotronDiffTestBlackBox #(
       cyclotron_difftest_reg(
         __out_trace_valid,
         __out_trace_pc,
+        __out_trace_warpId,
         __out_trace_regs_0_enable,
         __out_trace_regs_0_address,
         __out_trace_regs_0_data,
