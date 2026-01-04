@@ -89,7 +89,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
 
   val ibuf = Module(new InstBuffer)
   val cfe = Module(new CyclotronFrontend()(p))
-  val cdiff = Module(new CyclotronDiffTest()(p))
+  val cdiff = Module(new CyclotronDiffTest(tick = false)(p))
   val be = Module(new Backend(test = true)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
@@ -957,12 +957,16 @@ with HasBlackBoxResource with HasCoreParameters {
   addResource("/csrc/Cyclotron.cc")
 }
 
-class CyclotronDiffTest(implicit p: Parameters) extends CoreModule {
+/** If `tick` is true, advance cyclotron sim by one tick inside the difftest
+ *  logic.  Set to false when some other module does the tick, e.g.
+ *  separate cyclotron frontend */
+class CyclotronDiffTest(tick: Boolean = true)
+(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val trace = Flipped(Valid(new TraceIO))
   })
 
-  val cbox = Module(new CyclotronDiffTestBlackBox()(p))
+  val cbox = Module(new CyclotronDiffTestBlackBox(tick)(p))
   cbox.io.clock := clock
   cbox.io.reset := reset.asBool
 
@@ -976,8 +980,19 @@ class CyclotronDiffTest(implicit p: Parameters) extends CoreModule {
   }
 }
 
-class CyclotronDiffTestBlackBox(implicit p: Parameters) extends CyclotronBlackBox
-with HasBlackBoxResource with HasCoreParameters {
+class CyclotronDiffTestBlackBox(tick: Boolean)(implicit val p: Parameters)
+extends BlackBox(Map(
+      "ARCH_LEN"     -> p(MuonKey).archLen,
+      "INST_BITS"    -> p(MuonKey).instBits,
+      "NUM_WARPS"    -> p(MuonKey).numWarps,
+      "NUM_LANES"    -> p(MuonKey).numLanes,
+      "OP_BITS"      -> Isa.opcodeBits,
+      "REG_BITS"     -> Isa.regBits,
+      "IMM_BITS"     -> 32,
+      "CSR_IMM_BITS" -> Isa.csrImmBits,
+      "PRED_BITS"    -> Isa.predBits,
+      "SIM_TICK"     -> (if (tick) 1 else 0),
+)) with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
