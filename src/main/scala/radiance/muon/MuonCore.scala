@@ -298,7 +298,7 @@ class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
 
 /** Muon core and core-private L0 caches */
 class MuonCore(
-  test: Boolean = false
+  val test: Boolean = false
 )(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
