@@ -65,14 +65,14 @@ jobs:
             ~/.cache/coursier
           key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
-      - name: Cache conda-env
-        id: cache-conda-env
-        uses: actions/cache@v5
-        with:
-          path: |
-            ${{ env.CHIPYARD_RELPATH }}/.conda-env
-            ${{ env.CHIPYARD_RELPATH }}/env.sh
-          key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
+      # - name: Cache conda-env
+      #   id: cache-conda-env
+      #   uses: actions/cache@v5
+      #   with:
+      #     path: |
+      #       ${{ env.CHIPYARD_RELPATH }}/.conda-env
+      #       ${{ env.CHIPYARD_RELPATH }}/env.sh
+      #     key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
