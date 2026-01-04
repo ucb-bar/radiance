@@ -76,7 +76,8 @@ jobs:
 
       - name: Setup Chipyard
         run: |
-          .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
+          # .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
+          .github/scripts/setup-chipyard.sh ""
 
       - name: Setup Radiance
         # move radiance to under chipyard/generators
@@ -97,11 +98,10 @@ jobs:
           make debug CONFIG=RadianceTapeoutSimConfig
 
   run-soc-isa-tests:
-    name: run-soc
     runs-on: as4
     needs: build
     steps:
-      - name: Run Muon ISA tests
+      - name: Run ISA tests on SoC config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
@@ -110,11 +110,10 @@ jobs:
           python3 test/run_isa_tests.py -j "$(nproc)"
 
   run-cosim-isa-tests:
-    name: run-cosim
     runs-on: as4
     needs: build
     steps:
-      - name: Run Muon ISA tests
+      - name: Run ISA tests on backend co-sim config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
@@ -124,7 +123,7 @@ jobs:
 
   clean:
     runs-on: as4
-    needs: [run-soc, run-cosim]
+    needs: [run-soc-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace and chipyard
