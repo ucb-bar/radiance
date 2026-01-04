@@ -96,7 +96,7 @@ jobs:
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
-  run:
+  run SoC isa-tests:
     name: run
     runs-on: as4
     needs: build
@@ -108,6 +108,19 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_isa_tests.py -j "$(nproc)"
+
+  run co-sim isa-tests:
+    name: run
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run Muon ISA tests
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
+          python3 test/run_isa_tests.py -j "$(nproc)" -c backend
 
   clean:
     runs-on: as4

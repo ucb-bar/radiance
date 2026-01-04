@@ -44,7 +44,7 @@ class Backend(
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
 
-  val bypass = false
+  val bypass = true
   val issued = if (bypass) {
     hazard.reset := true.B
     scoreboard.reset := true.B
