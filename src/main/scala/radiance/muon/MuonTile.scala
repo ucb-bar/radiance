@@ -298,7 +298,7 @@ class MuonTile(
 }
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
-  val muon = Module(new MuonCore(test = true))
+  val muon = Module(new MuonCore(test = false))
 
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
@@ -317,6 +317,6 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
-  val cdiff = Module(new CyclotronDiffTest)
-  cdiff.io.trace <> muon.io.trace.get
+  // val cdiff = Module(new CyclotronDiffTest)
+  // cdiff.io.trace <> muon.io.trace.get
 }
