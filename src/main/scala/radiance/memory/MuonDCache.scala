@@ -46,15 +46,95 @@ class MaskMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends MSHRFile {
   io.replay.bits.mask := sdqMask(replay_sdq_addr)
 }
 
+// cache flush is started after all other operations cease
+// (i.e. no pending commands in pipeline, no mshrs, shutdown ready for all interfaces)
 class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModule()(p) {
+  require(isPow2(nWays), "for simplicity")
+
   val io = IO(new Bundle {
     val flush = Input(Bool())
     val busy = Output(Bool())
     val done = Output(Bool())
 
-    val metaRead = Decoupled(new L1MetaReadReq)
-    val wbReq = Decoupled(new WritebackReq(edge.bundle))
+    val meta_read = Decoupled(new L1MetaReadReq)
+    val meta_write = Decoupled(new L1MetaWriteReq)
+    val meta_resp = Input(Vec(nWays, new L1Metadata))
+    val wb_req = Decoupled(new WritebackReq(edge.bundle))
   })
+
+  val flushing = RegInit(false.B)
+  val flushCounter = Counter(nSets * nWays)
+  // val respPending = RegInit(false.B)
+  // val respCounter = Counter(nSets * nWays)
+
+  io.busy := flushing
+  io.done := false.B
+
+  when (io.flush) {
+    assert(!flushing, "already flushing")
+    flushing := true.B
+  }
+
+  // when (io.wbReq.fire || io.meta_write.fire) {
+  //   val wrap = flushCounter.inc()
+  //   when (wrap) {
+  //     flushing := false.B
+  //     io.done := true.B
+  //   }
+  // }
+  when (io.meta_read.fire) {
+    // TODO: increment a pending requests counter and only assert done when responses are back
+    val wrap = flushCounter.inc()
+    when (wrap) {
+      flushing := false.B
+      io.done := true.B
+    }
+  }
+
+  io.meta_read.bits.idx := flushCounter.value >> log2Ceil(nWays)
+  io.meta_read.bits.tag := DontCare
+  // io.meta_read.bits.way_en := ~0.U(nWays.W) // doesnt matter either (???)
+  io.meta_read.bits.way_en := UIntToOH(flushCounter.value(log2Ceil(nWays) - 1, 0))
+
+  val metaReadFired = RegNext(io.meta_read.fire)
+  val meta = RegEnable(
+    io.meta_resp(RegNext(flushCounter.value(log2Ceil(nWays) - 1, 0))), metaReadFired)
+  val metaReq = RegEnable(RegNext(io.meta_read.bits), metaReadFired) // corresponds to resp
+  val metaValid = RegInit(false.B)
+
+  val clearInvalid = metaValid && !meta.coh.isValid()
+  val clearClean = io.meta_write.fire
+  val clearDirty = io.wb_req.fire
+  val anyClear = clearInvalid || clearClean || clearDirty // TODO: response counter
+
+  val readyForMeta = anyClear || (!metaValid)
+  io.meta_read.valid := flushing && readyForMeta
+
+  when (RegNext(io.meta_read.fire)) {
+    metaValid := true.B
+  }.elsewhen(anyClear) {
+    metaValid := false.B
+  }
+
+  val (isDirty, respType, nextCoh) = meta.coh.onCacheControl(M_FLUSH)
+  // invalid line gets automatically skipped
+
+  // clean line: invalidate in tag array only
+  io.meta_write.valid := metaValid && meta.coh.isValid() && !isDirty
+  io.meta_write.bits.way_en := metaReq.way_en
+  io.meta_write.bits.idx := metaReq.idx
+  io.meta_write.bits.tag := meta.tag
+  io.meta_write.bits.data.tag := meta.tag
+  io.meta_write.bits.data.coh := nextCoh
+
+  // dirty line: send a writeback request with voluntary release
+  io.wb_req.valid := metaValid && meta.coh.isValid() && isDirty
+  io.wb_req.bits.idx := metaReq.idx
+  io.wb_req.bits.tag := meta.tag
+  io.wb_req.bits.source := 0.U // TODO: does this work??
+  io.wb_req.bits.param := respType
+  io.wb_req.bits.way_en := metaReq.way_en
+  io.wb_req.bits.voluntary := true.B
 }
 
 class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int)(implicit p: Parameters)
@@ -91,6 +171,7 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   val wb = Module(new WritebackUnit)
   val prober = Module(new ProbeUnit)
   val mshrs = Module(new MaskMSHRFile)
+  val flush = Module(new CacheFlushUnit)
 
   io.tlb_port.req.ready := true.B
   io.cpu.req.ready := true.B
@@ -184,8 +265,8 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   // tags
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
   val meta = Module(new L1MetadataArray(() => onReset ))
-  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, 5))
-  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 2))
+  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, 6))
+  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 3))
   meta.io.read <> metaReadArb.io.out
   meta.io.write <> metaWriteArb.io.out
 
@@ -340,9 +421,10 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   tl_out.e <> mshrs.io.mem_finish
 
   // writebacks
-  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 2))
+  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 3))
   wbArb.io.in(0) <> prober.io.wb_req
   wbArb.io.in(1) <> mshrs.io.wb_req
+  wbArb.io.in(2) <> flush.io.wb_req
   wb.io.req <> wbArb.io.out
   metaReadArb.io.in(3) <> wb.io.meta_read
   readArb.io.in(2) <> wb.io.data_req
@@ -435,6 +517,13 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   io.cpu.s2_xcpt := Mux(RegNext(s1_xcpt_valid), RegEnable(s1_xcpt, s1_clk_en), 0.U.asTypeOf(s1_xcpt))
   io.cpu.s2_uncached := false.B
   io.cpu.s2_paddr := s2_req.addr
+
+  // cache flush
+  // TODO: preflush
+  flush.io.flush := false.B // TODO
+  flush.io.meta_resp := meta.io.resp
+  metaReadArb.io.in(5) <> flush.io.meta_read
+  metaWriteArb.io.in(2) <> flush.io.meta_write
 
   // performance events
   io.cpu.perf.acquire := edge.done(tl_out.a)
