@@ -11,14 +11,15 @@ defaults:
 
 env:
   CHIPYARD_RELPATH: chipyard-work
-  CHIPYARD_DIR: ${{ github.workspace }}/chipyard-work
+  # need to be persistent cross-action
+  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard-${{ github.run_id }}-${{ github.run_attempt }}"
   # flip to force-reset cache
   CACHE_NUMBER: 0
 
 jobs:
-  everything:
+  build:
+    name: build
     runs-on: as4
-
     steps:
       - name: Setup system
         run: |
@@ -26,7 +27,7 @@ jobs:
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"/*
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,9 +37,12 @@ jobs:
       - name: Checkout Chipyard
         run: |
           [ -d "${CHIPYARD_DIR}" ] && echo "${CHIPYARD_DIR} already exists, aborting" && exit 1
+          mkdir -p "${CHIPYARD_DIR}"
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          # for caching
+          ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
       - name: Install conda
         uses: conda-incubator/setup-miniconda@v3
@@ -92,6 +96,11 @@ jobs:
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
+  run:
+    name: run
+    runs-on: as4
+    needs: build
+    steps:
       - name: Run Muon ISA tests
         run: |
           cd "${CHIPYARD_DIR}"
@@ -100,7 +109,12 @@ jobs:
           cd generators/radiance
           python3 test/run_isa_tests.py -j "$(nproc)"
 
-      - name: Cleanup workspace
-        if: always()
+  clean:
+    runs-on: as4
+    needs: run
+    if: always()
+    steps:
+      - name: Cleanup workspace and chipyard
         run: |
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
+          [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
