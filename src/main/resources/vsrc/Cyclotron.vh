@@ -9,6 +9,7 @@ import "DPI-C" function void cyclotron_init(input string elffile);
 import "DPI-C" function string vpi_get_binary();
 
 import "DPI-C" function cyclotron_difftest_reg(
+  input bit  trace_sim_tick,
   input bit  trace_valid,
   input int  trace_pc,
   input int  trace_warpId,

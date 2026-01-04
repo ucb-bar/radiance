@@ -8,6 +8,9 @@ module CyclotronDiffTestBlackBox #(
   parameter IMM_BITS = 32,
   parameter CSR_IMM_BITS = 8,
   parameter PRED_BITS = 4,
+  // advance cyclotron sim by one tick inside the difftest function.
+  // set to 0 when some other DPI module does the tick, e.g. CyclotronFrontend
+  parameter SIM_TICK = 1,
   localparam OPNOEXT_BITS = 7,
   localparam OPEXT_BITS = 2,
   localparam WARP_ID_BITS = $clog2(NUM_WARPS),
@@ -83,6 +86,7 @@ module CyclotronDiffTestBlackBox #(
     if (reset) begin
     end else begin
       cyclotron_difftest_reg(
+        SIM_TICK,
         __out_trace_valid,
         __out_trace_pc,
         __out_trace_warpId,

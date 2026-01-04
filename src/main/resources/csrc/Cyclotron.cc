@@ -338,6 +338,7 @@ void cyclotron_mem(
 };
 
 void cyclotron_difftest_reg_rs(
+    const uint8_t   trace_sim_tick,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -353,6 +354,7 @@ void cyclotron_difftest_reg_rs(
 );
 
 void cyclotron_difftest_reg(
+    const uint8_t   trace_sim_tick,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -367,6 +369,7 @@ void cyclotron_difftest_reg(
     const uint32_t *trace_regs_2_data
 ) {
   cyclotron_difftest_reg_rs(
+    trace_sim_tick,
     trace_valid,
     trace_pc,
     trace_warpId,
