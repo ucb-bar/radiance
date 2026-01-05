@@ -36,7 +36,7 @@ case class MuonCoreParams(
   // if true, use a bank-conflict-avoiding operand collector
   // if false, use a simple rs1/2/3-duplicated register file
   useCollector: Boolean = false,
-  numRegBanks: Int = 4,          // when useCollector true
+  numRegBanks: Int = 1,          // when useCollector true
   numCollectorEntries: Int = 1,  // when useCollector true
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),

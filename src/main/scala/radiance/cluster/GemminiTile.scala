@@ -191,7 +191,7 @@ class GemminiTile private (
     val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
       .asInstanceOf[CapacityInKilobytes].kilobytes * 1024
     require(isPow2(gemminiSpadSizeBytes))
-    val reqSize = q.numInputLanes * q.inputBits / 8
+    val reqSize = q.numGPUInputLanes * q.inputBits / 8
 
     println("quant manager address set")
     println(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1))
@@ -277,7 +277,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // requantizer
   outer.gemminiParams.requantizer.foreach { q =>
-    val in = Wire(Decoupled(new RequantizerInBundle(q.numInputLanes, q.inputBits)))
+    val in = Wire(Decoupled(new RequantizerInBundle(q.numGPUInputLanes, q.inputBits)))
     val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
     { // input
@@ -341,7 +341,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map { c =>
     val lut = Wire(Decoupled(UInt(c.numBits.W)))
-    outer.gemmini.module.mx_io.get.lut <> lut
+    outer.gemmini.module.mx_io.get.lut <> lut.asTypeOf(outer.gemmini.module.mx_io.get.lut.cloneType)
     lut
   }
 
