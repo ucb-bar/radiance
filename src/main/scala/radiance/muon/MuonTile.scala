@@ -26,6 +26,7 @@ case class MuonTileParams(
   icache: Option[ICacheParams] = None,
   icacheUsingD: Option[DCacheParams] = None,
   dcache: Option[DCacheParams] = None,
+  peripheralAddr: BigInt = 0,
   btb: Option[BTBParams] = None,
   beuAddr: Option[BigInt] = None,
   blockerCtrlAddr: Option[BigInt] = None,
@@ -209,17 +210,18 @@ class MuonTile(
   
   val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
 
-  val (l0dOut, l0dIn) = muonParams.dcache.map { l0dParams =>
+  val (l0dOut, l0dIn, flushRegNode) = muonParams.dcache.map { l0dParams =>
     require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0dParams,
-      cacheTagBits = muonParams.core.l0dReqTagBits
+      cacheTagBits = muonParams.core.l0dReqTagBits,
+      flushAddr = Some(muonParams.peripheralAddr),
     )))
-    (l0d.outNode, l0d.inNode)
+    (l0d.outNode, l0d.inNode, l0d.flushRegNode)
   }.getOrElse {
    val passthru = TLEphemeralNode()
-   (passthru, passthru)
+   (passthru, passthru, None)
   }
 
   val dcacheNode = visibilityNode
@@ -298,7 +300,7 @@ class MuonTile(
 }
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
-  val muon = Module(new MuonCore(test = true))
+  val muon = Module(new MuonCore(test = false))
 
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
@@ -317,6 +319,8 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
-  val cdiff = Module(new CyclotronDiffTest)
-  cdiff.io.trace <> muon.io.trace.get
+  muon.io.trace.foreach { trace =>
+    val cdiff = Module(new CyclotronDiffTest)
+    cdiff.io.trace <> trace
+  }
 }

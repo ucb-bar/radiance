@@ -3,6 +3,8 @@ package radiance.memory
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
+import freechips.rocketchip.regmapper.RegField
+import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
 import freechips.rocketchip.rocket.{DCacheParams, NonBlockingDCache, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.subsystem.CacheBlockBytes
@@ -16,7 +18,8 @@ case class TLNBDCacheParams(
   id: Int,
   cache: DCacheParams,
   cacheTagBits: Int,
-  overrideDChannelSize: Option[Int] = None
+  overrideDChannelSize: Option[Int] = None,
+  flushAddr: Option[BigInt] = None,
 )
 
 case class DummyCacheCoreParams(
@@ -70,13 +73,22 @@ class TLNBDCache(val params: TLNBDCacheParams)
     )
   ))
 
+  val flushRegNode = params.flushAddr.map { addr =>
+    TLRegisterNode(
+      address = Seq(AddressSet(addr, 0xff)),
+      device = new SimpleDevice(f"muon-cache-flush", Seq(s"muon-cache-flush")),
+      beatBytes = 8,
+      concurrency = 1,
+    )
+  }
+
   implicit val q = p.alterMap(Map(
     TileKey -> DummyCacheTileParams(params),
     CacheBlockBytes -> params.cache.blockBytes,
     // TileVisibilityNodeKey -> visibilityNode,
   ))
 
-  val nbdCache = LazyModule(new MuonNonBlockingDCache(params.id)(q))
+  val nbdCache = LazyModule(new MuonNonBlockingDCache(params.id, params.flushAddr.isDefined)(q))
 
   val outNode = nbdCache.node
   override lazy val module = new TLNBDCacheModule(this)(q)
@@ -204,6 +216,20 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   cacheIO.tlb_port.req <> DontCare
   cacheIO.tlb_port.req.valid := false.B
   cacheIO.tlb_port.s2_kill := false.B
+
+  // flush mmio
+  outer.flushRegNode.foreach { node =>
+    val fio = outer.nbdCache.module.flush_io.get
+    fio.start := false.B
+    node.regmap(
+      0x0 -> Seq(RegField.w(32, (valid: Bool, _: UInt) => {
+        when (valid) {
+          fio.start := true.B
+        }
+        !fio.busy
+      })),
+    )
+  }
 
 }
 

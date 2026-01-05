@@ -55,6 +55,7 @@ class TLULNBDCache(params: TLNBDCacheParams)
   val beatBytes = params.cache.blockBytes
   val inNode = tlnbdCache.inNode
   val tlcOutNode = tlnbdCache.outNode
+  val flushRegNode = tlnbdCache.flushRegNode
   val c2ulNode = LazyModule(new TLCToTLULNode(beatBytes)).node
   val outNode = TLIdentityNode()
 

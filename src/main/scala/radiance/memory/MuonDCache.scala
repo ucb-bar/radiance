@@ -49,12 +49,10 @@ class MaskMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends MSHRFile {
 // cache flush is started after all other operations cease
 // (i.e. no pending commands in pipeline, no mshrs, shutdown ready for all interfaces)
 class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModule()(p) {
-  require(isPow2(nWays), "for simplicity")
 
   val io = IO(new Bundle {
     val flush = Input(Bool())
     val busy = Output(Bool())
-    val done = Output(Bool())
 
     val meta_read = Decoupled(new L1MetaReadReq)
     val meta_write = Decoupled(new L1MetaWriteReq)
@@ -67,13 +65,11 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   // val respPending = RegInit(false.B)
   // val respCounter = Counter(nSets * nWays)
 
-  io.busy := flushing
-  io.done := false.B
-
   when (io.flush) {
     assert(!flushing, "already flushing")
     flushing := true.B
   }
+  io.busy := flushing
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -87,7 +83,6 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val wrap = flushCounter.inc()
     when (wrap) {
       flushing := false.B
-      io.done := true.B
     }
   }
 
@@ -137,7 +132,8 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.voluntary := true.B
 }
 
-class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int)(implicit p: Parameters)
+class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int,
+                            val canFlush: Boolean)(implicit p: Parameters)
   extends HellaCache(staticIdForMetadataUseOnly) {
 
   override lazy val module = new MuonNonBlockingDCacheModule(this)
@@ -171,7 +167,14 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   val wb = Module(new WritebackUnit)
   val prober = Module(new ProbeUnit)
   val mshrs = Module(new MaskMSHRFile)
-  val flush = Module(new CacheFlushUnit)
+
+  val flush_unit = Option.when(outer.canFlush)(Module(new CacheFlushUnit))
+  val flush_io = Option.when(outer.canFlush)(IO(new Bundle {
+    val start = Input(Bool())
+    val busy = Output(Bool())
+  }))
+  val flushing = WireInit(false.B)
+  val flushFlag = if (outer.canFlush) 1 else 0
 
   io.tlb_port.req.ready := true.B
   io.cpu.req.ready := true.B
@@ -265,8 +268,8 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   // tags
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
   val meta = Module(new L1MetadataArray(() => onReset ))
-  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, 6))
-  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 3))
+  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, 5 + flushFlag))
+  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 2 + flushFlag))
   meta.io.read <> metaReadArb.io.out
   meta.io.write <> metaWriteArb.io.out
 
@@ -421,10 +424,10 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   tl_out.e <> mshrs.io.mem_finish
 
   // writebacks
-  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 3))
+  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle), 2 + flushFlag))
   wbArb.io.in(0) <> prober.io.wb_req
   wbArb.io.in(1) <> mshrs.io.wb_req
-  wbArb.io.in(2) <> flush.io.wb_req
+  flush_unit.foreach( wbArb.io.in(2) <> _.io.wb_req )
   wb.io.req <> wbArb.io.out
   metaReadArb.io.in(3) <> wb.io.meta_read
   readArb.io.in(2) <> wb.io.data_req
@@ -519,11 +522,32 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   io.cpu.s2_paddr := s2_req.addr
 
   // cache flush
-  // TODO: preflush
-  flush.io.flush := false.B // TODO
-  flush.io.meta_resp := meta.io.resp
-  metaReadArb.io.in(5) <> flush.io.meta_read
-  metaWriteArb.io.in(2) <> flush.io.meta_write
+  flush_io.foreach { fio =>
+    val preflushing = RegInit(false.B)
+    val flush = flush_unit.get
+
+    when (fio.start) {
+      preflushing := true.B
+    }
+
+    flush.io.flush := false.B
+    val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid
+    when (preflushing && ready_to_flush) {
+      preflushing := false.B
+      flush.io.flush := true.B
+    }
+
+    flushing := preflushing || RegNext(preflushing) || flush.io.busy
+    fio.busy := flushing
+
+    when (flushing) {
+      io.cpu.req.ready := false.B
+    }
+
+    flush.io.meta_resp := meta.io.resp
+    metaReadArb.io.in(5) <> flush.io.meta_read
+    metaWriteArb.io.in(2) <> flush.io.meta_write
+  }
 
   // performance events
   io.cpu.perf.acquire := edge.done(tl_out.a)
