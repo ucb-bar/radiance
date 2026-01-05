@@ -319,8 +319,8 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
-  muon.io.trace.foreach { trace =>
-    val cdiff = Module(new CyclotronDiffTest)
-    cdiff.io.trace <> trace
+  if (muon.test) {
+    val cdiff = Module(new CyclotronDiffTest(tick = true))
+    cdiff.io.trace <> muon.io.trace.get
   }
 }

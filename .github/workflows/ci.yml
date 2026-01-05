@@ -11,14 +11,15 @@ defaults:
 
 env:
   CHIPYARD_RELPATH: chipyard-work
-  CHIPYARD_DIR: ${{ github.workspace }}/chipyard-work
+  # need to be persistent cross-action
+  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard-${{ github.run_id }}-${{ github.run_attempt }}"
   # flip to force-reset cache
   CACHE_NUMBER: 0
 
 jobs:
-  everything:
+  build:
+    name: build
     runs-on: as4
-
     steps:
       - name: Setup system
         run: |
@@ -26,7 +27,7 @@ jobs:
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"/*
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,9 +37,12 @@ jobs:
       - name: Checkout Chipyard
         run: |
           [ -d "${CHIPYARD_DIR}" ] && echo "${CHIPYARD_DIR} already exists, aborting" && exit 1
+          mkdir -p "${CHIPYARD_DIR}"
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          # for caching
+          ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
       - name: Install conda
         uses: conda-incubator/setup-miniconda@v3
@@ -61,18 +65,19 @@ jobs:
             ~/.cache/coursier
           key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
-      - name: Cache conda-env
-        id: cache-conda-env
-        uses: actions/cache@v5
-        with:
-          path: |
-            ${{ env.CHIPYARD_RELPATH }}/.conda-env
-            ${{ env.CHIPYARD_RELPATH }}/env.sh
-          key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
+      # - name: Cache conda-env
+      #   id: cache-conda-env
+      #   uses: actions/cache@v5
+      #   with:
+      #     path: |
+      #       ${{ env.CHIPYARD_RELPATH }}/.conda-env
+      #       ${{ env.CHIPYARD_RELPATH }}/env.sh
+      #     key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
-          .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
+          # .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
+          .github/scripts/setup-chipyard.sh ""
 
       - name: Setup Radiance
         # move radiance to under chipyard/generators
@@ -92,7 +97,11 @@ jobs:
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
-      - name: Run Muon ISA tests
+  run-soc-isa-tests:
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run ISA tests on SoC config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
@@ -100,7 +109,24 @@ jobs:
           cd generators/radiance
           python3 test/run_isa_tests.py -j "$(nproc)"
 
-      - name: Cleanup workspace
-        if: always()
+  run-cosim-isa-tests:
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run ISA tests on backend co-sim config
         run: |
-          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}/*"
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
+          python3 test/run_isa_tests.py -j "$(nproc)" -c backend
+
+  clean:
+    runs-on: as4
+    needs: [run-soc-isa-tests, run-cosim-isa-tests]
+    if: always()
+    steps:
+      - name: Cleanup workspace and chipyard
+        run: |
+          [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
+          [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
