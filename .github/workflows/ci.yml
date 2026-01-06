@@ -41,6 +41,8 @@ jobs:
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          # cross-workflow shared conda env
+          echo "CHIPYARD_CONDA_ENV_NAME=chipyard-$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
           # for caching
           ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
@@ -50,6 +52,11 @@ jobs:
           auto-update-conda: true
           auto-activate-base: true
           activate-environment: ""
+
+      - name: Setup conda env path
+        run: |
+          set -x
+          echo "CHIPYARD_CONDA_ENV_PATH=$(conda info --base)/envs/${CHIPYARD_CONDA_ENV_NAME} >> ${GITHUB_ENV}"
 
       - name: Install cargo
         uses: dtolnay/rust-toolchain@stable
@@ -65,14 +72,14 @@ jobs:
             ~/.cache/coursier
           key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
-      # - name: Cache conda-env
-      #   id: cache-conda-env
-      #   uses: actions/cache@v5
-      #   with:
-      #     path: |
-      #       ${{ env.CHIPYARD_RELPATH }}/.conda-env
-      #       ${{ env.CHIPYARD_RELPATH }}/env.sh
-      #     key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
+      - name: Cache conda-env
+        id: cache-conda-env
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.CHIPYARD_CONDA_ENV_PATH }}
+            ${{ env.CHIPYARD_RELPATH }}/env.sh
+          key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
@@ -139,7 +146,8 @@ jobs:
     needs: [run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
-      - name: Cleanup workspace and chipyard
+      - name: Cleanup workspace, chipyard and conda
         run: |
           [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
           [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
+          [ -d "${CHIPYARD_CONDA_ENV_PATH}" ] && rm -rf "${CHIPYARD_CONDA_ENV_PATH}"
