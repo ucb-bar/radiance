@@ -226,7 +226,8 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
         when (valid) {
           fio.start := true.B
         }
-        !fio.busy
+        true.B
+        // !fio.busy
       })),
     )
   }

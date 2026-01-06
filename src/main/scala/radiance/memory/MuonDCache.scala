@@ -83,6 +83,7 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val wrap = flushCounter.inc()
     when (wrap) {
       flushing := false.B
+      printf("CACHE FLUSH COMPLETE!\n")
     }
   }
 
@@ -114,8 +115,9 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   val (isDirty, respType, nextCoh) = meta.coh.onCacheControl(M_FLUSH)
   // invalid line gets automatically skipped
 
-  // clean line: invalidate in tag array only
-  io.meta_write.valid := metaValid && meta.coh.isValid() && !isDirty
+  // valid line: invalidate in tag array
+  // need double fire for dirty lines
+  io.meta_write.valid := metaValid && meta.coh.isValid() && (!isDirty || io.wb_req.ready)
   io.meta_write.bits.way_en := metaReq.way_en
   io.meta_write.bits.idx := metaReq.idx
   io.meta_write.bits.tag := meta.tag
@@ -123,13 +125,15 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.meta_write.bits.data.coh := nextCoh
 
   // dirty line: send a writeback request with voluntary release
-  io.wb_req.valid := metaValid && meta.coh.isValid() && isDirty
+  io.wb_req.valid := metaValid && meta.coh.isValid() && isDirty && io.meta_write.ready
   io.wb_req.bits.idx := metaReq.idx
   io.wb_req.bits.tag := meta.tag
   io.wb_req.bits.source := 0.U // TODO: does this work??
   io.wb_req.bits.param := respType
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
+
+  assert(!io.wb_req.fire || io.meta_write.fire)
 }
 
 class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int,
