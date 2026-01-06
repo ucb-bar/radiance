@@ -16,8 +16,8 @@ if [[ "${CACHE_HIT}" == "true" ]]; then
     source $(conda info --base)/etc/profile.d/conda.sh
     conda activate "${CHIPYARD_CONDA_ENV_PATH}"
     ./build-setup.sh riscv-tools --conda-env-name "${CHIPYARD_CONDA_ENV_NAME}" \
-        --skip-conda --skip-toolchain --skip-precompile --skip-firesim --skip-marshal
+        --skip-conda --skip-toolchain --skip-ctags --skip-precompile --skip-firesim --skip-marshal --skip-circt
 else
     ./build-setup.sh riscv-tools --conda-env-name "${CHIPYARD_CONDA_ENV_NAME}" \
-        --skip-precompile --skip-firesim --skip-marshal
+        --skip-ctags --skip-precompile --skip-firesim --skip-marshal
 fi
