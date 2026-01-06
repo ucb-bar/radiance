@@ -61,6 +61,14 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   // fe csr, hartid
   fe.io.softReset := false.B
 
+  // reply with dummy LSU tokens; Cyclotron model does not depend on their
+  // values
+  fe.io.lsuReserve.foreach { warpRes =>
+    warpRes.req.ready := true.B
+    warpRes.resp.valid := true.B
+    warpRes.resp.bits := 0.U.asTypeOf(new LsuReservationResp)
+  }
+
   // fe decode -> cyclotron back end
   // note issue logic is simple pass-through of decode
   (cbe.io.issue zip fe.io.ibuf).foreach { case (b, f) =>
@@ -73,6 +81,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   fe.io.commit := cbe.io.commit
 
   // fe imem <> cyclotron back end
+  // TODO: imem being in cbe is weird
   cbe.io.imem.req <> fe.io.imem.req
   fe.io.imem.resp <> cbe.io.imem.resp
 
