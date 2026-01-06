@@ -762,26 +762,36 @@ class LsuResponse(implicit p: Parameters) extends CoreBundle {
     val debugId: Option[UInt] = lsuDerived.debugIdBits.map { bits => UInt(bits.W) }
 }
 
-/* 
-# Downstream memory interface
+// ---------------------------
+// Downstream memory interface
+// ---------------------------
+//
+// The LSU Memory Request has a full-warp-wide interface, with a single tag
+// shared across all lanes, and with per-lane data / address / tmask.
+//
+// On the other hand, the core's memory interface is fully per-LSU-lane, with a
+// per-LSU-lane tag as well.  Generally, for coalesced requests, the responses
+// will come back together, but for uncoalesced requests, no such guarantee is
+// made.
+//
+// Because the LSU always expects responses for all per-lane reqs to come back
+// at the same time "atomically" as a result of its warp-wide interface, we
+// need to support partial writes into the load data staging SRAM, and keep
+// track of which words in a row are valid, only advancing the state machine to
+// begin writing back once all of them are.
+//
+// As such, we need to convert from LSU request to core request, and the LSU
+// response should be converted from per-LSU-lane core responses. We don't need
+// to have a separate tag for each core memory request lane, since the
+// coalescer treats each lane as a separate client with a separate source id
+// space. Converting from core memory response to LSU memory response(s) is
+// done very naively, by picking the first valid lane on the core side, and
+// filtering only those responses whose tag matches it.
+//
+// In the future, it may be possible to begin writing back to register files
+// once a packet is ready (or even individual lanes within a packet), rather
+// than the full warp.
 
-The LSU Memory Request interface is per-warp with separate data / address / tmask per lane, 
-but the tag is shared across all lanes.
-
-The core's memory interface is fully per-LSU-lane, with a per-LSU-lane tag as well. Generally, for coalesced requests, 
-the responses will come back together, but for uncoalesced requests, no such guarantee is made. As such, we
-need to support partial writes into the load data staging SRAM, and we need to keep track of which words in a row
-are valid, only advancing the state machine to begin writing back once all of them are.
-
-As such, we need to convert from LSU memory request to core memory request, and the LSU Memory Response interface 
-should support per-LSU-lane valids. We don't need to have a separate tag for each core memory request lane, since 
-the coalescer treats each lane as a separate client with a separate source id space. 
-We also need to convert from core memory response to LSU memory response(s). This is done very naively, 
-by picking the first valid lane on the core side, and filtering only those responses whose tag matches it. 
-
-In the future, it may be possible to begin writing back to register files once a packet is ready (or even
-individual lanes within a packet), rather than the full warp
-*/
 class LsuMemTag(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
     val packet = UInt(lsuDerived.packetBits.W)

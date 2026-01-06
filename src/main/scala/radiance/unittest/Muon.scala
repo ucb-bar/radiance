@@ -44,7 +44,7 @@ class MuonTestbench(implicit p: Parameters) extends Module {
   io.finished := true.B
 }
 
-/** Testbench for Muon frontend as top */
+/** Testbench for frontend-as-top co-sim config */
 class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -81,7 +81,7 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   dontTouch(fe.io)
 }
 
-/** Testbench for Muon backend as top */
+/** Testbench for backend-as-top co-sim config */
 class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCoreParameters {
   val io = IO(new Bundle {
     val finished = Bool()
@@ -135,7 +135,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   io.finished := cfe.io.finished && ibufDry
 }
 
-/** Testbench for Muon backend LSU as top */
+/** DUT module for LSU testbench */
 class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
   
@@ -804,6 +804,7 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
   done := allDone && responseChecker.io.done
 }
 
+/** Testbench for LSU-as-top config */
 class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   val lsuWrapper = LazyModule(new LSUWrapper()(p))
   val xbar = TLXbar()
