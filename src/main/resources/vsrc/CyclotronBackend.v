@@ -376,9 +376,9 @@ module CyclotronBackendBlackBox #(
   longint __imem_resp_bits_data;
 
   // initialize model at the rtl sim start
-  initial begin
-    cyclotron_init();
-  end
+  // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
+  // ELF
+  initial cyclotron_init_task();
 
   // TODO: simulate backpressure
 

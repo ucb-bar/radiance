@@ -162,7 +162,7 @@ class MuonTile(
         emits = TLMasterToSlaveTransferSizes(
           get = TransferSizes(1, muonParams.core.instBytes)
         ),
-        sourceId = IdRange(0, muonParams.core.numWarps * muonParams.core.ibufDepth)
+        sourceId = IdRange(0, muonParams.core.l0iReqTagBits)
       )),
       channelBytes = TLChannelBeatBytes(muonParams.core.instBytes),
     )))
