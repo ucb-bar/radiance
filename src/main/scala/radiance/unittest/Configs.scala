@@ -27,8 +27,8 @@ class WithMuonLSUDebugIds(width: Int) extends Config((_, _, _) => {
   case MuonLoadStoreUnitDebugIdKey => Some(width)
 })
 
-class MuonTestConfig extends Config(
-  new WithMuonUnitTestHarness(new MuonTest()(_)) ++
+class MuonCoreTestConfig extends Config(
+  new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
   new WithMuonCores(1, headless = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
