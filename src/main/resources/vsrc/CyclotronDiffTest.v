@@ -30,9 +30,7 @@ module CyclotronDiffTestBlackBox #(
   input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_1_data,
   input  logic                            trace_regs_2_enable,
   input  logic [REG_BITS-1:0]             trace_regs_2_address,
-  input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_2_data,
-
-  output logic finished
+  input  logic [(NUM_LANES*ARCH_LEN)-1:0] trace_regs_2_data
 );
   `include "Cyclotron.vh"
 
@@ -52,44 +50,19 @@ module CyclotronDiffTestBlackBox #(
     input int  trace_regs_2_data[NUM_LANES]
   );
 
-  // "in": C->verilog, "out": verilog->C
   // need to be in ascending order to match with C array memory layout
-  bit     __out_trace_valid;
-  int     __out_trace_pc;
-  int     __out_trace_warpId;
-  bit     __out_trace_regs_0_enable;
-  byte    __out_trace_regs_0_address;
-  int     __out_trace_regs_0_data [0:NUM_LANES-1];
-  bit     __out_trace_regs_1_enable;
-  byte    __out_trace_regs_1_address;
-  int     __out_trace_regs_1_data [0:NUM_LANES-1];
-  bit     __out_trace_regs_2_enable;
-  byte    __out_trace_regs_2_address;
-  int     __out_trace_regs_2_data [0:NUM_LANES-1];
+  int     __trace_regs_0_data [0:NUM_LANES-1];
+  int     __trace_regs_1_data [0:NUM_LANES-1];
+  int     __trace_regs_2_data [0:NUM_LANES-1];
 
-  bit __in_finished;
-
-  // initialize model at the rtl sim start
-  // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
-  // ELF
   initial cyclotron_init_task();
 
-  // connect regtrace signals
-  assign __out_trace_valid = trace_valid;
-  assign __out_trace_pc = trace_pc;
-  assign __out_trace_warpId = trace_warpId;
-  assign __out_trace_regs_0_enable  = trace_regs_0_enable;
-  assign __out_trace_regs_0_address = trace_regs_0_address;
-  assign __out_trace_regs_1_enable  = trace_regs_1_enable;
-  assign __out_trace_regs_1_address = trace_regs_1_address;
-  assign __out_trace_regs_2_enable  = trace_regs_2_enable;
-  assign __out_trace_regs_2_address = trace_regs_2_address;
   genvar g;
   generate
     for (g = 0; g < NUM_LANES; g = g + 1) begin
-      assign __out_trace_regs_0_data[g] = trace_regs_0_data[ARCH_LEN*g +: ARCH_LEN];
-      assign __out_trace_regs_1_data[g] = trace_regs_1_data[ARCH_LEN*g +: ARCH_LEN];
-      assign __out_trace_regs_2_data[g] = trace_regs_2_data[ARCH_LEN*g +: ARCH_LEN];
+      assign __trace_regs_0_data[g] = trace_regs_0_data[ARCH_LEN*g +: ARCH_LEN];
+      assign __trace_regs_1_data[g] = trace_regs_1_data[ARCH_LEN*g +: ARCH_LEN];
+      assign __trace_regs_2_data[g] = trace_regs_2_data[ARCH_LEN*g +: ARCH_LEN];
     end
   endgenerate
 
@@ -98,18 +71,18 @@ module CyclotronDiffTestBlackBox #(
     end else begin
       cyclotron_difftest_reg(
         SIM_TICK,
-        __out_trace_valid,
-        __out_trace_pc,
-        __out_trace_warpId,
-        __out_trace_regs_0_enable,
-        __out_trace_regs_0_address,
-        __out_trace_regs_0_data,
-        __out_trace_regs_1_enable,
-        __out_trace_regs_1_address,
-        __out_trace_regs_1_data,
-        __out_trace_regs_2_enable,
-        __out_trace_regs_2_address,
-        __out_trace_regs_2_data
+        trace_valid,
+        trace_pc,
+        trace_warpId,
+        trace_regs_0_enable,
+        trace_regs_0_address,
+        __trace_regs_0_data,
+        trace_regs_1_enable,
+        trace_regs_1_address,
+        __trace_regs_1_data,
+        trace_regs_2_enable,
+        trace_regs_2_address,
+        __trace_regs_2_data
       );
     end
   end

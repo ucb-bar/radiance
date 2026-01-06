@@ -26,20 +26,18 @@ module CyclotronInstMemBlackBox #(
 
   initial cyclotron_init_task();
 
-  bit     __resp_valid;
-  longint __resp_bits_tag;
-  longint __resp_bits_inst;
-
-  assign resp_valid = __resp_valid;
-  assign resp_bits_tag = __resp_bits_tag;
-  assign resp_bits_inst = __resp_bits_inst;
-
+  // nonblocking assignments from DPI output vars ensure other posedge logic
+  // reads pre-DPI values
   always @(posedge clock) begin
     if (reset) begin
-      __resp_valid <= '0;
-      __resp_bits_tag <= '0;
-      __resp_bits_inst <= '0;
+      resp_valid <= '0;
+      resp_bits_tag <= '0;
+      resp_bits_inst <= '0;
     end else begin
+      bit     __resp_valid;
+      longint __resp_bits_tag;
+      longint __resp_bits_inst;
+
       cyclotron_fetch(
         req_valid,
         req_bits_tag,
@@ -48,6 +46,9 @@ module CyclotronInstMemBlackBox #(
         __resp_bits_tag,
         __resp_bits_inst
       );
+      resp_valid <= __resp_valid;
+      resp_bits_tag <= __resp_bits_tag;
+      resp_bits_inst <= __resp_bits_inst;
     end
   end
 
