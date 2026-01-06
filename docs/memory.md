@@ -183,8 +183,9 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 |----------------|-----------|-------------------------------- |
 | `0x0000_0000`  | `0x20000` | Shared memory cluster local     |
 | `0x0004_0000`  | `0x40000` | Requantized shared memory       |
-| `0x0008_0000`  |   `0x200` | Core 0 print and perf buffer    |
-| `0x0008_0200`  |   `0x200` | Core 1 print and perf buffer    |
+| `0x0008_0000`  |   `0x200` | Shared print and perf buffer    |
+| `0x0008_0200`  |   `0x100` | Core 0 L0d flush MMIO           |
+| `0x0008_0300`  |   `0x100` | Core 1 L0d flush MMIO           |
 | `0x0008_4000`  |   `0x100` | Gemmini MMIO                    |
 | `0x0008_8000`  |  `0x4000` | Gemmini scaling factor memory   |
 
