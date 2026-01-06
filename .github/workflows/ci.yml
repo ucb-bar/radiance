@@ -54,17 +54,6 @@ jobs:
       - name: Install cargo
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Scala deps
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.ivy2/cache
-            ~/.sbt
-            ${{ env.CHIPYARD_RELPATH }}/.ivy2/cache
-            ${{ env.CHIPYARD_RELPATH }}/.sbt
-            ~/.cache/coursier
-          key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
-
       - name: Cache conda-env
         id: cache-conda-env
         uses: actions/cache@v5
@@ -86,6 +75,16 @@ jobs:
           rsync -a --exclude "/${CHIPYARD_RELPATH}/" \
             "${GITHUB_WORKSPACE}/" "${CHIPYARD_DIR}/generators/radiance/"
           ls -al "${CHIPYARD_DIR}/generators/radiance"
+
+      - name: Cache Scala build files
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.CHIPYARD_DIR }}/generators/**/target/**
+            ${{ env.CHIPYARD_RELPATH }}/.ivy2/cache
+            ${{ env.CHIPYARD_RELPATH }}/.sbt
+            ~/.cache/coursier
+          key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Build Radiance sim binary
         run: |
