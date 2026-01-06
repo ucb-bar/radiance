@@ -95,6 +95,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd sims/vcs
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
+          make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
   run-soc-isa-tests:
