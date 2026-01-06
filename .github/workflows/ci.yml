@@ -12,7 +12,7 @@ defaults:
 env:
   CHIPYARD_RELPATH: chipyard-work
   # need to be persistent cross-action
-  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard-${{ github.run_id }}-${{ github.run_attempt }}"
+  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard"
   # flip to force-reset cache
   CACHE_NUMBER: 0
 
@@ -41,8 +41,6 @@ jobs:
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
-          # cross-workflow shared conda env
-          echo "CHIPYARD_CONDA_ENV_NAME=chipyard-$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
           # for caching
           ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
@@ -52,11 +50,6 @@ jobs:
           auto-update-conda: true
           auto-activate-base: true
           activate-environment: ""
-
-      - name: Setup conda env path
-        run: |
-          set -x
-          echo "CHIPYARD_CONDA_ENV_PATH=$(conda info --base)/envs/${CHIPYARD_CONDA_ENV_NAME} >> ${GITHUB_ENV}"
 
       - name: Install cargo
         uses: dtolnay/rust-toolchain@stable
@@ -77,14 +70,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ${{ env.CHIPYARD_CONDA_ENV_PATH }}
+            ${{ env.CHIPYARD_DIR }}/.conda-env
             ${{ env.CHIPYARD_RELPATH }}/env.sh
           key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
-          # .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
-          .github/scripts/setup-chipyard.sh ""
+          .github/scripts/setup-chipyard.sh "${{ steps.cache-conda-env.outputs.cache-hit }}"
 
       - name: Setup Radiance
         # move radiance to under chipyard/generators
@@ -143,11 +135,10 @@ jobs:
 
   clean:
     runs-on: as4
-    needs: [run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
+    needs: [build, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda
         run: |
           [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
           [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
-          [ -d "${CHIPYARD_CONDA_ENV_PATH}" ] && rm -rf "${CHIPYARD_CONDA_ENV_PATH}"

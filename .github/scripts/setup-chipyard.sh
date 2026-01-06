@@ -11,13 +11,13 @@ cd "${CHIPYARD_DIR}"
 
 if [[ "${CACHE_HIT}" == "true" ]]; then
     echo "[CI] Cache hit! Skipping conda and toolchain steps"
-    export RISCV="${CHIPYARD_CONDA_ENV_PATH}/riscv-tools"
+    export RISCV="${CHIPYARD_DIR}/.conda-env/riscv-tools"
     [ -d "${RISCV}" ] || ( echo "error: ${RISCV} does not exist!" && exit 1 )
     source $(conda info --base)/etc/profile.d/conda.sh
-    conda activate "${CHIPYARD_CONDA_ENV_PATH}"
-    ./build-setup.sh riscv-tools --conda-env-name "${CHIPYARD_CONDA_ENV_NAME}" \
+    conda activate "${CHIPYARD_DIR}/.conda-env"
+    ./build-setup.sh riscv-tools \
         --skip-conda --skip-toolchain --skip-ctags --skip-precompile --skip-firesim --skip-marshal --skip-circt
 else
-    ./build-setup.sh riscv-tools --conda-env-name "${CHIPYARD_CONDA_ENV_NAME}" \
+    ./build-setup.sh riscv-tools \
         --skip-ctags --skip-precompile --skip-firesim --skip-marshal
 fi
