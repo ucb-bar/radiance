@@ -8,22 +8,6 @@ import "DPI-C" function void cyclotron_init(input string elffile);
 
 import "DPI-C" function string vpi_get_binary();
 
-import "DPI-C" function cyclotron_difftest_reg(
-  input bit  trace_sim_tick,
-  input bit  trace_valid,
-  input int  trace_pc,
-  input int  trace_warpId,
-  input bit  trace_regs_0_enable,
-  input byte trace_regs_0_address,
-  input int  trace_regs_0_data[NUM_LANES],
-  input bit  trace_regs_1_enable,
-  input byte trace_regs_1_address,
-  input int  trace_regs_1_data[NUM_LANES],
-  input bit  trace_regs_2_enable,
-  input byte trace_regs_2_address,
-  input int  trace_regs_2_data[NUM_LANES]
-);
-
 task automatic cyclotron_init_task();
   string elffile;
   elffile = vpi_get_binary();

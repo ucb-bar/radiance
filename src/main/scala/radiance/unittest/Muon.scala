@@ -9,6 +9,7 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{IdRange, TransferSizes}
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{IdRange, AddressSet}
@@ -20,13 +21,15 @@ import scala.collection.mutable.ArrayBuffer
 /** Testbench for Muon with the test signals */
 class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
   val coreTop = LazyModule(new MuonCoreTop()(p.alterMap(Map(
-    // FIXME: this should be unnecessary with WithMuonCores(headless = true)
+    // @cleanup: this should be unnecessary with WithMuonCores(headless = true)
     TileKey -> DummyTileParams
   ))))
   val xbar = TLXbar()
   val fakeGmem = TLRAM(
-    address = AddressSet(0x0, 1024*1024*16-1), // TODO: don't hardcode; 1MB region for each warp
-    beatBytes = p(MuonKey).archLen / 8
+    // address = AddressSet(0x0, (BigInt(1) << p(MuonKey).archLen) - 1),
+    address = AddressSet(0x0, 0x1000 - 1),
+    beatBytes = p(MuonKey).archLen / 8,
+    devName = Some("gmem")
   )
 
   // see doc in MuonLSUTestbench for TLBuffer
@@ -40,6 +43,7 @@ class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
     val io = IO(new Bundle {
       val finished = Bool()
     })
+
     io.finished := coreTop.module.io.finished
   }
 }
@@ -178,23 +182,21 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
   }
 }
 
-/** DUT module for core-standalone testbench */
+/** DUT module for core-standalone testbench.
+ *  Hooks up a MuonCore with a Rust instruction memory model, and exposes a TL
+ *  node for its global memory interface. */
 class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
 
   // every core lane is a separate TL client
-  def masterParams = (lane: Int) => {
-    val sourceId = IdRange(0, sourceIdsPerLane)
-    TLMasterParameters.v1(
-      name = f"lsu-gmem-lane$lane",
-      sourceId = sourceId,
-      requestFifo = false
-    )
-  }
   val lsuNodes = Seq.tabulate(muonParams.lsu.numLsuLanes) { lane =>
     TLClientNode(Seq(
       TLMasterPortParameters.v1(
-        Seq(masterParams(lane))
+        Seq(TLMasterParameters.v1(
+          name = f"lsu-gmem-lane$lane",
+          sourceId = IdRange(0, sourceIdsPerLane),
+          requestFifo = false
+        ))
       )
     ))
   }
@@ -206,16 +208,16 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     })
 
     val core = Module(new MuonCore()(p))
-    core.io.imem.resp.valid := false.B
-    core.io.imem.resp.bits := DontCare
-    core.io.imem.req.ready := false.B
 
-    // mem <> lsuAdapter
+    val imem = Module(new CyclotronInstMem)
+    core.io.imem <> imem.io.imem
+
     MuonMemTL.multiConnectTL(
       core.io.dmem.req,
       core.io.dmem.resp,
       lsuNodes
     )
+
     // tie off shared mem
     core.io.smem.req.foreach(_.ready := false.B)
     core.io.smem.resp.foreach(_.valid := false.B)
@@ -1017,6 +1019,50 @@ with HasBlackBoxResource with HasCoreParameters {
   addResource("/vsrc/CyclotronBackend.v")
   addResource("/vsrc/Cyclotron.vh")
   addResource("/csrc/Cyclotron.cc")
+}
+
+class CyclotronInstMem(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val imem = Flipped(new InstMemIO)
+  })
+
+  val bbox = Module(new CyclotronInstMemBlackBox)
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  io.imem.req.ready := true.B
+  bbox.io.req.valid := io.imem.req.valid
+  bbox.io.req.bits.tag := io.imem.req.bits.tag
+  bbox.io.req.bits.pc := io.imem.req.bits.address
+
+  io.imem.resp.valid := bbox.io.resp.valid
+  io.imem.resp.bits.tag := bbox.io.resp.bits.tag
+  io.imem.resp.bits.data := bbox.io.resp.bits.inst
+  io.imem.resp.bits.metadata := DontCare
+
+  class CyclotronInstMemBlackBox(implicit val p: Parameters)
+  extends BlackBox(Map(
+        "ARCH_LEN"      -> p(MuonKey).archLen,
+        "INST_BITS"     -> p(MuonKey).instBits,
+        "IMEM_TAG_BITS" -> p(MuonKey).l0iReqTagBits
+  )) with HasBlackBoxResource with HasCoreParameters {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
+      val req = Flipped(Valid(new Bundle {
+        val tag = UInt(imemTagBits.W)
+        val pc = pcT
+      }))
+      val resp = Valid(new Bundle {
+        val tag = UInt(imemTagBits.W)
+        val inst = instT
+      })
+    })
+
+    addResource("/vsrc/CyclotronInstMem.v")
+    addResource("/vsrc/Cyclotron.vh")
+    addResource("/csrc/Cyclotron.cc")
+  }
 }
 
 /** If `tick` is true, advance cyclotron sim by one tick inside the difftest

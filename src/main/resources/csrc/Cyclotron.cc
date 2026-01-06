@@ -36,6 +36,33 @@ void cyclotron_init(const char* elfname) {
   cyclotron_init_rs(elfname);
 }
 
+void cyclotron_fetch_rs(
+    uint8_t  req_valid,
+    uint64_t req_bits_tag,
+    uint32_t req_bits_pc,
+    uint8_t* resp_valid_ptr,
+    uint64_t* resp_bits_tag_ptr,
+    uint64_t* resp_bits_inst_ptr
+);
+
+void cyclotron_fetch(
+    uint8_t  req_valid,
+    uint64_t req_bits_tag,
+    uint32_t req_bits_pc,
+    uint8_t* resp_valid_ptr,
+    uint64_t* resp_bits_tag_ptr,
+    uint64_t* resp_bits_inst_ptr
+) {
+    cyclotron_fetch_rs(
+        req_valid,
+        req_bits_tag,
+        req_bits_pc,
+        resp_valid_ptr,
+        resp_bits_tag_ptr,
+        resp_bits_inst_ptr
+    );
+}
+
 void cyclotron_frontend_rs(
     const uint8_t* ibuf_ready_vec,
     uint8_t*       ibuf_valid_vec,
