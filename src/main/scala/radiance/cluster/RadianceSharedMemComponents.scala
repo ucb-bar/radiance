@@ -6,6 +6,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, BufferParams}
 import freechips.rocketchip.tilelink._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
 import radiance.subsystem._
@@ -56,7 +57,9 @@ class RadianceSharedMemComponents(
     tile.smemNodes.zipWithIndex.map { case (m, lid) =>
       val smemFanoutXbar = LazyModule(new TLXbar())
       smemFanoutXbar.suggestName(f"rad_smem_fanout_cl${clusterParams.clusterId}_c${cid}_l${lid}_xbar")
-      smemFanoutXbar.node :=* AddressOrNode(clusterParams.baseAddr) :=* m
+      smemFanoutXbar.node :=* DisableMonitors { implicit p =>
+        AddressOrNode(clusterParams.baseAddr) :=* m
+      }
       smemFanoutXbar.node
     }.toList
   }.toList

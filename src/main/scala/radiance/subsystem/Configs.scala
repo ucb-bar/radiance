@@ -100,15 +100,14 @@ class WithMuonCores(
         icacheUsingD = l0i,
         dcache = l0d,
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
-        peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset +
-          0x200 + 0x100 * coreIdOffset,
+        peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset
       )
       List.tabulate(n)(i => MuonTileAttachParams(
         muon.copy(
           tileId = i + idOffset,
-          coreId = i + coreIdOffset,
+          coreId = i /* + coreIdOffset */,
           clusterId = clusterParams.clusterId,
-          peripheralAddr = muon.peripheralAddr + i * 0x100,
+          peripheralAddr = muon.peripheralAddr + 0x200 + i * 0x100,
         ),
         crossing
       )) ++ prev

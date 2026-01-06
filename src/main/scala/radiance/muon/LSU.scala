@@ -1282,8 +1282,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.shmemReq.valid := false.B
         reqGen.io.memRequest.ready := io.globalMemReq.ready
     }.otherwise {
-        io.globalMemReq.valid := reqGen.io.memRequest.valid
-        io.shmemReq.valid := true.B
+        io.globalMemReq.valid := false.B
+        io.shmemReq.valid := reqGen.io.memRequest.valid
         reqGen.io.memRequest.ready := io.shmemReq.ready
     }
     

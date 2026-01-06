@@ -10,6 +10,7 @@ import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config._
+import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.SoftResetFinishNode
 import radiance.memory._
@@ -148,7 +149,9 @@ class MuonTile(
   }
 
   val smemNodes = innerSmemNodes.map(node => {
-    TLBuffer() := node
+    DisableMonitors { implicit p =>
+      TLBuffer() := node
+    }
   })
 
   val icacheWordNode = muonParams.icache match {
@@ -212,6 +215,7 @@ class MuonTile(
 
   val (l0dOut, l0dIn, flushRegNode) = muonParams.dcache.map { l0dParams =>
     require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
+    println(f"l0d flush address is ${muonParams.peripheralAddr}%x")
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0dParams,
