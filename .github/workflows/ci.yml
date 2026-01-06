@@ -109,6 +109,18 @@ jobs:
           cd generators/radiance
           python3 test/run_isa_tests.py -j "$(nproc)"
 
+  run-core-isa-tests:
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run ISA tests on core-as-top config
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
+          python3 test/run_isa_tests.py -j "$(nproc)" -c core
+
   run-cosim-isa-tests:
     runs-on: as4
     needs: build
@@ -123,7 +135,7 @@ jobs:
 
   clean:
     runs-on: as4
-    needs: [run-soc-isa-tests, run-cosim-isa-tests]
+    needs: [run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace and chipyard
