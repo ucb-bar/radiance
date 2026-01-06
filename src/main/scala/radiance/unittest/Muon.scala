@@ -26,8 +26,10 @@ class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
   ))))
   val xbar = TLXbar()
   val fakeGmem = TLRAM(
+    // FIXME: full GMEM-sized TLRAM hangs the simulator; currently working
+    // around with an arbitrarily small GMEM
     // address = AddressSet(0x0, (BigInt(1) << p(MuonKey).archLen) - 1),
-    address = AddressSet(0x0, 0x1000 - 1),
+    address = AddressSet(0x0, 0x10000000 - 1),
     beatBytes = p(MuonKey).archLen / 8,
     devName = Some("gmem")
   )
@@ -207,8 +209,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
       val finished = Output(Bool())
     })
 
-    val core = Module(new MuonCore()(p))
-
+    val core = Module(new MuonCore(test = false)(p))
     val imem = Module(new CyclotronInstMem)
     core.io.imem <> imem.io.imem
 
@@ -230,6 +231,12 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.softReset := false.B
     core.io.coreId := 0.U
     core.io.clusterId := 0.U
+
+    // RTL/model diff-test
+    if (core.test) {
+      val cdiff = Module(new CyclotronDiffTest(tick = true))
+      cdiff.io.trace <> core.io.trace.get
+    }
 
     io.finished := core.io.finished
   }
