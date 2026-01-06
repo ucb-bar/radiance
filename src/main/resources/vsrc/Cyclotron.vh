@@ -24,6 +24,12 @@ import "DPI-C" function cyclotron_difftest_reg(
   input int  trace_regs_2_data[NUM_LANES]
 );
 
+task automatic cyclotron_init_task();
+  string elffile;
+  elffile = vpi_get_binary();
+  cyclotron_init(elffile);
+endtask
+
 import "DPI-C" function void cyclotron_imem(
   output bit     imem_req_ready,
   input  bit     imem_req_valid,
@@ -38,4 +44,3 @@ import "DPI-C" function void cyclotron_imem(
   output byte    imem_resp_bits_tag,
   output longint imem_resp_bits_data
 );
-

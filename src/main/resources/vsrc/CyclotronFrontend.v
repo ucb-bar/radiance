@@ -102,15 +102,10 @@ module CyclotronFrontendBlackBox #(
 
   bit __in_finished;
 
-  string elffile;
-
   // initialize model at the rtl sim start
   // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
   // ELF
-  initial begin
-    elffile = vpi_get_binary();
-    cyclotron_init(elffile);
-  end
+  initial cyclotron_init_task();
 
   always @(negedge clock) begin
     cyclotron_imem(
