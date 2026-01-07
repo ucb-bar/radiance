@@ -323,7 +323,8 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
   if (outer.muonParams.disabled) {
-    muon.reset := true.B
+    muon.io.imem.req.ready := false.B
+    muon.io.imem.resp.valid := false.B
   }
 
   if (muon.test) {
