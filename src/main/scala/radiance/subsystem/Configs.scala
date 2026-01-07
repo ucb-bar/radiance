@@ -63,6 +63,7 @@ class WithMuonCores(
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
   headless: Boolean,
+  disabled: Boolean,
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
@@ -86,7 +87,6 @@ class WithMuonCores(
     } else {
       val prev = up(TilesLocated(`location`))
       val idOffset = up(NumTiles)
-      val coreIdOffset = up(NumMuonCores)
       require(up(SIMTCoreKey).isDefined, "WithMuonCores requires WithSIMTConfig")
 
       val clusterParams = (location match {
@@ -100,7 +100,8 @@ class WithMuonCores(
         icacheUsingD = l0i,
         dcache = l0d,
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
-        peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset
+        peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset,
+        disabled = disabled,
       )
       List.tabulate(n)(i => MuonTileAttachParams(
         muon.copy(
@@ -114,10 +115,10 @@ class WithMuonCores(
     }
   }
   case NumTiles => up(NumTiles) + n
-  case NumMuonCores => up(NumMuonCores) + n
 }) {
   // constructor override that omits `crossing`
-  def this(n: Int, location: HierarchicalLocation = InSubsystem, headless: Boolean = false,
+  def this(n: Int, location: HierarchicalLocation = InSubsystem,
+           headless: Boolean = false, disabled: Boolean = false,
           l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -126,7 +127,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), headless, l0i, l0d)
+  ), headless, disabled, l0i, l0d)
 }
 
 class WithCyclotronCores(
@@ -317,18 +318,18 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         //   1, Float(5, 11), -1, identity = "0x3c00", c_str="((x) * (scale))"
         // )),
         // mvin_scale_acc_args = None,
-        has_training_convs = false,
-        inputType = MxFloat(5, 3, 1),
-        weightType = MxFloat(5, 3, 1),
-        accType = MxFloat(8, 8, 1),
-        spatialArrayInputType = MxFloat(5, 3, 1),
-        spatialArrayWeightType = MxFloat(5, 3, 1),
-        spatialArrayOutputType = MxFloat(8, 8, 1),
-        meshProdPrecisionList = Seq.fill(16)(8, 8),
-        meshAccPrecisionList = Seq.fill(16)(MxFloat(8, 8, 1)),
-        acc_read_full_width = false, // set to true to output fp32
+        // has_training_convs = false,
+        // inputType = MxFloat(5, 3, 1),
+        // weightType = MxFloat(5, 3, 1),
+        // accType = MxFloat(8, 8, 1),
+        // spatialArrayInputType = MxFloat(5, 3, 1),
+        // spatialArrayWeightType = MxFloat(5, 3, 1),
+        // spatialArrayOutputType = MxFloat(8, 8, 1),
+        // meshProdPrecisionList = Seq.fill(16)(8, 8),
+        // meshAccPrecisionList = Seq.fill(16)(MxFloat(8, 8, 1)),
+        // acc_read_full_width = false, // set to true to output fp32
         num_counter = 0,
-        dataflow = Dataflow.WS,
+        // dataflow = Dataflow.WS,
         ex_read_from_acc = false,
         ex_write_to_spad = false,
         has_max_pool = false,
@@ -336,8 +337,8 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         sp_singleported = false,
         spad_read_delay = 4,
         use_shared_ext_mem = true,
-        acc_sub_banks = 1,
-        has_normalizations = false,
+        // acc_sub_banks = 1,
+        // has_normalizations = false,
         meshRows = dim,
         meshColumns = dim,
         tile_latency = 0,

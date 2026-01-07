@@ -17,8 +17,6 @@ import radiance.memory._
 import radiance.subsystem._
 import radiance.unittest.CyclotronDiffTest
 
-case object NumMuonCores extends Field[Int](0)
-
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
   tileId: Int = 0,
@@ -28,6 +26,7 @@ case class MuonTileParams(
   icacheUsingD: Option[DCacheParams] = None,
   dcache: Option[DCacheParams] = None,
   peripheralAddr: BigInt = 0,
+  disabled: Boolean = false,
   btb: Option[BTBParams] = None,
   beuAddr: Option[BigInt] = None,
   blockerCtrlAddr: Option[BigInt] = None,
@@ -322,6 +321,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
+
+  if (outer.muonParams.disabled) {
+    muon.reset := true.B
+  }
 
   if (muon.test) {
     val cdiff = Module(new CyclotronDiffTest(tick = true))

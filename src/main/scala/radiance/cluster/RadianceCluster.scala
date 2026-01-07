@@ -93,7 +93,7 @@ class RadianceCluster (
   // clcbus -> print buffer TODO: move to MuonTile
   val printBuf = TLRAM(
     address = AddressSet(thisClusterParams.baseAddr +
-      thisClusterParams.peripheralAddrOffset, 0x100 * muonTiles.length - 1),
+      thisClusterParams.peripheralAddrOffset, 0x100 * (muonTiles.length max 1) - 1),
     cacheable = false,
     atomics = true,
     beatBytes = 8
@@ -144,7 +144,7 @@ class RadianceCluster (
     realMuons.foreach(barrierJunction.node := _.barrierMaster)
     barrierSynchronizer.node := barrierJunction.node
 
-    realMuons.foreach(_.flushRegNode.get := HackAtomicNode(8) := clcbus.outwardNode)
+    realMuons.foreach(_.flushRegNode.foreach(_ := HackAtomicNode(8) := clcbus.outwardNode))
   }
 
 //  val l1InNodes = muonTiles.map(_.dcacheNode)

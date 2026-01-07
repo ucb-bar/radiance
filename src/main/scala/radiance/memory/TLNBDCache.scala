@@ -56,7 +56,7 @@ class TLNBDCache(val params: TLNBDCacheParams)
         TLSlaveParameters.v2(
           address = Seq(AddressSet(0, p(GPUMemory).get.size - 1)),
           name = Some("radiance_l1"),
-          fifoId = Some(0),
+          fifoId = Some(1),
           supports = TLMasterToSlaveTransferSizes(
             get = TransferSizes(1, beatBytes),
             putFull = TransferSizes(1, beatBytes),

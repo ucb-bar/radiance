@@ -31,17 +31,18 @@ class RadianceCBus(params: RadianceCBusParams, name: String)(implicit p: Paramet
 {
   override lazy val desiredName = s"RadControlBus_$name"
 
+  println(name + " fixer")
   private val fixer = LazyModule(new TLFIFOFixer(TLFIFOFixer.all))
   fixer.suggestName(name + "_fixer")
+  private val in_xbar = LazyModule(new TLXbar(nameSuffix = Some(s"${name}_in")))
   private val node: TLNode = {
-    val in_xbar = LazyModule(new TLXbar(nameSuffix = Some(s"${name}_in")))
     val out_xbar = LazyModule(new TLXbar(nameSuffix = Some(s"${name}_out")))
     (out_xbar.node :*= fixer.node :*= in_xbar.node)
   }
 
   def inwardNode: TLInwardNode = node
   def outwardNode: TLOutwardNode = node
-  def busView: TLEdge = fixer.node.edges.in.head
+  def busView: TLEdge = in_xbar.node.edges.out.head
 
   val prefixNode = None
   val builtInDevices: BuiltInDevices = BuiltInDevices.attach(params, outwardNode)
