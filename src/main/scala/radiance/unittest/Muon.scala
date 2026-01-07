@@ -231,6 +231,11 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.coreId := 0.U
     core.io.clusterId := 0.U
 
+    // performance counters
+    val cperf = Module(new Profiler)
+    cperf.io.perf <> core.io.perf
+    cperf.io.finished := core.io.finished
+
     // RTL/model diff-test
     if (core.test) {
       val cdiff = Module(new CyclotronDiffTest(tick = true))
@@ -1092,40 +1097,70 @@ class CyclotronDiffTest(tick: Boolean = true)
     boxtr.address := tr.address
     boxtr.data := tr.data.asUInt
   }
-}
 
-class CyclotronDiffTestBlackBox(tick: Boolean)(implicit val p: Parameters)
-extends BlackBox(Map(
-      "ARCH_LEN"     -> p(MuonKey).archLen,
-      "INST_BITS"    -> p(MuonKey).instBits,
-      "NUM_WARPS"    -> p(MuonKey).numWarps,
-      "NUM_LANES"    -> p(MuonKey).numLanes,
-      "OP_BITS"      -> Isa.opcodeBits,
-      "REG_BITS"     -> Isa.regBits,
-      "IMM_BITS"     -> 32,
-      "CSR_IMM_BITS" -> Isa.csrImmBits,
-      "PRED_BITS"    -> Isa.predBits,
-      "SIM_TICK"     -> (if (tick) 1 else 0),
-)) with HasBlackBoxResource with HasCoreParameters {
-  val io = IO(new Bundle {
-    val clock = Input(Clock())
-    val reset = Input(Bool())
+  class CyclotronDiffTestBlackBox(tick: Boolean)(implicit val p: Parameters)
+  extends BlackBox(Map(
+        "ARCH_LEN"     -> p(MuonKey).archLen,
+        "INST_BITS"    -> p(MuonKey).instBits,
+        "NUM_WARPS"    -> p(MuonKey).numWarps,
+        "NUM_LANES"    -> p(MuonKey).numLanes,
+        "OP_BITS"      -> Isa.opcodeBits,
+        "REG_BITS"     -> Isa.regBits,
+        "IMM_BITS"     -> 32,
+        "CSR_IMM_BITS" -> Isa.csrImmBits,
+        "PRED_BITS"    -> Isa.predBits,
+        "SIM_TICK"     -> (if (tick) 1 else 0),
+  )) with HasBlackBoxResource with HasCoreParameters {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
 
-    val trace = Input(new Bundle {
-      val valid = Bool()
-      val pc = pcT
-      val warpId = widT
-      val regs = Vec(Isa.maxNumRegs, new Bundle {
-        val enable = Bool()
-        val address = pRegT
-        val data = UInt((muonParams.numLanes * muonParams.archLen).W)
+      val trace = Input(new Bundle {
+        val valid = Bool()
+        val pc = pcT
+        val warpId = widT
+        val regs = Vec(Isa.maxNumRegs, new Bundle {
+          val enable = Bool()
+          val address = pRegT
+          val data = UInt((muonParams.numLanes * muonParams.archLen).W)
+        })
       })
     })
+
+    addResource("/vsrc/CyclotronDiffTest.v")
+    addResource("/vsrc/Cyclotron.vh")
+    addResource("/csrc/Cyclotron.cc")
+  }
+}
+
+class Profiler(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val finished = Input(Bool())
+    val perf = Flipped(new PerfIO)
   })
 
-  addResource("/vsrc/CyclotronDiffTest.v")
-  addResource("/vsrc/Cyclotron.vh")
-  addResource("/csrc/Cyclotron.cc")
+  val bbox = Module(new ProfilerBlackBox()(p))
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  bbox.io.perf <> io.perf
+  bbox.io.finished := io.finished
+
+  class ProfilerBlackBox()(implicit val p: Parameters)
+  extends BlackBox(Map(
+        "COUNTER_WIDTH" -> Perf.counterWidth,
+  )) with HasBlackBoxResource with HasCoreParameters {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
+      val finished = Input(Bool())
+      val perf = Flipped(new PerfIO)
+    })
+
+    addResource("/vsrc/Profiler.v")
+    addResource("/vsrc/Cyclotron.vh")
+    addResource("/csrc/Cyclotron.cc")
+  }
 }
 
 class CyclotronMemBlackBox(implicit p: Parameters) extends CyclotronBlackBox

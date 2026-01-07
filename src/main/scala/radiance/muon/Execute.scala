@@ -17,7 +17,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
     val softReset = Input(Bool())
-    val perf = Output(new ExecutePerfIO)
+    val perf = new ExecutePerfIO
   })
   
   val aluPipe = Module(new ALUPipe())
@@ -81,7 +81,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
 }
 
 class ExecutePerfIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val instRetired = UInt(Perf.counterWidth.W)
-  val cycle =  UInt(Perf.counterWidth.W)
+  val instRetired = Output(UInt(Perf.counterWidth.W))
+  val cycle =  Output(UInt(Perf.counterWidth.W))
   // TODO: issue valid, execute fire
 }

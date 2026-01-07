@@ -412,4 +412,18 @@ void cyclotron_difftest_reg(
   );
 }
 
+void profile_perf_counters_rs(
+    uint64_t inst_retired,
+    uint64_t cycle,
+    uint8_t finished
+);
+
+void profile_perf_counters(
+    uint64_t inst_retired,
+    uint64_t cycle,
+    uint8_t finished
+) {
+  profile_perf_counters_rs(inst_retired, cycle, finished);
+}
+
 } // extern "C"
