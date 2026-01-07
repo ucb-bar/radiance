@@ -158,14 +158,22 @@ class RadianceCyclotronConfig extends Config(
 */
 
 class RadianceTapeoutSimConfig extends Config(
-  // new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 64, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  // new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
-  // new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 64, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  // new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  // new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
+  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new RadianceBaseConfig
+)
+
+class RadianceGemminiOnlyConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
   new RadianceBaseConfig
 )

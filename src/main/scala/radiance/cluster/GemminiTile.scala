@@ -334,14 +334,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       node.d.ready := true.B
     }
 
-    outer.gemmini.module.mx_io.get.requant_in <> in
+    outer.gemmini.module.mx_io.get.requant_in_gpu <> in
     outer.gemmini.module.mx_io.get.requant_out <> out
   }
 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map { c =>
     val lut = Wire(Decoupled(UInt(c.numBits.W)))
-    outer.gemmini.module.mx_io.get.lut <> lut.asTypeOf(outer.gemmini.module.mx_io.get.lut.cloneType)
+    val mxLut = outer.gemmini.module.mx_io.get.lut
+    mxLut.valid := lut.valid
+    mxLut.bits := lut.bits.asTypeOf(outer.gemmini.module.mx_io.get.lut.bits.cloneType)
+    lut.ready := mxLut.ready
     lut
   }
 
