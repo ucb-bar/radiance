@@ -17,6 +17,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
     val softReset = Input(Bool())
+    val perf = Output(new ExecutePerfIO)
   })
   
   val aluPipe = Module(new ALUPipe())
@@ -63,15 +64,24 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   }
   io.resp :<>= respArbiter.io.out
 
-  val mcycle = Wire(UInt(64.W))
-  val mcycleReg = RegEnable(mcycle, 0.U(64.W), true.B)
-  mcycle := Mux(io.softReset, 0.U(64.W), mcycleReg + 1.U)
+  val mcycle = Wire(UInt(Perf.counterWidth.W))
+  val mcycleReg = RegEnable(mcycle, 0.U(Perf.counterWidth.W), true.B)
+  mcycle := Mux(io.softReset, 0.U(Perf.counterWidth.W), mcycleReg + 1.U)
 
-  val minstret = Wire(UInt(64.W))
-  val minstretReg = RegEnable(minstret, 0.U(64.W), io.resp.fire)
-  minstret := Mux(io.softReset, 0.U(64.W), minstretReg + 1.U)
+  val minstret = Wire(UInt(Perf.counterWidth.W))
+  val minstretReg = RegEnable(minstret, 0.U(Perf.counterWidth.W), io.resp.fire)
+  minstret := Mux(io.softReset, 0.U(Perf.counterWidth.W), minstretReg + 1.U)
+
+  io.perf.instRetired := minstret
+  io.perf.cycle := mcycleReg
 
   sfuPipe.csrIO.mcycle := mcycleReg
   sfuPipe.csrIO.minstret := minstretReg
   sfuPipe.csrIO.fe := io.feCSR
+}
+
+class ExecutePerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val instRetired = UInt(Perf.counterWidth.W)
+  val cycle =  UInt(Perf.counterWidth.W)
+  // TODO: issue valid, execute fire
 }

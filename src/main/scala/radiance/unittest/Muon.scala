@@ -9,11 +9,10 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.diplomacy.{IdRange, TransferSizes}
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.{IdRange, AddressSet}
-import freechips.rocketchip.unittest.{UnitTest, UnitTestModule}
+import freechips.rocketchip.unittest.UnitTest
 import radiance.muon._
 import radiance.subsystem.DummyTileParams
 import scala.collection.mutable.ArrayBuffer
@@ -29,7 +28,7 @@ class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
     // FIXME: full GMEM-sized TLRAM hangs the simulator; currently working
     // around with an arbitrarily small GMEM
     // address = AddressSet(0x0, (BigInt(1) << p(MuonKey).archLen) - 1),
-    address = AddressSet(0x0, 0x10000000 - 1),
+    address = AddressSet(0x0, 0x100000 - 1),
     beatBytes = p(MuonKey).archLen / 8,
     devName = Some("gmem")
   )
