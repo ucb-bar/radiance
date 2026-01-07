@@ -3,9 +3,8 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.resources.BigIntHexContext
-import freechips.rocketchip.rocket.{ALU, MulDivParams}
-import freechips.rocketchip.tile.{CoreParams, FPUParams, HasNonDiplomaticTileParameters, HasTileParameters}
-import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey, ParameterizedBundle, SimpleBundleField}
+import freechips.rocketchip.rocket.ALU
+import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.muon.backend.RegWriteback
@@ -284,6 +283,14 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
   ).cloneType))
 }
 
+object Perf {
+  val counterWidth = 64
+}
+
+class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val backend = new BackendPerfIO
+}
+
 /** Trace IO to software testbench that logs PC and register read data at
  *  issue time. */
 class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
@@ -309,6 +316,7 @@ class MuonCore(
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val finished = Output(Bool())
+    val perf = new PerfIO
     /** PC/reg trace IO for diff-testing against model */
     val trace = Option.when(test)(Valid(new TraceIO))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
@@ -329,6 +337,7 @@ class MuonCore(
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset
   be.io.trace.foreach(_ <> io.trace.get)
+  io.perf.backend <> be.io.perf
 
   fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb

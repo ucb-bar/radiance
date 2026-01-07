@@ -99,8 +99,26 @@ module CyclotronFrontendBlackBox #(
   int     __in_ibuf_pred   [0:NUM_WARPS-1];
   int     __in_ibuf_tmask  [0:NUM_WARPS-1];
   longint __in_ibuf_raw    [0:NUM_WARPS-1];
+  bit     __in_ibuf_valid_next  [0:NUM_WARPS-1];
+  byte    __in_ibuf_wid_next    [0:NUM_WARPS-1];
+  int     __in_ibuf_pc_next     [0:NUM_WARPS-1];
+  byte    __in_ibuf_op_next     [0:NUM_WARPS-1];
+  byte    __in_ibuf_opext_next  [0:NUM_WARPS-1];
+  byte    __in_ibuf_rd_next     [0:NUM_WARPS-1];
+  byte    __in_ibuf_rs1_next    [0:NUM_WARPS-1];
+  byte    __in_ibuf_rs2_next    [0:NUM_WARPS-1];
+  byte    __in_ibuf_rs3_next    [0:NUM_WARPS-1];
+  int     __in_ibuf_imm32_next  [0:NUM_WARPS-1];
+  int     __in_ibuf_imm24_next  [0:NUM_WARPS-1];
+  byte    __in_ibuf_csrImm_next [0:NUM_WARPS-1];
+  byte    __in_ibuf_f3_next     [0:NUM_WARPS-1];
+  byte    __in_ibuf_f7_next     [0:NUM_WARPS-1];
+  int     __in_ibuf_pred_next   [0:NUM_WARPS-1];
+  int     __in_ibuf_tmask_next  [0:NUM_WARPS-1];
+  longint __in_ibuf_raw_next    [0:NUM_WARPS-1];
 
   bit __in_finished;
+  bit __in_finished_next;
 
   // initialize model at the rtl sim start
   // use BINARY= argument (i.e. first non-plusarg argument) as the Cyclotron
@@ -202,24 +220,44 @@ module CyclotronFrontendBlackBox #(
     end else begin
       cyclotron_frontend(
         __out_ibuf_ready,
-        __in_ibuf_valid,
-        __in_ibuf_pc,
-        __in_ibuf_wid,
-        __in_ibuf_op,
-        __in_ibuf_opext,
-        __in_ibuf_f3,
-        __in_ibuf_rd,
-        __in_ibuf_rs1,
-        __in_ibuf_rs2,
-        __in_ibuf_rs3,
-        __in_ibuf_f7,
-        __in_ibuf_imm32,
-        __in_ibuf_imm24,
-        __in_ibuf_csrImm,
-        __in_ibuf_tmask,
-        __in_ibuf_raw,
-        __in_finished
+        __in_ibuf_valid_next,
+        __in_ibuf_pc_next,
+        __in_ibuf_wid_next,
+        __in_ibuf_op_next,
+        __in_ibuf_opext_next,
+        __in_ibuf_f3_next,
+        __in_ibuf_rd_next,
+        __in_ibuf_rs1_next,
+        __in_ibuf_rs2_next,
+        __in_ibuf_rs3_next,
+        __in_ibuf_f7_next,
+        __in_ibuf_imm32_next,
+        __in_ibuf_imm24_next,
+        __in_ibuf_csrImm_next,
+        __in_ibuf_tmask_next,
+        __in_ibuf_raw_next,
+        __in_finished_next
       );
+      for (integer g = 0; g < NUM_WARPS; g = g + 1) begin
+        __in_ibuf_valid[g] <= __in_ibuf_valid_next[g];
+        __in_ibuf_wid[g] <= __in_ibuf_wid_next[g];
+        __in_ibuf_pc[g] <= __in_ibuf_pc_next[g];
+        __in_ibuf_op[g] <= __in_ibuf_op_next[g];
+        __in_ibuf_opext[g] <= __in_ibuf_opext_next[g];
+        __in_ibuf_rd[g] <= __in_ibuf_rd_next[g];
+        __in_ibuf_rs1[g] <= __in_ibuf_rs1_next[g];
+        __in_ibuf_rs2[g] <= __in_ibuf_rs2_next[g];
+        __in_ibuf_rs3[g] <= __in_ibuf_rs3_next[g];
+        __in_ibuf_imm32[g] <= __in_ibuf_imm32_next[g];
+        __in_ibuf_imm24[g] <= __in_ibuf_imm24_next[g];
+        __in_ibuf_csrImm[g] <= __in_ibuf_csrImm_next[g];
+        __in_ibuf_f3[g] <= __in_ibuf_f3_next[g];
+        __in_ibuf_f7[g] <= __in_ibuf_f7_next[g];
+        __in_ibuf_pred[g] <= __in_ibuf_pred_next[g];
+        __in_ibuf_tmask[g] <= __in_ibuf_tmask_next[g];
+        __in_ibuf_raw[g] <= __in_ibuf_raw_next[g];
+      end
+      __in_finished <= __in_finished_next;
     end
   end
 

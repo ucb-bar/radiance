@@ -19,6 +19,7 @@ class Backend(
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val softReset = Input(Bool())
+    val perf = Output(new BackendPerfIO)
     /** PC/reg trace IO for diff-testing against model */
     val trace = Option.when(test)(Valid(new TraceIO))
   })
@@ -126,6 +127,8 @@ class Backend(
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
+
+  io.perf.execute <> execute.io.perf
 
   if (bypass) {
     // fallback issue: stall every instruction until writeback
@@ -239,4 +242,8 @@ class Backend(
       cf"] mask=${r.tmask}%b" +
       cf"\n")
   }
+}
+
+class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val execute = new ExecutePerfIO
 }
