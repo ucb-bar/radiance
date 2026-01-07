@@ -84,7 +84,9 @@ jobs:
             ${{ env.CHIPYARD_RELPATH }}/.ivy2/cache
             ${{ env.CHIPYARD_RELPATH }}/.sbt
             ~/.cache/coursier
-          key: scala-${{ hashFiles('**/*.sbt', '**/project/**') }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
+          key: scala-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}-${{ env.CACHE_NUMBER }}
+          restore-keys: |
+            scala-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build Radiance sim binary
         run: |
