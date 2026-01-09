@@ -69,7 +69,11 @@ class RadianceSharedMemComponents(
   val muonClcBusXbar = LazyModule(new TLXbar()).suggestName("muon_clc_xbar").node
   val muonClcBusClient = TLEphemeralNode()
   muonSmemFanout.flatten.foreach(muonClcBusXbar := _)
-  muonClcBusClient := TLFragmenter(8, 8) := TLWidthWidget(4) := muonClcBusXbar
+  (muonClcBusClient
+    := TLFragmenter(8, 8)
+    := TLWidthWidget(4) // muons see 4B managers instead of 8B for cbus
+    := TLSourceShrinker(smemKey.controlInFlights) // cap sources for cbus ops
+    := muonClcBusXbar)
 
   val unalignedClients = extClients.map(connectOne(_, () => TLFragmenter(wordSize, 128)))
 

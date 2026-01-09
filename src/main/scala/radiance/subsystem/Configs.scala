@@ -36,6 +36,7 @@ case class RadianceSharedMemKey(address: BigInt,
                                 numWords: Int,
                                 wordSize: Int = 4,
                                 prealignBufDepth: Int = 2,
+                                controlInFlights: Int = 16,
                                 memType: MemType = TwoPort,
                                 strideByWord: Boolean = true,
                                 filterAligned: Boolean = true,
@@ -406,7 +407,7 @@ class WithRadianceSharedMem(address: BigInt,
   case RadianceSharedMemKey => {
     require(isPow2(size) && size >= 1024)
     Some(RadianceSharedMemKey(
-      address, size, numBanks, numWords, 4, 2, memType,
+      address, size, numBanks, numWords, 4, 2, 16, memType,
       strideByWord, filterAligned, disableMonitors, serialization
     ))
   }

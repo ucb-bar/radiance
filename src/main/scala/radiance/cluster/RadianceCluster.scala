@@ -103,7 +103,10 @@ class RadianceCluster (
   val GPUMemParams(gmemAddr, gmemSize) = p(GPUMemory).get
 
   // cbus -> clcbus/smem
-  clcbus.inwardNode := TLFragmenter(8, 128, alwaysMin = true) := extReqXbar
+  (clcbus.inwardNode
+    := TLFragmenter(8, 128, alwaysMin = true)
+    := TLSourceShrinker(thisClusterParams.smemConfig.controlInFlights)
+    := extReqXbar)
   extReqXbar := ccbus.outwardNode
   // ccbus is connected to cbus automatically
 
