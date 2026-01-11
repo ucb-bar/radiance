@@ -206,7 +206,9 @@ class MuonTile(
   }
 
   val lsuNodes = innerLsuNodes.map(node => {
-    TLBuffer() := node
+    (TLBuffer()
+      := TLSourceShrinker(1 << muonParams.core.logGMEMInFlights)
+      := node)
   })
 
   
@@ -237,7 +239,7 @@ class MuonTile(
     coalLogSize = log2Ceil(coalescedReqWidth),
     wordSizeInBytes = muonParams.core.archLen / 8,
     numOldSrcIds = 1 << lsuSourceIdBits,
-    numNewSrcIds = 1 << 5,
+    numNewSrcIds = 1 << muonParams.core.logCoalGMEMInFlights,
     respQueueDepth = 4,
     numCoalReqs = 1,
   )))
@@ -254,7 +256,10 @@ class MuonTile(
   // (0 until muonParams.core.numLanes).foreach(_ => nonCoalXbar := coalescer.nexusNode)
   coalXbar := coalescer.nexusNode
   coalescer.passthroughNodes.foreach(nonCoalXbar := _)
-  coalXbar := TLWidthWidget(muonParams.core.archLen / 8) := nonCoalXbar
+  (coalXbar
+    := TLWidthWidget(muonParams.core.archLen / 8)
+    := TLSourceShrinker(1 << muonParams.core.logNonCoalGMEMInFlights)
+    := nonCoalXbar)
 
   lsuNodes.foreach(coalescer.nexusNode := _)
 

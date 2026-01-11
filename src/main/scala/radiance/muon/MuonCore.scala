@@ -44,6 +44,9 @@ case class MuonCoreParams(
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logSMEMInFlights: Int = 2,
+  logGMEMInFlights: Int = 4, // per lane
+  logCoalGMEMInFlights: Int = 5, // all lanes
+  logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
   // debug bundles and prints
@@ -54,12 +57,9 @@ case class MuonCoreParams(
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
   def l0dReqTagBits: Int = {
-    val packetBits = log2Up(numLanes / lsu.numLsuLanes) // from lsu derived params
-    val sourceIdBits = LsuQueueToken.width(this) + packetBits
-    val laneBits = log2Ceil(numLanes)
     val coalVsNonCoal = 1
     val sizeTagBits = 3 // store the size in the cache tag
-    val totalBits = sourceIdBits + laneBits + coalVsNonCoal + sizeTagBits
+    val totalBits = (logCoalGMEMInFlights max logNonCoalGMEMInFlights) + coalVsNonCoal + sizeTagBits
     println("l0d tag bits", totalBits)
     totalBits
   }
