@@ -415,15 +415,24 @@ void cyclotron_difftest_reg(
 void profile_perf_counters_rs(
     uint64_t inst_retired,
     uint64_t cycle,
+    uint64_t cycles_decoded,
+    uint64_t cycles_eligible,
+    uint64_t cycles_issued,
     uint8_t finished
 );
 
 void profile_perf_counters(
     uint64_t inst_retired,
     uint64_t cycle,
+    uint64_t cycles_decoded,
+    uint64_t cycles_eligible,
+    uint64_t cycles_issued,
     uint8_t finished
 ) {
-  profile_perf_counters_rs(inst_retired, cycle, finished);
+  profile_perf_counters_rs(
+      inst_retired, cycle,
+      cycles_decoded, cycles_eligible, cycles_issued,
+      finished);
 }
 
 } // extern "C"

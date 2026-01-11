@@ -4,10 +4,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-/** Hazard module checks for WAW/WAR hazards in the per-warp instructions at
- *  ibuffer heads, and gates their admission to the reservation station. IOW,
- *  the module resolves WAW/WAR hazards by stalling.  RAW hazards are handled
- *  inside the reservation station.
+/** Hazard module checks WAW/WAR hazards for instructions at the ibuffer heads,
+ *  and gates their admission to the reservation station. IOW, the module
+ *  resolves WAW/WAR hazards by stalling.  RAW hazards are handled at the
+ *  reservation station.
  */
 class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
@@ -77,7 +77,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   // TODO only handling warp 0 because of single-port scoreboard
-  val rsAdmitAllWarps = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
+  val rsAdmitPerWarp = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
     wid match {
       case 0 => tryWarp(ibPort)
       case _ => {
@@ -94,7 +94,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
   // dequeue from IBUF
-  (io.ibuf zip rsAdmitAllWarps).foreach { case (ib, rs) =>
+  (io.ibuf zip rsAdmitPerWarp).foreach { case (ib, rs) =>
     ib.ready := rs.fire // since ib.valid != rs.valid
   }
 
@@ -102,9 +102,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   // RS table
   // TODO: per-FU RS
   val rsAdmitArbiter = Module(
-    new RRArbiter(chiselTypeOf(rsAdmitAllWarps.head.bits), rsAdmitAllWarps.length)
+    new RRArbiter(chiselTypeOf(rsAdmitPerWarp.head.bits), rsAdmitPerWarp.length)
   )
-  (rsAdmitArbiter.io.in zip rsAdmitAllWarps).foreach { case (a, w) => a <> w }
+  (rsAdmitArbiter.io.in zip rsAdmitPerWarp).foreach { case (a, w) => a <> w }
   val rsAdmitChosen = rsAdmitArbiter.io.out
 
   // update scoreboard upon RS admission

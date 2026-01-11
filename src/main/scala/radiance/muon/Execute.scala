@@ -17,7 +17,11 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
     val softReset = Input(Bool())
-    val perf = new ExecutePerfIO
+    val perf = new Bundle {
+      val instRetired = Output(UInt(Perf.counterWidth.W))
+      val cycles =  Output(UInt(Perf.counterWidth.W))
+      // TODO: execute fire
+    }
   })
   
   val aluPipe = Module(new ALUPipe())
@@ -72,16 +76,22 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val minstretReg = RegEnable(minstret, 0.U(Perf.counterWidth.W), io.resp.fire)
   minstret := Mux(io.softReset, 0.U(Perf.counterWidth.W), minstretReg + 1.U)
 
-  io.perf.instRetired := minstret
-  io.perf.cycle := mcycleReg
+  // io.perf.instRetired := minstret
+  // io.perf.cycle := mcycleReg
+  val perf = new ExecutePerfCounter
+  perf.cycles.cond(true.B)
+  perf.instRetired.cond(io.resp.fire)
+  io.perf.cycles := perf.cycles.value
+  io.perf.instRetired := perf.instRetired.value
 
   sfuPipe.csrIO.mcycle := mcycleReg
   sfuPipe.csrIO.minstret := minstretReg
   sfuPipe.csrIO.fe := io.feCSR
 }
 
-class ExecutePerfIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val instRetired = Output(UInt(Perf.counterWidth.W))
-  val cycle =  Output(UInt(Perf.counterWidth.W))
-  // TODO: issue valid, execute fire
+class ExecutePerfCounter {
+  /** total retired instructions */
+  val instRetired = new PerfCounter
+  /** total elapsed cycle */
+  val cycles = new PerfCounter
 }

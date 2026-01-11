@@ -283,10 +283,6 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
   ).cloneType))
 }
 
-object Perf {
-  val counterWidth = 64
-}
-
 class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val backend = new BackendPerfIO
 }

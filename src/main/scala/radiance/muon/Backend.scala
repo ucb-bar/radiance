@@ -59,6 +59,14 @@ class Backend(
     reservStation.io.issue
   }
 
+  val perf = new BackendPerfCounter
+  perf.cyclesDecoded.cond(io.ibuf.map(_.valid).reduce(_ || _))
+  perf.cyclesEligible.cond(issued.valid)
+  perf.cyclesIssued.cond(issued.fire)
+  io.perf.cyclesDecoded := perf.cyclesDecoded.value
+  io.perf.cyclesEligible := perf.cyclesEligible.value
+  io.perf.cyclesIssued := perf.cyclesIssued.value
+
   // -----------------
   // operand collector
   // -----------------
@@ -128,8 +136,6 @@ class Backend(
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
 
-  io.perf.execute <> execute.io.perf
-
   if (bypass) {
     // fallback issue: stall every instruction until writeback
     // or execute req fire, for instructions that don't need writeback (i.e. stores, fences)
@@ -185,6 +191,9 @@ class Backend(
     executeIn.uop := issued.bits.uop
     execute.io.token := issued.bits.token
   }
+
+  io.perf.instRetired := execute.io.perf.instRetired
+  io.perf.cycles := execute.io.perf.cycles
 
   // ---------
   // writeback
@@ -244,6 +253,35 @@ class Backend(
   }
 }
 
+object Perf {
+  val counterWidth = 64
+}
+
+/** Creates both the state/logic for a performance counter, as well as declares
+ *  a new IO port for the parent module. */
+class PerfCounter(width: Int = Perf.counterWidth) {
+  private val cond_ = WireInit(false.B)
+  val value = RegInit(0.U(width.W))
+  when (cond_) {
+    value := value + 1.U
+  }
+  def cond(c: Bool) = { cond_ := c }
+}
+
+class BackendPerfCounter {
+  // below must only increment when ibuffer is not dry:
+  /** any decoded instruction this cycle? */
+  val cyclesDecoded = new PerfCounter
+  /** any warp eligible for issue this cycle? */
+  val cyclesEligible = new PerfCounter
+  /** any warp issued this cycle? */
+  val cyclesIssued = new PerfCounter
+}
+
 class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
-  val execute = new ExecutePerfIO
+  val instRetired = Output(UInt(Perf.counterWidth.W))
+  val cycles = Output(UInt(Perf.counterWidth.W))
+  val cyclesDecoded = Output(UInt(Perf.counterWidth.W))
+  val cyclesEligible = Output(UInt(Perf.counterWidth.W))
+  val cyclesIssued = Output(UInt(Perf.counterWidth.W))
 }
