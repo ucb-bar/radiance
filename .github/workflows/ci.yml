@@ -20,6 +20,11 @@ jobs:
   build:
     name: build
     runs-on: as4
+    env:
+      # fix broken IPv6
+      RUSTUP_USE_CURL: "1"
+      CURL_IPRESOLVE: "4"
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: "sparse"
     steps:
       - name: Setup system
         run: |
