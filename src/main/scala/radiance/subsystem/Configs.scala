@@ -373,7 +373,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         // outputIdBits = 3,
       )),
       lookupTable = Some(GemminiLUTConfig(
-        numBits = 96
+        // numBits = 100
       )),
     )
     Seq(GemminiTileAttachParams(

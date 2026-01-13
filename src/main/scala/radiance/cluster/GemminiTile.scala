@@ -412,19 +412,33 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }.toSeq
 
   val gemminiLutMMIO = lutIO.map { io =>
-    require(io.bits.getWidth == 96)
+    require(io.bits.getWidth == 100)
 
     val lutW0 = RegInit(0.U(32.W))
     val lutW1 = RegInit(0.U(32.W))
-    def lutW2(valid: Bool, bits: UInt): Bool = {
-      io.valid := valid
-      io.bits := Cat(bits, lutW1, lutW0)
-      io.ready
+    val lutW2 = RegInit(0.U(32.W))
+    val lutAddrReg = RegInit(0.U(32.W))
+
+    io.bits := Cat(lutAddrReg(3, 0), lutW2, lutW1, lutW0)
+    io.valid := false.B
+
+    def lutRegFunc(reg: UInt, trigger: Boolean = false): (Bool, UInt) => Bool = {
+      def lut(valid: Bool, bits: UInt): Bool = {
+        when (io.ready && valid) {
+          reg := bits
+        }
+        if (trigger) {
+          io.valid := RegNext(io.ready && valid)
+        }
+        io.ready
+      }
+      lut
     }
     Seq(
-      0x40 -> Seq(RegField.w(32, lutW0)),
-      0x44 -> Seq(RegField.w(32, lutW1)),
-      0x48 -> Seq(RegField.w(32, lutW2(_, _))),
+      0x40 -> Seq(RegField.w(32, lutRegFunc(lutW0))),
+      0x44 -> Seq(RegField.w(32, lutRegFunc(lutW1))),
+      0x48 -> Seq(RegField.w(32, lutRegFunc(lutW2))),
+      0x4c -> Seq(RegField.w(32, lutRegFunc(lutAddrReg, trigger = true))),
     )
   }.toSeq.flatten
 
