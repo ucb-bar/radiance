@@ -66,6 +66,7 @@ class Backend(
   io.perf.cyclesDecoded := perf.cyclesDecoded.value
   io.perf.cyclesEligible := perf.cyclesEligible.value
   io.perf.cyclesIssued := perf.cyclesIssued.value
+  io.perf.perWarp <> hazard.io.perf.perWarp
 
   // -----------------
   // operand collector
@@ -255,6 +256,7 @@ class Backend(
 
 object Perf {
   val counterWidth = 64
+  def T = UInt(counterWidth.W)
 }
 
 /** Creates both the state/logic for a performance counter, as well as declares
@@ -278,7 +280,9 @@ class BackendPerfCounter {
   val cyclesIssued = new PerfCounter
 }
 
-class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+// use traits to flatten all sub-module counters into this
+class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p)
+with HasIssuePerfCounters {
   val instRetired = Output(UInt(Perf.counterWidth.W))
   val cycles = Output(UInt(Perf.counterWidth.W))
   val cyclesDecoded = Output(UInt(Perf.counterWidth.W))

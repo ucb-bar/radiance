@@ -1143,18 +1143,31 @@ class Profiler(implicit p: Parameters) extends CoreModule {
   bbox.io.clock := clock
   bbox.io.reset := reset.asBool
 
-  bbox.io.perf <> io.perf
   bbox.io.finished := io.finished
+  bbox.io.instRetired := io.perf.backend.instRetired
+  bbox.io.cycles := io.perf.backend.cycles
+  bbox.io.cyclesDecoded := io.perf.backend.cyclesDecoded
+  bbox.io.cyclesEligible := io.perf.backend.cyclesEligible
+  bbox.io.cyclesIssued := io.perf.backend.cyclesIssued
+  bbox.io.perWarp_stallsWAW := VecInit(io.perf.backend.perWarp.map(_.stallsWAW)).asUInt
+  bbox.io.perWarp_stallsWAR := VecInit(io.perf.backend.perWarp.map(_.stallsWAR)).asUInt
 
   class ProfilerBlackBox()(implicit val p: Parameters)
   extends BlackBox(Map(
         "COUNTER_WIDTH" -> Perf.counterWidth,
+        "NUM_WARPS" -> muonParams.numWarps,
   )) with HasBlackBoxResource with HasCoreParameters {
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
       val finished = Input(Bool())
-      val perf = Flipped(new PerfIO)
+      val instRetired = Input(UInt(Perf.counterWidth.W))
+      val cycles = Input(UInt(Perf.counterWidth.W))
+      val cyclesDecoded = Input(UInt(Perf.counterWidth.W))
+      val cyclesEligible = Input(UInt(Perf.counterWidth.W))
+      val cyclesIssued = Input(UInt(Perf.counterWidth.W))
+      val perWarp_stallsWAW = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
+      val perWarp_stallsWAR = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
     })
 
     addResource("/vsrc/Profiler.v")

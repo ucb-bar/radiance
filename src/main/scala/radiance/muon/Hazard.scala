@@ -26,9 +26,18 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val rsAdmit = Decoupled(new ReservationStationEntry)
     /** writeback interface from EX */
     val writeback = Flipped(regWritebackT)
+    val perf = Output(new IssuePerfIO)
   })
 
-  def tryWarp(ibufPort: DecoupledIO[InstBufEntry]): DecoupledIO[ReservationStationEntry] = {
+  val stallsWAW = Seq.fill(numWarps)(new PerfCounter)
+  val stallsWAR = Seq.fill(numWarps)(new PerfCounter)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsWAW := stallsWAW(wid).value
+    p.stallsWAR := stallsWAR(wid).value
+  }
+
+  def tryWarp(warpId: Int): DecoupledIO[ReservationStationEntry] = {
+    val ibufPort = io.ibuf(warpId)
     val uopValid = ibufPort.valid
     val hasRd    = ibufPort.bits.uop.inst(HasRd) .asBool
     val hasRs1   = ibufPort.bits.uop.inst(HasRs1).asBool
@@ -51,6 +60,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     // assumes combinational-read scoreboard
     val hasWAW = hasRd && (io.scb.readRd.pendingWrites =/= 0.U)
     val hasWAR = hasRd && (io.scb.readRd.pendingReads =/= 0.U)
+
+    stallsWAW(warpId).cond(uopValid && hasWAW)
+    stallsWAR(warpId).cond(uopValid && hasWAR)
 
     // @perf: for now simply gates WAR into RS; relax this into stalling at
     // writeback
@@ -79,7 +91,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   // TODO only handling warp 0 because of single-port scoreboard
   val rsAdmitPerWarp = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
     wid match {
-      case 0 => tryWarp(ibPort)
+      case 0 => tryWarp(wid)
       case _ => {
         when (ibPort.valid) {
           assert(false.B,
@@ -175,3 +187,14 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     read.decr := false.B
   }
 }
+
+trait HasIssuePerfCounters extends HasCoreParameters {
+  implicit val p: Parameters
+  val perWarp = Vec(numWarps, new Bundle {
+    val stallsWAW = Perf.T
+    val stallsWAR = Perf.T
+  })
+}
+
+class IssuePerfIO(implicit p: Parameters) extends CoreBundle()(p)
+with HasIssuePerfCounters
