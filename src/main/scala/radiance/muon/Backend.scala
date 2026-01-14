@@ -63,8 +63,9 @@ class Backend(
   io.perf.cyclesEligible := PerfCounter(issued.valid)
   io.perf.cyclesIssued := PerfCounter(issued.fire)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
-    p.stallsBusy := PerfCounter((issued.bits.uop.wid === wid.U) &&
-                                issued.valid && !issued.ready)
+    p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
+    p.stallsBusy := PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
+                                !issued.ready)
   }
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
     p.cyclesDecoded := h.cyclesDecoded

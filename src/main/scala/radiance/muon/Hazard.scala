@@ -199,6 +199,7 @@ trait HasIssuePerfCounters extends HasCoreParameters {
   implicit val p: Parameters
   val perWarp = Vec(numWarps, new Bundle {
     val cyclesDecoded = Perf.T
+    val cyclesIssued = Perf.T
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
     val stallsBusy = Perf.T
