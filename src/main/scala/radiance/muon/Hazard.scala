@@ -26,13 +26,17 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val rsAdmit = Decoupled(new ReservationStationEntry)
     /** writeback interface from EX */
     val writeback = Flipped(regWritebackT)
-    val perf = Output(new IssuePerfIO)
+    val perf = Output(Vec(numWarps, new Bundle {
+      val cyclesDecoded = Perf.T
+      val stallsWAW = Perf.T
+      val stallsWAR = Perf.T
+    }))
   })
 
   val cyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAW = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAR = Seq.fill(numWarps)(new PerfCounter)
-  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+  io.perf.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesDecoded := cyclesDecoded(wid).value
     p.stallsWAW := stallsWAW(wid).value
     p.stallsWAR := stallsWAR(wid).value
@@ -197,8 +201,6 @@ trait HasIssuePerfCounters extends HasCoreParameters {
     val cyclesDecoded = Perf.T
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
+    val stallsBusy = Perf.T
   })
 }
-
-class IssuePerfIO(implicit p: Parameters) extends CoreBundle()(p)
-with HasIssuePerfCounters

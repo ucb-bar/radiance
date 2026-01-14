@@ -59,14 +59,18 @@ class Backend(
     reservStation.io.issue
   }
 
-  val perf = new BackendPerfCounter
-  perf.cyclesDecoded.cond(io.ibuf.map(_.valid).reduce(_ || _))
-  perf.cyclesEligible.cond(issued.valid)
-  perf.cyclesIssued.cond(issued.fire)
-  io.perf.cyclesDecoded := perf.cyclesDecoded.value
-  io.perf.cyclesEligible := perf.cyclesEligible.value
-  io.perf.cyclesIssued := perf.cyclesIssued.value
-  io.perf.perWarp <> hazard.io.perf.perWarp
+  io.perf.cyclesDecoded := PerfCounter(io.ibuf.map(_.valid).reduce(_ || _))
+  io.perf.cyclesEligible := PerfCounter(issued.valid)
+  io.perf.cyclesIssued := PerfCounter(issued.fire)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsBusy := PerfCounter((issued.bits.uop.wid === wid.U) &&
+                                issued.valid && !issued.ready)
+  }
+  (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
+    p.cyclesDecoded := h.cyclesDecoded
+    p.stallsWAW := h.stallsWAW
+    p.stallsWAR := h.stallsWAR
+  }
 
   // -----------------
   // operand collector
@@ -270,14 +274,12 @@ class PerfCounter(width: Int = Perf.counterWidth) {
   def cond(c: Bool) = { cond_ := c }
 }
 
-class BackendPerfCounter {
-  // below must only increment when ibuffer is not dry:
-  /** any decoded instruction this cycle? */
-  val cyclesDecoded = new PerfCounter
-  /** any warp eligible for issue this cycle? */
-  val cyclesEligible = new PerfCounter
-  /** any warp issued this cycle? */
-  val cyclesIssued = new PerfCounter
+object PerfCounter {
+  def apply(cond: Bool): UInt = {
+    val c = new PerfCounter
+    c.cond(cond)
+    c.value
+  }
 }
 
 // use traits to flatten all sub-module counters into this
@@ -285,7 +287,10 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p)
 with HasIssuePerfCounters {
   val instRetired = Output(UInt(Perf.counterWidth.W))
   val cycles = Output(UInt(Perf.counterWidth.W))
+  /** any decoded instruction this cycle? */
   val cyclesDecoded = Output(UInt(Perf.counterWidth.W))
+  /** any warp eligible for issue this cycle? */
   val cyclesEligible = Output(UInt(Perf.counterWidth.W))
+  /** any warp issued this cycle? */
   val cyclesIssued = Output(UInt(Perf.counterWidth.W))
 }
