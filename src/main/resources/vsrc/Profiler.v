@@ -10,18 +10,21 @@ module ProfilerBlackBox #(
   input logic [COUNTER_WIDTH-1:0] cyclesDecoded,
   input logic [COUNTER_WIDTH-1:0] cyclesEligible,
   input logic [COUNTER_WIDTH-1:0] cyclesIssued,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesDecoded,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAW,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAR
 );
 
   `include "Cyclotron.vh"
 
+  longint per_warp_cycles_decoded [0:NUM_WARPS-1];
   longint per_warp_stalls_waw [0:NUM_WARPS-1];
   longint per_warp_stalls_war [0:NUM_WARPS-1];
 
   genvar i;
   generate
     for (i = 0; i < NUM_WARPS; i = i + 1) begin
+      assign per_warp_cycles_decoded[i] = perWarp_cyclesDecoded[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_waw[i] = perWarp_stallsWAW[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_war[i] = perWarp_stallsWAR[i*COUNTER_WIDTH +: COUNTER_WIDTH];
     end
@@ -33,6 +36,7 @@ module ProfilerBlackBox #(
     input longint cycles_decoded,
     input longint cycles_eligible,
     input longint cycles_issued,
+    input longint per_warp_cycles_decoded[NUM_WARPS],
     input longint per_warp_stalls_waw[NUM_WARPS],
     input longint per_warp_stalls_war[NUM_WARPS],
     input bit     finished
@@ -49,6 +53,7 @@ module ProfilerBlackBox #(
         cyclesDecoded,
         cyclesEligible,
         cyclesIssued,
+        per_warp_cycles_decoded,
         per_warp_stalls_waw,
         per_warp_stalls_war,
         finished

@@ -1149,6 +1149,7 @@ class Profiler(implicit p: Parameters) extends CoreModule {
   bbox.io.cyclesDecoded := io.perf.backend.cyclesDecoded
   bbox.io.cyclesEligible := io.perf.backend.cyclesEligible
   bbox.io.cyclesIssued := io.perf.backend.cyclesIssued
+  bbox.io.perWarp_cyclesDecoded := VecInit(io.perf.backend.perWarp.map(_.cyclesDecoded)).asUInt
   bbox.io.perWarp_stallsWAW := VecInit(io.perf.backend.perWarp.map(_.stallsWAW)).asUInt
   bbox.io.perWarp_stallsWAR := VecInit(io.perf.backend.perWarp.map(_.stallsWAR)).asUInt
 
@@ -1166,6 +1167,7 @@ class Profiler(implicit p: Parameters) extends CoreModule {
       val cyclesDecoded = Input(UInt(Perf.counterWidth.W))
       val cyclesEligible = Input(UInt(Perf.counterWidth.W))
       val cyclesIssued = Input(UInt(Perf.counterWidth.W))
+      val perWarp_cyclesDecoded = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAW = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAR = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
     })

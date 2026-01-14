@@ -29,9 +29,11 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val perf = Output(new IssuePerfIO)
   })
 
+  val cyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAW = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAR = Seq.fill(numWarps)(new PerfCounter)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.cyclesDecoded := cyclesDecoded(wid).value
     p.stallsWAW := stallsWAW(wid).value
     p.stallsWAR := stallsWAR(wid).value
   }
@@ -61,6 +63,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val hasWAW = hasRd && (io.scb.readRd.pendingWrites =/= 0.U)
     val hasWAR = hasRd && (io.scb.readRd.pendingReads =/= 0.U)
 
+    cyclesDecoded(warpId).cond(uopValid)
     stallsWAW(warpId).cond(uopValid && hasWAW)
     stallsWAR(warpId).cond(uopValid && hasWAR)
 
@@ -191,6 +194,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
 trait HasIssuePerfCounters extends HasCoreParameters {
   implicit val p: Parameters
   val perWarp = Vec(numWarps, new Bundle {
+    val cyclesDecoded = Perf.T
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
   })
