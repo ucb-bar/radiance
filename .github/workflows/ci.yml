@@ -25,6 +25,8 @@ jobs:
       RUSTUP_USE_CURL: "1"
       CURL_IPRESOLVE: "4"
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: "sparse"
+      CARGO_NET_RETRY: "10"
+      CARGO_HTTP_TIMEOUT: "60"
     steps:
       - name: Setup system
         run: |
@@ -91,6 +93,12 @@ jobs:
           rsync -a --exclude "/${CHIPYARD_RELPATH}/" \
             "${GITHUB_WORKSPACE}/" "${CHIPYARD_DIR}/generators/radiance/"
           ls -al "${CHIPYARD_DIR}/generators/radiance"
+
+      # warm up cargo as fetching index.crates.io likes to fail intermittently
+      - name: Cargo fetch
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance/cyclotron"
+          cargo fetch
 
       - name: Cache Scala build files
         uses: actions/cache@v5
