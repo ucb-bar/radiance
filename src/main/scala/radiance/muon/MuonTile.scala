@@ -15,7 +15,7 @@ import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.SoftResetFinishNode
 import radiance.memory._
 import radiance.subsystem._
-import radiance.unittest.CyclotronDiffTest
+import radiance.unittest.{Profiler, CyclotronDiffTest}
 
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
@@ -332,7 +332,15 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
     muon.io.imem.resp.valid := false.B
   }
 
+  val isSim = p(RadianceSimArgs)
+  if (isSim) {
+    val cperf = Module(new Profiler)
+    cperf.io.perf <> muon.io.perf
+    cperf.io.finished := muon.io.finished
+  }
+
   if (muon.test) {
+    assert(isSim, "MuonCore.test cannot be true in non-sim mode!")
     val cdiff = Module(new CyclotronDiffTest(tick = true))
     cdiff.io.trace <> muon.io.trace.get
   }

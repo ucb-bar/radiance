@@ -264,8 +264,6 @@ object Perf {
   def T = UInt(counterWidth.W)
 }
 
-/** Creates both the state/logic for a performance counter, as well as declares
- *  a new IO port for the parent module. */
 class PerfCounter(width: Int = Perf.counterWidth) {
   private val cond_ = WireInit(false.B)
   val value = RegInit(0.U(width.W))
