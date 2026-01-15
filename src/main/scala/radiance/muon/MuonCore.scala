@@ -49,8 +49,9 @@ case class MuonCoreParams(
   logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
-  // debug bundles and prints
-  debug: Boolean = true
+  // verification and debug bundles
+  debug: Boolean = true,
+  difftest: Boolean = false
 ) extends PhysicalCoreParams {
   val warpIdBits = log2Up(numWarps)
   val coreIdBits: Int = log2Ceil(numCores)
@@ -300,9 +301,7 @@ class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 /** Muon core and core-private L0 caches */
-class MuonCore(
-  val test: Boolean = false
-)(implicit p: Parameters) extends CoreModule {
+class MuonCore(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val dmem = new DataMemIO
@@ -314,7 +313,7 @@ class MuonCore(
     val finished = Output(Bool())
     val perf = new PerfIO
     /** PC/reg trace IO for diff-testing against model */
-    val trace = Option.when(test)(Valid(new TraceIO))
+    val trace = Option.when(muonParams.difftest)(Valid(new TraceIO))
     // TODO: LCP (threadblock start/done, warp slot, synchronization)
   })
   dontTouch(io)
@@ -324,7 +323,7 @@ class MuonCore(
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
-  val be = Module(new Backend(test))
+  val be = Module(new Backend(muonParams.difftest))
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
   be.io.feCSR := fe.io.csr

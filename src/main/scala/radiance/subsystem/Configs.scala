@@ -63,27 +63,32 @@ class WithMuonCores(
   n: Int,
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
-  headless: Boolean,
+  standalone: Boolean,
+  difftest: Boolean,
   disabled: Boolean,
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
+    if (difftest) {
+      assert(up(RadianceSimArgs),
+             "WithMuonCores: difftest cannot be enabled in non-sim mode!")
+    }
     MuonCoreParams(
       numWarps = up(SIMTCoreKey).get.numWarps,
       numLanes = up(SIMTCoreKey).get.numLanes,
       numCores = n,
       numClusters = 2, // TODO: magic number
       logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
-
       lsu = LoadStoreUnitParams(
         numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
-      )
+      ),
+      difftest = difftest,
     )
   }
   case TilesLocated(`location`) => {
-    if (headless) {
+    if (standalone) {
       Seq()
     } else {
       val prev = up(TilesLocated(`location`))
@@ -119,7 +124,7 @@ class WithMuonCores(
 }) {
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
-           headless: Boolean = false, disabled: Boolean = false,
+           standalone: Boolean = false, difftest: Boolean = false, disabled: Boolean = false,
           l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -128,7 +133,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), headless, disabled, l0i, l0d)
+  ), standalone, difftest, disabled, l0i, l0d)
 }
 
 class WithCyclotronCores(

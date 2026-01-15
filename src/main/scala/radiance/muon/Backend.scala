@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int.LsuOpDecoder
 
 class Backend(
-  test: Boolean = false
+  difftest: Boolean = false
 )(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val lsuReserve = reservationIO
@@ -21,7 +21,7 @@ class Backend(
     val softReset = Input(Bool())
     val perf = Output(new BackendPerfIO)
     /** PC/reg trace IO for diff-testing against model */
-    val trace = Option.when(test)(Valid(new TraceIO))
+    val trace = Option.when(difftest)(Valid(new TraceIO))
   })
 
   // -----

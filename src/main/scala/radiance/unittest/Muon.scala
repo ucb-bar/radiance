@@ -104,7 +104,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   val ibuf = Module(new InstBuffer)
   val cfe = Module(new CyclotronFrontend()(p))
   val cdiff = Module(new CyclotronDiffTest(tick = false)(p))
-  val be = Module(new Backend(test = true)(p.alterMap(Map(
+  val be = Module(new Backend(difftest = true)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
 
@@ -208,7 +208,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
       val finished = Output(Bool())
     })
 
-    val core = Module(new MuonCore(test = false)(p))
+    val core = Module(new MuonCore()(p))
     val imem = Module(new CyclotronInstMem)
     core.io.imem <> imem.io.imem
 
@@ -237,7 +237,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     cperf.io.finished := core.io.finished
 
     // RTL/model diff-test
-    if (core.test) {
+    if (core.muonParams.difftest) {
       val cdiff = Module(new CyclotronDiffTest(tick = true))
       cdiff.io.trace <> core.io.trace.get
     }

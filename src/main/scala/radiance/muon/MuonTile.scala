@@ -308,7 +308,7 @@ class MuonTile(
 }
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
-  val muon = Module(new MuonCore(test = false))
+  val muon = Module(new MuonCore)
 
   MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
 
@@ -339,8 +339,8 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
     cperf.io.finished := muon.io.finished
   }
 
-  if (muon.test) {
-    assert(isSim, "MuonCore.test cannot be true in non-sim mode!")
+  if (muon.muonParams.difftest) {
+    assert(isSim, "MuonCore.difftest cannot be true in non-sim mode!")
     val cdiff = Module(new CyclotronDiffTest(tick = true))
     cdiff.io.trace <> muon.io.trace.get
   }

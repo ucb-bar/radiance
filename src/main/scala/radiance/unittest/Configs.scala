@@ -29,26 +29,26 @@ class WithMuonLSUDebugIds(width: Int) extends Config((_, _, _) => {
 
 class MuonCoreTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
-  new WithMuonCores(1, headless = true) ++
+  new WithMuonCores(1, standalone = true, difftest = false) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
 class MuonFrontendTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonFrontendTest()(_)) ++
-  new WithMuonCores(1, headless = true) ++
+  new WithMuonCores(1, standalone = true, difftest = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
 class MuonBackendTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonBackendTest()(_)) ++
-  new WithMuonCores(1, headless = true) ++
+  new WithMuonCores(1, standalone = true, difftest = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
 class MuonLSUTestConfig extends Config(
   new WithMuonLSUDebugIds(width = 16) ++
   new WithMuonUnitTestHarness(new MuonLSUTest()(_)) ++
-  new WithMuonCores(1, headless = true) ++
+  new WithMuonCores(1, standalone = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
