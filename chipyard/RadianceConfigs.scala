@@ -143,19 +143,12 @@ class RadianceBringupHostConfig extends Config(
   new chipyard.NoCoresConfig)
 
 class RadianceMuonConfig extends Config(
-  new WithMuonCores(1, location = InCluster(0)) ++
-  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
-  new RadianceBaseConfig)
-
-/*
-class RadianceCyclotronConfig extends Config(
-  new WithCyclotronCores(1) ++
-  new WithCoalescer(nNewSrcIds = 16) ++
-  new WithVortexL1Banks(nBanks = 8) ++
-  new WithRadianceCluster(0, smemConfig = tapeoutSmemConfig, l1Config = l1CacheConfig) ++
-  new RadianceBaseConfig)
-*/
+  new WithExtGPUMem() ++
+  new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new RadianceBaseConfig
+)
 
 class RadianceTapeoutSimConfig extends Config(
   // new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
