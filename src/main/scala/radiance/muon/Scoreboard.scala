@@ -16,7 +16,7 @@ class ScoreboardUpdate(implicit p: Parameters) extends CoreBundle()(p) {
   val write = Input(new ScoreboardRegUpdate)
   /** rs1/2/3 updates to pendingReads */
   val reads = Input(Vec(Isa.maxNumRegs, new ScoreboardRegUpdate))
-  /** false if scoreboard counters saturated */
+  /** false if scoreboard counters saturated.  Combinational same-cycle. */
   val success = Output(Bool())
 }
 

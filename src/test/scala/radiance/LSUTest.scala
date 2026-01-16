@@ -1,4 +1,4 @@
-package radiance.core
+package radiance.muon
 
 import chisel3._
 import chisel3.util._
@@ -6,10 +6,6 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import radiance.muon.LoadStoreUnit
 import radiance.subsystem._
-import radiance.muon.AddressSpaceCfg
-import radiance.muon.MemOp
-import radiance.muon.AddressSpace
-import radiance.muon.LsuQueueToken
 
 class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
     behavior of "LSU"
