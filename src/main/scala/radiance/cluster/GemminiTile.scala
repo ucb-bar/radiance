@@ -153,7 +153,7 @@ class GemminiTile private (
 
   val regDevice = new SimpleDevice(f"gemmini-cmd-reg-$tileId", Seq(s"gemmini-cmd-reg-$tileId"))
   val regNode = TLRegisterNode(
-    address = Seq(AddressSet(gemminiParams.mmioAddress, 0xff)),
+    address = Seq(AddressSet(gemminiParams.mmioAddress, 0xfff)),
     device = regDevice,
     beatBytes = 8,
     concurrency = 1)
@@ -340,14 +340,11 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map { c =>
-    val lut = Wire(Decoupled(UInt(c.numBits.W)))
-    val mxLut = outer.gemmini.module.mx_io.get.lut
-    mxLut.valid := lut.valid
-    mxLut.bits := lut.bits.asTypeOf(outer.gemmini.module.mx_io.get.lut.bits.cloneType)
-    lut.ready := mxLut.ready
+    val lut = Seq.fill(c.numTables)(Wire(Decoupled(new QuantLutWriteBundle(c))))
+    val mxIO = outer.gemmini.module.mx_io.get
+    (lut zip Seq(mxIO.lut0, mxIO.lut1, mxIO.lut2)).foreach { case (a, b) => a <> b }
     lut
   }
-
 
   // cisc
   val cisc = new GemminiCISC(
@@ -411,35 +408,52 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     0x30 -> Seq(RegField.w(32, gemminiCisc(_, _)))
   }.toSeq
 
-  val gemminiLutMMIO = lutIO.map { io =>
-    require(io.bits.getWidth == 100)
+  val gemminiLutMMIO = lutIO.map { luts =>
+    val config = outer.gemminiParams.lookupTable.get
+    require(luts.length == config.numTables)
+    require(luts.head.bits.data.head.getWidth == config.numBits)
+    require(config.numBits % 32 == 0)
 
-    val lutW0 = RegInit(0.U(32.W))
-    val lutW1 = RegInit(0.U(32.W))
-    val lutW2 = RegInit(0.U(32.W))
-    val lutAddrReg = RegInit(0.U(32.W))
+    val tableBase = 0x80
+    val tableOffset = 0x180
+    val wordsPerEntry = config.numBits / 32
 
-    io.bits := Cat(lutAddrReg(3, 0), lutW2, lutW1, lutW0)
-    io.valid := false.B
+    require(tableOffset >= (config.numEntries * config.numBits) / 8)
 
-    def lutRegFunc(reg: UInt, trigger: Boolean = false): (Bool, UInt) => Bool = {
-      def lut(valid: Bool, bits: UInt): Bool = {
-        when (io.ready && valid) {
-          reg := bits
+    val flops = RegInit(
+      VecInit.fill(config.numTables)(
+      VecInit.fill(config.numEntries)(
+      VecInit.fill(wordsPerEntry)(0.U(32.W)))))
+
+    val maps = luts.zipWithIndex.flatMap { case (io, i) =>
+      io.valid := false.B
+      io.bits.data := VecInit(flops(i).map(_.asUInt))
+
+      def lutRegFunc(reg: UInt, trigger: Boolean = false): (Bool, UInt) => Bool = {
+        def lut(valid: Bool, bits: UInt): Bool = {
+          when (io.ready && valid) {
+            reg := bits
+          }
+          if (trigger) {
+            // this assumes ready never lowers without a fire first
+            io.valid := RegNext(io.ready && valid)
+          }
+          io.ready
         }
-        if (trigger) {
-          io.valid := RegNext(io.ready && valid)
-        }
-        io.ready
+        lut
       }
-      lut
+
+      Seq.tabulate(config.numEntries) { j =>
+        Seq.tabulate(wordsPerEntry) { k =>
+          val addr = tableBase + tableOffset * i + (config.numBits / 32 * j + k) * 4
+          val trigger = (j + 1 == config.numEntries) && (k + 1 == wordsPerEntry) // trigger per table
+
+          addr -> Seq(RegField.w(32, lutRegFunc(flops(i)(j)(k), trigger)))
+        }
+      }.flatten
     }
-    Seq(
-      0x40 -> Seq(RegField.w(32, lutRegFunc(lutW0))),
-      0x44 -> Seq(RegField.w(32, lutRegFunc(lutW1))),
-      0x48 -> Seq(RegField.w(32, lutRegFunc(lutW2))),
-      0x4c -> Seq(RegField.w(32, lutRegFunc(lutAddrReg, trigger = true))),
-    )
+
+    maps
   }.toSeq.flatten
 
   outer.regNode.regmap(
