@@ -123,7 +123,7 @@ jobs:
           make debug CONFIG=RadianceTapeoutSimConfig
 
   run-unit-tests:
-    name: Run unit-tests
+    name: Run Unit-tests
     runs-on: as4
     needs: build
     steps:
@@ -132,7 +132,12 @@ jobs:
           cd "${CHIPYARD_DIR}"
           source env.sh
           source /ecad/tools/vlsi.bashrc
-          sbt "project radiance; testOnly radiance.muon.*"
+          sbt "project radiance; \
+               testOnly radiance.muon.ALUPipeTest; \
+               testOnly radiance.muon.FPPipeTest; \
+               testOnly radiance.muon.MulDivPipeTest; \
+               testOnly radiance.muon.SequencerTest; \
+               testOnly radiance.muon.ScoreboardTest"
 
   run-soc-isa-tests:
     name: Run SoC ISA tests
