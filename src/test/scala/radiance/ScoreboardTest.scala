@@ -1,11 +1,11 @@
 package radiance.muon
 
 import chisel3._
+import chisel3.simulator.EphemeralSimulator._
 import freechips.rocketchip.tile.{TileKey, TileParams}
 import freechips.rocketchip.prci.ClockSinkParameters
 import org.chipsalliance.cde.config.Parameters
 import org.scalatest.flatspec.AnyFlatSpec
-import chisel3.simulator.EphemeralSimulator._
 
 class ScoreboardTest extends AnyFlatSpec {
   private case class DummyTileParams(muon: MuonCoreParams) extends TileParams {
@@ -72,10 +72,12 @@ class ScoreboardTest extends AnyFlatSpec {
     c.io.readRs3.pReg.poke(0.U)
     c.io.readRd.enable.poke(false.B)
     c.io.readRd.pReg.poke(0.U)
+
+    c.clock.step()
   }
 
-  def setUpdateRS(
-      c: Scoreboard,
+  def setUpdate(
+      upd: ScoreboardUpdate,
       pReg: Int,
       incr: Boolean,
       decr: Boolean,
@@ -83,13 +85,13 @@ class ScoreboardTest extends AnyFlatSpec {
       doRead: Boolean,
       rsi: Int = 0
   ): Unit = {
-    c.io.updateRS.enable.poke(true.B)
-    if (doWrite) c.io.updateRS.write.pReg.poke(pReg.U) else c.io.updateRS.write.pReg.poke(0.U)
-    c.io.updateRS.write.incr.poke((doWrite && incr).B)
-    c.io.updateRS.write.decr.poke((doWrite && decr).B)
-    if (doRead) c.io.updateRS.reads(rsi).pReg.poke(pReg.U) else c.io.updateRS.reads(rsi).pReg.poke(0.U)
-    c.io.updateRS.reads(rsi).incr.poke((doRead && incr).B)
-    c.io.updateRS.reads(rsi).decr.poke((doRead && decr).B)
+    upd.enable.poke(true.B)
+    if (doWrite) upd.write.pReg.poke(pReg.U) else upd.write.pReg.poke(0.U)
+    upd.write.incr.poke((doWrite && incr).B)
+    upd.write.decr.poke((doWrite && decr).B)
+    if (doRead) upd.reads(rsi).pReg.poke(pReg.U) else upd.reads(rsi).pReg.poke(0.U)
+    upd.reads(rsi).incr.poke((doRead && incr).B)
+    upd.reads(rsi).decr.poke((doRead && decr).B)
   }
 
   it should "increment pendingReads and pendingWrites after updateRS" in {
@@ -98,15 +100,13 @@ class ScoreboardTest extends AnyFlatSpec {
       reset(c)
       clearIO(c)
 
-      setUpdateRS(c, pReg = 42, incr = true, decr = false, doWrite = true, doRead = true, rsi = 0)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = true, rsi = 0)
       c.io.updateRS.success.expect(true.B)
       c.clock.step()
       clearIO(c)
 
       c.io.readRs1.enable.poke(true.B)
       c.io.readRs1.pReg.poke(42.U)
-      c.clock.step()
-
       c.io.readRs1.pendingReads.expect(1.U)
       c.io.readRs1.pendingWrites.expect(1.U)
     }
@@ -118,15 +118,214 @@ class ScoreboardTest extends AnyFlatSpec {
       reset(c)
       clearIO(c)
 
-      setUpdateRS(c, pReg = 42, incr = true, decr = true, doWrite = true, doRead = false)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = true, doWrite = true, doRead = false)
       c.io.updateRS.success.expect(true.B)
       c.clock.step()
       clearIO(c)
 
       c.io.readRs1.enable.poke(true.B)
       c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+    }
+  }
+
+  it should "increment pendingReads on multiple updateRS to the same reg" in {
+    val p = testParams()
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(0.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 0)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 1)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 2)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(3.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+    }
+  }
+
+  it should "fail if pendingReads counter has saturated" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      for (i <- 0 until m.maxPendingReads) {
+        setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+        c.io.updateRS.success.expect(true.B)
+        c.clock.step()
+      }
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.updateRS.success.expect(false.B)
       c.clock.step()
 
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(m.maxPendingReads.U)
+    }
+  }
+
+  it should "fail if pendingWrites counter has saturated" in {
+    val p = testParams()
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(false.B)
+      c.clock.step()
+
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingWrites.expect(1.U)
+    }
+  }
+
+  it should "fail if pendingReads/pendingWrites counter has underflown" in {
+    val p = testParams()
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(0.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+
+      c.clock.step()
+
+      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true)
+      setUpdate(c.io.updateWB,   pReg = 42, incr = false, decr = true, doWrite = true, doRead = false)
+      c.io.updateColl.success.expect(false.B)
+      c.io.updateWB.success.expect(false.B)
+      c.clock.step()
+
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(0.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+    }
+  }
+
+  it should "correctly reflect concurrent updateWB and updateRS" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      // pendingWrites(42) == 1
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      setUpdate(c.io.updateWB, pReg = 42, incr = false, decr = true, doWrite = true, doRead = false)
+      // order matters!
+      c.io.updateRS.success.expect(true.B)
+      c.io.updateWB.success.expect(true.B)
+      c.clock.step()
+
+      // pendingWrites(42): 1 -> 0 (updateWB) -> 1 (updateRS)
+
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(0.U)
+      c.io.readRs1.pendingWrites.expect(1.U)
+    }
+  }
+
+  it should "correctly reflect concurrent updateColl and updateRS" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      // pendingReads(42) == 1
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 0)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 1)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 2)
+      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true)
+      // order matters!
+      c.io.updateRS.success.expect(true.B)
+      c.io.updateColl.success.expect(true.B)
+      c.clock.step()
+
+      // pendingReads(42): 1 +  -1 (updateColl) + 3 (updateRS) = 3
+
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(3.U)
+      c.io.readRs1.pendingWrites.expect(0.U)
+    }
+  }
+
+  it should "unroll failed updateRS upon concurrent updateColl" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      // pendingReads(42) == 2
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 0)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 1)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 2)
+      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true)
+      // order matters!
+      c.io.updateRS.success.expect(false.B)
+      c.io.updateColl.success.expect(true.B)
+      c.clock.step()
+
+      // pendingReads(42): 2 +  -1 (updateColl) + 3 (updateRS, failed) = 1
+
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingReads.expect(1.U)
       c.io.readRs1.pendingWrites.expect(0.U)
     }
   }
