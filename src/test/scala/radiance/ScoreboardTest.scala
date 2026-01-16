@@ -129,6 +129,33 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
+  it should "succeed if counter is saturated but decr cancels out incr" in {
+    val p = testParams()
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      clearIO(c)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(false.B)
+      c.clock.step()
+
+      clearIO(c)
+      setUpdate(c.io.updateRS, pReg = 42, incr = true, decr = true, doWrite = true, doRead = false)
+      c.io.updateRS.success.expect(true.B)
+      c.clock.step()
+      clearIO(c)
+
+      c.io.readRs1.enable.poke(true.B)
+      c.io.readRs1.pReg.poke(42.U)
+      c.io.readRs1.pendingWrites.expect(1.U)
+    }
+  }
+
   it should "increment pendingReads on multiple updateRS to the same reg" in {
     val p = testParams()
     simulate(new Scoreboard()(p)) { c =>
