@@ -18,7 +18,7 @@ env:
 
 jobs:
   build:
-    name: build
+    name: Build
     runs-on: as4
     env:
       # fix broken IPv6
@@ -122,7 +122,20 @@ jobs:
           make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
+  run-unit-tests:
+    name: Run unit-tests
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run ChiselTest unit-tests
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          sbt "project radiance; testOnly radiance.muon.*"
+
   run-soc-isa-tests:
+    name: Run SoC ISA tests
     runs-on: as4
     needs: build
     steps:
@@ -135,6 +148,7 @@ jobs:
           python3 test/run_isa_tests.py -j "$(nproc)"
 
   run-core-isa-tests:
+    name: Run Core-standalone ISA tests
     runs-on: as4
     needs: build
     steps:
@@ -147,6 +161,7 @@ jobs:
           python3 test/run_isa_tests.py -j "$(nproc)" -c core
 
   run-cosim-isa-tests:
+    name: Run Co-sim ISA tests
     runs-on: as4
     needs: build
     steps:
@@ -159,8 +174,9 @@ jobs:
           python3 test/run_isa_tests.py -j "$(nproc)" -c backend
 
   clean:
+    name: Clean
     runs-on: as4
-    needs: [build, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
+    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda
