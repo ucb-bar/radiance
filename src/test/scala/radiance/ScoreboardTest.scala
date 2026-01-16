@@ -112,7 +112,7 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
-  it should "not increment if both incr and decr at the same time" in {
+  it should "not increment if incr and decr cancels each other" in {
     val p = testParams()
     simulate(new Scoreboard()(p)) { c =>
       reset(c)
@@ -154,7 +154,7 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
-  it should "fail if pendingReads counter has saturated" in {
+  it should "fail if pendingReads counter has overflown" in {
     val p = testParams()
     val m = p(MuonKey)
     simulate(new Scoreboard()(p)) { c =>
@@ -179,7 +179,7 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
-  it should "fail if pendingWrites counter has saturated" in {
+  it should "fail if pendingWrites counter has overflown" in {
     val p = testParams()
     simulate(new Scoreboard()(p)) { c =>
       reset(c)

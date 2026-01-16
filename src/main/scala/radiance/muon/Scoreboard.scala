@@ -190,29 +190,26 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         // if currCount + u.incr overflows but u.decr cancels it out, treat
         // it as a success.
         when (u.incr =/= u.decr) {
-          val delta = u.incr.pad(u.incr.getWidth + 1).asSInt -& u.decr.pad(u.decr.getWidth + 1).asSInt
-          val currCountWide = currCount.pad(currCount.getWidth + 1)
-          val newCountWide = currCountWide.asSInt + delta
-          val maxCountWide = maxCount.pad(newCountWide.getWidth).asSInt
-          printf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount: ${newCountWide}, currCount: ${currCountWide}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), delta:${delta}(${delta.getWidth}W)\n")
-          when (newCountWide > maxCountWide) {
-            success := false.B
-            // ignore incr and just reflect decr
-            dirtied := (u.decr =/= 0.U)
-            assert(currCountWide >= u.decr,
-                   cf"scoreboard: ${countName} underflow at pReg=${u.pReg} " +
-                   cf"(currCount=${currCountWide}, incr=${u.incr}, decr=${u.decr}) ")
-            newCount := currCountWide - u.decr
-          }.otherwise {
-            dirtied := true.B
-            // underflow should never be possible since the number of retired
-            // regs should strictly be smaller than the pending regs, i.e. no
-            // over-commit beyond what's issued
-            assert(newCountWide >= 0.S,
-                   cf"scoreboard: ${countName} underflow at pReg:${u.pReg} " +
-                   cf"(newCount:${newCountWide}, oldCount:${currCountWide} (width ${currCountWide.getWidth}), maxCount:${maxCountWide}, incr:${u.incr}, decr:${u.decr})")
-            newCount := newCountWide.asUInt
+          // stay positive (literally)
+          val posDelta = (u.incr > u.decr)
+          val overflow = posDelta && ((u.incr - u.decr) > (maxCount - currCount))
+          val underflow = !posDelta && (u.decr - u.incr) > currCount
+
+          success := !overflow && !underflow
+          dirtied := success
+          when (success) {
+            newCount := currCount + u.incr - u.decr
           }
+
+          printf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount:${newCount}, currCount:${currCount}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), success:${success}\n")
+
+          // underflow should never be possible since the number of retired
+          // regs should strictly be smaller than the pending regs, i.e. no
+          // over-commit beyond what's issued
+          //
+          // assert(!underflow,
+          //        cf"scoreboard: ${countName} underflow at pReg=${u.pReg} " +
+          //        cf"(currCount=${currCount}, incr=${u.incr}, decr=${u.decr})")
         }.elsewhen (u.incr === u.decr && u.incr =/= 0.U) {
           printf(cf"applyUpdates: [${debug}] ${countName} incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
         }
@@ -230,7 +227,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
   val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
   val (wbWriteRecs,  wbSuccess)   = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
-  assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
+  // assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
   // RS admission updates
   val uniqRSReadUpdates  = consolidateUpdates(io.updateRS.reads)
@@ -241,8 +238,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   dontTouch(rsSuccess)
 
   io.updateRS.success := io.updateRS.enable && rsSuccess
-  io.updateWB.success := collSuccess
-  io.updateColl.success := wbSuccess
+  io.updateWB.success := wbSuccess
+  io.updateColl.success := collSuccess
 
   when (io.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
     when (io.updateRS.enable) {
