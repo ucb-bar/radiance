@@ -256,7 +256,7 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
-  it should "correctly reflect concurrent updateWB and updateRS" in {
+  it should "correctly reflect concurrent updateWB and updateRS to same reg" in {
     val p = testParams()
     val m = p(MuonKey)
     simulate(new Scoreboard()(p)) { c =>
@@ -284,6 +284,62 @@ class ScoreboardTest extends AnyFlatSpec {
       c.io.hazard.readRs1.pReg.poke(42.U)
       c.io.hazard.readRs1.pendingReads.expect(0.U)
       c.io.hazard.readRs1.pendingWrites.expect(1.U)
+    }
+  }
+
+  it should "correctly reflect concurrent updateWB and updateRS writes to different reg" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.hazard.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      setUpdate(c.io.updateWB, pReg = 42, incr = false, decr = true, doWrite = true, doRead = false)
+      setUpdate(c.io.hazard.updateRS, pReg = 5, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.hazard.updateRS.success.expect(true.B)
+      c.io.updateWB.success.expect(true.B)
+      c.clock.step()
+
+      clearIO(c)
+
+      c.io.hazard.readRs1.enable.poke(true.B)
+      c.io.hazard.readRs1.pReg.poke(42.U)
+      c.io.hazard.readRs2.enable.poke(true.B)
+      c.io.hazard.readRs2.pReg.poke(5.U)
+      c.io.hazard.readRs1.pendingWrites.expect(0.U)
+      c.io.hazard.readRs2.pendingWrites.expect(1.U)
+    }
+  }
+
+  it should "correctly reflect concurrent updateColl and updateRS reads to different reg" in {
+    val p = testParams()
+    val m = p(MuonKey)
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.hazard.updateRS.success.expect(true.B)
+      c.clock.step()
+
+      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true)
+      setUpdate(c.io.hazard.updateRS, pReg = 5, incr = true, decr = false, doWrite = false, doRead = true)
+      c.io.hazard.updateRS.success.expect(true.B)
+      c.io.updateColl.success.expect(true.B)
+      c.clock.step()
+
+      clearIO(c)
+
+      c.io.hazard.readRs1.enable.poke(true.B)
+      c.io.hazard.readRs1.pReg.poke(42.U)
+      c.io.hazard.readRs2.enable.poke(true.B)
+      c.io.hazard.readRs2.pReg.poke(5.U)
+      c.io.hazard.readRs1.pendingReads.expect(0.U)
+      c.io.hazard.readRs2.pendingReads.expect(1.U)
     }
   }
 
