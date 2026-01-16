@@ -14,13 +14,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     /** scoreboard interface */
-    val scb = new Bundle {
-      val updateRS = Flipped(new ScoreboardUpdate)
-      val readRs1  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRs2  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRs3  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRd   = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-    }
+    val scb = Flipped(new ScoreboardHazardIO)
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
     val perf = Output(Vec(numWarps, new Bundle {
