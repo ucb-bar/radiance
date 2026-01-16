@@ -31,12 +31,12 @@ class ScoreboardRead(
 }
 
 class ScoreboardIO(implicit p: Parameters) extends CoreBundle()(p) {
-  /** scoreboard pending-read/write increments on RS admission */
-  val updateRS = new ScoreboardUpdate
   /** scoreboard pending-read decrements on collector response */
   val updateColl = new ScoreboardUpdate
   /** scoreboard pending-write decrements on writeback */
   val updateWB = new ScoreboardUpdate
+  /** scoreboard pending-read/write increments on RS admission */
+  val updateRS = new ScoreboardUpdate
   /** scoreboard accesses on RS admission */
   val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
@@ -286,7 +286,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
     }
 
-    // partially apply RS updates on success
+    // conditionally apply RS updates on success
     // make sure this happens later than coll/WB!
     when (rsSuccess) {
       commitUpdate(collReadRecs ++ rsReadRecs, isWrite = false)

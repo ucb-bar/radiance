@@ -33,7 +33,6 @@ class Backend(
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.updateRS <> hazard.io.scb.updateRS
-  scoreboard.io.updateWB <> hazard.io.scb.updateWB
   scoreboard.io.readRd <> hazard.io.scb.readRd
   scoreboard.io.readRs1 <> hazard.io.scb.readRs1
   scoreboard.io.readRs2 <> hazard.io.scb.readRs2
@@ -43,7 +42,7 @@ class Backend(
   val reservStation = Module(new ReservationStation)
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
-  hazard.io.writeback <> reservStation.io.writebackHazard // TODO remove
+  scoreboard.io.updateWB <> reservStation.io.scb.updateWB
 
   val bypass = true
   val issued = if (bypass) {
