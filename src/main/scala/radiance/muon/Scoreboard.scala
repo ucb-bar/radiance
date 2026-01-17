@@ -296,10 +296,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     when (warpIo.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
-      // rsReadRecs / rsWriteRecs always contains coll/WB update recs, as
-      // passed in applyUpdates
-      commitUpdate(rsReadRecs, isWrite = false)
-      commitUpdate(rsWriteRecs, isWrite = true)
+      commitUpdate(collRecs ++ rsReadRecs, isWrite = false)
+      commitUpdate(wbRecs ++ rsWriteRecs, isWrite = true)
 
       when (!rsReadSuccess) {
         printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to read overflow: ")
