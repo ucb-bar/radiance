@@ -24,11 +24,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val issue = Decoupled(ibufEntryT)
     /** writeback from the downstream EX pipe */
     val writeback = Flipped(regWritebackT)
-    /** writeback pass-through to the hazard module */
-    val writebackHazard = regWritebackT
     /** scoreboard interface for collector updates */
     val scb = new Bundle {
       val updateColl = Flipped(new ScoreboardUpdate)
+      val updateWB = Flipped(new ScoreboardUpdate)
     }
     /** collector request/response; RS keeps track of operand validity */
     val collector = new Bundle {
@@ -376,8 +375,16 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
 
-  // pass-through to scoreboard to also update pendingWrites
-  io.writebackHazard <> io.writeback
+  // update scoreboard upon writeback
+  io.scb.updateWB.enable := io.writeback.fire
+  io.scb.updateWB.write.pReg := Mux(io.writeback.fire, io.writeback.bits.rd, 0.U)
+  io.scb.updateWB.write.incr := false.B
+  io.scb.updateWB.write.decr := io.writeback.fire
+  io.scb.updateWB.reads.foreach { read =>
+    read.pReg := 0.U
+    read.incr := false.B
+    read.decr := false.B
+  }
 
   // reset
   when (reset.asBool) {

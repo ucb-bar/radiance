@@ -30,13 +30,9 @@ class ScoreboardRead(
   val pendingWrites = Output(UInt(writeCountBits.W))
 }
 
-class ScoreboardIO(implicit p: Parameters) extends CoreBundle()(p) {
+class ScoreboardHazardIO(implicit p: Parameters) extends CoreBundle()(p) {
   /** scoreboard pending-read/write increments on RS admission */
   val updateRS = new ScoreboardUpdate
-  /** scoreboard pending-read decrements on collector response */
-  val updateColl = new ScoreboardUpdate
-  /** scoreboard pending-write decrements on writeback */
-  val updateWB = new ScoreboardUpdate
   /** scoreboard accesses on RS admission */
   val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
@@ -52,17 +48,24 @@ class ScoreboardIO(implicit p: Parameters) extends CoreBundle()(p) {
  */
 class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // asynchronous-read, synchronous-write
-  val io = IO(new ScoreboardIO)
+  val io = IO(new Bundle {
+    /** scoreboard pending-read decrements on collector response */
+    val updateColl = new ScoreboardUpdate
+    /** scoreboard pending-write decrements on writeback */
+    val updateWB = new ScoreboardUpdate
+    /** scoreboard accesses used for RS admission from the Hazard stage */
+    val hazard = new ScoreboardHazardIO
+  })
 
   class Entry extends Bundle {
-    val pendingReads = chiselTypeOf(io.readRd.pendingReads)
-    val pendingWrites = chiselTypeOf(io.readRd.pendingWrites)
+    val pendingReads = chiselTypeOf(io.hazard.readRd.pendingReads)
+    val pendingWrites = chiselTypeOf(io.hazard.readRd.pendingWrites)
     // TODO: reads epoch
   }
 
   // flip-flops
-  val readTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.readRd.pendingReads))
-  val writeTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.readRd.pendingWrites))
+  val readTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.readRd.pendingReads))
+  val writeTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.readRd.pendingWrites))
 
   // reset
   // @synthesis: unsure if this will generate expensive trees, revisit
@@ -230,21 +233,21 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
   // RS admission updates
-  val uniqRSReadUpdates  = consolidateUpdates(io.updateRS.reads)
-  val uniqRSWriteUpdates = consolidateUpdates(Seq(io.updateRS.write))
+  val uniqRSReadUpdates  = consolidateUpdates(io.hazard.updateRS.reads)
+  val uniqRSWriteUpdates = consolidateUpdates(Seq(io.hazard.updateRS.write))
   val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collReadRecs, uniqRSReadUpdates,  isWrite = false, debug = "rsRead")
   val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbWriteRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
   val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
   dontTouch(rsSuccess)
 
-  io.updateRS.success := io.updateRS.enable && rsSuccess
+  io.hazard.updateRS.success := io.hazard.updateRS.enable && rsSuccess
   io.updateWB.success := wbSuccess
   io.updateColl.success := collSuccess
 
-  when (io.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
-    when (io.updateRS.enable) {
+  when (io.hazard.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
+    when (io.hazard.updateRS.enable) {
       printf(cf"scoreboard: received RS update ")
-      printUpdate(io.updateRS)
+      printUpdate(io.hazard.updateRS)
     }
     when (io.updateWB.enable) {
       printf(cf"scoreboard: received WB update ")
@@ -286,7 +289,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
     }
 
-    // partially apply RS updates on success
+    // conditionally apply RS updates on success
     // make sure this happens later than coll/WB!
     when (rsSuccess) {
       commitUpdate(collReadRecs ++ rsReadRecs, isWrite = false)
@@ -297,10 +300,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
       when (!rsReadSuccess) {
         printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
-        printUpdate(io.updateRS)
+        printUpdate(io.hazard.updateRS)
       }.elsewhen (!rsWriteSuccess) {
         printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
-        printUpdate(io.updateRS)
+        printUpdate(io.hazard.updateRS)
       }
     }
 
@@ -323,10 +326,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       port.pendingWrites := lookup(wbWriteRecs, port.pReg, isWrite = true)._1
     }
   }
-  read(io.readRs1)
-  read(io.readRs2)
-  read(io.readRs3)
-  read(io.readRd)
+  read(io.hazard.readRs1)
+  read(io.hazard.readRs2)
+  read(io.hazard.readRs3)
+  read(io.hazard.readRd)
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {

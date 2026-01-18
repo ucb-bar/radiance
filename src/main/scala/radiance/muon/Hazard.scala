@@ -14,18 +14,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     /** scoreboard interface */
-    val scb = new Bundle {
-      val updateRS = Flipped(new ScoreboardUpdate)
-      val updateWB = Flipped(new ScoreboardUpdate)
-      val readRs1  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRs2  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRs3  = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-      val readRd   = Flipped(new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits))
-    }
+    val scb = Flipped(new ScoreboardHazardIO)
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
-    /** writeback interface from EX */
-    val writeback = Flipped(regWritebackT)
     val perf = Output(Vec(numWarps, new Bundle {
       val cyclesDecoded = Perf.T
       val stallsWAW = Perf.T
@@ -180,18 +171,6 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
       printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +
              cf"RS admission blocked due to scoreboard overflow\n")
     }
-  }
-
-  // update scoreboard upon writeback
-  io.scb.updateWB.enable := io.writeback.valid
-  io.scb.updateWB.write.pReg := Mux(io.writeback.valid, io.writeback.bits.rd, 0.U)
-  // Writeback always increments
-  io.scb.updateWB.write.incr := false.B
-  io.scb.updateWB.write.decr := io.writeback.valid
-  io.scb.updateWB.reads.foreach { read =>
-    read.pReg := 0.U
-    read.incr := false.B
-    read.decr := false.B
   }
 }
 
