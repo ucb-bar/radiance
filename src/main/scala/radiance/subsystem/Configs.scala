@@ -114,7 +114,7 @@ class WithMuonCores(
           tileId = i + idOffset,
           coreId = i /* + coreIdOffset */,
           clusterId = clusterParams.clusterId,
-          peripheralAddr = muon.peripheralAddr + 0x200 + i * 0x100,
+          peripheralAddr = muon.peripheralAddr + 0x200 + i * 0x200,
         ),
         crossing
       )) ++ prev

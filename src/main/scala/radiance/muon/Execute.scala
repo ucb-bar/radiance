@@ -16,6 +16,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val lsuReserve = reservationIO
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
+    val flush = cacheFlushIO
     val softReset = Input(Bool())
     val perf = new Bundle {
       val instRetired = Output(UInt(Perf.counterWidth.W))
@@ -35,6 +36,10 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.csrIO.fcsr <> fpPipe.fCSRIO
   sfuPipe.idIO := io.id
   sfuPipe.barIO <> io.barrier
+  sfuPipe.flushIO <> io.flush
+  // TODO: LSU needs to provide these
+  sfuPipe.fenceIO.gmemOutstanding := 0.U
+  sfuPipe.fenceIO.smemOutstanding := 0.U
 
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve

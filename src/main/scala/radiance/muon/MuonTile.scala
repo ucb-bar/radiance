@@ -12,10 +12,10 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
-import radiance.cluster.SoftResetFinishNode
+import radiance.cluster.{CacheFlushNode, SoftResetFinishNode}
 import radiance.memory._
 import radiance.subsystem._
-import radiance.unittest.{Profiler, CyclotronDiffTest}
+import radiance.unittest.{CyclotronDiffTest, Profiler}
 
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
@@ -123,6 +123,11 @@ class MuonTile(
   val slaveNode = TLIdentityNode()
   val masterNode = TLIdentityNode()
 
+
+  // ===========
+  // smem
+  // ===========
+
   // see comment below about innerLsuNodes / lsuNodes
   val innerSmemNodes = Seq.tabulate(muonParams.core.lsu.numLsuLanes) { i =>
     TLClientNode(
@@ -153,6 +158,18 @@ class MuonTile(
     }
   })
 
+
+  // ===========
+  // l0i
+  // ===========
+
+  val iFlushMaster = CacheFlushNode.Master()
+
+  def connectBuf(node: TLNode, n: Int): TLNode = {
+    val cacheBuf = TLBuffer(ace = BufferParams(n), bd = BufferParams(0))
+    cacheBuf := node
+  }
+
   val icacheWordNode = muonParams.icache match {
     case _ => TLClientNode(Seq(TLMasterPortParameters.v2(
       masters = Seq(TLMasterParameters.v2(
@@ -167,22 +184,20 @@ class MuonTile(
     )))
   }
 
-  def connectBuf(node: TLNode, n: Int): TLNode = {
-    val cacheBuf = TLBuffer(ace = BufferParams(n), bd = BufferParams(0))
-    cacheBuf := node
-  }
-
-  val (l0iOut, l0iIn) = muonParams.icacheUsingD.map { l0iParams =>
+  val (l0iOut, l0iIn, l0iFlushRegNode) = muonParams.icacheUsingD.map { l0iParams =>
     val l0i = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0iParams,
       cacheTagBits = muonParams.core.l0iReqTagBits,
-      overrideDChannelSize = Some(3)
+      overrideDChannelSize = Some(3),
+      flushAddr = Some(muonParams.peripheralAddr),
     )))
-    (connectBuf(l0i.outNode, 4), l0i.inNode)
+    l0i.flushNode.get := iFlushMaster
+    (connectBuf(l0i.outNode, 4), l0i.inNode, l0i.flushRegNode)
   }.getOrElse {
+    CacheFlushNode.Slave() := iFlushMaster // TODO: might have to tie off
     val passthru = TLEphemeralNode()
-    (passthru, passthru)
+    (passthru, passthru, None)
   }
   val icacheNode = TLIdentityNode()
   icacheNode := l0iOut
@@ -190,6 +205,13 @@ class MuonTile(
     TLWidthWidget(muonParams.core.instBytes) :=
     ResponseFIFOFixer() :=
     icacheWordNode
+
+
+  // ===========
+  // l0d
+  // ===========
+
+  val dFlushMaster = CacheFlushNode.Master()
 
   val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
   val lsuSourceIdBits = lsuDerived.sourceIdBits
@@ -214,22 +236,28 @@ class MuonTile(
   
   val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
 
-  val (l0dOut, l0dIn, flushRegNode) = muonParams.dcache.map { l0dParams =>
+  val (l0dOut, l0dIn, l0dFlushRegNode) = muonParams.dcache.map { l0dParams =>
     require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
     println(f"l0d flush address is ${muonParams.peripheralAddr}%x")
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0dParams,
       cacheTagBits = muonParams.core.l0dReqTagBits,
-      flushAddr = Some(muonParams.peripheralAddr),
+      flushAddr = Some(muonParams.peripheralAddr + 0x100),
     )))
+    l0d.flushNode.get := dFlushMaster
     (l0d.outNode, l0d.inNode, l0d.flushRegNode)
   }.getOrElse {
-   val passthru = TLEphemeralNode()
-   (passthru, passthru, None)
+    CacheFlushNode.Slave() := dFlushMaster // TODO: tie off
+    val passthru = TLEphemeralNode()
+    (passthru, passthru, None)
   }
 
   val dcacheNode = visibilityNode
+
+  // ===========
+  // coalescer
+  // ===========
 
   val coalescer = LazyModule(new CoalescingUnit(CoalescerConfig(
     enable = true,
@@ -262,6 +290,10 @@ class MuonTile(
     := nonCoalXbar)
 
   lsuNodes.foreach(coalescer.nexusNode := _)
+
+  // ===========
+  // misc
+  // ===========
 
   val softResetFinishSlave = SoftResetFinishNode.Slave()
 
@@ -319,13 +351,17 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   barrier.req <> muon.io.barrier.req
   barrier.resp <> muon.io.barrier.resp
 
+  outer.iFlushMaster.out.head._1 <> muon.io.flush.i
+  outer.dFlushMaster.out.head._1 <> muon.io.flush.d
+
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
-  outer.reportCease(None)
-  outer.reportWFI(None)
 
   muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
+
+  outer.reportCease(None)
+  outer.reportWFI(None)
 
   if (outer.muonParams.disabled) {
     muon.io.imem.req.ready := false.B

@@ -21,10 +21,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     }
   })
   val fenceIO = IO(lsuFenceIO)
-  val flushIO = IO(new Bundle {
-    val i = cacheFlushIO
-    val d = cacheFlushIO
-  })
+  val flushIO = IO(cacheFlushIO)
   val barIO = IO(barrierIO)
   // to fix scala lsp issues
   val barReqT = barIO.req.bits.cloneType.asInstanceOf[barIO.req.bits.type]
@@ -81,12 +78,12 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val fences = Seq(
     new StallFields(
       start = WireInit(io.req.fire && inst.b(IsFenceI)),
-      done = _ => flushIO.i.done,
+      done = (_: UInt) => flushIO.i.done,
       reqT = UInt(0.W)
     ),
     new StallFields(
       start = WireInit(io.req.fire && inst.b(IsFenceD)),
-      done = _ => flushIO.d.done,
+      done = (_: UInt) => flushIO.d.done,
       reqT = UInt(0.W)
     )
   )

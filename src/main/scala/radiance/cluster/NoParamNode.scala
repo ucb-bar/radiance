@@ -37,3 +37,10 @@ class SoftResetFinishBundle extends Bundle {
 }
 
 object SoftResetFinishNode extends NoParamNode(new SoftResetFinishBundle)
+
+class CacheFlushBundle extends Bundle {
+  val start = Output(Bool())
+  val done = Input(Bool())
+}
+
+object CacheFlushNode extends NoParamNode(new CacheFlushBundle)

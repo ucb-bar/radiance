@@ -18,6 +18,7 @@ class Backend(
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
+    val flush = cacheFlushIO
     val softReset = Input(Bool())
     val perf = Output(new BackendPerfIO)
     /** PC/reg trace IO for diff-testing against model */
@@ -136,6 +137,7 @@ class Backend(
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
   execute.io.barrier <> io.barrier
+  execute.io.flush <> io.flush
   execute.io.req.bits := executeIn
 
   execute.io.mem.dmem <> io.dmem
@@ -161,7 +163,8 @@ class Backend(
         val memOp = LsuOpDecoder.decode(issued.bits.uop.inst.opcode, issued.bits.uop.inst.f3)
         willWriteback := MemOp.isLoad(memOp) || MemOp.isAtomic(memOp)
       }
-      when (issued.bits.uop.inst.expand().b(IsNuInvoke)) {
+      val expanded = issued.bits.uop.inst.expand()
+      when (expanded.b(IsNuInvoke) || expanded.b(IsFenceD) || expanded.b(IsFenceI)) {
         willWriteback := false.B
       }
     }

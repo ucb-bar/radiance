@@ -147,7 +147,8 @@ class RadianceCluster (
     realMuons.foreach(barrierJunction.node := _.barrierMaster)
     barrierSynchronizer.node := barrierJunction.node
 
-    realMuons.foreach(_.flushRegNode.foreach(_ := HackAtomicNode(8) := clcbus.outwardNode))
+    realMuons.flatMap(m => m.l0iFlushRegNode.toSeq ++ m.l0dFlushRegNode.toSeq)
+      .foreach(_ := HackAtomicNode(8) := clcbus.outwardNode)
   }
 
 //  val l1InNodes = muonTiles.map(_.dcacheNode)

@@ -12,6 +12,7 @@ import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import radiance.cluster.CacheFlushNode
 import radiance.subsystem.{DummyTileParams, GPUMemory, PhysicalCoreParams}
 
 case class TLNBDCacheParams(
@@ -81,6 +82,8 @@ class TLNBDCache(val params: TLNBDCacheParams)
       concurrency = 1,
     )
   }
+
+  val flushNode = params.flushAddr.map(_ => CacheFlushNode.Slave())
 
   implicit val q = p.alterMap(Map(
     TileKey -> DummyCacheTileParams(params),
@@ -217,19 +220,29 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   cacheIO.tlb_port.req.valid := false.B
   cacheIO.tlb_port.s2_kill := false.B
 
+  val fio = outer.nbdCache.module.flush_io
+  fio.foreach(_.start := false.B)
+
   // flush mmio
   outer.flushRegNode.foreach { node =>
-    val fio = outer.nbdCache.module.flush_io.get
-    fio.start := false.B
     node.regmap(
       0x0 -> Seq(RegField.w(32, (valid: Bool, _: UInt) => {
         when (valid) {
-          fio.start := true.B
+          fio.get.start := true.B
         }
         true.B
         // !fio.busy
       })),
     )
+  }
+
+  // we assume the core flush doesn't collide with mmio flush
+  outer.flushNode.map(_.in.head._1).foreach { node =>
+    when (node.start) {
+      fio.get.start := true.B
+    }
+    // done on falling edge of busy
+    node.done := RegNext(fio.get.busy) && !fio.get.busy
   }
 
 }

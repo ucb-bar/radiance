@@ -7,6 +7,7 @@ import freechips.rocketchip.rocket.ALU
 import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.{Field, Parameters}
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+import radiance.cluster.CacheFlushBundle
 import radiance.muon.backend.RegWriteback
 import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
@@ -243,8 +244,8 @@ trait HasCoreParameters {
   })
 
   def cacheFlushIO = new Bundle {
-    val start = Output(Bool())
-    val done = Input(Bool())
+    val i = new CacheFlushBundle
+    val d = new CacheFlushBundle
   }
 
   def barrierIO = new BarrierBundle(BarrierParams(
@@ -317,6 +318,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val dmem = new DataMemIO
     val smem = new SharedMemIO
     val barrier = barrierIO
+    val flush = cacheFlushIO
     val softReset = Input(Bool())
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
@@ -338,6 +340,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.smem <> io.smem
   be.io.feCSR := fe.io.csr
   be.io.barrier <> io.barrier
+  be.io.flush <> io.flush
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset
