@@ -20,6 +20,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       val regWrite = Valid(csrDataT)
     }
   })
+  val fenceIO = IO(lsuFenceIO)
+  val flushIO = IO(new Bundle {
+    val i = cacheFlushIO
+    val d = cacheFlushIO
+  })
   val barIO = IO(barrierIO)
   // to fix scala lsp issues
   val barReqT = barIO.req.bits.cloneType.asInstanceOf[barIO.req.bits.type]
@@ -31,16 +36,62 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   val writeback = Wire(schedWritebackT)
 
-  case class BarrierFields(inProgress: Valid[barIO.req.bits.type],
-                           writeback: Valid[SchedWriteback],
-                           start: Bool, reqSent: Bool, respReceived: Bool)
-  val barriers = Seq.tabulate(m.numWarps) { wid => BarrierFields(
-    inProgress = RegInit(0.U.asTypeOf(Valid(barReqT))),
-    writeback = RegInit(0.U.asTypeOf(schedWritebackT)),
-    start = WireInit(io.req.fire && (wid.U === io.req.bits.uop.wid) && inst.b(IsNuInvoke)),
-    reqSent = RegInit(false.B),
-    respReceived = RegInit(false.B)
-  )}
+  case class StallFields[T <: Data](
+    inProgress: Valid[T],
+    writeback: Valid[SchedWriteback],
+    start: Bool,
+    done: T => Bool,
+    reqSent: Bool,
+    respReceived: Bool) {
+
+    def this(start: Bool, done: T => Bool, reqT: T) = {
+      this(
+        inProgress = RegInit(0.U.asTypeOf(Valid(reqT))),
+        writeback = RegInit(0.U.asTypeOf(schedWritebackT)),
+        start = start,
+        done = done,
+        reqSent = RegInit(false.B),
+        respReceived = RegInit(false.B)
+      )
+    }
+
+    when (start) {
+      inProgress.valid := true.B
+      writeback := writeback
+      assert(!reqSent)
+    }
+
+    val finish = inProgress.valid && done(inProgress.bits)
+    when (finish) {
+      when (respReceived) {
+        printf("WARNING: duplicate stall response\n")
+      }
+      respReceived := true.B
+    }
+  }
+
+  val barriers = Seq.tabulate(m.numWarps) { wid =>
+    new StallFields(
+      start = WireInit(io.req.fire && (wid.U === io.req.bits.uop.wid) && inst.b(IsNuInvoke)),
+      done = (p: barReqT.type) => barIO.resp.valid && (barIO.resp.bits.id === p.id),
+      reqT = barReqT
+    )
+  }
+
+  val fences = Seq(
+    new StallFields(
+      start = WireInit(io.req.fire && inst.b(IsFenceI)),
+      done = _ => flushIO.i.done,
+      reqT = UInt(0.W)
+    ),
+    new StallFields(
+      start = WireInit(io.req.fire && inst.b(IsFenceD)),
+      done = _ => flushIO.d.done,
+      reqT = UInt(0.W)
+    )
+  )
+
+  val stalls = barriers ++ fences
 
   writeback.valid := true.B
 
@@ -100,6 +151,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     // vortex logic: if resultant mask is 0, set to first lane's rs2
     writeback.bits.setTmask.bits := Mux(newTmask.orR, newTmask, firstRs2)
   }
+
+
+  // ========
+  // CSRs
+  // ========
 
   val warpOffset = log2Ceil(m.numLanes)
   val coreOffset = warpOffset + log2Ceil(m.numWarps)
@@ -169,27 +225,21 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     }
   }
 
+
+  // ========
+  // barriers
+  // ========
+
   barriers.zipWithIndex.foreach { case (b, wid) =>
     when (b.start) {
       when (b.inProgress.valid) {
         printf("WARNING: duplicate barrier request, may lead to weird behavior\n")
       }
-      b.inProgress.valid := true.B
       b.inProgress.bits.id := firstRs1.asTypeOf(barIO.req.bits.id)
       b.inProgress.bits.have := 1.U
       b.inProgress.bits.want := inst(NuNumElems) +& 1.U
-      b.writeback := writeback
-      assert(!b.reqSent)
       assert(inst(F3) === 1.U(3.W), "only support sync, imm retire for neutrino")
       assert(!b.inProgress.valid, "cannot start barrier when one is in progress")
-    }
-
-    val finish = b.inProgress.valid && barIO.resp.valid && (barIO.resp.bits.id === b.inProgress.bits.id)
-    when (finish) {
-      when (b.respReceived) {
-        printf("WARNING: duplicate barrier response, likely reused barrier id\n")
-      }
-      b.respReceived := true.B
     }
 
     // val wbFire = io.resp.fire && respIsBarrier && (wid.U === io.resp.bits.sched.get.bits.wid)
@@ -210,25 +260,39 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   }
   barIO.req <> barReqArbiter.io.out
 
-  // arbitrate writeback port
-  val barRespArbiter = Module(new RRArbiter(barriers.head.writeback.cloneType, m.numWarps))
-  (barRespArbiter.io.in zip barriers).foreach { case (arbIn, b) =>
-    arbIn.valid := b.respReceived && b.inProgress.valid
-    arbIn.bits := b.writeback
-    when (arbIn.fire) {
-      b.inProgress.valid := false.B
-      b.reqSent := false.B
-      b.respReceived := false.B
+  // ========
+  // fences
+  // ========
+
+  (fences zip Seq(flushIO.i, flushIO.d)).foreach { case (fence, flush) =>
+    // start a flush when lsu is clear, and we havent sent out the request yet
+    flush.start := fence.inProgress.valid && !fence.reqSent && (fenceIO.gmemOutstanding === 0.U)
+    when (flush.start) {
+      fence.reqSent := true.B
     }
   }
-  // non-barrier instructions have writeback priority for simplicity
-  barRespArbiter.io.out.ready := io.resp.ready && !busy
+
+
+  // arbitrate writeback port for both barriers and fences
+  val stallRespArbiter = Module(new RRArbiter(barriers.head.writeback.cloneType, stalls.length))
+  (stallRespArbiter.io.in zip stalls).foreach { case (arbIn, s) =>
+    arbIn.valid := s.respReceived && s.inProgress.valid
+    arbIn.bits := s.writeback
+    when (arbIn.fire) {
+      s.inProgress.valid := false.B
+      s.reqSent := false.B
+      s.respReceived := false.B
+    }
+  }
+
+  // writeback priority is: everything else > barriers/fences
+  stallRespArbiter.io.out.ready := io.resp.ready && !busy
 
   io.req.ready := !busy || io.resp.fire // TODO: might be able to unset ready if bar wb pending
-  io.resp.valid := busy || barRespArbiter.io.out.valid
+  io.resp.valid := busy || stallRespArbiter.io.out.valid
   io.resp.bits.sched.get := Mux(busy,
     RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire),
-    barRespArbiter.io.out.bits
+    stallRespArbiter.io.out.bits
   )
   io.resp.bits.reg.get := Mux(busy,
     RegEnable(regWriteback, 0.U.asTypeOf(regWritebackT), io.req.fire),

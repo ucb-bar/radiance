@@ -237,6 +237,16 @@ trait HasCoreParameters {
 
   def csrDataT = UInt(32.W)
 
+  def lsuFenceIO = Input(new Bundle {
+    val smemOutstanding = UInt((m.logSMEMInFlights + log2Ceil(m.numLanes)).W)
+    val gmemOutstanding = UInt((m.logGMEMInFlights + log2Ceil(m.numLanes)).W)
+  })
+
+  def cacheFlushIO = new Bundle {
+    val start = Output(Bool())
+    val done = Input(Bool())
+  }
+
   def barrierIO = new BarrierBundle(BarrierParams(
     haveBits = m.warpIdBits,
     barrierBits = m.barrierBits,
