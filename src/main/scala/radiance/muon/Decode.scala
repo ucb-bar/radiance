@@ -357,6 +357,7 @@ object Decoder {
           MuOpcode.BRANCH,
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
+          MuOpcode.MISC_MEM,
         ).contains(op) ||
           sd(IsTMC) || sd(IsSplit) || sd(IsPred) || sd(IsWSpawn) || sd(IsBar)
         )

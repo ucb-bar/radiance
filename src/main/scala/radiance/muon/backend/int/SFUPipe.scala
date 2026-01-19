@@ -35,7 +35,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   case class StallFields[T <: Data](
     inProgress: Valid[T],
-    writeback: Valid[SchedWriteback],
+    storedWriteback: Valid[SchedWriteback],
     start: Bool,
     done: T => Bool,
     reqSent: Bool,
@@ -44,7 +44,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     def this(start: Bool, done: T => Bool, reqT: T) = {
       this(
         inProgress = RegInit(0.U.asTypeOf(Valid(reqT))),
-        writeback = RegInit(0.U.asTypeOf(schedWritebackT)),
+        storedWriteback = RegInit(0.U.asTypeOf(schedWritebackT)),
         start = start,
         done = done,
         reqSent = RegInit(false.B),
@@ -54,7 +54,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
     when (start) {
       inProgress.valid := true.B
-      writeback := writeback
+      storedWriteback := writeback
       assert(!reqSent)
     }
 
@@ -271,10 +271,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
 
   // arbitrate writeback port for both barriers and fences
-  val stallRespArbiter = Module(new RRArbiter(barriers.head.writeback.cloneType, stalls.length))
+  val stallRespArbiter = Module(new RRArbiter(schedWritebackT, stalls.length))
   (stallRespArbiter.io.in zip stalls).foreach { case (arbIn, s) =>
     arbIn.valid := s.respReceived && s.inProgress.valid
-    arbIn.bits := s.writeback
+    arbIn.bits := s.storedWriteback
     when (arbIn.fire) {
       s.inProgress.valid := false.B
       s.reqSent := false.B
@@ -298,6 +298,6 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   // override busy
   when (io.req.fire) {
-    busy := !inst.b(IsNuInvoke)
+    busy := !inst.b(IsNuInvoke) && !inst.b(IsFenceI) && !inst.b(IsFenceD)
   }
 }
