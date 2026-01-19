@@ -102,7 +102,7 @@ class WithRadianceTapeoutPeripherals extends Config(
         )),
         slaveWhere = OBUS
       )),
-      phyParams = testchipip.serdes.CreditedSourceSyncSerialPhyParams(phitWidth=16) // narrow link
+      phyParams = testchipip.serdes.CreditedSourceSyncSerialPhyParams(phitWidth=4) // narrow link
     ),
   )) ++
   new testchipip.soc.WithOffchipBusClient(MBUS,       // obus provides path to other chip's memory, and also backs mbus
