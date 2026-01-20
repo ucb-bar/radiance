@@ -109,19 +109,6 @@ class Backend(
     opnd := port.data
   }
 
-  // drive regtrace IO for testing
-  io.trace.foreach { traceIO =>
-    traceIO.valid := issued.fire
-    traceIO.bits.pc := issued.bits.uop.pc
-    traceIO.bits.warpId := issued.bits.uop.wid
-    (traceIO.bits.regs zip operands)
-      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
-        tReg.enable := issued.bits.uop.inst(haves(rsi))
-        tReg.address := issued.bits.uop.inst(regs(rsi))
-        tReg.data := opnd
-      }
-  }
-
   // -------
   // execute
   // -------
@@ -168,6 +155,8 @@ class Backend(
     execute.io.req.valid := inFlight && !hasIssued
     
     // assumes 1-cycle latency collector
+    // FIXME: this changes issue-vs-execute timing on bypass=true/false, which
+    // is confusing
     val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
     val token = RegEnable(issued.bits.token, 0.U.asTypeOf(issued.bits.token.cloneType), issued.fire)
     executeIn.uop := uop
@@ -194,6 +183,19 @@ class Backend(
     execute.io.req.valid := issued.valid
     executeIn.uop := issued.bits.uop
     execute.io.token := issued.bits.token
+  }
+
+  // drive regtrace IO for testing
+  io.trace.foreach { traceIO =>
+    traceIO.valid := execute.io.req.fire
+    traceIO.bits.pc := executeIn.uop.pc
+    traceIO.bits.warpId := executeIn.uop.wid
+    (traceIO.bits.regs zip operands)
+      .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
+        tReg.enable := executeIn.uop.inst(haves(rsi))
+        tReg.address := executeIn.uop.inst(regs(rsi))
+        tReg.data := opnd
+      }
   }
 
   io.perf.instRetired := execute.io.perf.instRetired
