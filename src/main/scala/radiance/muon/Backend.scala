@@ -33,7 +33,25 @@ class Backend(
   hazard.io.ibuf <> io.ibuf
 
   val scoreboard = Module(new Scoreboard)
-  scoreboard.io.hazard <> hazard.io.scb
+  scoreboard.io.hazard(0) <> hazard.io.scb
+  scoreboard.io.hazard.zipWithIndex.foreach { case (scb, wid) =>
+    wid match {
+      case 0 => scb <> hazard.io.scb
+      case _ => {
+        scb.updateRS.enable := false.B
+        scb.updateRS.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
+        scb.updateRS.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+        scb.readRs1.enable := false.B
+        scb.readRs1.pReg := 0.U
+        scb.readRs2.enable := false.B
+        scb.readRs2.pReg := 0.U
+        scb.readRs3.enable := false.B
+        scb.readRs3.pReg := 0.U
+        scb.readRd.enable := false.B
+        scb.readRd.pReg := 0.U
+      }
+    }
+  }
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)

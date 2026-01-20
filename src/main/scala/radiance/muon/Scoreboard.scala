@@ -31,9 +31,7 @@ class ScoreboardRead(
 }
 
 class ScoreboardHazardIO(implicit p: Parameters) extends CoreBundle()(p) {
-  /** scoreboard pending-read/write increments on RS admission */
   val updateRS = new ScoreboardUpdate
-  /** scoreboard accesses on RS admission */
   val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRs3  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
@@ -53,19 +51,20 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     val updateColl = new ScoreboardUpdate
     /** scoreboard pending-write decrements on writeback */
     val updateWB = new ScoreboardUpdate
-    /** scoreboard accesses used for RS admission from the Hazard stage */
-    val hazard = new ScoreboardHazardIO
+    /** scoreboard accesses/updates on RS admission from the Hazard stage.
+     *  These are per-warp ports. */
+    val hazard = Vec(numWarps, new ScoreboardHazardIO)
   })
 
   class Entry extends Bundle {
-    val pendingReads = chiselTypeOf(io.hazard.readRd.pendingReads)
-    val pendingWrites = chiselTypeOf(io.hazard.readRd.pendingWrites)
+    val pendingReads = chiselTypeOf(io.hazard.head.readRd.pendingReads)
+    val pendingWrites = chiselTypeOf(io.hazard.head.readRd.pendingWrites)
     // TODO: reads epoch
   }
 
   // flip-flops
-  val readTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.readRd.pendingReads))
-  val writeTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.readRd.pendingWrites))
+  val readTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.head.readRd.pendingReads))
+  val writeTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.head.readRd.pendingWrites))
 
   // reset
   // @synthesis: unsure if this will generate expensive trees, revisit
@@ -94,6 +93,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   // if rs1/rs2/rs3 points to the same reg, bump the counters by the number
   // of duplicates.  This keeps coalescing out of consideration when designing
   // the collector.
+  // note the final Seq is always length 3 (maxNumRegs).
   def consolidateUpdates(updates: Seq[ScoreboardRegUpdate]): Seq[ConsolidatedRegUpdate] = {
     // check if reg # is unique with prefix Sum
     val matchCount = updates.zipWithIndex.map { case (self, i) =>
@@ -104,7 +104,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }.fold(0.U)(_ +& _)
     }
 
-    // coalesce total incr/decrs to the same reg with prefix sum
+    // coalesce total incr/decrs to the same reg with prefix-sum
     val coalescedIncDec = updates.zipWithIndex.map { case (self, i) =>
       // forward prefix sum
       (i until updates.length).map { j =>
@@ -148,42 +148,48 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
   // Look up the most recent counter values for a pReg, by not only reading
   // the flip-flop table, but also the given update records.
+  // Also returns a bitvector that indicates which of the `records` was hit for
+  // the lookup.
   def lookup(records: Seq[UpdateRecord], pReg: UInt, isWrite: Boolean) = {
     val table = (if (isWrite) writeTable else readTable)
+    val hit   = WireDefault(false.B)
     val value = Wire(UInt(table(0).getWidth.W))
     val dirty = WireDefault(false.B)
     value := table(pReg)
 
     // priority-tree
-    records.foreach { rec =>
-      when (rec.pReg === pReg) {
+    val hitvec = records.map { rec =>
+      val hit = (rec.pReg === pReg)
+      when (hit) {
         value := rec.counter
         dirty := rec.dirty
       }
+      hit
     }
 
-    (value, dirty)
+    (hitvec, (value, dirty))
   }
 
   // updateWB/updateColl is decrement-only, and always succeeds (otherwise we
   // risk deadlock);
   // updateRS is increment-only, and may fail due to counter overflow.
   //
-  // Apply updateWB/Coll first, and on the updated counter values, try
-  // applying updateRS.  If the latter fails, only commit the post-WB/Coll
-  // values to the table.  This requires generating updated counter values as
-  // a separate stage into a set of Wires, and conditionally latching those values
-  // to the Mem; that is what UpdateRecord is for.
+  // Apply updateWB/Coll first, and on the updated counter values, try applying
+  // updateRS.  If the latter fails, only commit the post-WB/Coll values to the
+  // table.  This requires generating updated counter values as a separate stage
+  // into a set of Wires, and conditionally latching those values to the Mem;
+  // that is what UpdateRecord is for.
 
   def applyUpdates(records: Seq[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean, debug: String = ""):
-    (Seq[UpdateRecord] /* new table */, Bool /* success */) = {
+    (Seq[UpdateRecord] /* new updates */, Bool /* success */) = {
     val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
     val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
     val success = WireDefault(true.B)
 
-    val newRecords = uniqUpdates.map { u =>
+    val processUpdates = uniqUpdates.map { u =>
       val dirtied = WireDefault(false.B)
-      val (currCount, prevDirty) = lookup(records, u.pReg, isWrite)
+      // are we updating upon another same-cycle update?
+      val (hitvec, (currCount, prevDirty)) = lookup(records, u.pReg, isWrite)
       val newCount = WireDefault(currCount)
 
       // skip x0 updates
@@ -219,117 +225,116 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
 
       val dirty = prevDirty || dirtied
-      UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth)
+      (UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth), hitvec)
+    }
+    val newRecords = processUpdates.map(_._1)
+
+    // if each of the `records` got dirtied by the new updates, we need to
+    // invalidate them so we don't do double-updates to the counter table
+    val prevRecords: Seq[UpdateRecord] = if (records.isEmpty) {
+      Seq()
+    } else {
+      val recordsHitvec = processUpdates.map(_._2).map(VecInit(_).asUInt).reduce(_ | _).asBools
+      assert(recordsHitvec.length == records.length)
+      (records zip recordsHitvec).map { case (rec, hit) =>
+        UpdateRecord(!hit && rec.dirty, rec.pReg, rec.counter, width = rec.counter.getWidth)
+      }
     }
 
-    (newRecords, success)
+    (prevRecords ++ newRecords, success)
   }
 
-  // collector and writeback updates
+  def commitUpdate(recs: Seq[UpdateRecord], isWrite: Boolean) = {
+    recs.foreach { r =>
+      when (r.dirty) {
+        assert(r.pReg =/= 0.U, "update to x0 not filtered in the logic?")
+        if (isWrite) {
+          printf(cf"scoreboard: committed write (pReg:${r.pReg}, new pendingWrites:${r.counter})\n")
+          writeTable(r.pReg) := r.counter
+        } else {
+          printf(cf"scoreboard: committed read (pReg:${r.pReg}, new pendingReads:${r.counter})\n")
+          readTable(r.pReg) := r.counter
+        }
+      }
+    }
+  }
+
+  // collector and writeback updates.  These are global across-warp
+  //
   val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
   val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
-  val (collReadRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
-  val (wbWriteRecs,  wbSuccess)   = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
+  val (collRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
+  val (wbRecs, wbSuccess) = applyUpdates(Seq(), uniqWBWriteUpdates,  isWrite = true,  debug = "wb")
   // assert(collSuccess && wbSuccess, "scoreboard: collector / WB update must always succeed!")
 
-  // RS admission updates
-  val uniqRSReadUpdates  = consolidateUpdates(io.hazard.updateRS.reads)
-  val uniqRSWriteUpdates = consolidateUpdates(Seq(io.hazard.updateRS.write))
-  val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collReadRecs, uniqRSReadUpdates,  isWrite = false, debug = "rsRead")
-  val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbWriteRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
-  val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
-  dontTouch(rsSuccess)
-
-  io.hazard.updateRS.success := io.hazard.updateRS.enable && rsSuccess
   io.updateWB.success := wbSuccess
   io.updateColl.success := collSuccess
 
-  when (io.hazard.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
-    when (io.hazard.updateRS.enable) {
-      printf(cf"scoreboard: received RS update ")
-      printUpdate(io.hazard.updateRS)
-    }
-    when (io.updateWB.enable) {
-      printf(cf"scoreboard: received WB update ")
-      printUpdate(io.updateWB)
-    }
-    when (io.updateColl.enable) {
-      printf(cf"scoreboard: received collector update ")
-      printUpdate(io.updateColl)
+  when (io.updateWB.enable) {
+    printf(cf"scoreboard: received WB update ")
+    printUpdate(io.updateWB)
+  }
+  when (io.updateColl.enable) {
+    printf(cf"scoreboard: received collector update ")
+    printUpdate(io.updateColl)
+  }
+
+  // RS admit updates.  These are per-warp
+  //
+  def perWarp(warpIo: ScoreboardHazardIO, warpId: Int) = {
+    // RS admission updates
+    val uniqRSReadUpdates  = consolidateUpdates(warpIo.updateRS.reads)
+    val uniqRSWriteUpdates = consolidateUpdates(Seq(warpIo.updateRS.write))
+    val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collRecs, uniqRSReadUpdates,  isWrite = false, debug = "rsRead")
+    val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
+    val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
+    dontTouch(rsSuccess)
+
+    warpIo.updateRS.success := warpIo.updateRS.enable && rsSuccess
+
+    when (warpIo.updateRS.enable) {
+      printf(cf"scoreboard: received RS update (warp=${warpId}) ")
+      printUpdate(warpIo.updateRS)
     }
 
-    def commitUpdate(recs: Seq[UpdateRecord], isWrite: Boolean) = {
-      // need to reflect the latest index in the seq
-      // TODO: refactor; the logic is largely similar to consolidateUpdates
-      val syncRecs = recs.zipWithIndex.map { case (r, i) =>
-        val count = WireDefault(r.counter)
-        val dirty = WireDefault(r.dirty)
-        for (j <- i + 1 until recs.length) {
-          when (recs(j).dirty && recs(j).pReg === r.pReg) {
-            // prefix-sum overwrite; relies on these orders being preserved in
-            // the elaborated verilog
-            count := recs(j).counter
-            dirty := recs(j).dirty
-          }
-        }
-        UpdateRecord(dirty, r.pReg, count, width = r.counter.getWidth)
-      }
-
-      syncRecs.foreach { r =>
-        when (r.dirty) {
-          assert(r.pReg =/= 0.U, "update to x0 not filtered in the logic?")
-          if (isWrite) {
-            printf(cf"scoreboard: committed write (pReg:${r.pReg}, new pendingWrites:${r.counter})\n")
-            writeTable(r.pReg) := r.counter
-          } else {
-            printf(cf"scoreboard: committed read (pReg:${r.pReg}, new pendingReads:${r.counter})\n")
-            readTable(r.pReg) := r.counter
-          }
-        }
-      }
-    }
-
-    // conditionally apply RS updates on success
-    // make sure this happens later than coll/WB!
-    when (rsSuccess) {
-      commitUpdate(collReadRecs ++ rsReadRecs, isWrite = false)
-      commitUpdate(wbWriteRecs  ++ rsWriteRecs, isWrite = true)
-    }.otherwise {
-      commitUpdate(collReadRecs, isWrite = false)
-      commitUpdate(wbWriteRecs, isWrite = true)
+    when (warpIo.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
+      commitUpdate(rsReadRecs, isWrite = false)
+      commitUpdate(rsWriteRecs, isWrite = true)
 
       when (!rsReadSuccess) {
-        printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
-        printUpdate(io.hazard.updateRS)
+        printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to read overflow: ")
+        printUpdate(warpIo.updateRS)
       }.elsewhen (!rsWriteSuccess) {
-        printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
-        printUpdate(io.hazard.updateRS)
+        printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to write overflow: ")
+        printUpdate(warpIo.updateRS)
+      }
+
+      printf(cf"scoreboard: warp=${warpId}: table update, content beforehand:\n")
+      printTable
+    }
+
+    // read
+    // ----
+    //
+    def read(port: ScoreboardRead) = {
+      port.pendingReads := 0.U
+      port.pendingWrites := 0.U
+      when (port.enable) {
+        // using lookup here enables bypassing same-cycle updates to reads to the
+        // same pReg
+        // NOTE: don't use rsReadRecs/rsWriteRecs here, otherwise results in a
+        // combinational cycle with the RS admission logic in the Hazard module
+        port.pendingReads  := lookup(collRecs, port.pReg, isWrite = false)._2._1
+        port.pendingWrites := lookup(wbRecs, port.pReg, isWrite = true)._2._1
       }
     }
-
-    printf("scoreboard: table update, content beforehand:\n")
-    printTable
+    read(warpIo.readRs1)
+    read(warpIo.readRs2)
+    read(warpIo.readRs3)
+    read(warpIo.readRd)
   }
 
-  // read
-  // ----
-  //
-  def read(port: ScoreboardRead) = {
-    port.pendingReads := 0.U
-    port.pendingWrites := 0.U
-    when (port.enable) {
-      // using lookup here enables bypassing same-cycle updates to reads to the
-      // same pReg
-      // NOTE: don't use rsReadRecs/rsWriteRecs here, otherwise results in a
-      // combinational cycle with the RS admission logic in the Hazard module
-      port.pendingReads  := lookup(collReadRecs, port.pReg, isWrite = false)._1
-      port.pendingWrites := lookup(wbWriteRecs, port.pReg, isWrite = true)._1
-    }
-  }
-  read(io.hazard.readRs1)
-  read(io.hazard.readRs2)
-  read(io.hazard.readRs3)
-  read(io.hazard.readRd)
+  io.hazard.zipWithIndex.foreach { case (io, wid) => perWarp(io, wid) }
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {
