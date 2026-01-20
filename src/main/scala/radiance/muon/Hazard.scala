@@ -14,7 +14,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
     /** scoreboard interface */
-    val scb = Flipped(new ScoreboardHazardIO)
+    val scb = Flipped(Vec(muonParams.numWarps, new ScoreboardHazardIO))
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
     val perf = Output(Vec(numWarps, new Bundle {
@@ -33,7 +33,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     p.stallsWAR := stallsWAR(wid).value
   }
 
-  def tryWarp(warpId: Int): DecoupledIO[ReservationStationEntry] = {
+  def doWarp(warpId: Int): DecoupledIO[ReservationStationEntry] = {
     val ibufPort = io.ibuf(warpId)
     val uopValid = ibufPort.valid
     val hasRd    = ibufPort.bits.uop.inst(HasRd) .asBool
@@ -41,22 +41,21 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val hasRs2   = ibufPort.bits.uop.inst(HasRs2).asBool
     val hasRs3   = ibufPort.bits.uop.inst(HasRs3).asBool
 
-    // TODO: multi-port scoreboard ports
-    io.scb.readRs1.enable := uopValid && hasRs1
-    io.scb.readRs1.pReg   := ibufPort.bits.uop.inst.rs1
-    io.scb.readRs2.enable := uopValid && hasRs2
-    io.scb.readRs2.pReg   := ibufPort.bits.uop.inst.rs2
-    io.scb.readRs3.enable := uopValid && hasRs3
-    io.scb.readRs3.pReg   := ibufPort.bits.uop.inst.rs3
-    io.scb.readRd.enable  := uopValid && hasRd
-    io.scb.readRd.pReg    := ibufPort.bits.uop.inst.rd
+    io.scb(warpId).readRs1.enable := uopValid && hasRs1
+    io.scb(warpId).readRs1.pReg   := ibufPort.bits.uop.inst.rs1
+    io.scb(warpId).readRs2.enable := uopValid && hasRs2
+    io.scb(warpId).readRs2.pReg   := ibufPort.bits.uop.inst.rs2
+    io.scb(warpId).readRs3.enable := uopValid && hasRs3
+    io.scb(warpId).readRs3.pReg   := ibufPort.bits.uop.inst.rs3
+    io.scb(warpId).readRd.enable  := uopValid && hasRd
+    io.scb(warpId).readRd.pReg    := ibufPort.bits.uop.inst.rd
 
     // RS admission logic
     val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
 
     // assumes combinational-read scoreboard
-    val hasWAW = hasRd && (io.scb.readRd.pendingWrites =/= 0.U)
-    val hasWAR = hasRd && (io.scb.readRd.pendingReads =/= 0.U)
+    val hasWAW = hasRd && (io.scb(warpId).readRd.pendingWrites =/= 0.U)
+    val hasWAR = hasRd && (io.scb(warpId).readRd.pendingReads =/= 0.U)
 
     cyclesDecoded(warpId).cond(uopValid)
     stallsWAW(warpId).cond(uopValid && hasWAW)
@@ -79,30 +78,14 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     rsEntry.valid(0) := !hasRs1
     rsEntry.valid(1) := !hasRs2
     rsEntry.valid(2) := !hasRs3
-    rsEntry.busy(0) := hasRs1 && (io.scb.readRs1.pendingWrites =/= 0.U)
-    rsEntry.busy(1) := hasRs2 && (io.scb.readRs2.pendingWrites =/= 0.U)
-    rsEntry.busy(2) := hasRs3 && (io.scb.readRs3.pendingWrites =/= 0.U)
+    rsEntry.busy(0) := hasRs1 && (io.scb(warpId).readRs1.pendingWrites =/= 0.U)
+    rsEntry.busy(1) := hasRs2 && (io.scb(warpId).readRs2.pendingWrites =/= 0.U)
+    rsEntry.busy(2) := hasRs3 && (io.scb(warpId).readRs3.pendingWrites =/= 0.U)
 
     rsAdmit
   }
 
-  // TODO only handling warp 0 because of single-port scoreboard
-  val rsAdmitPerWarp = io.ibuf.zipWithIndex.map{ case (ibPort, wid) =>
-    wid match {
-      case 0 => tryWarp(wid)
-      case _ => {
-        when (ibPort.valid) {
-          assert(false.B,
-            cf"hazard: TODO: ibuf for warpId>0 not handled yet " +
-            cf"(pc=0x${ibPort.bits.uop.pc}%x, warpId=${ibPort.bits.uop.wid})")
-        }
-        val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
-        rsAdmit.valid := false.B
-        rsAdmit.bits := DontCare
-        rsAdmit
-      }
-    }
-  }
+  val rsAdmitPerWarp = (0 until muonParams.numWarps).map(doWarp(_))
   // dequeue from IBUF
   (io.ibuf zip rsAdmitPerWarp).foreach { case (ib, rs) =>
     ib.ready := rs.fire // since ib.valid != rs.valid
@@ -112,10 +95,23 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   // RS table
   // TODO: per-FU RS
   val rsAdmitArbiter = Module(
-    new RRArbiter(chiselTypeOf(rsAdmitPerWarp.head.bits), rsAdmitPerWarp.length)
+    new RRArbiter(chiselTypeOf(rsAdmitPerWarp.head.bits), muonParams.numWarps)
   )
   (rsAdmitArbiter.io.in zip rsAdmitPerWarp).foreach { case (a, w) => a <> w }
   val rsAdmitChosen = rsAdmitArbiter.io.out
+
+  // initialize scoreboard update IO
+  io.scb.foreach { wIo =>
+    wIo.updateRS.enable := false.B
+    wIo.updateRS.write.pReg := 0.U
+    wIo.updateRS.write.incr := false.B
+    wIo.updateRS.write.decr := false.B
+    wIo.updateRS.reads.foreach { read =>
+      read.pReg := 0.U
+      read.incr := false.B
+      read.decr := false.B
+    }
+  }
 
   // update scoreboard upon RS admission
   // This must be done at the same cycle as scoreboard read, so that the updated
@@ -123,8 +119,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   //
   // Note that io.rsAdmit.ready needs to be checked so that we trigger scoreboard
   // update only when there's guaranteed space in the RS.
+  val chosenWarpId = rsAdmitArbiter.io.chosen
   when (rsAdmitChosen.valid && io.rsAdmit.ready) {
-    assert(rsAdmitArbiter.io.chosen === 0.U,
+    assert(chosenWarpId === 0.U,
            "TODO: arbiter chose something else than warp 0") // FIXME
 
     val chosenUop = rsAdmitChosen.bits.ibufEntry.uop
@@ -134,40 +131,29 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
                        chosenUop.inst(HasRs3).asBool)
     val rss      = Seq(chosenUop.inst.rs1, chosenUop.inst.rs2, chosenUop.inst.rs3)
 
-    io.scb.updateRS.enable := hasRd || hasRss.reduce(_ || _)
-    io.scb.updateRS.write.pReg := chosenUop.inst.rd
+    io.scb(chosenWarpId).updateRS.enable := hasRd || hasRss.reduce(_ || _)
+    io.scb(chosenWarpId).updateRS.write.pReg := chosenUop.inst.rd
     // RS admission always increments
-    io.scb.updateRS.write.incr := hasRd
-    io.scb.updateRS.write.decr := false.B
-    (io.scb.updateRS.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
+    io.scb(chosenWarpId).updateRS.write.incr := hasRd
+    io.scb(chosenWarpId).updateRS.write.decr := false.B
+    (io.scb(chosenWarpId).updateRS.reads zip (hasRss zip rss)).foreach { case (read, (hasRs, rs)) =>
       read.pReg := rs
       read.incr := hasRs
-      read.decr := false.B
-    }
-  }.otherwise {
-    // due diligence to value-gate
-    io.scb.updateRS.enable := false.B
-    io.scb.updateRS.write.pReg := 0.U
-    io.scb.updateRS.write.incr := false.B
-    io.scb.updateRS.write.decr := false.B
-    io.scb.updateRS.reads.foreach { read =>
-      read.pReg := 0.U
-      read.incr := false.B
       read.decr := false.B
     }
   }
 
   // gate RS entry if scoreboard update failed
   // note io.scb.updateRS.success is combinational.
-  io.rsAdmit.valid := rsAdmitChosen.valid && io.scb.updateRS.success
-  rsAdmitChosen.ready := io.rsAdmit.ready && io.scb.updateRS.success
+  io.rsAdmit.valid := rsAdmitChosen.valid && io.scb(chosenWarpId).updateRS.success
+  rsAdmitChosen.ready := io.rsAdmit.ready && io.scb(chosenWarpId).updateRS.success
   io.rsAdmit.bits  := rsAdmitChosen.bits
   // for good measure, assert scoreboard update has always succeeded upon RS
   // admission fire
-  assert(!io.rsAdmit.fire || (!io.scb.updateRS.enable || io.scb.updateRS.success),
+  assert(!io.rsAdmit.fire || (!io.scb(chosenWarpId).updateRS.enable || io.scb(chosenWarpId).updateRS.success),
          "uop entered RS without succeeding scoreboard update")
   if (muonParams.debug) {
-    when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb.updateRS.success) {
+    when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb(chosenWarpId).updateRS.success) {
       printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +
              cf"RS admission blocked due to scoreboard overflow\n")
     }
