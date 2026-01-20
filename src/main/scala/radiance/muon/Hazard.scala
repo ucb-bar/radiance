@@ -67,9 +67,11 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     rsAdmit.valid := uopValid && !hasWAW && !hasWAR
     if (muonParams.debug) {
       when (uopValid && hasWAR) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x) is gated RS admission due to WAR\n")
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x, " +
+               cf"rd=${ibufPort.bits.uop.inst.rd}) is gated RS admission due to WAR\n")
       }.elsewhen (uopValid && hasWAW) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x) is gated RS admission due to WAW\n")
+        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x), " +
+               cf"rd=${ibufPort.bits.uop.inst.rd}) is gated RS admission due to WAW\n")
       }
     }
 

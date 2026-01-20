@@ -238,6 +238,34 @@ class ScoreboardTest extends AnyFlatSpec {
     }
   }
 
+  it should "unroll both pendingReads and Writes if either counter has overflown" in {
+    val p = testParams()
+    simulate(new Scoreboard()(p)) { c =>
+      reset(c)
+      clearIO(c)
+
+      setUpdate(c.io.hazard(0).updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = false)
+      c.io.hazard(0).updateRS.success.expect(true.B)
+      c.clock.step()
+
+      c.io.hazard(0).readRs1.enable.poke(true.B)
+      c.io.hazard(0).readRs1.pReg.poke(42.U)
+      c.io.hazard(0).readRs1.pendingReads.expect(0.U)
+      c.io.hazard(0).readRs1.pendingWrites.expect(1.U)
+
+      setUpdate(c.io.hazard(0).updateRS, pReg = 42, incr = true, decr = false, doWrite = true, doRead = true)
+      c.io.hazard(0).updateRS.success.expect(false.B)
+      c.clock.step()
+
+      clearIO(c)
+
+      c.io.hazard(0).readRs1.enable.poke(true.B)
+      c.io.hazard(0).readRs1.pReg.poke(42.U)
+      c.io.hazard(0).readRs1.pendingReads.expect(0.U)
+      c.io.hazard(0).readRs1.pendingWrites.expect(1.U)
+    }
+  }
+
   it should "fail if pendingReads/pendingWrites counter has underflown" in {
     val p = testParams()
     simulate(new Scoreboard()(p)) { c =>

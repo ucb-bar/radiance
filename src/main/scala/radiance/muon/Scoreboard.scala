@@ -312,8 +312,13 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       printf(cf"scoreboard: received RS update (warp=${warpId}) ")
       printUpdate(warpIo.updateRS)
 
-      commitUpdate(rsReadRecs, isWrite = false)
-      commitUpdate(rsWriteRecs, isWrite = true)
+      when (rsSuccess) {
+        commitUpdate(rsReadRecs, isWrite = false)
+        commitUpdate(rsWriteRecs, isWrite = true)
+      }.otherwise {
+        commitUpdate(collRecs, isWrite = false)
+        commitUpdate(wbRecs, isWrite = true)
+      }
 
       when (!rsReadSuccess) {
         printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to read overflow: ")
