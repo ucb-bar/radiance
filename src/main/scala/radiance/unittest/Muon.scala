@@ -134,6 +134,8 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   be.io.coreId := 0.U
   be.io.softReset := false.B
   be.io.feCSR := 0.U.asTypeOf(be.io.feCSR)
+  be.io.flush.i.done := true.B
+  be.io.flush.d.done := true.B
   // TODO: barriers not handled
   be.io.barrier.req.ready := false.B
   be.io.barrier.resp.valid := false.B
