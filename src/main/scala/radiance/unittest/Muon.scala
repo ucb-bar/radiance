@@ -104,7 +104,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   val ibuf = Module(new InstBuffer)
   val cfe = Module(new CyclotronFrontend()(p))
   val cdiff = Module(new CyclotronDiffTest(tick = false)(p))
-  val be = Module(new Backend(difftest = true)(p.alterMap(Map(
+  val be = Module(new Backend(muonParams.difftest)(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
 

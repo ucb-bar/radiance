@@ -279,9 +279,28 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     printUpdate(io.updateColl)
   }
 
+  val anyWarpUpdateRs = io.hazard.map(_.updateRS.enable).reduce(_ || _)
+  // if there were no updateRS, only apply WB and coll updates
+  // this prevents multiple frivolous updates compared to merging it with the
+  // doWarp loop
+  when (!anyWarpUpdateRs && (io.updateWB.enable || io.updateColl.enable)) {
+    when (io.updateWB.enable) {
+      printf("scoreboard: received WB update ")
+      printUpdate(io.updateWB)
+    }.elsewhen (io.updateColl.enable) {
+      printf("scoreboard: received coll update ")
+      printUpdate(io.updateColl)
+    }
+
+    commitUpdate(collRecs, isWrite = false)
+    commitUpdate(wbRecs, isWrite = true)
+
+    printf(cf"scoreboard: table received coll/WB update; content beforehand:\n")
+    printTable
+  }
+
   // RS admit updates.  These are per-warp
-  //
-  def perWarp(warpIo: ScoreboardHazardIO, warpId: Int) = {
+  def doWarp(warpIo: ScoreboardHazardIO, warpId: Int) = {
     // RS admission updates
     val uniqRSReadUpdates  = consolidateUpdates(warpIo.updateRS.reads)
     val uniqRSWriteUpdates = consolidateUpdates(Seq(warpIo.updateRS.write))
@@ -295,9 +314,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     when (warpIo.updateRS.enable) {
       printf(cf"scoreboard: received RS update (warp=${warpId}) ")
       printUpdate(warpIo.updateRS)
-    }
 
-    when (warpIo.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
       commitUpdate(rsReadRecs, isWrite = false)
       commitUpdate(rsWriteRecs, isWrite = true)
 
@@ -309,7 +326,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         printUpdate(warpIo.updateRS)
       }
 
-      printf(cf"scoreboard: warp=${warpId}: table update, content beforehand:\n")
+      printf(cf"scoreboard: warp=${warpId}: table received RS update; content beforehand:\n")
       printTable
     }
 
@@ -334,7 +351,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     read(warpIo.readRd)
   }
 
-  io.hazard.zipWithIndex.foreach { case (io, wid) => perWarp(io, wid) }
+  io.hazard.zipWithIndex.foreach { case (io, wid) => doWarp(io, wid) }
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {

@@ -41,21 +41,22 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val hasRs2   = ibufPort.bits.uop.inst(HasRs2).asBool
     val hasRs3   = ibufPort.bits.uop.inst(HasRs3).asBool
 
-    io.scb(warpId).readRs1.enable := uopValid && hasRs1
-    io.scb(warpId).readRs1.pReg   := ibufPort.bits.uop.inst.rs1
-    io.scb(warpId).readRs2.enable := uopValid && hasRs2
-    io.scb(warpId).readRs2.pReg   := ibufPort.bits.uop.inst.rs2
-    io.scb(warpId).readRs3.enable := uopValid && hasRs3
-    io.scb(warpId).readRs3.pReg   := ibufPort.bits.uop.inst.rs3
-    io.scb(warpId).readRd.enable  := uopValid && hasRd
-    io.scb(warpId).readRd.pReg    := ibufPort.bits.uop.inst.rd
+    val scbPort = io.scb(warpId)
+    scbPort.readRs1.enable := uopValid && hasRs1
+    scbPort.readRs1.pReg   := ibufPort.bits.uop.inst.rs1
+    scbPort.readRs2.enable := uopValid && hasRs2
+    scbPort.readRs2.pReg   := ibufPort.bits.uop.inst.rs2
+    scbPort.readRs3.enable := uopValid && hasRs3
+    scbPort.readRs3.pReg   := ibufPort.bits.uop.inst.rs3
+    scbPort.readRd.enable  := uopValid && hasRd
+    scbPort.readRd.pReg    := ibufPort.bits.uop.inst.rd
 
     // RS admission logic
     val rsAdmit = Wire(Decoupled(new ReservationStationEntry))
 
     // assumes combinational-read scoreboard
-    val hasWAW = hasRd && (io.scb(warpId).readRd.pendingWrites =/= 0.U)
-    val hasWAR = hasRd && (io.scb(warpId).readRd.pendingReads =/= 0.U)
+    val hasWAW = hasRd && (scbPort.readRd.pendingWrites =/= 0.U)
+    val hasWAR = hasRd && (scbPort.readRd.pendingReads =/= 0.U)
 
     cyclesDecoded(warpId).cond(uopValid)
     stallsWAW(warpId).cond(uopValid && hasWAW)
@@ -78,9 +79,9 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     rsEntry.valid(0) := !hasRs1
     rsEntry.valid(1) := !hasRs2
     rsEntry.valid(2) := !hasRs3
-    rsEntry.busy(0) := hasRs1 && (io.scb(warpId).readRs1.pendingWrites =/= 0.U)
-    rsEntry.busy(1) := hasRs2 && (io.scb(warpId).readRs2.pendingWrites =/= 0.U)
-    rsEntry.busy(2) := hasRs3 && (io.scb(warpId).readRs3.pendingWrites =/= 0.U)
+    rsEntry.busy(0) := hasRs1 && (scbPort.readRs1.pendingWrites =/= 0.U)
+    rsEntry.busy(1) := hasRs2 && (scbPort.readRs2.pendingWrites =/= 0.U)
+    rsEntry.busy(2) := hasRs3 && (scbPort.readRs3.pendingWrites =/= 0.U)
 
     rsAdmit
   }
@@ -121,9 +122,6 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   // update only when there's guaranteed space in the RS.
   val chosenWarpId = rsAdmitArbiter.io.chosen
   when (rsAdmitChosen.valid && io.rsAdmit.ready) {
-    assert(chosenWarpId === 0.U,
-           "TODO: arbiter chose something else than warp 0") // FIXME
-
     val chosenUop = rsAdmitChosen.bits.ibufEntry.uop
     val hasRd    = chosenUop.inst(HasRd).asBool
     val hasRss   = Seq(chosenUop.inst(HasRs1).asBool,
@@ -145,6 +143,8 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
 
   // gate RS entry if scoreboard update failed
   // note io.scb.updateRS.success is combinational.
+  // TODO: currently only admitting 1 entry to RS per cycle; consider
+  // constraining io.scb.updateRS to single-port.
   io.rsAdmit.valid := rsAdmitChosen.valid && io.scb(chosenWarpId).updateRS.success
   rsAdmitChosen.ready := io.rsAdmit.ready && io.scb(chosenWarpId).updateRS.success
   io.rsAdmit.bits  := rsAdmitChosen.bits
