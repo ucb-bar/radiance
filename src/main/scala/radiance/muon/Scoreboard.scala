@@ -36,7 +36,6 @@ class ScoreboardHazardIO(implicit p: Parameters) extends CoreBundle()(p) {
   val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRs3  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
   val readRd   = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
-  // TODO: per-warp ports
 }
 
 /** Scoreboard module keeps track of pending reads and writes to every register
@@ -193,8 +192,6 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       val newCount = WireDefault(currCount)
 
       // skip x0 updates
-      //
-      // TODO: refactor; handling both incr / decr seems overkill
       when (u.pReg =/= 0.U) {
         // if currCount + u.incr overflows but u.decr cancels it out, treat
         // it as a success.

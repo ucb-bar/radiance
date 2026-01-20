@@ -32,10 +32,12 @@ case class MuonCoreParams(
   // issue
   numIssueQueueEntries: Int = 8, // RS
   maxPendingReads: Int = 3,      // scoreboard
+  noILP: Boolean = false, // fallback to single-in-flight instruction issue
+                          // logic ("bypass")
   // collector
-  // if true, use a bank-conflict-avoiding operand collector
-  // if false, use a simple rs1/2/3-duplicated register file
-  useCollector: Boolean = false,
+  useCollector: Boolean = false,  // if true, use a bank-conflict-avoiding
+                                  // operand collector; if false, use a simple
+                                  // rs1/2/3-duplicated register file
   numRegBanks: Int = 1,          // when useCollector true
   numCollectorEntries: Int = 1,  // when useCollector true
   // execute

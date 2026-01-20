@@ -64,6 +64,7 @@ class WithMuonCores(
   location: HierarchicalLocation,
   crossing: RocketCrossingParams,
   standalone: Boolean,
+  noILP: Boolean,
   difftest: Boolean,
   disabled: Boolean,
   l0i: Option[DCacheParams],
@@ -80,6 +81,7 @@ class WithMuonCores(
       numLanes = up(SIMTCoreKey).get.numLanes,
       numCores = n,
       numClusters = 2, // TODO: magic number
+      noILP = noILP,
       logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
       lsu = LoadStoreUnitParams(
         numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
@@ -124,8 +126,9 @@ class WithMuonCores(
 }) {
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
-           standalone: Boolean = false, difftest: Boolean = false, disabled: Boolean = false,
-          l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
+    standalone: Boolean = false, noILP: Boolean = false,
+    difftest: Boolean = false, disabled: Boolean = false,
+    l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
     slave = HierarchicalElementSlavePortParams.locationDefault(location),
@@ -133,7 +136,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, difftest, disabled, l0i, l0d)
+  ), standalone, noILP, difftest, disabled, l0i, l0d)
 }
 
 class WithCyclotronCores(

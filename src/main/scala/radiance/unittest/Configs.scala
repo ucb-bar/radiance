@@ -33,6 +33,12 @@ class MuonCoreTestConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
+class MuonCoreNoILPTestConfig extends Config(
+  new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
+  new WithMuonCores(1, standalone = true, noILP = true, difftest = true) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
+  new BaseSubsystemConfig)
+
 class MuonCoreTestNoDiffConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
   new WithMuonCores(1, standalone = true, difftest = false) ++

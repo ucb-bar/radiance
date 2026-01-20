@@ -41,8 +41,8 @@ class Backend(
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   scoreboard.io.updateWB <> reservStation.io.scb.updateWB
 
-  val bypass = true
-  val issued = if (bypass) {
+  val noILP = muonParams.noILP
+  val issued = if (noILP) {
     hazard.reset := true.B
     scoreboard.reset := true.B
     reservStation.reset := true.B
@@ -77,8 +77,8 @@ class Backend(
   val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
-  if (bypass) {
-    // on bypass, manage collector entirely after issue
+  if (noILP) {
+    // on noILP, manage collector entirely after issue
     (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
       .foreach { case (has, reg, readData, collReq) =>
         val pReg = issued.bits.uop.inst(reg)
@@ -126,7 +126,7 @@ class Backend(
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
 
-  if (bypass) {
+  if (noILP) {
     // fallback issue: stall every instruction until writeback
     // or execute req fire, for instructions that don't need writeback (i.e. stores, fences)
     val inFlight = RegInit(false.B)
@@ -155,7 +155,7 @@ class Backend(
     execute.io.req.valid := inFlight && !hasIssued
     
     // assumes 1-cycle latency collector
-    // FIXME: this changes issue-vs-execute timing on bypass=true/false, which
+    // FIXME: this changes issue-vs-execute timing on noILP=true/false, which
     // is confusing
     val uop = RegEnable(issued.bits.uop, 0.U.asTypeOf(issued.bits.uop.cloneType), issued.fire)
     val token = RegEnable(issued.bits.token, 0.U.asTypeOf(issued.bits.token.cloneType), issued.fire)
