@@ -227,6 +227,8 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.barrier.req.ready := false.B
     core.io.barrier.resp.valid := false.B
     core.io.barrier.resp.bits := DontCare
+    core.io.flush.i.done := true.B
+    core.io.flush.d.done := true.B
     core.io.softReset := false.B
     core.io.coreId := 0.U
     core.io.clusterId := 0.U
