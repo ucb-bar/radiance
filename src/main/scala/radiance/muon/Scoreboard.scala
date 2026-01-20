@@ -148,42 +148,48 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
   // Look up the most recent counter values for a pReg, by not only reading
   // the flip-flop table, but also the given update records.
+  // Also returns a bitvector that indicates which of the `records` was hit for
+  // the lookup.
   def lookup(records: Seq[UpdateRecord], pReg: UInt, isWrite: Boolean) = {
     val table = (if (isWrite) writeTable else readTable)
+    val hit   = WireDefault(false.B)
     val value = Wire(UInt(table(0).getWidth.W))
     val dirty = WireDefault(false.B)
     value := table(pReg)
 
     // priority-tree
-    records.foreach { rec =>
-      when (rec.pReg === pReg) {
+    val hitvec = records.map { rec =>
+      val hit = (rec.pReg === pReg)
+      when (hit) {
         value := rec.counter
         dirty := rec.dirty
       }
+      hit
     }
 
-    (value, dirty)
+    (hitvec, (value, dirty))
   }
 
   // updateWB/updateColl is decrement-only, and always succeeds (otherwise we
   // risk deadlock);
   // updateRS is increment-only, and may fail due to counter overflow.
   //
-  // Apply updateWB/Coll first, and on the updated counter values, try
-  // applying updateRS.  If the latter fails, only commit the post-WB/Coll
-  // values to the table.  This requires generating updated counter values as
-  // a separate stage into a set of Wires, and conditionally latching those values
-  // to the Mem; that is what UpdateRecord is for.
+  // Apply updateWB/Coll first, and on the updated counter values, try applying
+  // updateRS.  If the latter fails, only commit the post-WB/Coll values to the
+  // table.  This requires generating updated counter values as a separate stage
+  // into a set of Wires, and conditionally latching those values to the Mem;
+  // that is what UpdateRecord is for.
 
   def applyUpdates(records: Seq[UpdateRecord], uniqUpdates: Seq[ConsolidatedRegUpdate], isWrite: Boolean, debug: String = ""):
-    (Seq[UpdateRecord] /* new table */, Bool /* success */) = {
+    (Seq[UpdateRecord] /* new updates */, Bool /* success */) = {
     val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
     val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
     val success = WireDefault(true.B)
 
-    val newRecords = uniqUpdates.map { u =>
+    val processUpdates = uniqUpdates.map { u =>
       val dirtied = WireDefault(false.B)
-      val (currCount, prevDirty) = lookup(records, u.pReg, isWrite)
+      // are we updating upon another same-cycle update?
+      val (hitvec, (currCount, prevDirty)) = lookup(records, u.pReg, isWrite)
       val newCount = WireDefault(currCount)
 
       // skip x0 updates
@@ -219,31 +225,27 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
 
       val dirty = prevDirty || dirtied
-      UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth)
+      (UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth), hitvec)
+    }
+    val newRecords = processUpdates.map(_._1)
+
+    // if each of the `records` got dirtied by the new updates, we need to
+    // invalidate them so we don't do double-updates to the counter table
+    val prevRecords: Seq[UpdateRecord] = if (records.isEmpty) {
+      Seq()
+    } else {
+      val recordsHitvec = processUpdates.map(_._2).map(VecInit(_).asUInt).reduce(_ | _).asBools
+      assert(recordsHitvec.length == records.length)
+      (records zip recordsHitvec).map { case (rec, hit) =>
+        UpdateRecord(!hit && rec.dirty, rec.pReg, rec.counter, width = rec.counter.getWidth)
+      }
     }
 
-    (newRecords, success)
+    (prevRecords ++ newRecords, success)
   }
 
   def commitUpdate(recs: Seq[UpdateRecord], isWrite: Boolean) = {
-    // need to reflect the latest index in the seq
-    // TODO: refactor; the logic is largely similar to consolidateUpdates
-    val syncRecs = recs.zipWithIndex.map { case (r, i) =>
-      val count = WireDefault(r.counter)
-      val dirty = WireDefault(r.dirty)
-      // prefix-sum; overwrite self with right-most match
-      // relies on its order being preserved in elaboration
-      // NOTE: @perf: has high chance of being expensive for long recs!
-      for (j <- i + 1 until recs.length) {
-        when (recs(j).dirty && recs(j).pReg === r.pReg) {
-          count := recs(j).counter
-          dirty := recs(j).dirty
-        }
-      }
-      UpdateRecord(dirty, r.pReg, count, width = r.counter.getWidth)
-    }
-
-    syncRecs.foreach { r =>
+    recs.foreach { r =>
       when (r.dirty) {
         assert(r.pReg =/= 0.U, "update to x0 not filtered in the logic?")
         if (isWrite) {
@@ -296,8 +298,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     when (warpIo.updateRS.enable || io.updateWB.enable || io.updateColl.enable) {
-      commitUpdate(collRecs ++ rsReadRecs, isWrite = false)
-      commitUpdate(wbRecs ++ rsWriteRecs, isWrite = true)
+      commitUpdate(rsReadRecs, isWrite = false)
+      commitUpdate(rsWriteRecs, isWrite = true)
 
       when (!rsReadSuccess) {
         printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to read overflow: ")
@@ -322,8 +324,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         // same pReg
         // NOTE: don't use rsReadRecs/rsWriteRecs here, otherwise results in a
         // combinational cycle with the RS admission logic in the Hazard module
-        port.pendingReads  := lookup(collRecs, port.pReg, isWrite = false)._1
-        port.pendingWrites := lookup(wbRecs, port.pReg, isWrite = true)._1
+        port.pendingReads  := lookup(collRecs, port.pReg, isWrite = false)._2._1
+        port.pendingWrites := lookup(wbRecs, port.pReg, isWrite = true)._2._1
       }
     }
     read(warpIo.readRs1)
