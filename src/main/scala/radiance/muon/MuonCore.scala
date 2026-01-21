@@ -6,7 +6,6 @@ import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.rocket.ALU
 import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.{Field, Parameters}
-import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.CacheFlushBundle
 import radiance.muon.backend.RegWriteback
 import radiance.muon.backend.fp.FPPipeParams
@@ -35,9 +34,9 @@ case class MuonCoreParams(
   noILP: Boolean = false, // fallback to single-in-flight instruction issue
                           // logic ("bypass")
   // collector
-  useCollector: Boolean = false,  // if true, use a bank-conflict-avoiding
-                                  // operand collector; if false, use a simple
-                                  // rs1/2/3-duplicated register file
+  useCollector: Boolean = true,  // if true, use a bank-conflict-avoiding
+                                 // operand collector; if false, use a simple
+                                 // rs1/2/3-duplicated register file
   numRegBanks: Int = 1,          // when useCollector true
   numCollectorEntries: Int = 1,  // when useCollector true
   // execute

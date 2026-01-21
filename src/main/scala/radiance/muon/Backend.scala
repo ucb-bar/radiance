@@ -79,21 +79,21 @@ class Backend(
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (noILP) {
     // on noILP, manage collector entirely after issue
-    (haves lazyZip regs lazyZip collector.io.readData.regs lazyZip collector.io.readReq.bits.regs)
-      .foreach { case (has, reg, readData, collReq) =>
-        val pReg = issued.bits.uop.inst(reg)
-        collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
-        collReq.pReg := pReg
-        readData.enable := issued.valid && issued.bits.uop.inst.b(has)
-        readData.pReg.get := pReg
-        readData.collEntry := DontCare
-      }
-    collector.io.readReq.bits.rsEntryId := DontCare
+    // (haves lazyZip regs lazyZip collector.io.readData.resp lazyZip collector.io.readReq.bits.regs)
+    //   .foreach { case (has, reg, readData, collReq) =>
+    //     val pReg = issued.bits.uop.inst(reg)
+    //     collReq.enable := issued.valid && issued.bits.uop.inst.b(has)
+    //     collReq.pReg := pReg
+    //     readData.enable := issued.valid && issued.bits.uop.inst.b(has)
+    //     readData.pReg.get := pReg
+    //     readData.collEntry := DontCare
+    //   }
+    // collector.io.readReq.bits.rsEntryId := DontCare
 
     reservStation.io.collector.readReq.ready := false.B
     reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
     reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
-    reservStation.io.collector.readData.regs.foreach(_.data := DontCare)
+    // reservStation.io.collector.readData.resp.foreach(_.data := DontCare)
   } else {
     // RS manages collector
     collector.io.readReq <> reservStation.io.collector.readReq
@@ -105,8 +105,11 @@ class Backend(
   val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
   val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
   collector.io.readResp.ports.foreach(_.ready := true.B)
-  (operands zip collector.io.readData.regs).foreach { case (opnd, port) =>
-    opnd := port.data
+  (operands zip collector.io.readData.resp.bits).foreach { case (opnd, port) =>
+    // value-gate to reduce switching
+    opnd := Mux(port.enable,
+      port.data,
+      VecInit.fill(numLanes)(0.U.asTypeOf(regDataT)))
   }
 
   // -------

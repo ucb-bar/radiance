@@ -69,7 +69,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
   // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
-  val collPriorityTable = Wire(Vec(numEntries, Bool()))
+  val collAllReadyTable = Wire(Vec(numEntries, Bool()))
 
   (0 until numEntries).map { i =>
     val uop = instTable(i).uop
@@ -119,55 +119,69 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       .map { case (r, (b, cf)) => !r && !b && !cf})
     val needCollect = valid && needCollectOps.reduce(_ || _)
     // is this uop RAW-cleared and only waiting for collection?
-    val priority = needCollect && (needCollectOps === VecInit(opReadys.map(!_)))
-    (needCollect, needCollectOps, priority)
+    val needCollectAllReady = needCollect && (needCollectOps === VecInit(opReadys.map(!_)))
+    (needCollect, needCollectOps, needCollectAllReady)
   }
   // select a single entry for collection
   // TODO: @perf: currently a simple priority encoder; might introduce fairness
   // problem
   val collBitvec = WireDefault(VecInit(needCollects.map(_._1)))
-  collPriorityTable := VecInit(needCollects.map(_._3))
+  collAllReadyTable := VecInit(needCollects.map(_._3))
   dontTouch(collBitvec)
-  dontTouch(collPriorityTable)
+  dontTouch(collAllReadyTable)
 
-  // Prioritize rows that has no RAW-busy ops, and only needs collection as the
-  // last step before issue.  Otherwise, rows with partial ops can take up
-  // valuable space in the collector banks.
+  // don't allow early-firing collector requests for partial operands of an
+  // instruction.  Partial collects may result in a deadlock with insufficient
+  // collector entries where the younger instruction requesting a partial
+  // collect blocks collection of an older instruction, but has RAW hazard to
+  // that older instruction.
+  val allowPartialCollect = false
+  // If allowPartialCollect == true, prioritize rows that has no RAW-busy ops
+  // (no partial-collects), and only needs collection as the last step before
+  // issue.  Otherwise, rows with partial ops can take up valuable space in the
+  // collector banks.
   //
-  // NOTE: It's debatable whether this logic should be in the collector or not.
-  // But for that, we need some kind of bookkeeping in the collector for the
+  // NOTE: Arguably all of this should be in the collector module.  But for
+  // that, we need some kind of bookkeeping in the collector for the
   // partial-collect uops, which is what the collector banks are meant for,
   // which are expensive.
-  val anyPriority = collPriorityTable.reduce(_ || _)
-  val firstPriorityRow = PriorityEncoder(collPriorityTable)
+  val allReadyExists = collAllReadyTable.reduce(_ || _)
+  val firstAllReadyRow = PriorityEncoder(collAllReadyTable)
   val firstNeedRow = PriorityEncoder(collBitvec)
-  val collRow = Mux(anyPriority, firstPriorityRow, firstNeedRow)
+  val collRow = Mux(!allowPartialCollect.B || allReadyExists,
+    firstAllReadyRow, firstNeedRow)
   dontTouch(collRow)
 
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
+  val collValid = (if (allowPartialCollect) {
+    allReadyExists
+  } else {
+    collOpNeed.reduce(_ || _)
+  })
   val collUop = instTable(collRow).uop
   val collPC = WireDefault(collUop.pc)
   dontTouch(collPC)
   val collRegs = Seq(collUop.inst.rs1, collUop.inst.rs2, collUop.inst.rs3)
 
-  // this is clunky, but Mem does not support partial-field updates
-  val newCollPtr = WireDefault(collPtrTable(collRow))
   assert(collOpNeed.length == io.collector.readReq.bits.regs.length)
   assert(collRegs.length == io.collector.readReq.bits.regs.length)
+
+  io.collector.readReq.valid := collValid
+  // this is clunky, but Mem does not support partial-field updates
+  val newCollPtr = WireDefault(collPtrTable(collRow))
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
     .zipWithIndex.foreach { case ((need, pReg, collPort), rsi) =>
       assert(collPort.data.isEmpty)
-      collPort.enable := need
+      collPort.enable := collValid && need
       collPort.pReg := Mux(need, pReg, 0.U)
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
     }
   io.collector.readReq.bits.rsEntryId := collRow
-  io.collector.readReq.valid := io.collector.readReq.bits.anyEnabled()
   when (io.collector.readReq.fire) {
-    val fired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
+    val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                 .map { case (a,b) => a || b }
-    collFiredTable(collRow) := fired
+    collFiredTable(collRow) := newFired
     collPtrTable(collRow) := newCollPtr
 
     printf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
@@ -271,25 +285,30 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   (issueScheduler.io.in zip eligibles).foreach { case (s, e) => s <> e }
   val issueScheduled = issueScheduler.io.out
 
-  // drive the operands port upon issue via collector's combinational readData
+  // drive collector's operand serve port upon issue, for use in EX
   val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
-  io.collector.readData.regs.zipWithIndex.foreach { case (port, rsi) =>
-    port.enable := issueScheduled.fire && hasOpTable(issuedId)(rsi)
-    port.collEntry := collPtrTable(issuedId)(rsi)
-    port.pReg match {
-      // for no-collector config, collEntry pointer is not used; use pRegs to
-      // actually drive SRAMs
-      case Some(pReg) => pReg := rsTable(issuedId)(rsi)
-      case None => assert(useCollector,
-           "collector data port has unnecessary pReg field instantiated when useCollector == true")
-    }
-    // port.data input is not used
-  }
+  io.collector.readData.req.valid := issueScheduled.valid
+  io.collector.readData.req.bits.collEntry := 0.U // fixed for DuplicatedCollector
+  io.collector.readData.resp.ready := issueScheduled.fire
+  assert(useCollector, "FIXME: !useCollector is broken currently")
+  // io.collector.readData.req.bits.zipWithIndex.foreach { case (port, rsi) =>
+  //   port.enable := issueScheduled.fire && hasOpTable(issuedId)(rsi)
+  //   port.pReg match {
+  //     // for no-collector config, collEntry pointer is not used; use pRegs to
+  //     // actually drive SRAMs
+  //     // FIXME: remove
+  //     case Some(pReg) => pReg := rsTable(issuedId)(rsi)
+  //     case None => assert(useCollector,
+  //          "collector data port has unnecessary pReg field instantiated when useCollector == true")
+  //   }
+  //   // port.data input is not used
+  // }
   dontTouch(issuedId)
 
   // if not using collector, RS only directly uses the readData port and never
   // sends readReq / gets readResp back, so we need to signal scoreboard
   // explicitly at issue time
+  // FIXME: Hacky; handle this altogether in Collector
   if (!useCollector) {
     io.scb.updateColl.enable := issueScheduled.fire
     io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
@@ -309,8 +328,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // implication due to sequential reads unlike collector buffers with
   // combinational reads. In that case, we need to align the issue timing with
   // the SRAM round-trip.
-  val collectorSequentialRead = !useCollector
-  if (collectorSequentialRead) {
+  val operandOneCycleLate = !useCollector
+  if (operandOneCycleLate) {
     val queue = Module(
       new Queue(gen = chiselTypeOf(io.issue.bits), entries = 1, pipe = true)
     )
@@ -404,7 +423,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
-               cf"collPriority:${collPriorityTable(i)} | " +
+               cf"collPriority:${collAllReadyTable(i)} | " +
                cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
                cf"\n")
       }
