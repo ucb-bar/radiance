@@ -378,6 +378,30 @@ Operand collector consists of the following components:
     The (2) condition may not always hold when e.g. instruction mix is skewed
     and a single FU-type collector bank runs out of space.
 
+TODO: elaborate why a simple duplicate-bank regfile design requires collector
+logic.
+
+### IO
+
+The collector provides an latency-insensitive interface for operand read/writes
+so that the RS can make issue-scheduling decisions in a timing-decoupled way.
+
+* `readReq`: Requests the collector to initiate an operand read and expose it
+to the `readData` port.
+* `readResp`: Indicates the requested operand will be available at the
+collector bank port (`readData`) *at the next cycle*.  RS uses this to
+arbitrate among eligible, all-collected instructions and expose it to the issue
+port at the next cycle, lining up with the collector data.
+* `writeReq`/`writeResp`: Same as `readReq`/`readResp` but for writes.  Normally
+the response has a 1-cycle latency because writes don't cause bank conflicts.
+* `readData`: Port that serves the operand data to EX.  Its member `req` tells
+to the collector which bank entry to be read, and `resp` exposes the full
+register vector-data stored at that entry to the port. `resp` is
+combinational-read.
+
+See [Collector.scala](/src/main/scala/radiance/muon/Collector.scala) for the
+implementation.
+
 ### Collector banking strategies
 
 #### Source-register-banked collectors

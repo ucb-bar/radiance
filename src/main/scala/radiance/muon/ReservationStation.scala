@@ -67,9 +67,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
   def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
-  // where the operand lives in the collector banks
+  // where the operand lives in the collector banks.  RS uses this to allocate a
+  // spot in the collector & feed the correct data to EX upon issue.
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
-  val collAllReadyTable = Wire(Vec(numEntries, Bool()))
+  val collNeedAllReadyTable = Wire(Vec(numEntries, Bool()))
   // mostly for debugging
   val eligibleTable = WireDefault(VecInit.fill(numEntries)(false.B))
   dontTouch(eligibleTable)
@@ -128,10 +129,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // select a single entry for collection
   // TODO: @perf: currently a simple priority encoder; might introduce fairness
   // problem
-  val collBitvec = WireDefault(VecInit(needCollects.map(_._1)))
-  collAllReadyTable := VecInit(needCollects.map(_._3))
-  dontTouch(collBitvec)
-  dontTouch(collAllReadyTable)
+  val collNeedTable = WireDefault(VecInit(needCollects.map(_._1)))
+  collNeedAllReadyTable := VecInit(needCollects.map(_._3))
+  dontTouch(collNeedTable)
+  dontTouch(collNeedAllReadyTable)
 
   // don't allow early-firing collector requests for partial operands of an
   // instruction.  Partial collects may result in a deadlock with insufficient
@@ -148,9 +149,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // that, we need some kind of bookkeeping in the collector for the
   // partial-collect uops, which is what the collector banks are meant for,
   // which are expensive.
-  val allReadyExists = collAllReadyTable.reduce(_ || _)
-  val firstAllReadyRow = PriorityEncoder(collAllReadyTable)
-  val firstNeedRow = PriorityEncoder(collBitvec)
+  val allReadyExists = collNeedAllReadyTable.reduce(_ || _)
+  val firstAllReadyRow = PriorityEncoder(collNeedAllReadyTable)
+  val firstNeedRow = PriorityEncoder(collNeedTable)
   val collRow = Mux(!allowPartialCollect.B || allReadyExists,
     firstAllReadyRow, firstNeedRow)
   dontTouch(collRow)
@@ -428,6 +429,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
+               cf"collNeed:${collNeedAllReadyTable(i)} | " +
                cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)} | " +
                cf"eligible:${eligibleTable(i)}" +
                cf"\n")
