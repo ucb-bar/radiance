@@ -70,6 +70,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // where the operand lives in the collector banks
   val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
   val collAllReadyTable = Wire(Vec(numEntries, Bool()))
+  // mostly for debugging
+  val eligibleTable = WireDefault(VecInit.fill(numEntries)(false.B))
+  dontTouch(eligibleTable)
 
   (0 until numEntries).map { i =>
     val uop = instTable(i).uop
@@ -263,6 +266,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
     // TODO: Consider same-cycle collector response
 
+    eligibleTable(i) := eligible
+
     val candidate = Wire(Decoupled(issueArbBundleT))
     candidate.valid := eligible
     candidate.bits.entry := instTable(i)
@@ -423,8 +428,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +
-               cf"collPriority:${collAllReadyTable(i)} | " +
-               cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)}" +
+               cf"collFired:${collFiredTable(i)(0)}${collFiredTable(i)(1)}${collFiredTable(i)(2)} | " +
+               cf"eligible:${eligibleTable(i)}" +
                cf"\n")
       }
     }
