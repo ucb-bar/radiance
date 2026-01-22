@@ -108,21 +108,30 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   // collector banks, i.e. flip-flops that stage collected register data until
   // EX consumes them.  Separate per-reg, enq/deq drifts need care.
-  val collBankEntries = 1
+  val numCollEntries = muonParams.numCollectorEntries
   val collBanks = Seq.fill(Isa.maxNumRegs)(Module(
-    new Queue(gen = vecRegDataT, entries = collBankEntries, pipe = true)
+    new Queue(gen = vecRegDataT, entries = numCollEntries, pipe = true)
   ))
 
   // collector allocation table
-  val allocTable = new CollectorAllocTable(collBankEntries)(p)
+  val allocTable = new CollectorAllocTable(numCollEntries)(p)
   when (reset.asBool) { allocTable.reset }
   val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
   // TODO: skip allocation when noen of readReq.regs.enable is set
   when (io.readReq.fire) {
-    val (_, allocId) = allocTable.alloc
-    nextAllocId := allocId
+    when (dequeue) {
+      // concurrent alloc/free; reuse id being freed
+      nextAllocId := 0.U /* FIXME */
+    }.otherwise {
+      val (succ, allocId) = allocTable.alloc
+      assert(succ, "unexpected collector alloc fail")
+      nextAllocId := allocId
+    }
+  }.elsewhen (dequeue) {
+    allocTable.free(0.U /* FIXME */)
   }
-  io.readReq.ready := allocTable.hasFree
+  // handle same-cycle collector bank dequeue
+  io.readReq.ready := allocTable.hasFree || dequeue
 
   // read requests
   val readEns = io.readReq.bits.regs.map(_.enable)
@@ -191,10 +200,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       "collector: reg.enable set when request is invalid?")
     collBank.io.deq.ready := req.enable
   }
-  val dequeue = io.readData.req.valid && io.readData.req.bits.map(_.enable).reduce(_ || _)
-  when (dequeue) {
-    allocTable.free(0.U /* FIXME */)
-  }
+  def dequeue = io.readData.req.valid && io.readData.req.bits.map(_.enable).reduce(_ || _)
 }
 
 class CollectorAllocTable(numEntries: Int)(implicit val p: Parameters)
