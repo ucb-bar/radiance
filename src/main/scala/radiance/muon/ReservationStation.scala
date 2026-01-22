@@ -174,10 +174,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // this is clunky, but Mem does not support partial-field updates
   val newCollPtr = WireDefault(collPtrTable(collRow))
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
-    .zipWithIndex.foreach { case ((need, pReg, collPort), rsi) =>
-      assert(collPort.data.isEmpty)
-      collPort.enable := collValid && need
-      collPort.pReg := Mux(need, pReg, 0.U)
+    .zipWithIndex.foreach { case ((need, pReg, cReq), rsi) =>
+      assert(cReq.data.isEmpty) // isRead
+      cReq.enable := collValid && need
+      cReq.pReg := Mux(need, pReg, 0.U)
       // TODO: currently assumes DuplicatedCollector with only 1 entry
       newCollPtr(rsi) := 0.U
     }
@@ -213,11 +213,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     (opReadys lazyZip collFired lazyZip
      (collPtrs zip rss) lazyZip
      (io.collector.readResp.ports zip io.scb.updateColl.reads))
-      .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cPort, scbPort)), rsi) =>
-        assert(useCollector.B || !cPort.fire,
+      .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cResp, scbPort)), rsi) =>
+        assert(useCollector.B || !cResp.fire,
                "RS: unexpected collector response when useCollector == false!")
 
-        when (cPort.fire && valid && !rdy && cf && (cPort.bits.collEntry === cptr)) {
+        when (cResp.fire && valid && !rdy && cf && (cResp.bits.collEntry === cptr)) {
           newOpReadys(rsi) := true.B
           updated := true.B
 
@@ -248,6 +248,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val opReadys = opReadyTable(i)
     val hasOps = hasOpTable(i)
     val busys = busyTable(i)
+    // TODO: @perf: Consider collReadResps coming in at the same cycle for
+    // issue. Otherwise, this increases collector request -> issue latency &
+    // requires deeper collector banks.
     val allCollected = opReadys.reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
     // issue eligibility logic
@@ -264,8 +267,6 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     // TODO: Consider same-cycle writeback for busyTable
     // NOTE: When doing this, need to ensure that the collector itself supports
     // writeback-to-read forwarding.
-
-    // TODO: Consider same-cycle collector response
 
     eligibleTable(i) := eligible
 
@@ -292,17 +293,21 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val issueScheduled = issueScheduler.io.out
 
   // drive collector's operand serve port upon issue, for use in EX
-  val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
-  io.collector.readData.req.valid := issueScheduled.valid
-  io.collector.readData.req.bits.collEntry := 0.U // fixed for DuplicatedCollector
-  io.collector.readData.resp.ready := issueScheduled.fire
+  // make sure to line this up with EX fire, so that collector data gets
+  // consumed when it's used
+  io.collector.readData.req.valid := io.issue.valid
+  io.collector.readData.req.bits.collEntry := 0.U // fixed for DuplicatedCollector, TODO
+  io.collector.readData.resp.ready := io.issue.fire
   assert(useCollector, "FIXME: !useCollector is broken currently")
+
+  val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
+  // FIXME: Old bypass-specific code; remove
+  //
   // io.collector.readData.req.bits.zipWithIndex.foreach { case (port, rsi) =>
   //   port.enable := issueScheduled.fire && hasOpTable(issuedId)(rsi)
   //   port.pReg match {
   //     // for no-collector config, collEntry pointer is not used; use pRegs to
   //     // actually drive SRAMs
-  //     // FIXME: remove
   //     case Some(pReg) => pReg := rsTable(issuedId)(rsi)
   //     case None => assert(useCollector,
   //          "collector data port has unnecessary pReg field instantiated when useCollector == true")
@@ -330,24 +335,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
   }
 
-  // If true, we're using simple SRAMs with op-duplication, which has timing
-  // implication due to sequential reads unlike collector buffers with
-  // combinational reads. In that case, we need to align the issue timing with
-  // the SRAM round-trip.
-  val operandOneCycleLate = !useCollector
-  if (operandOneCycleLate) {
-    val queue = Module(
-      new Queue(gen = chiselTypeOf(io.issue.bits), entries = 1, pipe = true)
-    )
-    queue.io.enq.valid := issueScheduler.io.out.valid
-    queue.io.enq.bits := issueScheduler.io.out.bits.entry
-    issueScheduler.io.out.ready := queue.io.enq.ready
-    io.issue <> queue.io.deq
-  } else {
-    io.issue.valid := issueScheduler.io.out.valid
-    io.issue.bits := issueScheduler.io.out.bits.entry
-    issueScheduler.io.out.ready := io.issue.ready
-  }
+  // latch the issue at the output to cut timing before EX (which currently
+  // does not latch its input), and also to stage it when EX is !ready.
+  val issueStaged = Module(
+    new Queue(gen = chiselTypeOf(io.issue.bits), entries = 1, pipe = true)
+  )
+  issueStaged.io.enq.valid := issueScheduler.io.out.valid
+  issueStaged.io.enq.bits := issueScheduler.io.out.bits.entry
+  issueScheduler.io.out.ready := issueStaged.io.enq.ready
+  io.issue <> issueStaged.io.deq
 
   if (muonParams.debug) {
     when (io.issue.fire) {

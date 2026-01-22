@@ -387,8 +387,10 @@ The collector provides an latency-insensitive interface for operand read/writes
 so that the RS can make issue-scheduling decisions in a timing-decoupled way.
 
 * `readReq`: Requests the collector to initiate an operand read and expose it
-to the `readData` port.
-* `readResp`: Indicates the requested operand will be available at the
+to the `readData` port.  This is a `DecoupledIO`, where `ready == false`
+indicates the request has failed due to collector banks already being full. In
+such cases, the RS must re-try the request.
+* `readResp`: Indicates the requested operand will be made available at the
 collector bank port (`readData`) *at the next cycle*.  RS uses this to
 arbitrate among eligible, all-collected instructions and expose it to the issue
 port at the next cycle, lining up with the collector data.

@@ -52,7 +52,6 @@ object CollectorResponse {
 class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val hasPReg = !muonParams.useCollector
-  /** RS will keep track of collEntry and send a req with it */
   val req = Flipped(Valid(new Bundle {
     val collEntry = UInt(collEntryWidth.W)
   }))
@@ -103,12 +102,17 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
     if (bankIdWidth == 0) 0.U else r(regWidth - 1, bankAddrWidth)
   }
 
-  // flip-flop banks that stage collected registers until EX consumes them
+  // collector banks, i.e. flip-flops that stage collected register data until
+  // EX consumes them
+  val collBankEntries = 2
   val collBanks = Seq.fill(Isa.maxNumRegs)(Module(
-    new Queue(gen = vecRegDataT, entries = 1, pipe = true)
+    new Queue(gen = vecRegDataT, entries = collBankEntries, pipe = true)
   ))
 
   // read requests
+  val allCollBanksReady = collBanks.map(_.io.enq.ready).reduce(_ && _)
+  io.readReq.ready := allCollBanksReady
+
   val readEns = io.readReq.bits.regs.map(_.enable)
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
   (readEns lazyZip readPRegs lazyZip rfBanks lazyZip collBanks)
@@ -120,7 +124,6 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       val nextEn = RegNext(bankEn, false.B)
       val nextPReg = RegNext(pReg, 0.U)
 
-      // request
       bankPorts.foreach(_.enable := false.B)
       bankPorts(bankId).enable := bankEn
       bankPorts.foreach(_.address := regBankAddr(pReg))
@@ -131,9 +134,6 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       collBank.io.enq.valid := nextEn
       collBank.io.enq.bits := bankOut
     }
-  // consider backpressure from collector banks
-  val allCollBanksReady = collBanks.map(_.io.enq.ready).reduce(_ && _)
-  io.readReq.ready := allCollBanksReady
 
   // read response
   // duplicated collector always answers readResp 1-cycle later
@@ -142,27 +142,6 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
     respPort.valid := RegNext(opEn, false.B)
     respPort.bits.collEntry := 0.U // fixed for DuplicatedCollector
   }
-
-  // // readData
-  // val dataEnables = io.readData.regs.map(_.enable)
-  // val dataPRegs = io.readData.regs.map(_.pReg.get)
-  // (dataEnables lazyZip dataPRegs lazyZip rfBanks lazyZip io.readData.regs)
-  //   .foreach { case (en, pReg, banks, readDataOp) =>
-  //     val bankPorts = VecInit(banks.map(_.readPorts.head))
-  //     val bankId = regBankId(pReg)
-  //     val nextBankId = RegNext(bankId, 0.U)
-  //     val nextPReg = RegNext(pReg, 0.U)
-
-  //     // request
-  //     bankPorts.foreach(_.enable := false.B)
-  //     bankPorts(bankId).enable := en && (pReg =/= 0.U)
-  //     bankPorts.foreach(_.address := regBankAddr(pReg))
-
-  //     val bankOut = Mux(nextPReg =/= 0.U,
-  //                       VecInit(bankPorts.map(_.data))(nextBankId),
-  //                       vecZeros)
-  //     readDataOp.data := bankOut
-  //   }
 
   // write port
   require(io.writeReq.bits.regs.length == 1, "collector: only single-writeback per cycle supported")
