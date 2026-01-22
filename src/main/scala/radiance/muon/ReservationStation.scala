@@ -38,7 +38,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   })
 
   val numEntries = muonParams.numIssueQueueEntries
-  val collEntryWidth = log2Up(muonParams.numCollectorEntries)
+  val numCollEntriesWidth = log2Up(muonParams.numCollectorEntries)
   val useCollector = muonParams.useCollector
 
   // whether this table row is valid
@@ -69,7 +69,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
   // where the operand lives in the collector banks.  RS uses this to allocate a
   // spot in the collector & feed the correct data to EX upon issue.
-  val collPtrTable   = Mem(numEntries, Vec(Isa.maxNumRegs, UInt(collEntryWidth.W)))
+  val collPtrTable   = Mem(numEntries, UInt(numCollEntriesWidth.W))
   val collNeedAllReadyTable = Wire(Vec(numEntries, Bool()))
   // mostly for debugging
   val eligibleTable = WireDefault(VecInit.fill(numEntries)(false.B))
@@ -101,7 +101,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     opReadyTable(emptyRow) := io.admit.bits.valid
     busyTable(emptyRow)  := io.admit.bits.busy
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
-    collPtrTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(0.U)
+    collPtrTable(emptyRow) := 0.U
 
     if (muonParams.debug) {
       printf(cf"RS: admitted: PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
@@ -140,7 +140,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // collect blocks collection of an older instruction, but has RAW hazard to
   // that older instruction.
   val allowPartialCollect = false
-  // If allowPartialCollect == true, prioritize rows that has no RAW-busy ops
+  // if allowPartialCollect == true, prioritize rows that has no RAW-busy ops
   // (no partial-collects), and only needs collection as the last step before
   // issue.  Otherwise, rows with partial ops can take up valuable space in the
   // collector banks.
@@ -172,23 +172,19 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   io.collector.readReq.valid := collValid
   // this is clunky, but Mem does not support partial-field updates
-  val newCollPtr = WireDefault(collPtrTable(collRow))
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
     .zipWithIndex.foreach { case ((need, pReg, cReq), rsi) =>
       assert(cReq.data.isEmpty) // isRead
       cReq.enable := collValid && need
       cReq.pReg := Mux(need, pReg, 0.U)
-      // TODO: currently assumes DuplicatedCollector with only 1 entry
-      newCollPtr(rsi) := 0.U
     }
   io.collector.readReq.bits.rsEntryId := collRow
   io.collector.readReq.bits.pc.foreach(_ := collPC)
   when (io.collector.readReq.fire) {
+    // collector alloc succeeded
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
-                .map { case (a,b) => a || b }
+                   .map { case (a,b) => a || b }
     collFiredTable(collRow) := newFired
-    collPtrTable(collRow) := newCollPtr
-
     printf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
   }
 
@@ -197,28 +193,31 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // 2. update scoreboard pending-reads
   //
   // collector wakeup should never block
-  io.collector.readResp.ports.foreach(_.ready := true.B)
-  io.scb.updateColl.enable := io.collector.readResp.ports.map(_.fire).reduce(_ || _)
-  // set later
-  io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+  io.scb.updateColl.enable := io.collector.readResp.valid &&
+                              io.collector.readResp.bits.regs.map(_.enable).reduce(_ || _)
   io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
-
+  io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
   (0 until numEntries).foreach { i =>
     val valid = validTable(i)
     val rss = rsTable(i)
     val opReadys = opReadyTable(i)
     val newOpReadys = WireDefault(opReadys)
     val collFired = collFiredTable(i)
-    val collPtrs = collPtrTable(i)
     val updated = WireDefault(false.B)
-    (opReadys lazyZip collFired lazyZip
-     (collPtrs zip rss) lazyZip
-     (io.collector.readResp.ports zip io.scb.updateColl.reads))
-      .zipWithIndex.foreach { case ((rdy, cf, (cptr, rs), (cResp, scbPort)), rsi) =>
-        assert(useCollector.B || !cResp.fire,
-               "RS: unexpected collector response when useCollector == false!")
+    (opReadys lazyZip collFired lazyZip rss lazyZip
+     (io.collector.readResp.bits.regs zip io.scb.updateColl.reads))
+      .zipWithIndex.foreach { case ((rdy, cFired, rs, (cRespReg, scbPort)), rsi) =>
+        if (!useCollector) {
+          assert(!cRespReg.enable,
+            "RS: unexpected collector response when useCollector == false!")
+        }
 
-        when (cResp.fire && valid && !rdy && cf && (cResp.bits.collEntry === cptr)) {
+        // TODO: currently there's no way of matching collector response <-> RS
+        // entry that fired readReq; we're assuming that only one RS entry
+        // sends out a readReq at a time, and readResp comes back in-order.
+        // Use rsEntryId in collector to relax this.
+        val cRespValid = io.collector.readResp.valid
+        when (valid && cRespValid && cRespReg.enable && !rdy && cFired) {
           newOpReadys(rsi) := true.B
           updated := true.B
 
@@ -231,6 +230,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       }
     when (updated) {
       opReadyTable(i) := newOpReadys
+      collPtrTable(i) := io.collector.readResp.bits.collEntry
     }
   }
 

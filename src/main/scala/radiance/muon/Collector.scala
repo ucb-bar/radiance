@@ -35,18 +35,18 @@ class CollectorResponse(
   val isWrite: Boolean
 )(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
-  val ports = Vec(numPorts, Decoupled(new Bundle {
-    /** pointer to the collector entry; RS uses this to know where to issue
-     *  operands from */
-    val collEntry = UInt(collEntryWidth.W)
+  // ID of the allocated collector bank entry
+  val collEntry = UInt(collEntryWidth.W)
+  val regs = Vec(numPorts, new Bundle {
+    val enable = Bool()
     // TODO: tmask
-  }))
+  })
 }
 
 object CollectorResponse {
   def apply(numPorts: Int, isWrite: Boolean)(implicit p: Parameters)
-  : CollectorResponse = {
-    new CollectorResponse(numPorts, isWrite)
+  : ValidIO[CollectorResponse] = {
+    Valid(new CollectorResponse(numPorts, isWrite))
   }
 }
 
@@ -131,6 +131,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
     allocTable.free(0.U /* FIXME */)
   }
   // handle same-cycle collector bank dequeue
+  // TODO: return alloc result via readResp, not readReq.ready
   io.readReq.ready := allocTable.hasFree || dequeue
 
   // read requests
@@ -159,11 +160,12 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   // read response
   // duplicated collector always answers readResp 1-cycle later
-  (io.readReq.bits.regs lazyZip io.readResp.ports).foreach { case (reqPort, respPort) =>
+  io.readResp.valid := RegNext(io.readReq.fire, false.B)
+  (io.readReq.bits.regs lazyZip io.readResp.bits.regs).foreach { case (reqPort, respPort) =>
     val opEn = io.readReq.fire && reqPort.enable
-    respPort.valid := RegNext(opEn, false.B)
-    respPort.bits.collEntry := nextAllocId
+    respPort.enable := RegNext(opEn, false.B)
   }
+  io.readResp.bits.collEntry := nextAllocId
 
   // write port
   require(io.writeReq.bits.regs.length == 1, "collector: only single-writeback per cycle supported")
@@ -182,8 +184,9 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
     bankWrites(regBankId(writePReg)).enable := writeEnable && (writePReg =/= 0.U)
   }
 
-  io.writeResp.ports.head.valid := RegNext(writeEnable)
-  io.writeResp.ports.head.bits.collEntry := 0.U // writes don't have collector entry
+  io.writeResp.valid := RegNext(writeEnable)
+  io.writeResp.bits.regs.head.enable := true.B
+  io.writeResp.bits.collEntry := 0.U // writes don't use collector entries
 
   // operand serve (readData)
   // currently, collector drives response with valid data regardless of EX req

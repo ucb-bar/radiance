@@ -92,8 +92,9 @@ class Backend(
     // collector.io.readReq.bits.rsEntryId := DontCare
 
     reservStation.io.collector.readReq.ready := false.B
-    reservStation.io.collector.readResp.ports.foreach(_.valid := false.B)
-    reservStation.io.collector.readResp.ports.foreach(_.bits := DontCare)
+    reservStation.io.collector.readResp.valid := false.B
+    reservStation.io.collector.readResp.bits.regs.foreach(_.enable := false.B)
+    reservStation.io.collector.readResp.bits.collEntry := DontCare
     // reservStation.io.collector.readData.resp.foreach(_.data := DontCare)
   } else {
     // RS manages collector
@@ -105,7 +106,6 @@ class Backend(
   // drive EX operands from collector
   val executeIn = WireInit(0.U.asTypeOf(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
   val operands = Seq(executeIn.rs1Data, executeIn.rs2Data, executeIn.rs3Data).map(_.get)
-  collector.io.readResp.ports.foreach(_.ready := true.B)
   (operands zip collector.io.readData.resp.bits).foreach { case (opnd, port) =>
     // value-gate to reduce switching
     opnd := Mux(port.enable,
@@ -232,7 +232,6 @@ class Backend(
   collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this
   collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
-  collector.io.writeResp.ports.foreach(_.ready := true.B)
   dontTouch(collector.io)
 
   // debug
