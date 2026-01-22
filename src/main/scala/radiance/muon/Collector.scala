@@ -16,6 +16,7 @@ class CollectorRequest(
     // TODO: tmask
   })
   val rsEntryId = UInt(rsEntryIdWidth.W)
+  val pc = Option.when(muonParams.debug)(pcT)
 
   def anyEnabled(): Bool = {
     regs.map(_.enable).reduce(_ || _)

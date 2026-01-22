@@ -182,6 +182,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       newCollPtr(rsi) := 0.U
     }
   io.collector.readReq.bits.rsEntryId := collRow
+  io.collector.readReq.bits.pc.foreach(_ := collPC)
   when (io.collector.readReq.fire) {
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                 .map { case (a,b) => a || b }

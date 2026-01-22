@@ -227,6 +227,7 @@ class Backend(
   collector.io.writeReq.bits.regs.head.enable := exRegWbFire
   collector.io.writeReq.bits.regs.head.pReg := exRegWb.bits.rd
   collector.io.writeReq.bits.regs.head.data.get := exRegWb.bits.data
+  collector.io.writeReq.bits.pc.foreach(_ := 0.U /* bogus */)
   collector.io.writeReq.bits.rsEntryId := 0.U // TODO: writes don't need to allocate RS entry; remove this
   collector.io.writeReq.valid := collector.io.writeReq.bits.anyEnabled()
   // TODO: tmask
