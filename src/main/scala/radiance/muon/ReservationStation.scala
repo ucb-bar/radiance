@@ -350,7 +350,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // drive collector's operand serve port upon issue, for use in EX
   // make sure to line this up with EX fire, so that collector data gets
   // consumed when it's used
-  io.collector.readData.req.valid := io.issue.valid
+  io.collector.readData.req.valid := io.issue.fire
   (io.collector.readData.req.bits zip issueStaged.io.deq.bits.hasOps).foreach { case (req, hasOp) =>
     req.enable := io.issue.fire && hasOp
     req.collEntry := 0.U // fixed for DuplicatedCollector, TODO

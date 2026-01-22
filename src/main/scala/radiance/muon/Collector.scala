@@ -53,6 +53,7 @@ object CollectorResponse {
 class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val hasPReg = !muonParams.useCollector
+  // `req.valid` dequeues operand from collector bank
   val req = Flipped(Valid(Vec(Isa.maxNumRegs, new Bundle {
     val enable = Bool()
     val collEntry = UInt(collEntryWidth.W)
@@ -107,15 +108,23 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   // collector banks, i.e. flip-flops that stage collected register data until
   // EX consumes them.  Separate per-reg, enq/deq drifts need care.
-  val collBankEntries = 2
+  val collBankEntries = 1
   val collBanks = Seq.fill(Isa.maxNumRegs)(Module(
     new Queue(gen = vecRegDataT, entries = collBankEntries, pipe = true)
   ))
 
-  // read requests
-  val allCollBanksReady = collBanks.map(_.io.enq.ready).reduce(_ && _)
-  io.readReq.ready := allCollBanksReady
+  // collector allocation table
+  val allocTable = new CollectorAllocTable(collBankEntries)(p)
+  when (reset.asBool) { allocTable.reset }
+  val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
+  // TODO: skip allocation when noen of readReq.regs.enable is set
+  when (io.readReq.fire) {
+    val (_, allocId) = allocTable.alloc
+    nextAllocId := allocId
+  }
+  io.readReq.ready := allocTable.hasFree
 
+  // read requests
   val readEns = io.readReq.bits.regs.map(_.enable)
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
   (readEns lazyZip readPRegs lazyZip rfBanks lazyZip collBanks)
@@ -144,7 +153,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   (io.readReq.bits.regs lazyZip io.readResp.ports).foreach { case (reqPort, respPort) =>
     val opEn = io.readReq.fire && reqPort.enable
     respPort.valid := RegNext(opEn, false.B)
-    respPort.bits.collEntry := 0.U // fixed for DuplicatedCollector
+    respPort.bits.collEntry := nextAllocId
   }
 
   // write port
@@ -165,7 +174,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   io.writeResp.ports.head.valid := RegNext(writeEnable)
-  io.writeResp.ports.head.bits.collEntry := 0.U // duplicated collector has no collector entry
+  io.writeResp.ports.head.bits.collEntry := 0.U // writes don't have collector entry
 
   // operand serve (readData)
   // currently, collector drives response with valid data regardless of EX req
@@ -182,12 +191,45 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       "collector: reg.enable set when request is invalid?")
     collBank.io.deq.ready := req.enable
   }
+  val dequeue = io.readData.req.valid && io.readData.req.bits.map(_.enable).reduce(_ || _)
+  when (dequeue) {
+    allocTable.free(0.U /* FIXME */)
+  }
+}
+
+class CollectorAllocTable(numEntries: Int)(implicit val p: Parameters)
+extends HasCoreParameters {
+  val idWidth = log2Up(numEntries)
+  val table = Mem(numEntries, new CollectorAllocTableEntry)
+
+  val emptyVec = VecInit((0 until numEntries).map(!table(_).valid))
+  val hasEmpty = WireDefault(emptyVec.reduce(_ || _))
+  val emptyId = PriorityEncoder(emptyVec)
+  dontTouch(emptyVec)
+  dontTouch(hasEmpty)
+
+  def reset = {
+    (0 until numEntries).foreach { table(_) := 0.U.asTypeOf(new CollectorAllocTableEntry) }
+  }
+
+  def hasFree: Bool = hasEmpty
+
+  def alloc: (Bool /*valid*/, UInt /*id*/) = {
+    when (hasEmpty) {
+      table(emptyId).valid := true.B
+    }
+    (hasEmpty, emptyId)
+  }
+
+  def free(id: UInt) = {
+    assert(id < numEntries.U, "collector alloc table id overflow")
+    assert(table(id).valid, "double-free in collector alloc table")
+    table(id).valid := false.B
+  }
 }
 
 class CollectorAllocTableEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
-  val collEntryIdWidth = log2Up(muonParams.numCollectorEntries)
   val valid = Bool()
-  val rsEntryId = UInt(rsEntryIdWidth.W)
-  val collEntryId = UInt(collEntryIdWidth.W)
+  // val rsEntryId = UInt(rsEntryIdWidth.W)
 }
