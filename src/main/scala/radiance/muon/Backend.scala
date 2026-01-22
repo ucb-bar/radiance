@@ -42,6 +42,7 @@ class Backend(
   scoreboard.io.updateWB <> reservStation.io.scb.updateWB
 
   val noILP = muonParams.noILP
+  assert(!noILP, "noILP == true is not currently supported; TODO")
   val issued = if (noILP) {
     hazard.reset := true.B
     scoreboard.reset := true.B
