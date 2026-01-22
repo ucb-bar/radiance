@@ -52,10 +52,12 @@ object CollectorResponse {
 class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val hasPReg = !muonParams.useCollector
-  val req = Flipped(Valid(new Bundle {
+  val req = Flipped(Valid(Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
     val collEntry = UInt(collEntryWidth.W)
-  }))
-  val resp = Decoupled(Vec(Isa.maxNumRegs, new Bundle {
+  })))
+  // same-cycle as `req`
+  val resp = Valid(Vec(Isa.maxNumRegs, new Bundle {
     val enable = Bool()
     val pReg = Option.when(hasPReg)(pRegT)
     val data = Vec(numLanes, regDataT)
@@ -103,7 +105,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   // collector banks, i.e. flip-flops that stage collected register data until
-  // EX consumes them
+  // EX consumes them.  Separate per-reg, enq/deq drifts need care.
   val collBankEntries = 2
   val collBanks = Seq.fill(Isa.maxNumRegs)(Module(
     new Queue(gen = vecRegDataT, entries = collBankEntries, pipe = true)
@@ -117,7 +119,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val readPRegs = io.readReq.bits.regs.map(_.pReg)
   (readEns lazyZip readPRegs lazyZip rfBanks lazyZip collBanks)
     .foreach { case (en, pReg, banks, collBank) =>
-      val bankEn = io.readReq.fire && en && (pReg =/= 0.U)
+      val bankEn = io.readReq.fire && en
       val bankPorts = VecInit(banks.map(_.readPorts.head))
       val bankId = regBankId(pReg)
       val nextBankId = RegNext(bankId, 0.U)
@@ -125,14 +127,15 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       val nextPReg = RegNext(pReg, 0.U)
 
       bankPorts.foreach(_.enable := false.B)
-      bankPorts(bankId).enable := bankEn
+      bankPorts(bankId).enable := bankEn && (pReg =/= 0.U)
       bankPorts.foreach(_.address := regBankAddr(pReg))
 
-      val bankOut = Mux(nextPReg =/= 0.U,
+      val regOut = Mux(nextPReg =/= 0.U,
         VecInit(bankPorts.map(_.data))(nextBankId),
         vecZeros)
+      // TODO: @perf: Skip latching 0.U to collBank
       collBank.io.enq.valid := nextEn
-      collBank.io.enq.bits := bankOut
+      collBank.io.enq.bits := regOut
     }
 
   // read response
@@ -164,13 +167,19 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   io.writeResp.ports.head.bits.collEntry := 0.U // duplicated collector has no collector entry
 
   // operand serve (readData)
+  // currently, collector drives response with valid data regardless of EX req
   io.readData.resp.valid := collBanks.map(_.io.deq.valid).reduce(_ || _)
   (io.readData.resp.bits zip collBanks).foreach { case (opnd, collBank) =>
+    // FIXME: this doesn't work when collBanks drift!!
     opnd.enable := collBank.io.deq.valid
     opnd.data := collBank.io.deq.bits
     assert(opnd.pReg.isEmpty)
-    // dequeue.  Note: should be fire to consider EX back-pressure
-    collBank.io.deq.ready := io.readData.resp.fire
+  }
+  // dequeue collector bank on successful serve
+  (io.readData.req.bits zip collBanks).foreach { case (req, collBank) =>
+    assert(!req.enable || io.readData.req.valid,
+      "collector: reg.enable set when request is invalid?")
+    collBank.io.deq.ready := req.enable
   }
 }
 

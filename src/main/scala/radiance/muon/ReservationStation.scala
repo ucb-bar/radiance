@@ -237,9 +237,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // issue
   // -----
 
-  def issueArbBundleT = new Bundle {
+  def issueBundleT = new Bundle {
     val entry = chiselTypeOf(io.issue.bits)
     val entryId = UInt(log2Ceil(numEntries).W)
+    val hasOps = chiselTypeOf(hasOpTable.head)
   }
 
   // check issue eligiblity after collection finished & RAW settled
@@ -270,10 +271,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
     eligibleTable(i) := eligible
 
-    val candidate = Wire(Decoupled(issueArbBundleT))
+    val candidate = Wire(Decoupled(issueBundleT))
     candidate.valid := eligible
     candidate.bits.entry := instTable(i)
     candidate.bits.entryId := i.U
+    candidate.bits.hasOps := hasOps
 
     // deregister upon issue
     when (candidate.fire) {
@@ -291,14 +293,6 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   )
   (issueScheduler.io.in zip eligibles).foreach { case (s, e) => s <> e }
   val issueScheduled = issueScheduler.io.out
-
-  // drive collector's operand serve port upon issue, for use in EX
-  // make sure to line this up with EX fire, so that collector data gets
-  // consumed when it's used
-  io.collector.readData.req.valid := io.issue.valid
-  io.collector.readData.req.bits.collEntry := 0.U // fixed for DuplicatedCollector, TODO
-  io.collector.readData.resp.ready := io.issue.fire
-  assert(useCollector, "FIXME: !useCollector is broken currently")
 
   val issuedId = WireDefault(issueScheduler.io.out.bits.entryId)
   // FIXME: Old bypass-specific code; remove
@@ -338,12 +332,12 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // latch the issue at the output to cut timing before EX (which currently
   // does not latch its input), and also to stage it when EX is !ready.
   val issueStaged = Module(
-    new Queue(gen = chiselTypeOf(io.issue.bits), entries = 1, pipe = true)
+    new Queue(gen = issueBundleT, entries = 1, pipe = true)
   )
-  issueStaged.io.enq.valid := issueScheduler.io.out.valid
-  issueStaged.io.enq.bits := issueScheduler.io.out.bits.entry
-  issueScheduler.io.out.ready := issueStaged.io.enq.ready
-  io.issue <> issueStaged.io.deq
+  issueStaged.io.enq <> issueScheduler.io.out
+  io.issue.valid := issueStaged.io.deq.valid
+  io.issue.bits := issueStaged.io.deq.bits.entry
+  issueStaged.io.deq.ready := io.issue.ready
 
   if (muonParams.debug) {
     when (io.issue.fire) {
@@ -352,6 +346,16 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
 
+  // drive collector's operand serve port upon issue, for use in EX
+  // make sure to line this up with EX fire, so that collector data gets
+  // consumed when it's used
+  io.collector.readData.req.valid := io.issue.valid
+  (io.collector.readData.req.bits zip issueStaged.io.deq.bits.hasOps).foreach { case (req, hasOp) =>
+    req.enable := io.issue.fire && hasOp
+    req.collEntry := 0.U // fixed for DuplicatedCollector, TODO
+  }
+
+  assert(useCollector, "FIXME: !useCollector is broken currently")
 
   // ---------
   // writeback
