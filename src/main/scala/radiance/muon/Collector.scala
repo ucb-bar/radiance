@@ -114,6 +114,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val collBanks = Seq.fill(Isa.maxNumRegs)(
     Seq.fill(numCollEntries)(RegInit(vecZeros))
   )
+  // @perf: this creates a big MUX
   val collBanksMux = collBanks.map(VecInit(_))
 
   // collector allocation table
@@ -124,20 +125,23 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   when (io.readReq.fire) {
     when (freeNow) {
       // concurrent alloc/free; reuse id being freed
-      nextAllocId := rdCollEntry
       printf(cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
       allocTable.print
+
+      nextAllocId := rdCollEntry
     }.otherwise {
       val (succ, allocId) = allocTable.alloc
-      assert(succ, "unexpected collector alloc fail")
-      nextAllocId := allocId
       printf(cf"collector: allocating id=${allocId}. before: ")
       allocTable.print
+
+      assert(succ, "unexpected collector alloc fail")
+      nextAllocId := allocId
     }
   }.elsewhen (freeNow) {
-    allocTable.free(rdCollEntry)
     printf(cf"collector: freeing id=${rdCollEntry}. before: ")
     allocTable.print
+
+    allocTable.free(rdCollEntry)
   }
   // handle same-cycle collector bank dealloc
   // TODO: return alloc result via readResp, not readReq.ready

@@ -70,6 +70,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // where the operand lives in the collector banks.  RS uses this to allocate a
   // spot in the collector & feed the correct data to EX upon issue.
   val collPtrTable   = Mem(numEntries, UInt(numCollEntriesWidth.W))
+  // whether this entry has received the final `rseadResp` from collector this
+  // cycle. Used when `forwardCollectorIssue` is enabled, to indicate whether
+  // we need to use the forwarded opReady and collPtr data instead of the
+  // latched one.
+  val collForwardedTable = WireDefault(VecInit.fill(numEntries)(false.B))
   val collNeedAllReadyTable = Wire(Vec(numEntries, Bool()))
   // mostly for debugging
   val eligibleTable = WireDefault(VecInit.fill(numEntries)(false.B))
@@ -230,12 +235,18 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          printf(cf"RS: collector response handled at row:${i}, pc:${instTable(i).uop.pc}%x, rs:${rs}, rsi:${rsi}\n")
+          printf(cf"RS: collector response handled at row:${i}, " +
+                 cf"pc:${instTable(i).uop.pc}%x, collEntry:${io.collector.readResp.bits.collEntry}, " +
+                 cf"rs:${rs}, rsi:${rsi}\n")
         }
       }
     when (updated) {
       opReadyTable(i) := newOpReadys
       collPtrTable(i) := io.collector.readResp.bits.collEntry
+      // collection finished this cycle & eligible for forwarding?
+      when (newOpReadys.reduce(_ && _)) {
+        collForwardedTable(i) := true.B
+      }
     }
   }
 
@@ -290,7 +301,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     candidate.bits.entryId := i.U
     candidate.bits.hasOps := hasOpTable(i)
     candidate.bits.collFired := collFiredTable(i)
-    candidate.bits.collEntry := collPtrTable(i)
+    candidate.bits.collEntry := (if (muonParams.forwardCollectorIssue) {
+      // forward collector resp to issue, but only when this particular RS
+      // entry has received that response
+      Mux(collForwardedTable(i),
+        io.collector.readResp.bits.collEntry,
+        collPtrTable(i))
+    } else {
+      collPtrTable(i)
+    })
 
     // deregister upon issue
     when (candidate.fire) {
@@ -356,7 +375,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   if (muonParams.debug) {
     when (io.issue.fire) {
-      printf(cf"RS: issued: PC=${io.issue.bits.uop.pc}%x at row ${issueScheduler.io.out.bits.entryId}:\n")
+      printf(cf"RS: issued: row:${issueStaged.io.deq.bits.entryId}, pc:${io.issue.bits.uop.pc}%x, " +
+             cf"collEntry:${issueStaged.io.deq.bits.collEntry}; before:\n")
       printTable
     }
   }
