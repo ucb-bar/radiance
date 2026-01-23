@@ -292,8 +292,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     commitUpdate(collRecs, isWrite = false)
     commitUpdate(wbRecs, isWrite = true)
 
-    printf(cf"scoreboard: table received coll/WB update; content beforehand:\n")
-    printTable
+    if (muonParams.debug) {
+      printf(cf"scoreboard: table received coll/WB update; content beforehand:\n")
+      printTable
+    }
   }
 
   // RS admit updates.  These are per-warp
@@ -328,8 +330,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         printUpdate(warpIo.updateRS)
       }
 
-      printf(cf"scoreboard: warp=${warpId}: table received RS update; content beforehand:\n")
-      printTable
+      if (muonParams.debug) {
+        printf(cf"scoreboard: warp=${warpId}: table received RS update; content beforehand:\n")
+        printTable
+      }
     }
 
     // read
@@ -380,14 +384,18 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   def printTable = {
-    printf("=" * 8 + " Scoreboard " + "=" * 8 + "\n")
-    for (i <- 0 until muonParams.numPhysRegs) {
-      val reads = readTable(i)
-      val writes = writeTable(i)
-      when (reads > 0.U || writes > 0.U) {
-        printf(cf"p${i} | writes:${writes} | reads:${reads}\n")
+    // @perf: NOTE: this can instantiate a read port for *every* table entries;
+    // make sure to guard this with debug
+    if (muonParams.debug) {
+      printf("=" * 8 + " Scoreboard " + "=" * 8 + "\n")
+      for (i <- 0 until muonParams.numPhysRegs) {
+        val reads = readTable(i)
+        val writes = writeTable(i)
+        when (reads > 0.U || writes > 0.U) {
+          printf(cf"p${i} | writes:${writes} | reads:${reads}\n")
+        }
       }
+      printf("=" * 28 + "\n")
     }
-    printf("=" * 28 + "\n")
   }
 }

@@ -54,7 +54,7 @@ case class MuonCoreParams(
   logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
-  debug: Boolean = true, // enable extra IOs for debug (ex: PC)
+  debug: Boolean = false, // enable extra IOs for debug (ex: PC)
   difftest: Boolean = false // enable arch-state differential testing
                             // against cyclotron
 ) extends PhysicalCoreParams {
