@@ -43,7 +43,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   // whether this table row is valid
   val validTable     = Mem(numEntries, Bool())
-  // TODO: optimize; storing all of Decode fields in RS gets expensive
+  // @perf: optimize; storing all of Decode fields in RS gets expensive
   val instTable      = Mem(numEntries, ibufEntryT)
   // whether the instruction uses rs1/2/3
   // not actually a state; combinationally computed from instTable
@@ -51,9 +51,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // rs1/2/3 of the instruction
   // not actually a state; combinationally computed from instTable
   val rsTable        = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, pRegT)))
-  // whether the used operands has been collected
+  // whether the valid operands are not busy & have been collected from regfile
   val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
-  // whether the operands are being written-to by in-flight uops in EX
+  // whether the operands are being written-to by in-flight insts in EX
   val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
   // whether the operands are currently being collected
   // a partial set of hasOpTable; not all of the operands can be collected at
@@ -197,11 +197,16 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                               io.collector.readResp.bits.regs.map(_.enable).reduce(_ || _)
   io.scb.updateColl.write := 0.U.asTypeOf(new ScoreboardRegUpdate)
   io.scb.updateColl.reads.foreach(_ := 0.U.asTypeOf(new ScoreboardRegUpdate))
+
+  // ops already-collected + will-be-collected next cycle
+  val newOpReadyTable = WireDefault(
+    VecInit.tabulate(numEntries)(i => opReadyTable(i))
+  )
   (0 until numEntries).foreach { i =>
     val valid = validTable(i)
     val rss = rsTable(i)
     val opReadys = opReadyTable(i)
-    val newOpReadys = WireDefault(opReadys)
+    val newOpReadys = newOpReadyTable(i)
     val collFired = collFiredTable(i)
     val updated = WireDefault(false.B)
     (opReadys lazyZip collFired lazyZip rss lazyZip
@@ -252,11 +257,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val eligibles = VecInit((0 until numEntries).map { i =>
     val valid = validTable(i)
     val opReadys = opReadyTable(i)
+    val newOpReadys = newOpReadyTable(i)
     val busys = busyTable(i)
-    // TODO: @perf: Consider collReadResps coming in at the same cycle for
-    // issue. Otherwise, this increases collector request -> issue latency &
-    // requires deeper collector banks.
-    val allCollected = opReadys.reduce(_ && _)
+    // using newOpReadys here considers ops that will-be-collected next cycle
+    // as issue-eligible, eliminating one cycle latency from coll req -> issue
+    // sched. enabling this optimization also brings some area benefit, since
+    // reducing this latency allows shallower collector banks, which are
+    // generally large
+    val allCollected = (if (muonParams.forwardCollectorIssue)
+      newOpReadys else opReadys).reduce(_ && _)
     val noneBusy = !busys.reduce(_ || _)
     // issue eligibility logic
     val eligible = useCollector match {

@@ -122,20 +122,26 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
   // TODO: skip allocation when noen of readReq.regs.enable is set
   when (io.readReq.fire) {
-    when (dealloc) {
+    when (freeNow) {
       // concurrent alloc/free; reuse id being freed
       nextAllocId := rdCollEntry
+      printf(cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
+      allocTable.print
     }.otherwise {
       val (succ, allocId) = allocTable.alloc
       assert(succ, "unexpected collector alloc fail")
       nextAllocId := allocId
+      printf(cf"collector: allocating id=${allocId}. before: ")
+      allocTable.print
     }
-  }.elsewhen (dealloc) {
+  }.elsewhen (freeNow) {
     allocTable.free(rdCollEntry)
+    printf(cf"collector: freeing id=${rdCollEntry}. before: ")
+    allocTable.print
   }
   // handle same-cycle collector bank dealloc
   // TODO: return alloc result via readResp, not readReq.ready
-  io.readReq.ready := allocTable.hasFree || dealloc
+  io.readReq.ready := allocTable.hasFree || freeNow
 
   // read requests
   val readEns = io.readReq.bits.regs.map(_.enable)
@@ -203,13 +209,13 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   io.readData.resp.valid := allocTable.read(rdCollEntry).valid
   (io.readData.req.bits.regs lazyZip io.readData.resp.bits lazyZip collBanksMux).foreach
     { case (req, opnd, collBank) =>
-      // FIXME: there should be a per-reg valid bit stored in alloc table or somewhere
+      // TODO: there should be a per-reg valid bit stored in alloc table or somewhere
       opnd.enable := io.readData.req.valid && req.enable
       opnd.data := collBank(rdCollEntry)
       assert(opnd.pReg.isEmpty)
     }
-  // dealloc collector entry on successful serve
-  def dealloc = io.readData.req.valid &&
+  // free collector entry on successful serve
+  def freeNow = io.readData.req.valid &&
                 io.readData.req.bits.regs.map(_.enable).reduce(_ || _)
 }
 
@@ -250,6 +256,14 @@ extends HasCoreParameters {
     val newEntry = WireDefault(table(emptyId))
     newEntry.valid := false.B
     table(id) := newEntry
+  }
+
+  def print = {
+    printf("table content: ")
+    (0 until numEntries).foreach { i =>
+      printf(cf"${table(i).valid}")
+    }
+    printf("\n")
   }
 }
 

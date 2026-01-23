@@ -39,6 +39,9 @@ case class MuonCoreParams(
                                  // rs1/2/3-duplicated register file
   numRegBanks: Int = 1,          // when useCollector true
   numCollectorEntries: Int = 2,  // when useCollector true
+  forwardCollectorIssue: Boolean = true,  // perf optimization: pre-empt collector
+                                          // responses by one cycle for earlier
+                                          // issue eligiblity check
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),
