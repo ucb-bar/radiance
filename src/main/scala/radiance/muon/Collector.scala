@@ -54,10 +54,12 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val hasPReg = !muonParams.useCollector
   // `req.valid` dequeues operand from collector bank
-  val req = Flipped(Valid(Vec(Isa.maxNumRegs, new Bundle {
-    val enable = Bool()
+  val req = Flipped(Valid(new Bundle {
     val collEntry = UInt(collEntryWidth.W)
-  })))
+    val regs = Vec(Isa.maxNumRegs, new Bundle {
+      val enable = Bool()
+    })
+  }))
   // same-cycle as `req`
   val resp = Valid(Vec(Isa.maxNumRegs, new Bundle {
     val enable = Bool()
@@ -109,9 +111,10 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   // collector banks, i.e. flip-flops that stage collected register data until
   // EX consumes them.  Separate per-reg, enq/deq drifts need care.
   val numCollEntries = muonParams.numCollectorEntries
-  val collBanks = Seq.fill(Isa.maxNumRegs)(Module(
-    new Queue(gen = vecRegDataT, entries = numCollEntries, pipe = true)
-  ))
+  val collBanks = Seq.fill(Isa.maxNumRegs)(
+    Seq.fill(numCollEntries)(RegInit(vecZeros))
+  )
+  val collBanksMux = collBanks.map(VecInit(_))
 
   // collector allocation table
   val allocTable = new CollectorAllocTable(numCollEntries)(p)
@@ -119,20 +122,20 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
   // TODO: skip allocation when noen of readReq.regs.enable is set
   when (io.readReq.fire) {
-    when (dequeue) {
+    when (dealloc) {
       // concurrent alloc/free; reuse id being freed
-      nextAllocId := 0.U /* FIXME */
+      nextAllocId := rdCollEntry
     }.otherwise {
       val (succ, allocId) = allocTable.alloc
       assert(succ, "unexpected collector alloc fail")
       nextAllocId := allocId
     }
-  }.elsewhen (dequeue) {
-    allocTable.free(0.U /* FIXME */)
+  }.elsewhen (dealloc) {
+    allocTable.free(rdCollEntry)
   }
-  // handle same-cycle collector bank dequeue
+  // handle same-cycle collector bank dealloc
   // TODO: return alloc result via readResp, not readReq.ready
-  io.readReq.ready := allocTable.hasFree || dequeue
+  io.readReq.ready := allocTable.hasFree || dealloc
 
   // read requests
   val readEns = io.readReq.bits.regs.map(_.enable)
@@ -154,8 +157,12 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
         VecInit(bankPorts.map(_.data))(nextBankId),
         vecZeros)
       // TODO: @perf: Skip latching 0.U to collBank
-      collBank.io.enq.valid := nextEn
-      collBank.io.enq.bits := regOut
+      collBank.zipWithIndex.foreach { case (entry, i) =>
+        when (nextEn && (i.U === nextAllocId)) {
+          entry := regOut
+        }
+      }
+      dontTouch(regOut)
     }
 
   // read response
@@ -190,20 +197,20 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   // operand serve (readData)
   // currently, collector drives response with valid data regardless of EX req
-  io.readData.resp.valid := collBanks.map(_.io.deq.valid).reduce(_ || _)
-  (io.readData.resp.bits zip collBanks).foreach { case (opnd, collBank) =>
-    // FIXME: this doesn't work when collBanks drift!!
-    opnd.enable := collBank.io.deq.valid
-    opnd.data := collBank.io.deq.bits
-    assert(opnd.pReg.isEmpty)
-  }
-  // dequeue collector bank on successful serve
-  (io.readData.req.bits zip collBanks).foreach { case (req, collBank) =>
-    assert(!req.enable || io.readData.req.valid,
-      "collector: reg.enable set when request is invalid?")
-    collBank.io.deq.ready := req.enable
-  }
-  def dequeue = io.readData.req.valid && io.readData.req.bits.map(_.enable).reduce(_ || _)
+  def rdCollEntry = io.readData.req.bits.collEntry
+  assert(!io.readData.req.valid || allocTable.read(rdCollEntry).valid,
+    "collector: readData's collEntry should always point to a valid entry")
+  io.readData.resp.valid := allocTable.read(rdCollEntry).valid
+  (io.readData.req.bits.regs lazyZip io.readData.resp.bits lazyZip collBanksMux).foreach
+    { case (req, opnd, collBank) =>
+      // FIXME: there should be a per-reg valid bit stored in alloc table or somewhere
+      opnd.enable := io.readData.req.valid && req.enable
+      opnd.data := collBank(rdCollEntry)
+      assert(opnd.pReg.isEmpty)
+    }
+  // dealloc collector entry on successful serve
+  def dealloc = io.readData.req.valid &&
+                io.readData.req.bits.regs.map(_.enable).reduce(_ || _)
 }
 
 class CollectorAllocTable(numEntries: Int)(implicit val p: Parameters)
@@ -218,14 +225,21 @@ extends HasCoreParameters {
   dontTouch(hasEmpty)
 
   def reset = {
-    (0 until numEntries).foreach { table(_) := 0.U.asTypeOf(new CollectorAllocTableEntry) }
+    (0 until numEntries).foreach { table(_) := (new CollectorAllocTableEntry).empty }
+  }
+
+  def read(id: UInt): CollectorAllocTableEntry = {
+    table(id)
   }
 
   def hasFree: Bool = hasEmpty
 
   def alloc: (Bool /*valid*/, UInt /*id*/) = {
+    // Mem doesn't support partial-field updates
+    val newEntry = WireDefault(table(emptyId))
+    newEntry.valid := true.B
     when (hasEmpty) {
-      table(emptyId).valid := true.B
+      table(emptyId) := newEntry
     }
     (hasEmpty, emptyId)
   }
@@ -233,12 +247,16 @@ extends HasCoreParameters {
   def free(id: UInt) = {
     assert(id < numEntries.U, "collector alloc table id overflow")
     assert(table(id).valid, "double-free in collector alloc table")
-    table(id).valid := false.B
+    val newEntry = WireDefault(table(emptyId))
+    newEntry.valid := false.B
+    table(id) := newEntry
   }
 }
 
 class CollectorAllocTableEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val rsEntryIdWidth = log2Up(muonParams.numIssueQueueEntries)
   val valid = Bool()
+  val hasOps = Vec(Isa.maxNumRegs, Bool())
   // val rsEntryId = UInt(rsEntryIdWidth.W)
+  def empty = 0.U.asTypeOf(this)
 }

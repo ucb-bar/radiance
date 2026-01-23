@@ -241,14 +241,17 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   def issueBundleT = new Bundle {
     val entry = chiselTypeOf(io.issue.bits)
     val entryId = UInt(log2Ceil(numEntries).W)
+    // these need to be stored at the issue output latch to control the
+    // collector to serve EX with the right operands
     val hasOps = chiselTypeOf(hasOpTable.head)
+    val collFired = Vec(Isa.maxNumRegs, Bool())
+    val collEntry = UInt(numCollEntriesWidth.W)
   }
 
   // check issue eligiblity after collection finished & RAW settled
   val eligibles = VecInit((0 until numEntries).map { i =>
     val valid = validTable(i)
     val opReadys = opReadyTable(i)
-    val hasOps = hasOpTable(i)
     val busys = busyTable(i)
     // TODO: @perf: Consider collReadResps coming in at the same cycle for
     // issue. Otherwise, this increases collector request -> issue latency &
@@ -276,7 +279,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     candidate.valid := eligible
     candidate.bits.entry := instTable(i)
     candidate.bits.entryId := i.U
-    candidate.bits.hasOps := hasOps
+    candidate.bits.hasOps := hasOpTable(i)
+    candidate.bits.collFired := collFiredTable(i)
+    candidate.bits.collEntry := collPtrTable(i)
 
     // deregister upon issue
     when (candidate.fire) {
@@ -350,10 +355,14 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // drive collector's operand serve port upon issue, for use in EX
   // make sure to line this up with EX fire, so that collector data gets
   // consumed when it's used
-  io.collector.readData.req.valid := io.issue.fire
-  (io.collector.readData.req.bits zip issueStaged.io.deq.bits.hasOps).foreach { case (req, hasOp) =>
+  // TODO: instead of the RS supplying collector hasOp, have the collector
+  // track hasOp and reply with per-reg enable bits
+  // only request readData for instructions that have accessed the collector
+  val collFiredAny = issueStaged.io.deq.bits.collFired.reduce(_ || _)
+  io.collector.readData.req.valid := issueStaged.io.deq.fire && collFiredAny
+  io.collector.readData.req.bits.collEntry := issueStaged.io.deq.bits.collEntry
+  (io.collector.readData.req.bits.regs zip issueStaged.io.deq.bits.hasOps).foreach { case (req, hasOp) =>
     req.enable := io.issue.fire && hasOp
-    req.collEntry := 0.U // fixed for DuplicatedCollector, TODO
   }
 
   assert(useCollector, "FIXME: !useCollector is broken currently")

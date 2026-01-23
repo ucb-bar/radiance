@@ -38,7 +38,7 @@ case class MuonCoreParams(
                                  // operand collector; if false, use a simple
                                  // rs1/2/3-duplicated register file
   numRegBanks: Int = 1,          // when useCollector true
-  numCollectorEntries: Int = 1,  // when useCollector true
+  numCollectorEntries: Int = 2,  // when useCollector true
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
   fpPipe: FPPipeParams = FPPipeParams(8, 1),
