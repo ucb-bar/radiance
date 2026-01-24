@@ -68,7 +68,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   val writeTable = Mem(muonParams.numPhysRegs, UInt(scoreboardWriteCountBits.W))
 
   // reset
-  // @synthesis: unsure if this will generate expensive trees, revisit
+  // TODO: @synthesis: this blows up the number of write ports.
+  // Rewrite to plain Regs instead of using Mem.
   when (reset.asBool) {
     (0 until muonParams.numPhysRegs).foreach { pReg =>
       readTable(pReg) := 0.U
