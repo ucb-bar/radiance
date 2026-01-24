@@ -32,10 +32,12 @@ class ScoreboardRead(
 
 class ScoreboardHazardIO(implicit p: Parameters) extends CoreBundle()(p) {
   val updateRS = new ScoreboardUpdate
-  val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
-  val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
-  val readRs3  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
-  val readRd   = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
+  val warps = Vec(numWarps, new Bundle {
+    val readRs1  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
+    val readRs2  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
+    val readRs3  = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
+    val readRd   = new ScoreboardRead(scoreboardReadCountBits, scoreboardWriteCountBits)
+  })
 }
 
 /** Scoreboard module keeps track of pending reads and writes to every register
@@ -52,18 +54,18 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     val updateWB = new ScoreboardUpdate
     /** scoreboard accesses/updates on RS admission from the Hazard stage.
      *  These are per-warp ports. */
-    val hazard = Vec(numWarps, new ScoreboardHazardIO)
+    val hazard = new ScoreboardHazardIO
   })
 
   class Entry extends Bundle {
-    val pendingReads = chiselTypeOf(io.hazard.head.readRd.pendingReads)
-    val pendingWrites = chiselTypeOf(io.hazard.head.readRd.pendingWrites)
+    val pendingReads = UInt(scoreboardReadCountBits.W)
+    val pendingWrites = UInt(scoreboardWriteCountBits.W)
     // TODO: reads epoch
   }
 
   // flip-flops
-  val readTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.head.readRd.pendingReads))
-  val writeTable = Mem(muonParams.numPhysRegs, chiselTypeOf(io.hazard.head.readRd.pendingWrites))
+  val readTable = Mem(muonParams.numPhysRegs, UInt(scoreboardReadCountBits.W))
+  val writeTable = Mem(muonParams.numPhysRegs, UInt(scoreboardWriteCountBits.W))
 
   // reset
   // @synthesis: unsure if this will generate expensive trees, revisit
@@ -256,8 +258,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
 
-  // collector and writeback updates.  These are global across-warp
-  //
+  // collector and writeback updates
   val uniqCollReadUpdates = consolidateUpdates(io.updateColl.reads)
   val uniqWBWriteUpdates  = consolidateUpdates(Seq(io.updateWB.write))
   val (collRecs, collSuccess) = applyUpdates(Seq(), uniqCollReadUpdates, isWrite = false, debug = "coll")
@@ -267,26 +268,53 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   io.updateWB.success := wbSuccess
   io.updateColl.success := collSuccess
 
-  when (io.updateWB.enable) {
-    printf(cf"scoreboard: received WB update ")
-    printUpdate(io.updateWB)
-  }
-  when (io.updateColl.enable) {
-    printf(cf"scoreboard: received collector update ")
-    printUpdate(io.updateColl)
-  }
+  // RS admission updates
+  val uniqRSReadUpdates  = consolidateUpdates(io.hazard.updateRS.reads)
+  val uniqRSWriteUpdates = consolidateUpdates(Seq(io.hazard.updateRS.write))
+  val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collRecs, uniqRSReadUpdates, isWrite = false, debug = "rsRead")
+  val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
+  val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
+  dontTouch(rsSuccess)
 
-  val anyWarpUpdateRs = io.hazard.map(_.updateRS.enable).reduce(_ || _)
-  // if there were no updateRS, only apply WB and coll updates
-  // this prevents multiple frivolous updates compared to merging it with the
-  // doWarp loop
-  when (!anyWarpUpdateRs && (io.updateWB.enable || io.updateColl.enable)) {
-    when (io.updateWB.enable) {
-      printf("scoreboard: received WB update ")
-      printUpdate(io.updateWB)
-    }.elsewhen (io.updateColl.enable) {
-      printf("scoreboard: received coll update ")
-      printUpdate(io.updateColl)
+  io.hazard.updateRS.success := io.hazard.updateRS.enable && rsSuccess
+
+  when (io.hazard.updateRS.enable) {
+    if (muonParams.debug) {
+      printf(cf"scoreboard: received RS update ")
+      printUpdate(io.hazard.updateRS)
+    }
+
+    // these contain coll/wb updates
+    when (rsSuccess) {
+      commitUpdate(rsReadRecs, isWrite = false)
+      commitUpdate(rsWriteRecs, isWrite = true)
+    }.otherwise {
+      commitUpdate(collRecs, isWrite = false)
+      commitUpdate(wbRecs, isWrite = true)
+    }
+
+    if (muonParams.debug) {
+      when (!rsReadSuccess) {
+        printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
+        printUpdate(io.hazard.updateRS)
+      }.elsewhen (!rsWriteSuccess) {
+        printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
+        printUpdate(io.hazard.updateRS)
+      }
+
+      printf(cf"scoreboard: table received RS update; content beforehand:\n")
+      printTable
+    }
+  }.elsewhen (io.updateWB.enable || io.updateColl.enable) {
+    if (muonParams.debug) {
+      when (io.updateWB.enable) {
+        printf("scoreboard: received WB update ")
+        printUpdate(io.updateWB)
+      }
+      when (io.updateColl.enable) {
+        printf("scoreboard: received coll update ")
+        printUpdate(io.updateColl)
+      }
     }
 
     commitUpdate(collRecs, isWrite = false)
@@ -298,44 +326,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     }
   }
 
-  // RS admit updates.  These are per-warp
-  def doWarp(warpIo: ScoreboardHazardIO, warpId: Int) = {
-    // RS admission updates
-    val uniqRSReadUpdates  = consolidateUpdates(warpIo.updateRS.reads)
-    val uniqRSWriteUpdates = consolidateUpdates(Seq(warpIo.updateRS.write))
-    val (rsReadRecs,  rsReadSuccess)  = applyUpdates(collRecs, uniqRSReadUpdates,  isWrite = false, debug = "rsRead")
-    val (rsWriteRecs, rsWriteSuccess) = applyUpdates(wbRecs,  uniqRSWriteUpdates, isWrite = true,  debug = "rsWrite")
-    val rsSuccess = WireDefault(rsReadSuccess && rsWriteSuccess)
-    dontTouch(rsSuccess)
-
-    warpIo.updateRS.success := warpIo.updateRS.enable && rsSuccess
-
-    when (warpIo.updateRS.enable) {
-      printf(cf"scoreboard: received RS update (warp=${warpId}) ")
-      printUpdate(warpIo.updateRS)
-
-      when (rsSuccess) {
-        commitUpdate(rsReadRecs, isWrite = false)
-        commitUpdate(rsWriteRecs, isWrite = true)
-      }.otherwise {
-        commitUpdate(collRecs, isWrite = false)
-        commitUpdate(wbRecs, isWrite = true)
-      }
-
-      when (!rsReadSuccess) {
-        printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to read overflow: ")
-        printUpdate(warpIo.updateRS)
-      }.elsewhen (!rsWriteSuccess) {
-        printf(cf"scoreboard: warp=${warpId}: failed to commit RS update due to write overflow: ")
-        printUpdate(warpIo.updateRS)
-      }
-
-      if (muonParams.debug) {
-        printf(cf"scoreboard: warp=${warpId}: table received RS update; content beforehand:\n")
-        printTable
-      }
-    }
-
+  def readWarp(warpId: Int) = {
     // read
     // ----
     //
@@ -351,13 +342,13 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
         port.pendingWrites := lookup(wbRecs, port.pReg, isWrite = true)._2._1
       }
     }
-    read(warpIo.readRs1)
-    read(warpIo.readRs2)
-    read(warpIo.readRs3)
-    read(warpIo.readRd)
+    read(io.hazard.warps(warpId).readRs1)
+    read(io.hazard.warps(warpId).readRs2)
+    read(io.hazard.warps(warpId).readRs3)
+    read(io.hazard.warps(warpId).readRd)
   }
 
-  io.hazard.zipWithIndex.foreach { case (io, wid) => doWarp(io, wid) }
+  for (i <- 0 until numWarps) { readWarp(i) }
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {
