@@ -210,7 +210,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
             newCount := currCount + u.incr - u.decr
           }
 
-          printf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount:${newCount}, currCount:${currCount}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), success:${success}\n")
+          debugf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount:${newCount}, currCount:${currCount}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), success:${success}\n")
 
           // underflow should never be possible since the number of retired
           // regs should strictly be smaller than the pending regs, i.e. no
@@ -220,7 +220,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           //        cf"scoreboard: ${countName} underflow at pReg=${u.pReg} " +
           //        cf"(currCount=${currCount}, incr=${u.incr}, decr=${u.decr})")
         }.elsewhen (u.incr === u.decr && u.incr =/= 0.U) {
-          printf(cf"applyUpdates: [${debug}] ${countName} incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
+          debugf(cf"applyUpdates: [${debug}] ${countName} incr/decr cancel; pReg:${u.pReg}, newCount: ${newCount}, currCount: ${currCount}(${currCount.getWidth}W), incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W)\n")
         }
       }
 
@@ -249,10 +249,10 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       when (r.dirty) {
         assert(r.pReg =/= 0.U, "update to x0 not filtered in the logic?")
         if (isWrite) {
-          printf(cf"scoreboard: committed write (pReg:${r.pReg}, new pendingWrites:${r.counter})\n")
+          debugf(cf"scoreboard: committed write (pReg:${r.pReg}, new pendingWrites:${r.counter})\n")
           writeTable(r.pReg) := r.counter
         } else {
-          printf(cf"scoreboard: committed read (pReg:${r.pReg}, new pendingReads:${r.counter})\n")
+          debugf(cf"scoreboard: committed read (pReg:${r.pReg}, new pendingReads:${r.counter})\n")
           readTable(r.pReg) := r.counter
         }
       }
@@ -280,10 +280,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   io.hazard.updateRS.success := io.hazard.updateRS.enable && rsSuccess
 
   when (io.hazard.updateRS.enable) {
-    if (muonParams.debug) {
-      printf(cf"scoreboard: received RS update ")
-      printUpdate(io.hazard.updateRS)
-    }
+    debugf(cf"scoreboard: received RS update ")
+    printUpdate(io.hazard.updateRS)
 
     // these contain coll/wb updates
     when (rsSuccess) {
@@ -294,37 +292,31 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       commitUpdate(wbRecs, isWrite = true)
     }
 
-    if (muonParams.debug) {
-      when (!rsReadSuccess) {
-        printf(cf"scoreboard: failed to commit RS update due to read overflow: ")
-        printUpdate(io.hazard.updateRS)
-      }.elsewhen (!rsWriteSuccess) {
-        printf(cf"scoreboard: failed to commit RS update due to write overflow: ")
-        printUpdate(io.hazard.updateRS)
-      }
-
-      printf(cf"scoreboard: table received RS update; content beforehand:\n")
-      printTable
+    when (!rsReadSuccess) {
+      debugf(cf"scoreboard: failed to commit RS update due to read overflow: ")
+      printUpdate(io.hazard.updateRS)
+    }.elsewhen (!rsWriteSuccess) {
+      debugf(cf"scoreboard: failed to commit RS update due to write overflow: ")
+      printUpdate(io.hazard.updateRS)
     }
+
+    debugf(cf"scoreboard: table received RS update; content beforehand:\n")
+    printTable
   }.elsewhen (io.updateWB.enable || io.updateColl.enable) {
-    if (muonParams.debug) {
-      when (io.updateWB.enable) {
-        printf("scoreboard: received WB update ")
-        printUpdate(io.updateWB)
-      }
-      when (io.updateColl.enable) {
-        printf("scoreboard: received coll update ")
-        printUpdate(io.updateColl)
-      }
+    when (io.updateWB.enable) {
+      debugf("scoreboard: received WB update ")
+      printUpdate(io.updateWB)
+    }
+    when (io.updateColl.enable) {
+      debugf("scoreboard: received coll update ")
+      printUpdate(io.updateColl)
     }
 
     commitUpdate(collRecs, isWrite = false)
     commitUpdate(wbRecs, isWrite = true)
 
-    if (muonParams.debug) {
-      printf(cf"scoreboard: table received coll/WB update; content beforehand:\n")
-      printTable
-    }
+    debugf(cf"scoreboard: table received coll/WB update; content beforehand:\n")
+    printTable
   }
 
   def readWarp(warpId: Int) = {
@@ -353,41 +345,39 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {
-      printf(cf"{pReg:${reg.pReg}, incr:")
+      debugf(cf"{pReg:${reg.pReg}, incr:")
        when (reg.incr) {
-        printf("1")
+        debugf("1")
       }.elsewhen (reg.decr) {
-        printf("-1")
+        debugf("-1")
       }.otherwise {
-        printf("0")
+        debugf("0")
       }
-      printf("}")
+      debugf("}")
     }
 
-    printf("{rs1: ")
+    debugf("{rs1: ")
     printReg(upd.reads(0))
-    printf(", rs2: ")
+    debugf(", rs2: ")
     printReg(upd.reads(1))
-    printf(", rs3: ")
+    debugf(", rs3: ")
     printReg(upd.reads(2))
-    printf(", rd: ")
+    debugf(", rd: ")
     printReg(upd.write)
-    printf("}\n")
+    debugf("}\n")
   }
 
   def printTable = {
     // @perf: NOTE: this can instantiate a read port for *every* table entries;
     // make sure to guard this with debug
-    if (muonParams.debug) {
-      printf("=" * 8 + " Scoreboard " + "=" * 8 + "\n")
-      for (i <- 0 until muonParams.numPhysRegs) {
-        val reads = readTable(i)
-        val writes = writeTable(i)
-        when (reads > 0.U || writes > 0.U) {
-          printf(cf"p${i} | writes:${writes} | reads:${reads}\n")
-        }
+    debugf("=" * 8 + " Scoreboard " + "=" * 8 + "\n")
+    for (i <- 0 until muonParams.numPhysRegs) {
+      val reads = readTable(i)
+      val writes = writeTable(i)
+      when (reads > 0.U || writes > 0.U) {
+        debugf(cf"p${i} | writes:${writes} | reads:${reads}\n")
       }
-      printf("=" * 28 + "\n")
     }
+    debugf("=" * 28 + "\n")
   }
 }

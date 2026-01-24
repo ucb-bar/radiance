@@ -260,7 +260,13 @@ trait HasCoreParameters {
 }
 
 abstract class CoreModule(implicit val p: Parameters) extends Module
-  with HasCoreParameters
+  with HasCoreParameters {
+  def debugf(pable: Printable) = {
+    if (muonParams.debug) {
+      printf(pable)
+    }
+  }
+}
 
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasCoreParameters
