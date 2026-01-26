@@ -171,6 +171,7 @@ module CyclotronFrontendBlackBox #(
   assign imem_req_ready = __imem_req_ready;
 
   // connect ibuffer signals
+  // packed vector <-> array conversion uses ascending lane order
   genvar g;
   generate
     for (g = 0; g < NUM_WARPS; g = g + 1) begin

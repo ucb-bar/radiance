@@ -63,6 +63,51 @@ void cyclotron_fetch(
     );
 }
 
+void cyclotron_gmem_rs(
+    const uint8_t* req_valid,
+    uint8_t* req_ready,
+    const uint8_t* req_bits_store,
+    const uint32_t* req_bits_address,
+    const uint8_t* req_bits_size,
+    const uint32_t* req_bits_tag,
+    const uint32_t* req_bits_data,
+    const uint8_t* req_bits_mask,
+    const uint8_t* resp_ready,
+    uint8_t* resp_valid,
+    uint32_t* resp_bits_tag,
+    uint32_t* resp_bits_data
+);
+
+void cyclotron_gmem(
+    const uint8_t* req_valid,
+    uint8_t* req_ready,
+    const uint8_t* req_bits_store,
+    const uint32_t* req_bits_address,
+    const uint8_t* req_bits_size,
+    const uint32_t* req_bits_tag,
+    const uint32_t* req_bits_data,
+    const uint8_t* req_bits_mask,
+    const uint8_t* resp_ready,
+    uint8_t* resp_valid,
+    uint32_t* resp_bits_tag,
+    uint32_t* resp_bits_data
+) {
+    cyclotron_gmem_rs(
+        req_valid,
+        req_ready,
+        req_bits_store,
+        req_bits_address,
+        req_bits_size,
+        req_bits_tag,
+        req_bits_data,
+        req_bits_mask,
+        resp_ready,
+        resp_valid,
+        resp_bits_tag,
+        resp_bits_data
+    );
+}
+
 void cyclotron_frontend_rs(
     const uint8_t* ibuf_ready_vec,
     uint8_t*       ibuf_valid_vec,

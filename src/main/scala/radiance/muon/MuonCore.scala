@@ -132,7 +132,7 @@ trait HasCoreParameters {
   val lsuDerived = new LoadStoreUnitDerivedParams(p, muonParams)
   val addressBits = muonParams.archLen
   val dmemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
-  val dmemDataBits = muonParams.archLen // FIXME: needs to be cache line
+  val dmemDataBits = muonParams.archLen
   val smemTagBits  = lsuDerived.sourceIdBits + lsuDerived.laneIdBits
   val smemDataBits = muonParams.archLen
   val imemTagBits  = log2Ceil(muonParams.numWarps * muonParams.ibufDepth)

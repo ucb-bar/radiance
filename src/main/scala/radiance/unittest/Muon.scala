@@ -212,13 +212,15 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
 
     val core = Module(new MuonCore()(p))
     val imem = Module(new CyclotronInstMem)
+    val dmem = Module(new CyclotronDataMem)
     core.io.imem <> imem.io.imem
+    core.io.dmem <> dmem.io.dmem
 
-    MuonMemTL.multiConnectTL(
-      core.io.dmem.req,
-      core.io.dmem.resp,
-      lsuNodes
-    )
+    // MuonMemTL.multiConnectTL(
+    //   core.io.dmem.req,
+    //   core.io.dmem.resp,
+    //   lsuNodes
+    // )
 
     // tie off shared mem
     core.io.smem.req.foreach(_.ready := false.B)
@@ -916,6 +918,19 @@ class SynthesizableStimulus(implicit p: Parameters) extends CoreModule {
   done := allDone && responseChecker.io.done
 }
 
+object Cyclotron {
+  def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
+    assert(flattened.getWidth % wordBits == 0)
+    val numWords = flattened.getWidth / wordBits
+    VecInit.tabulate(numWords)(i => flattened((i + 1) * wordBits - 1, i * wordBits))
+  }
+
+  def unflatten(destWord: UInt, flattened: UInt, index: Int): Unit = {
+    assert(destWord.widthKnown)
+    destWord := splitUInt(flattened, destWord.getWidth)(index)
+  }
+}
+
 /** Wraps Verilog shim to convert messy flattened 1-D arrays into
  *  Chisel-friendly IOs. */
 class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
@@ -929,16 +944,7 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   cfbox.io.clock := clock
   cfbox.io.reset := reset.asBool
 
-  // helpers for connecting flattened Verilog IO to Chisel
-  def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
-    assert(flattened.getWidth % wordBits == 0)
-    val numWords = flattened.getWidth / wordBits
-    VecInit.tabulate(numWords)(i => flattened((i + 1) * wordBits - 1, i * wordBits))
-  }
-  def connectToSplit(destWord: UInt, flattened: UInt, index: Int) = {
-    assert(destWord.widthKnown)
-    destWord := splitUInt(flattened, destWord.getWidth)(index)
-  }
+  import Cyclotron._
 
   // IMem connection
   cfbox.io.imem.req <> io.imem.req
@@ -951,21 +957,21 @@ class CyclotronFrontend(implicit p: Parameters) extends CoreModule {
   cfbox.io.ibuf.ready := VecInit(io.ibuf.map(_.ready)).asUInt
   io.ibuf.zipWithIndex.foreach { case (ib, i) =>
     ib.valid := cfbox.io.ibuf.valid(i)
-    connectToSplit(ib.bits.pc,     cfbox.io.ibuf.pc, i)
-    connectToSplit(ib.bits.wid,    cfbox.io.ibuf.wid, i)
-    connectToSplit(ib.bits.op,     cfbox.io.ibuf.op, i)
-    connectToSplit(ib.bits.rd,     cfbox.io.ibuf.rd, i)
-    connectToSplit(ib.bits.rs1,    cfbox.io.ibuf.rs1, i)
-    connectToSplit(ib.bits.rs2,    cfbox.io.ibuf.rs2, i)
-    connectToSplit(ib.bits.rs3,    cfbox.io.ibuf.rs3, i)
-    connectToSplit(ib.bits.imm32,  cfbox.io.ibuf.imm32, i)
-    connectToSplit(ib.bits.imm24,  cfbox.io.ibuf.imm24, i)
-    connectToSplit(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
-    connectToSplit(ib.bits.f3,     cfbox.io.ibuf.f3, i)
-    connectToSplit(ib.bits.f7,     cfbox.io.ibuf.f7, i)
-    connectToSplit(ib.bits.pred,   cfbox.io.ibuf.pred, i)
-    connectToSplit(ib.bits.tmask,  cfbox.io.ibuf.tmask, i)
-    connectToSplit(ib.bits.raw,    cfbox.io.ibuf.raw, i)
+    unflatten(ib.bits.pc, cfbox.io.ibuf.pc, i)
+    unflatten(ib.bits.wid, cfbox.io.ibuf.wid, i)
+    unflatten(ib.bits.op, cfbox.io.ibuf.op, i)
+    unflatten(ib.bits.rd, cfbox.io.ibuf.rd, i)
+    unflatten(ib.bits.rs1, cfbox.io.ibuf.rs1, i)
+    unflatten(ib.bits.rs2, cfbox.io.ibuf.rs2, i)
+    unflatten(ib.bits.rs3, cfbox.io.ibuf.rs3, i)
+    unflatten(ib.bits.imm32, cfbox.io.ibuf.imm32, i)
+    unflatten(ib.bits.imm24, cfbox.io.ibuf.imm24, i)
+    unflatten(ib.bits.csrImm, cfbox.io.ibuf.csrImm, i)
+    unflatten(ib.bits.f3, cfbox.io.ibuf.f3, i)
+    unflatten(ib.bits.f7, cfbox.io.ibuf.f7, i)
+    unflatten(ib.bits.pred, cfbox.io.ibuf.pred, i)
+    unflatten(ib.bits.tmask, cfbox.io.ibuf.tmask, i)
+    unflatten(ib.bits.raw, cfbox.io.ibuf.raw, i)
   }
 
   io.finished := cfbox.io.finished
@@ -1075,6 +1081,68 @@ class CyclotronInstMem(implicit p: Parameters) extends CoreModule {
     })
 
     addResource("/vsrc/CyclotronInstMem.v")
+    addResource("/vsrc/Cyclotron.vh")
+    addResource("/csrc/Cyclotron.cc")
+  }
+}
+
+class CyclotronDataMem(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val dmem = Flipped(new DataMemIO)
+  })
+
+  val bbox = Module(new CyclotronDataMemBlackBox(this)(p))
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  import Cyclotron._
+
+  // request
+  bbox.io.req_valid := VecInit(io.dmem.req.map(_.valid)).asUInt
+  bbox.io.req_bits_store := VecInit(io.dmem.req.map(_.bits.store)).asUInt
+  bbox.io.req_bits_tag := VecInit(io.dmem.req.map(_.bits.tag)).asUInt
+  bbox.io.req_bits_address := VecInit(io.dmem.req.map(_.bits.address)).asUInt
+  bbox.io.req_bits_size := VecInit(io.dmem.req.map(_.bits.size)).asUInt
+  bbox.io.req_bits_data := VecInit(io.dmem.req.map(_.bits.data)).asUInt
+  bbox.io.req_bits_mask := VecInit(io.dmem.req.map(_.bits.mask)).asUInt
+  bbox.io.resp_ready := VecInit(io.dmem.resp.map(_.ready)).asUInt
+  io.dmem.req.zipWithIndex.foreach { case (req, i) =>
+    req.ready := bbox.io.req_ready(i)
+  }
+
+  // response
+  io.dmem.resp.zipWithIndex.foreach { case (resp, i) =>
+    resp.valid := bbox.io.resp_valid(i)
+    unflatten(resp.bits.tag, bbox.io.resp_bits_tag, i)
+    unflatten(resp.bits.data, bbox.io.resp_bits_data, i)
+    resp.bits.metadata := DontCare
+  }
+
+class CyclotronDataMemBlackBox(outer: CyclotronDataMem)(implicit val p: Parameters)
+  extends BlackBox(Map(
+        "ARCH_LEN"       -> outer.archLen,
+        "DMEM_DATA_BITS" -> outer.archLen,
+        "DMEM_TAG_BITS"  -> outer.dmemTagBits,
+        "NUM_LANES"      -> outer.numLanes,
+  )) with HasBlackBoxResource with HasCoreParameters {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
+      val req_valid = Input(UInt(numLanes.W))
+      val req_ready = Output(UInt(numLanes.W))
+      val req_bits_store = Input(UInt(numLanes.W))
+      val req_bits_tag = Input(UInt((numLanes * dmemTagBits).W))
+      val req_bits_address = Input(UInt((numLanes * addressBits).W))
+      val req_bits_size = Input(UInt((numLanes * (new DataMemIO).req.head.bits.size.getWidth).W))
+      val req_bits_data = Input(UInt((numLanes * dmemDataBits).W))
+      val req_bits_mask = Input(UInt((numLanes * (dmemDataBits / 8)).W))
+      val resp_ready = Input(UInt(numLanes.W))
+      val resp_valid = Output(UInt(numLanes.W))
+      val resp_bits_tag = Output(UInt((numLanes * dmemTagBits).W))
+      val resp_bits_data = Output(UInt((numLanes * dmemDataBits).W))
+    })
+
+    addResource("/vsrc/CyclotronDataMem.v")
     addResource("/vsrc/Cyclotron.vh")
     addResource("/csrc/Cyclotron.cc")
   }
