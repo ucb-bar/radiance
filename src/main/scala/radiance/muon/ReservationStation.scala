@@ -108,10 +108,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
     collPtrTable(emptyRow) := 0.U
 
-    if (muonParams.debug) {
-      printf(cf"RS: admitted: PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
-      printTable
-    }
+    debugf(cf"RS: admitted: warp=${io.admit.bits.ibufEntry.uop.wid}, " +
+           cf"PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
+    printTable
   }
 
   // -----------------
@@ -190,7 +189,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                    .map { case (a,b) => a || b }
     collFiredTable(collRow) := newFired
-    printf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
+    debugf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:
@@ -235,7 +234,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          printf(cf"RS: collector response handled at row:${i}, " +
+          debugf(cf"RS: collector response handled at row:${i}, " +
                  cf"pc:${instTable(i).uop.pc}%x, collEntry:${io.collector.readResp.bits.collEntry}, " +
                  cf"rs:${rs}, rsi:${rsi}\n")
         }
@@ -373,12 +372,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   io.issue.bits := issueStaged.io.deq.bits.entry
   issueStaged.io.deq.ready := io.issue.ready
 
-  if (muonParams.debug) {
-    when (io.issue.fire) {
-      printf(cf"RS: issued: row:${issueStaged.io.deq.bits.entryId}, pc:${io.issue.bits.uop.pc}%x, " +
-             cf"collEntry:${issueStaged.io.deq.bits.collEntry}; before:\n")
-      printTable
-    }
+  when (io.issue.fire) {
+    debugf(cf"RS: issued: row:${issueStaged.io.deq.bits.entryId}, " +
+           cf"warp:${io.issue.bits.uop.wid}, pc:${io.issue.bits.uop.pc}%x, " +
+           cf"collEntry:${issueStaged.io.deq.bits.collEntry}; before:\n")
+    printTable
   }
 
   // drive collector's operand serve port upon issue, for use in EX
@@ -432,10 +430,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
     when (updated) {
       busyTable(i) := newBusys
-      if (muonParams.debug) {
-        printf(cf"RS: writeback: PC=${uop.pc}%x at row ${i}, rd=${io.writeback.bits.rd}:\n")
-        printTable
-      }
+      debugf(cf"RS: writeback: warp=${uop.wid}, PC=${uop.pc}%x at row ${i}, rd=${io.writeback.bits.rd}:\n")
+      printTable
     }
   }
 
@@ -458,12 +454,12 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   // debug print
   def printTable = {
-    printf("=" * 40 + " ReservationStation " + "=" * 40 + "\n")
+    debugf("=" * 40 + " ReservationStation " + "=" * 40 + "\n")
     for (i <- 0 until numEntries) {
       val valid = validTable(i)
       when (valid) {
         val uop = instTable(i).uop
-        printf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
+        debugf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
                cf"regs: [rd:${uop.inst.rd} rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
@@ -474,7 +470,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                cf"\n")
       }
     }
-    printf("=" * 100 + "\n")
+    debugf("=" * 100 + "\n")
   }
 }
 

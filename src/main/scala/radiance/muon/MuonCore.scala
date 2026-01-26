@@ -257,16 +257,16 @@ trait HasCoreParameters {
     barrierBits = m.barrierBits,
     wantBits = m.warpIdBits + m.coreIdBits,
   ))
-}
 
-abstract class CoreModule(implicit val p: Parameters) extends Module
-  with HasCoreParameters {
   def debugf(pable: Printable) = {
     if (muonParams.debug) {
       printf(pable)
     }
   }
 }
+
+abstract class CoreModule(implicit val p: Parameters) extends Module
+  with HasCoreParameters
 
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasCoreParameters

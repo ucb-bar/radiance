@@ -125,20 +125,20 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   when (io.readReq.fire) {
     when (freeNow) {
       // concurrent alloc/free; reuse id being freed
-      printf(cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
+      debugf(cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
       allocTable.print
 
       nextAllocId := rdCollEntry
     }.otherwise {
       val (succ, allocId) = allocTable.alloc
-      printf(cf"collector: allocating id=${allocId}. before: ")
+      debugf(cf"collector: allocating id=${allocId}. before: ")
       allocTable.print
 
       assert(succ, "unexpected collector alloc fail")
       nextAllocId := allocId
     }
   }.elsewhen (freeNow) {
-    printf(cf"collector: freeing id=${rdCollEntry}. before: ")
+    debugf(cf"collector: freeing id=${rdCollEntry}. before: ")
     allocTable.print
 
     allocTable.free(rdCollEntry)
@@ -263,11 +263,11 @@ extends HasCoreParameters {
   }
 
   def print = {
-    printf("table content: ")
+    debugf("table content: ")
     (0 until numEntries).foreach { i =>
-      printf(cf"${table(i).valid}")
+      debugf(cf"${table(i).valid}")
     }
-    printf("\n")
+    debugf("\n")
   }
 }
 
