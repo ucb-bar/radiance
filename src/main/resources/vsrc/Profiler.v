@@ -1,6 +1,8 @@
 module ProfilerBlackBox #(
   parameter NUM_WARPS = 8,
-  parameter COUNTER_WIDTH = 64
+  parameter COUNTER_WIDTH = 64,
+  parameter CLUSTER_ID = 0,
+  parameter CORE_ID = 0
 ) (
   input clock,
   input reset,
@@ -37,6 +39,8 @@ module ProfilerBlackBox #(
   endgenerate
 
   import "DPI-C" function void profile_perf_counters(
+    input int     cluster_id,
+    input int     core_id,
     input longint inst_retired,
     input longint cycle,
     input longint cycles_decoded,
@@ -56,6 +60,8 @@ module ProfilerBlackBox #(
     if (reset) begin
     end else begin
       profile_perf_counters(
+        CLUSTER_ID,
+        CORE_ID,
         instRetired,
         cycles,
         cyclesDecoded,

@@ -1205,7 +1205,8 @@ class CyclotronDiffTest(tick: Boolean = true)
   }
 }
 
-class Profiler(implicit p: Parameters) extends CoreModule {
+class Profiler(clusterId: Int = 0, coreId: Int = 0)(implicit p: Parameters)
+extends CoreModule {
   val io = IO(new Bundle {
     val finished = Input(Bool())
     val perf = Flipped(new PerfIO)
@@ -1231,6 +1232,8 @@ class Profiler(implicit p: Parameters) extends CoreModule {
   extends BlackBox(Map(
         "COUNTER_WIDTH" -> Perf.counterWidth,
         "NUM_WARPS" -> muonParams.numWarps,
+        "CLUSTER_ID" -> clusterId,
+        "CORE_ID" -> coreId,
   )) with HasBlackBoxResource with HasCoreParameters {
     val io = IO(new Bundle {
       val clock = Input(Clock())
