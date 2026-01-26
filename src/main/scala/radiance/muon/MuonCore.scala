@@ -122,7 +122,7 @@ class MemResponse[T <: Bundle] (
 trait HasCoreParameters {
   implicit val p: Parameters
   val muonParams: MuonCoreParams = p(MuonKey)
-  implicit val m = muonParams
+  implicit val m: MuonCoreParams = muonParams
 
   val numLanes = muonParams.numLanes
   val numWarps = muonParams.numWarps

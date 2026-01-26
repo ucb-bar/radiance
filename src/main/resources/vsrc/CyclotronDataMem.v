@@ -39,6 +39,11 @@ module CyclotronDataMemBlackBox #(
     output int     resp_bits_data[NUM_LANES]
   );
 
+  initial begin
+    if (DMEM_TAG_BITS > 32) $fatal(1, "CyclotronDataMem: DMEM_TAG_BITS > 32 not supported by DPI int");
+    if (DMEM_DATA_BITS > 32) $fatal(1, "CyclotronDataMem: DMEM_DATA_BITS > 32 not supported by DPI int");
+  end
+
   initial cyclotron_init_task();
 
   // "in": C->verilog, "out": verilog->C
