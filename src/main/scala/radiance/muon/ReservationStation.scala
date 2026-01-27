@@ -371,6 +371,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   when (io.issue.fire) {
     debugf(cf"RS: issued: row:${issueStaged.io.deq.bits.entryId}, " +
            cf"warp:${io.issue.bits.uop.wid}, pc:${io.issue.bits.uop.pc}%x, " +
+           cf"tmask:${io.issue.bits.uop.tmask}%b, " +
            cf"collEntry:${issueStaged.io.deq.bits.collEntry}; before:\n")
     printTable
   }
@@ -426,7 +427,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
     when (updated) {
       busyTable(i) := newBusys
-      debugf(cf"RS: writeback: warp=${uop.wid}, PC=${uop.pc}%x at row ${i}, rd=${io.writeback.bits.rd}:\n")
+      debugf(cf"RS: writeback: warp=${uop.wid}, rd=${io.writeback.bits.rd} " +
+             cf"waking up PC=${uop.pc}%x at row ${i}:\n")
       printTable
     }
   }
