@@ -113,6 +113,7 @@ I1-type instructions will have 1 source register and 1 destination register. Thi
 **Special case for CSR instructions.** The CSR source/dest used to be encoded in the imm12 field; it's now 32-bits (nice and wide, as it should be). The CSR immediate used to be encoded in the 5-bit rs1 address; it will still occupy rs1 in Muon but will expand to use 8 bits.
 **Address Space Qualifier for Loads** We extend RISC-V `lb/lh/lw` with address space qualifiers `.global`, `.shared`, encoded using opext field as 00 and 01. 
 
+
 ### Neutrino Instructions
 ```
 63  60 59               54 53  52 51  44 43  36 35  28 27  20 19    18   17   16 9 8     7 6           0 
@@ -160,6 +161,57 @@ Note: `elem_count` stores the number of participants plus one, so the maximum re
 * Payload: `nu.payload /*task id=*/t1, /*payload0=*/a0, /*payload1=*/a1, /*payload2=*/a2`
 * Invoke: `nu.invoke.mr.pt.async /*rd=*/t1, /*task id=*/MATMUL, /*dep0=*/t0, /*dep1*/zero, /*dep2=*/zero, /*num_elems=*/1`
 * Complete: `nu.complete.pt /*job id=*/t1, /*num_elems=*/1`
+
+
+### Vortex Instructions
+
+We support a subset of Vortex extensions to implement SIMT divergence behavior.
+
+#### `vx_split`
+
+```
+vx_split  rd, rs1, rs2
+```
+
+* `rs1`: Per-lane condition value.  `vx_split` will set the current tmask as
+high for lanes that has non-zero `rs1` values, and push the tmask set high for
+lanes with zero `rs1` values to the IPDOM stack.  Original tmask is preserved,
+i.e. lanes not active before entering `vx_split` will not be made active in
+either tmask.
+* If `rs2` is set, use the `vx_split_n` variant, i.e. set current tmask for
+lanes with non-zero `rs1` and push tmask for lanes with zero `rs1`.
+* `rd` is unused.  This **deviates from Vortex** where `rd` is set to 1 if the
+condition is divergent, e.g. the value of `rs1` disagrees between
+currently-enabled lanes.
+
+#### `vx_join`
+
+TODO.
+
+#### `vx_tmc`
+
+```
+vx_tmc  rs1
+```
+
+* Set tmask to the value of `rs1` of the "leader" lane, i.e. the left-most
+active lane.
+
+#### `vx_pred`
+
+```
+vx_pred  rd, rs1, rs2
+```
+
+* `rs1`: Per-lane condition value.  `vx_pred` will set the current tmask
+as high for lanes that has non-zero `rs1` values.  Original tmask is
+preserved, i.e. lanes not active before entering `vx_pred` will not be made
+active in the tmask.
+* If the *address* of `rd` is non-zero, use the `vx_pred_n` variant, i.e. tmask
+is set for lanes with zero `rs1` values.
+* If no lanes have a non-zero `rs1` value (zero for `vx_pred_n`), set tmask
+to the value of `rs2` of the "leader" lane, i.e. the left-most active lane.
+
 
 ## New Registers
 
