@@ -180,13 +180,42 @@ i.e. lanes not active before entering `vx_split` will not be made active in
 either tmask.
 * If `rs2` is set, use the `vx_split_n` variant, i.e. set current tmask for
 lanes with non-zero `rs1` and push tmask for lanes with zero `rs1`.
-* `rd` is unused.  This **deviates from Vortex** where `rd` is set to 1 if the
+* `rd` is unused.  This *deviates from Vortex* where `rd` is set to 1 if the
 condition is divergent, e.g. the value of `rs1` disagrees between
 currently-enabled lanes.
 
+Note that `vx_split` pushes two tmasks to the IPDOM stack, in this order:
+(1) the original tmask that restores the state before entering the instruction,
+and (2) the diverged tmask that will be executed later.  When pushing (1), the
+PC of the subsequent instruction after `vx_split` will also be pushed as part
+of the stack entry. When pushing (2), no valid PC will be pushed to the stack.
+
+These entries will be consumed by two later executions of `vx_join`, where the
+first one will pop the diverged tmask and the PC to traverse the "else-path".
+The second one will pop the restored tmask, and the PC is *not* altered,
+causing the program to exit the branch.
+
+Note that for non-divergent branches, we skip pushing the (2) entry to the
+IPDOM stack.  Since the (1) entry does not alter PC and therefore prevents
+re-entry of `vx_join`, storing branch divergence to `rd` for use in `vx_join`
+becomes unnecessary.
+
 #### `vx_join`
 
-TODO.
+```
+vx_join  rs1
+```
+
+Pops `(tmask, optional PC)` entry from the IPDOM stack and modifies the
+architectural state accordingly.  Note it may not alter the PC depending on
+whether the corresponding `vx_split` pushed a valid PC or not.
+
+`rs1` is unused, which *deviates from Vortex* where a zero `rs1` value will
+indicate that the corresponding `vx_split` was non-divergent.
+Instead, we skip pushing the non-divergent tmask/PC to the IPDOM stack,
+eliminating the need for conditional stack-popping in `vx_join`.  See
+`vx_split` for details.
+
 
 #### `vx_tmc`
 
@@ -221,4 +250,3 @@ There will be 32 additional `t` registers, for a total of 39
 There will be 48 additional `s` registers, for a total of 60
 
 For now we double the number of floating point registers to 64, with each type having the same share of the new 32 (i.e. 8 `a` regs, 12 `s` regs, 12 `t` regs).
-
