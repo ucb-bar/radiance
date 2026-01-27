@@ -180,7 +180,7 @@ class FP16Pipe(implicit p: Parameters)
   recomposer.get.io.in.bits.data(0) := signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
 }
 
-class FPPipe(implicit p: Parameters)
+class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   extends ExPipe(writebackSched = false, writebackReg = true, requiresRs3 = true)
     with HasFPPipeParams {
 
@@ -192,7 +192,7 @@ class FPPipe(implicit p: Parameters)
 
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)
-  val CVFPU = Module(new CVFPU(numFp16Lanes = numFP32Lanes * 2, tagWidth = Isa.regBits))
+  val CVFPU = Module(new CVFPU(numFp16Lanes = numFP32Lanes * 2, tagWidth = Isa.regBits, isDivSqrt))
 
   CVFPU.io.clock := clock
   CVFPU.io.reset := reset
