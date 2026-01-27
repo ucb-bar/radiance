@@ -19,6 +19,7 @@ import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
+import radiance.memory.BoolArrayUtils.BoolSeqUtils
 import radiance.memory.SourceGenerator
 import radiance.subsystem.{GPUMemParams, GPUMemory, GemminiTileLike, PhysicalCoreParams}
 
@@ -252,27 +253,33 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     val wen = WireInit(node.a.fire)
     val writeData = WireInit(node.a.bits.data)
 
-    val writeFullAddr = node.a.bits.address(conf.addrBits - 1, 0)
-    val lineAddr = WireInit(writeFullAddr(conf.addrBits - 1, conf.lineOffsetBits))
+    val typeSelect = node.a.bits.address(conf.addrBits - 1)
+    val writeFullAddr = node.a.bits.address(conf.addrBits - 2, 0)
+    val lineAddr = WireInit(writeFullAddr(conf.addrBits - 2, conf.lineOffsetBits))
 
     // val sramRowAddr = WireInit(lineAddr(conf.addrBits - conf.lineOffsetBits - 1, conf.bankSelectBits))
     // val bankSelect = WireInit(lineAddr(conf.bankSelectBits - 1, 0))
 
-    val scalingFacWriteReq = Wire(Decoupled(new ScalingFactorWriteReq(
-      conf.addrBits - conf.lineOffsetBits, conf.sramLineSizeInBytes * 8)))
-    scalingFacWriteReq.valid := wen
-    scalingFacWriteReq.bits.addr := lineAddr
-    scalingFacWriteReq.bits.data := writeData
+    // weight and activation respectively; weight addresses have highest bit = 0
+    val scalingFacWriteReqs = Seq.fill(2)(Wire(Decoupled(new ScalingFactorWriteReq(
+      conf.addrBits - conf.lineOffsetBits, conf.sramLineSizeInBytes * 8))))
+    scalingFacWriteReqs.head.valid := wen && !typeSelect
+    scalingFacWriteReqs.last.valid := wen && typeSelect
+    scalingFacWriteReqs.foreach(_.bits.addr := lineAddr)
+    scalingFacWriteReqs.foreach(_.bits.data := writeData)
 
-    node.a.ready := node.d.ready && scalingFacWriteReq.ready
-    node.d.valid := node.a.valid && scalingFacWriteReq.ready
+    val bothReady = scalingFacWriteReqs.map(_.ready).andR
+
+    node.a.ready := node.d.ready && bothReady
+    node.d.valid := node.a.valid && bothReady
     node.d.bits := edge.AccessAck(node.a.bits)
 
     require(node.params.dataBits == conf.sramLineSizeInBytes * 8)
     assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
     assert(!node.a.valid || (node.a.bits.size === 3.U))
 
-    outer.gemmini.module.mx_io.get.scale_mem <> scalingFacWriteReq
+    outer.gemmini.module.mx_io.get.scale_mem_write_w <> scalingFacWriteReqs.head
+    outer.gemmini.module.mx_io.get.scale_mem_write_act <> scalingFacWriteReqs.last
   }
 
   // requantizer

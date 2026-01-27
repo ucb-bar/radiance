@@ -143,14 +143,14 @@ class RadianceSharedMemComponents(
 
   // (banks, subbanks, gemminis)
   val spadReadNodes = Seq.fill(smemBanks) {
-    distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width / 8)), "gemmini_r")
+    distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width_projected / 8)), "gemmini_r")
   }
   // TODO: these nodes probably dont do anything, eliminate?
   val spadWriteNodes = Seq.fill(smemBanks) {
-    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width / 8)), "gemmini_w")
+    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)), "gemmini_w")
   }
   val spadSpWriteNodesSingleBank = distAndDuplicate(
-    gemminis.map(g => (g.spad.spad_writer.get.node, g.config.sp_width / 8)), "gemmini_ws")
+    gemminis.map(g => (g.spad.spad_writer.get.node, g.config.sp_width_projected / 8)), "gemmini_ws")
   val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
 
   val preSplitterNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))
