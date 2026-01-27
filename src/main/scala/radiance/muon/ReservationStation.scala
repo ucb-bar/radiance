@@ -144,15 +144,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // collect blocks collection of an older instruction, but has RAW hazard to
   // that older instruction.
   val allowPartialCollect = false
-  // if allowPartialCollect == true, prioritize rows that has no RAW-busy ops
-  // (no partial-collects), and only needs collection as the last step before
+  // if allowPartialCollect == true, prioritize rows that have no RAW-busy ops
+  // (no partial-collects), and only need collection as the last step before
   // issue.  Otherwise, rows with partial ops can take up valuable space in the
   // collector banks.
-  //
-  // NOTE: Arguably all of this should be in the collector module.  But for
-  // that, we need some kind of bookkeeping in the collector for the
-  // partial-collect uops, which is what the collector banks are meant for,
-  // which are expensive.
   val allReadyExists = collNeedAllReadyTable.reduce(_ || _)
   val firstAllReadyRow = PriorityEncoder(collNeedAllReadyTable)
   val firstNeedRow = PriorityEncoder(collNeedTable)
@@ -161,7 +156,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   dontTouch(collRow)
 
   val collOpNeed = VecInit(needCollects.map(_._2))(collRow)
-  val collValid = (if (allowPartialCollect) {
+  val collValid = (if (!allowPartialCollect) {
     allReadyExists
   } else {
     collOpNeed.reduce(_ || _)
@@ -189,7 +184,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                    .map { case (a,b) => a || b }
     collFiredTable(collRow) := newFired
-    debugf(cf"RS: collector request fired at row:${collRow}, pc:${collUop.pc}%x\n")
+    debugf(cf"RS: collector request fired at row:${collRow}, warp:${collUop.wid}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:
@@ -235,7 +230,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
           scbPort.decr := (rs =/= 0.U)
 
           debugf(cf"RS: collector response handled at row:${i}, " +
-                 cf"pc:${instTable(i).uop.pc}%x, collEntry:${io.collector.readResp.bits.collEntry}, " +
+                 cf"warp:${instTable(i).uop.wid}, pc:${instTable(i).uop.pc}%x, " +
+                 cf"collEntry:${io.collector.readResp.bits.collEntry}, " +
                  cf"rs:${rs}, rsi:${rsi}\n")
         }
       }
