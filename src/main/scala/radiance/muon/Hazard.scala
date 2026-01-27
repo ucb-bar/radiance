@@ -67,10 +67,10 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     rsAdmit.valid := uopValid && !hasWAW && !hasWAR
     if (muonParams.debug) {
       when (uopValid && hasWAR) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x, " +
+        debugf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x, " +
                cf"rd=${ibufPort.bits.uop.inst.rd}) is gated RS admission due to WAR\n")
       }.elsewhen (uopValid && hasWAW) {
-        printf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x), " +
+        debugf(cf"hazard: IBUF head (wid=${ibufPort.bits.uop.wid}, PC=${ibufPort.bits.uop.pc}%x), " +
                cf"rd=${ibufPort.bits.uop.inst.rd}) is gated RS admission due to WAW\n")
       }
     }
@@ -152,7 +152,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
          "uop entered RS without succeeding scoreboard update")
   if (muonParams.debug) {
     when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb.updateRS.success) {
-      printf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +
+      debugf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +
              cf"RS admission blocked due to scoreboard overflow\n")
     }
   }

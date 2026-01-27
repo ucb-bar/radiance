@@ -72,6 +72,7 @@ case object IsIType          extends DecodeField(1, true)
 case object IsSType          extends DecodeField(1, true)
 case object IsBType          extends DecodeField(1, true)
 case object IsUJType         extends DecodeField(1, true)
+case object IsFPDivSqrt      extends DecodeField(1, true)
 case object UseALUPipe       extends DecodeField(1, true)
 case object UseMulDivPipe    extends DecodeField(1, true)
 case object UseFPPipe        extends DecodeField(1, true)
@@ -232,7 +233,7 @@ object Decoder {
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
       IsCSRRW, IsCSRRS, IsCSRRC, IsCSRRWI, IsCSRRSI, IsCSRRCI,
       IsFenceI, IsFenceD,
-      IsRType, IsIType, IsSType, IsBType, IsUJType,
+      IsRType, IsIType, IsSType, IsBType, IsUJType, IsFPDivSqrt,
       UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
@@ -291,6 +292,8 @@ object Decoder {
           MuOpcode.AUIPC,
           MuOpcode.JAL,
         ).contains(op))
+      case IsFPDivSqrt =>
+        Some(op == MuOpcode.OP_FP && (f7 == "00011??" || f7 == "01011??"))
       case UseALUPipe =>
         Some(Seq(
           MuOpcode.OP,

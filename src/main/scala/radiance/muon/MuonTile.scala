@@ -370,7 +370,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   val isSim = p(RadianceSimArgs)
   if (isSim) {
-    val cperf = Module(new Profiler)
+    val cperf = Module(new Profiler(
+      clusterId = outer.muonParams.clusterId,
+      coreId = outer.muonParams.coreId
+    ))
     cperf.io.perf <> muon.io.perf
     cperf.io.finished := muon.io.finished
   }

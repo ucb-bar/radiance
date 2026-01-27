@@ -26,14 +26,18 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   })
   
   val aluPipe = Module(new ALUPipe())
-  val fpPipe = Module(new FPPipe())
+  val fpAddMulPipe = Module(new FPPipe(isDivSqrt = false))
+  val fpDivSqrtPipe = Module(new FPPipe(isDivSqrt = true))
   val mulDivPipe = Module(new MulDivPipe())
   val lsuPipe = Module(new LSUPipe())
   val sfuPipe = Module(new SFUPipe())
 
   val inst = io.req.bits.uop.inst
 
-  sfuPipe.csrIO.fcsr <> fpPipe.fCSRIO
+  sfuPipe.csrIO.fcsr <> fpAddMulPipe.fCSRIO
+  // TODO: connect
+  fpDivSqrtPipe.fCSRIO.regWrite.valid := false.B
+  fpDivSqrtPipe.fCSRIO.regWrite.bits := DontCare
   sfuPipe.idIO := io.id
   sfuPipe.barIO <> io.barrier
   sfuPipe.flushIO <> io.flush
@@ -45,9 +49,10 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   lsuPipe.reserveIO <> io.lsuReserve
   lsuPipe.tokenIO := io.token
 
-  val pipes = Seq(aluPipe, fpPipe, mulDivPipe, lsuPipe, sfuPipe)
+  val pipes = Seq(aluPipe, fpAddMulPipe, fpDivSqrtPipe, mulDivPipe, lsuPipe, sfuPipe)
   val uses = Seq(inst.b(UseALUPipe),
-                 inst.b(UseFPPipe),
+                 inst.b(UseFPPipe) && !inst.b(IsFPDivSqrt),
+                 inst.b(UseFPPipe) && inst.b(IsFPDivSqrt),
                  inst.b(UseMulDivPipe),
                  inst.b(UseLSUPipe),
                  inst.b(UseSFUPipe))

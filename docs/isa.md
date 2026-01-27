@@ -113,6 +113,7 @@ I1-type instructions will have 1 source register and 1 destination register. Thi
 **Special case for CSR instructions.** The CSR source/dest used to be encoded in the imm12 field; it's now 32-bits (nice and wide, as it should be). The CSR immediate used to be encoded in the 5-bit rs1 address; it will still occupy rs1 in Muon but will expand to use 8 bits.
 **Address Space Qualifier for Loads** We extend RISC-V `lb/lh/lw` with address space qualifiers `.global`, `.shared`, encoded using opext field as 00 and 01. 
 
+
 ### Neutrino Instructions
 ```
 63  60 59               54 53  52 51  44 43  36 35  28 27  20 19    18   17   16 9 8     7 6           0 
@@ -161,6 +162,88 @@ Note: `elem_count` stores the number of participants plus one, so the maximum re
 * Invoke: `nu.invoke.mr.pt.async /*rd=*/t1, /*task id=*/MATMUL, /*dep0=*/t0, /*dep1*/zero, /*dep2=*/zero, /*num_elems=*/1`
 * Complete: `nu.complete.pt /*job id=*/t1, /*num_elems=*/1`
 
+
+### Vortex Instructions
+
+We support a subset of Vortex extensions to implement SIMT divergence behavior.
+
+#### `vx_split`
+
+```
+vx_split  rd, rs1, rs2
+```
+
+* `rs1`: Per-lane condition value.  `vx_split` will set the current tmask as
+high for lanes that has non-zero `rs1` values, and push the tmask set high for
+lanes with zero `rs1` values to the IPDOM stack.  Original tmask is preserved,
+i.e. lanes not active before entering `vx_split` will not be made active in
+either tmask.
+* If `rs2` is set, use the `vx_split_n` variant, i.e. set current tmask for
+lanes with non-zero `rs1` and push tmask for lanes with zero `rs1`.
+* `rd` is unused.  This *deviates from Vortex* where `rd` is set to 1 if the
+condition is divergent, e.g. the value of `rs1` disagrees between
+currently-enabled lanes.
+
+Note that `vx_split` pushes two tmasks to the IPDOM stack, in this order:
+(1) the original tmask that restores the state before entering the instruction,
+and (2) the diverged tmask that will be executed later.  When pushing (2), the
+PC of the subsequent instruction after `vx_split` will also be pushed as part
+of the stack entry. When pushing (1), no valid PC will be pushed to the stack.
+
+These entries will be consumed by two later executions of `vx_join`, where the
+first one pops the diverged tmask + PC and initiates the pipeline to traverse
+the "else-path". The second one will pop the restored tmask, but since PC entry
+is invalid, execution PC is *not* altered, allowing the program to proceed to
+the branch exit.
+
+Note that for non-divergent branches, we skip pushing the (2) entry to the
+IPDOM stack.  Since the (1) entry does not alter PC and therefore prevents
+the second execution of `vx_join`, communicating the result of branch
+divergence from `vx_split` to `vx_join` via `rd` (so that `vx_join` can
+conditionally avoid popping from stack) becomes unnecessary.
+
+#### `vx_join`
+
+```
+vx_join  rs1
+```
+
+Pops `(tmask, optional PC)` entry from the IPDOM stack and modifies the
+architectural state accordingly.  Note it may not alter the PC depending on
+whether the corresponding `vx_split` pushed a valid PC or not.
+
+`rs1` is unused, which *deviates from Vortex* where a zero `rs1` value will
+indicate that the corresponding `vx_split` was non-divergent.
+Instead, we skip pushing the non-divergent tmask/PC to the IPDOM stack,
+eliminating the need for conditional stack-popping in `vx_join`.  See
+`vx_split` for details.
+
+
+#### `vx_tmc`
+
+```
+vx_tmc  rs1
+```
+
+* Set tmask to the value of `rs1` of the "leader" lane, i.e. the left-most
+active lane.
+
+#### `vx_pred`
+
+```
+vx_pred  rd, rs1, rs2
+```
+
+* `rs1`: Per-lane condition value.  `vx_pred` will set the current tmask
+as high for lanes that has non-zero `rs1` values.  Original tmask is
+preserved, i.e. lanes not active before entering `vx_pred` will not be made
+active in the tmask.
+* If the *address* of `rd` is non-zero, use the `vx_pred_n` variant, i.e. tmask
+is set for lanes with zero `rs1` values.
+* If no lanes have a non-zero `rs1` value (zero for `vx_pred_n`), set tmask
+to the value of `rs2` of the "leader" lane, i.e. the left-most active lane.
+
+
 ## New Registers
 
 At 128 registers, we have 96 additional registers to allocate.
@@ -169,4 +252,3 @@ There will be 32 additional `t` registers, for a total of 39
 There will be 48 additional `s` registers, for a total of 60
 
 For now we double the number of floating point registers to 64, with each type having the same share of the new 32 (i.e. 8 `a` regs, 12 `s` regs, 12 `t` regs).
-

@@ -458,6 +458,8 @@ void cyclotron_difftest_reg(
 }
 
 void profile_perf_counters_rs(
+    uint32_t cluster_id,
+    uint32_t core_id,
     uint64_t inst_retired,
     uint64_t cycle,
     uint64_t cycles_decoded,
@@ -472,6 +474,8 @@ void profile_perf_counters_rs(
 );
 
 void profile_perf_counters(
+    uint32_t cluster_id,
+    uint32_t core_id,
     uint64_t inst_retired,
     uint64_t cycle,
     uint64_t cycles_decoded,
@@ -485,6 +489,7 @@ void profile_perf_counters(
     uint8_t finished
 ) {
   profile_perf_counters_rs(
+      cluster_id, core_id,
       inst_retired, cycle,
       cycles_decoded, cycles_eligible, cycles_issued,
       per_warp_cycles_decoded, per_warp_cycles_issued, per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_busy,
