@@ -173,13 +173,16 @@ We support a subset of Vortex extensions to implement SIMT divergence behavior.
 vx_split  rd, rs1, rs2
 ```
 
+Used jointly with `vx_join` to serialize execution of divergent branches.
+
 * `rs1`: Per-lane condition value.  `vx_split` will set the current tmask as
 high for lanes that has non-zero `rs1` values, and push the tmask set high for
 lanes with zero `rs1` values to the IPDOM stack.  Original tmask is preserved,
 i.e. lanes not active before entering `vx_split` will not be made active in
 either tmask.
-* If `rs2` is set, use the `vx_split_n` variant, i.e. set current tmask for
-lanes with non-zero `rs1` and push tmask for lanes with zero `rs1`.
+* If `rs2` is set, use the `vx_split_n` variant, i.e. modify the current tmask
+to lanes with zero `rs1` values, and push the non-zero `rs1` tmask to the
+stack.
 * `rd` is unused.  This *deviates from Vortex* where `rd` is set to 1 if the
 condition is divergent, e.g. the value of `rs1` disagrees between
 currently-enabled lanes.
