@@ -186,19 +186,21 @@ currently-enabled lanes.
 
 Note that `vx_split` pushes two tmasks to the IPDOM stack, in this order:
 (1) the original tmask that restores the state before entering the instruction,
-and (2) the diverged tmask that will be executed later.  When pushing (1), the
+and (2) the diverged tmask that will be executed later.  When pushing (2), the
 PC of the subsequent instruction after `vx_split` will also be pushed as part
-of the stack entry. When pushing (2), no valid PC will be pushed to the stack.
+of the stack entry. When pushing (1), no valid PC will be pushed to the stack.
 
 These entries will be consumed by two later executions of `vx_join`, where the
-first one will pop the diverged tmask and the PC to traverse the "else-path".
-The second one will pop the restored tmask, and the PC is *not* altered,
-causing the program to exit the branch.
+first one pops the diverged tmask + PC and initiates the pipeline to traverse
+the "else-path". The second one will pop the restored tmask, but since PC entry
+is invalid, execution PC is *not* altered, allowing the program to proceed to
+the branch exit.
 
 Note that for non-divergent branches, we skip pushing the (2) entry to the
 IPDOM stack.  Since the (1) entry does not alter PC and therefore prevents
-re-entry of `vx_join`, storing branch divergence to `rd` for use in `vx_join`
-becomes unnecessary.
+the second execution of `vx_join`, communicating the result of branch
+divergence from `vx_split` to `vx_join` via `rd` (so that `vx_join` can
+conditionally avoid popping from stack) becomes unnecessary.
 
 #### `vx_join`
 
