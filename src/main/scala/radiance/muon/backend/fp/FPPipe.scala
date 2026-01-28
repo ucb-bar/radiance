@@ -117,7 +117,7 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
                               cvFPUIF.resp.valid && respIsMine)
 
-  io.req.ready := (!busy || io.resp.fire) && decomposer.get.io.in.ready
+  io.req.ready := decomposer.get.io.in.ready
   decomposer.get.io.in.valid := io.req.fire
   decomposer.get.io.in.bits.data(0) := io.req.bits.rs1Data.get
   decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
@@ -228,7 +228,6 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   fCSRIO.regData := fCSR
   FP16Pipe.fCSRIO.regData := fCSR
   FP32Pipe.fCSRIO.regData := fCSR
-
 
   // if both ready, prioritize fp32
   FP32Pipe.io.resp.ready := io.resp.ready
