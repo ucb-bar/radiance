@@ -99,7 +99,6 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = RegEnable(ioFpOp, 0.U.asTypeOf(new FpOpBundle), io.req.fire)
-  val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W), cvFPUIF.resp.valid)
   val cvFPUReq = Mux(io.req.fire, ioFpOp, req)
 
   val operands = decomposer.get.io.out.bits.data
@@ -107,6 +106,9 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val isFP16 = fmt === FPFormat.BF16
   val respIsMine = cvFPUIF.resp.bits.tag(Isa.regBits) === isFP16
   val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result)
+  val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
+                              cvFPUIF.resp.valid && respIsMine)
+
 
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0)
