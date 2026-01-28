@@ -314,6 +314,7 @@ class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
 class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = pcT
   val warpId = widT
+  val tmask = tmaskT
   val regs = Vec(Isa.maxNumRegs, new Bundle {
     val enable = Bool()
     val address = pRegT

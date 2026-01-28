@@ -194,6 +194,7 @@ class Backend(
     traceIO.valid := execute.io.req.fire
     traceIO.bits.pc := executeIn.uop.pc
     traceIO.bits.warpId := executeIn.uop.wid
+    traceIO.bits.tmask := executeIn.uop.tmask
     (traceIO.bits.regs zip operands)
       .zipWithIndex.foreach { case ((tReg, opnd), rsi) =>
         tReg.enable := executeIn.uop.inst(haves(rsi))
