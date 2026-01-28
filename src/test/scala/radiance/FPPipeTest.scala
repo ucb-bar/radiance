@@ -170,6 +170,19 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
+  private def expectedCvFpuTag(
+      isFp16: Boolean,
+      tmask: Int,
+      outLanes: Int,
+      numFP16Lanes: Int,
+      rd: Int
+  ): BigInt = {
+    val tmaskMasked = BigInt(tmask) & ((BigInt(1) << outLanes) - 1)
+    (BigInt(if (isFp16) 1 else 0) << (numFP16Lanes + Isa.regBits)) |
+      (tmaskMasked << Isa.regBits) |
+      BigInt(rd)
+  }
+
   private case class FPRequestSpec(
       name: String,
       opcode: UInt,
@@ -264,8 +277,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
-        val expectedTag = (BigInt(0) << Isa.regBits) | BigInt(spec.rd)
-        c.cvFPUIF.req.bits.tag.expect(expectedTag.U((Isa.regBits + 1).W), s"${spec.name}: tag mismatch")
+        val expectedTag = expectedCvFpuTag(
+          isFp16 = false,
+          tmask = spec.tmask,
+          outLanes = env.numFP32Lanes,
+          numFP16Lanes = env.numFP32Lanes * 2,
+          rd = spec.rd
+        )
+        val tagWidth = c.cvFPUIF.req.bits.tag.getWidth
+        c.cvFPUIF.req.bits.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expandedMask(spec.tmask, env.numFP32Lanes).U, s"${spec.name}: SIMD mask mismatch")
         c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
         c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
@@ -298,8 +318,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
     c.cvFPUIF.resp.bits.result.poke(packedResult.U)
     c.cvFPUIF.resp.bits.status.poke(0.U)
-    val respTag = (BigInt(0) << Isa.regBits) | BigInt(spec.rd)
-    c.cvFPUIF.resp.bits.tag.poke(respTag.U((Isa.regBits + 1).W))
+    val respTag = expectedCvFpuTag(
+      isFp16 = false,
+      tmask = spec.tmask,
+      outLanes = env.numFP32Lanes,
+      numFP16Lanes = env.numFP32Lanes * 2,
+      rd = spec.rd
+    )
+    val respTagWidth = c.cvFPUIF.resp.bits.tag.getWidth
+    c.cvFPUIF.resp.bits.tag.poke(respTag.U(respTagWidth.W))
     c.cvFPUIF.resp.valid.poke(true.B)
     c.clock.step()
     c.cvFPUIF.resp.valid.poke(false.B)
@@ -387,8 +414,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         c.cvFPUIF.req.bits.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
         c.cvFPUIF.req.bits.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
         c.cvFPUIF.req.bits.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
-        val expectedTag = (BigInt(1) << Isa.regBits) | BigInt(spec.rd)
-        c.cvFPUIF.req.bits.tag.expect(expectedTag.U((Isa.regBits + 1).W), s"${spec.name}: tag mismatch")
+        val expectedTag = expectedCvFpuTag(
+          isFp16 = true,
+          tmask = spec.tmask,
+          outLanes = env.numLanes,
+          numFP16Lanes = env.numFP32Lanes * 2,
+          rd = spec.rd
+        )
+        val tagWidth = c.cvFPUIF.req.bits.tag.getWidth
+        c.cvFPUIF.req.bits.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
         c.cvFPUIF.req.bits.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
         c.cvFPUIF.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
         c.cvFPUIF.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
@@ -421,8 +455,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
     c.cvFPUIF.resp.bits.result.poke(packedResult.U)
     c.cvFPUIF.resp.bits.status.poke(0.U)
-    val respTag = (BigInt(1) << Isa.regBits) | BigInt(spec.rd)
-    c.cvFPUIF.resp.bits.tag.poke(respTag.U((Isa.regBits + 1).W))
+    val respTag = expectedCvFpuTag(
+      isFp16 = true,
+      tmask = spec.tmask,
+      outLanes = env.numLanes,
+      numFP16Lanes = env.numFP32Lanes * 2,
+      rd = spec.rd
+    )
+    val respTagWidth = c.cvFPUIF.resp.bits.tag.getWidth
+    c.cvFPUIF.resp.bits.tag.poke(respTag.U(respTagWidth.W))
     c.cvFPUIF.resp.valid.poke(true.B)
     c.clock.step()
     c.cvFPUIF.resp.valid.poke(false.B)
@@ -462,8 +503,8 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     val laneWidth = if (isFp16) 16 else archLen
     val laneMaskPerValue = (BigInt(1) << laneWidth) - 1
     val laneCount = if (isFp16) env.numLanes else env.numFP32Lanes
+    val totalPackets = env.numLanes / laneCount
 
-    def maskValues(values: Seq[BigInt]) = values.take(laneCount).map(_ & laneMaskPerValue)
     val expectedResultLanes =
       if (isFp16) {
         spec.expectedResultLanes.take(laneCount).map(signExtend(_, 16, archLen))
@@ -471,23 +512,36 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         spec.expectedResultLanes.take(laneCount)
       }
 
-    val packedRs1 = packLanes(maskValues(spec.rs1Lanes), laneWidth)
-    val packedRs2 = packLanes(maskValues(spec.rs2Lanes), laneWidth)
-    val packedRs3 = packLanes(maskValues(spec.rs3Lanes), laneWidth)
-    val packedResult =
-      if (isFp16) {
-        packLanes(spec.expectedResultLanes.take(env.numLanes).map(_ & 0xffff), 16)
-      } else {
-        packLanes(spec.expectedResultLanes.take(env.numFP32Lanes).map(_ & laneMaskPerValue), archLen)
+    def packetSlice(values: Seq[BigInt], packetIdx: Int, width: Int, outLanes: Int): Seq[BigInt] = {
+      val padded = values.padTo(env.numLanes, BigInt(0))
+      val base = packetIdx * outLanes
+      padded.slice(base, base + outLanes).map(_ & ((BigInt(1) << width) - 1))
+    }
+
+    val packetTmask: Seq[Int] =
+      (0 until totalPackets).map { packetIdx =>
+        (spec.tmask >> (packetIdx * laneCount)) & ((1 << laneCount) - 1)
       }
-    val expectedMask: BigInt =
-      if (isFp16) {
-        val width = env.numFP32Lanes * 2
-        val mask = (BigInt(1) << width) - 1
-        spec.tmask & mask
+    val packetOp0: Seq[BigInt] = (0 until totalPackets).map { packetIdx =>
+      if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+        BigInt(0)
       } else {
-        expandedMask(spec.tmask, env.numFP32Lanes)
+        packLanes(packetSlice(spec.rs1Lanes, packetIdx, laneWidth, laneCount), laneWidth)
       }
+    }
+    val packetOp1: Seq[BigInt] = (0 until totalPackets).map { packetIdx =>
+      packLanes(packetSlice(spec.rs1Lanes, packetIdx, laneWidth, laneCount), laneWidth)
+    }
+    val packetOp2: Seq[BigInt] = (0 until totalPackets).map { packetIdx =>
+      packLanes(packetSlice(spec.rs2Lanes, packetIdx, laneWidth, laneCount), laneWidth)
+    }
+    val packetOp3: Seq[BigInt] = (0 until totalPackets).map { packetIdx =>
+      packLanes(packetSlice(spec.rs3Lanes, packetIdx, laneWidth, laneCount), laneWidth)
+    }
+    val packetResult: Seq[BigInt] = (0 until totalPackets).map { packetIdx =>
+      val slice = packetSlice(spec.expectedResultLanes, packetIdx, laneWidth, laneCount)
+      packLanes(slice, laneWidth)
+    }
 
     zeroDecoded(c.io.req.bits.uop.inst)
     pokeDecoded(c.io.req.bits.uop.inst, Opcode, spec.opcode.litValue)
@@ -536,29 +590,64 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
     var cvReqSeen = false
     var cvReqCycles = 0
+    var cvReqPackets = 0
+    val seenPackets = scala.collection.mutable.Set.empty[Int]
+    val observedOrder = scala.collection.mutable.ArrayBuffer.empty[Int]
     def checkCvReq(): Unit = {
-      if (!cvReqSeen && c.cvfpuTest.observedReqValid.peek().litToBoolean) {
+      val reqReady = c.cvfpuTest.forceReqReady.peek().litToBoolean
+      if (cvReqPackets < totalPackets &&
+          reqReady &&
+          c.cvfpuTest.observedReqValid.peek().litToBoolean) {
         val dstFmt = c.cvfpuTest.observedReqBits.dstFormat.peek().litValue
         if (dstFmt == spec.expectedDstFmt.litValue) {
           val observed = c.cvfpuTest.observedReqBits
-          val (expOp0, expOp1, expOp2) =
-            if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
-              (BigInt(0), packedRs1, packedRs2)
-            } else {
-              (packedRs1, packedRs2, packedRs3)
-            }
+          val outLanes = if (dstFmt == FPFormat.BF16.litValue) env.numLanes else env.numFP32Lanes
+          val observedTag = observed.tag.peekInt()
+          val observedTmask = ((observedTag >> Isa.regBits) & ((BigInt(1) << outLanes) - 1)).toInt
+          val packetIdx = packetTmask.zipWithIndex.collectFirst {
+            case (mask, idx) if mask == observedTmask && !seenPackets.contains(idx) => idx
+          }.getOrElse {
+            throw new IllegalArgumentException(s"${spec.name}: unexpected packet tmask 0x${observedTmask.toHexString}")
+          }
+          seenPackets += packetIdx
+          observedOrder += packetIdx
+          val expOp0 = packetOp0(packetIdx)
+          val expOp1 = if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            packetOp1(packetIdx)
+          } else {
+            packetOp2(packetIdx)
+          }
+          val expOp2 = if (spec.expectedOp == FPUOp.ADD || spec.expectedOp == FPUOp.SUB) {
+            packetOp2(packetIdx)
+          } else {
+            packetOp3(packetIdx)
+          }
           observed.op.expect(spec.expectedOp, s"${spec.name}: op mismatch")
           observed.srcFormat.expect(spec.expectedSrcFmt, s"${spec.name}: src fmt mismatch")
           observed.dstFormat.expect(spec.expectedDstFmt, s"${spec.name}: dst fmt mismatch")
           observed.roundingMode.expect(roundingModeFrom(spec.f3), s"${spec.name}: rounding mode mismatch")
-          val fmtBit = if (dstFmt == FPFormat.BF16.litValue) 1 else 0
-          val expectedTag = (BigInt(fmtBit) << Isa.regBits) | BigInt(spec.rd)
-          observed.tag.expect(expectedTag.U((Isa.regBits + 1).W), s"${spec.name}: tag mismatch")
-          observed.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
+          val isFp16 = dstFmt == FPFormat.BF16.litValue
+          val expectedTag = expectedCvFpuTag(
+            isFp16 = isFp16,
+            tmask = packetTmask(packetIdx),
+            outLanes = outLanes,
+            numFP16Lanes = env.numFP32Lanes * 2,
+            rd = spec.rd
+          )
+          val tagWidth = observed.tag.getWidth
+          observed.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
+          val perPacketMask: BigInt =
+            if (isFp16) {
+              BigInt(packetTmask(packetIdx))
+            } else {
+              expandedMask(packetTmask(packetIdx), env.numFP32Lanes)
+            }
+          observed.simdMask.expect(perPacketMask.U, s"${spec.name}: SIMD mask mismatch")
           observed.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
           observed.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
           observed.operands(2).expect(expOp2.U, s"${spec.name}: operand2 mismatch")
-          cvReqSeen = true
+          cvReqPackets += 1
+          cvReqSeen = cvReqPackets == totalPackets
         }
       }
     }
@@ -569,9 +658,15 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
       cvReqCycles += 1
       c.io.req.valid.poke(false.B)
+      if (reqReadyCounter > 0) {
+        reqReadyCounter -= 1
+        if (reqReadyCounter == 0) {
+          c.cvfpuTest.forceReqReady.poke(true.B)
+        }
+      }
       checkCvReq()
       if (!cvReqSeen) {
-        require(cvReqCycles <= 12, s"${spec.name}: CVFPU request did not fire")
+        require(cvReqCycles <= 12 * totalPackets + reqReadyDelay, s"${spec.name}: CVFPU request did not fire")
       }
     }
 
@@ -584,22 +679,34 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.clock.step()
     }
 
-    c.cvfpuTest.respBits.result.poke(packedResult.U)
-    c.cvfpuTest.respBits.status.poke(0.U)
-    val respTag = (BigInt(if (isFp16) 1 else 0) << Isa.regBits) | BigInt(spec.rd)
-    c.cvfpuTest.respBits.tag.poke(respTag.U((Isa.regBits + 1).W))
-    c.cvfpuTest.forceRespValid.poke(true.B)
-    var respDriveCycles = 0
-    var respAccepted = false
-    while (!respAccepted) {
-      respAccepted = c.cvfpuTest.observedRespReady.peek().litToBoolean
-      c.clock.step()
-      respDriveCycles += 1
-      require(respDriveCycles <= 50, s"${spec.name}: CVFPU response not accepted")
+    // Prevent writeback from being consumed before we start checking.
+    c.io.resp.ready.poke(false.B)
+
+    val respTagWidth = c.cvfpuTest.respBits.tag.getWidth
+    observedOrder.foreach { packetIdx =>
+      val perPacketTmask = packetTmask(packetIdx)
+      val packetPackedResult = packetResult(packetIdx)
+      c.cvfpuTest.respBits.result.poke(packetPackedResult.U)
+      c.cvfpuTest.respBits.status.poke(0.U)
+      val respTag = expectedCvFpuTag(
+        isFp16 = isFp16,
+        tmask = perPacketTmask,
+        outLanes = if (isFp16) env.numLanes else env.numFP32Lanes,
+        numFP16Lanes = env.numFP32Lanes * 2,
+        rd = spec.rd
+      )
+      c.cvfpuTest.respBits.tag.poke(respTag.U(respTagWidth.W))
+      c.cvfpuTest.forceRespValid.poke(true.B)
+      var respDriveCycles = 0
+      var respAccepted = false
+      while (!respAccepted) {
+        respAccepted = c.cvfpuTest.observedRespReady.peek().litToBoolean
+        c.clock.step()
+        respDriveCycles += 1
+        require(respDriveCycles <= 50, s"${spec.name}: CVFPU response not accepted")
+      }
+      c.cvfpuTest.forceRespValid.poke(false.B)
     }
-    // provide one extra cycle with valid asserted to mimic CVFPU behavior
-    c.clock.step()
-    c.cvfpuTest.forceRespValid.poke(false.B)
 
     var respSeen = false
     var respCycles = 0
