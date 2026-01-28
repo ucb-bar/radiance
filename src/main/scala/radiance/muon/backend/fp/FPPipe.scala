@@ -25,6 +25,13 @@ trait HasFPPipeParams extends HasCoreParameters {
       Cat(Mux(lane(15), 0xffff.U(16.W), 0.U(16.W)), lane)
     }.reverse)
   }
+
+  def fpWordBits(fmt: FPFormat.Type) : Int = {
+    fmt match {
+      case FPFormat.FP32 => 32
+      case _ => 16
+    }
+  }
 }
 
 class FpOpBundle extends Bundle {
@@ -100,10 +107,11 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = RegEnable(ioFpOp, 0.U.asTypeOf(new FpOpBundle), io.req.fire)
   val cvFPUReq = Mux(io.req.fire, ioFpOp, req)
-
-  val operands = decomposer.get.io.out.bits.data
-  val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
   val isFP16 = fmt === FPFormat.BF16
+
+  val operands = decomposer.get.io.out.bits.data.take(3)
+                 .map(operand => VecInit(operand.map(reg => reg.asUInt(fpWordBits(fmt) - 1, 0))))
+  val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
   val respIsMine = cvFPUIF.resp.bits.tag(cvFPUTagBits - 1) === isFP16
   val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result)
   val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
@@ -128,6 +136,9 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.tag := Cat(isFP16,
                               0.U((numFP16Lanes - outLanes).W), decomposer.get.io.out.bits.data(3).asUInt,
                               Mux(io.req.fire, inst(Rd), reqRd))
+  cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
+  cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
+  cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operands(1).asUInt, operands(2).asUInt)
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
 
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsMine
@@ -154,9 +165,6 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
 class FP32Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.FP32, p(MuonKey).fpPipe.numFP32Lanes) {
   val expandedLaneMask = Cat(decomposer.get.io.out.bits.data(3).reverse.map(b => Cat(0.U(1.W), b.asUInt)))
-  cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
-  cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
-  cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operands(1).asUInt, operands(2).asUInt)
   cvFPUIF.req.bits.simdMask := expandedLaneMask
 
   //dumb hack for cvfpu fp16 conversion
@@ -170,10 +178,6 @@ class FP32Pipe(implicit p: Parameters)
 
 class FP16Pipe(implicit p: Parameters)
   extends FPPipeBase(FPFormat.BF16, p(MuonKey).fpPipe.numFP32Lanes * 2) {
-  val operandsLower = operands.take(3).map(operand => VecInit(operand.map(reg => reg.asUInt(15, 0))))
-  cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operandsLower(0).asUInt)
-  cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operandsLower(0).asUInt, operandsLower(1).asUInt)
-  cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operandsLower(1).asUInt, operandsLower(2).asUInt)
   cvFPUIF.req.bits.simdMask := decomposer.get.io.out.bits.data(3).asUInt
 
   recomposer.get.io.in.bits.data(0) := signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0))
