@@ -98,11 +98,9 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   })
 
   val ioFpOp = FpOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
-  val req = Reg(new FpOpBundle)
+  val req = RegEnable(ioFpOp, 0.U.asTypeOf(new FpOpBundle), io.req.fire)
   val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W), cvFPUIF.resp.valid)
-
-  val cvFPUReq = WireInit(req)
-  cvFPUReq := Mux(io.req.fire, ioFpOp, req)
+  val cvFPUReq = Mux(io.req.fire, ioFpOp, req)
 
   val operands = decomposer.get.io.out.bits.data
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
@@ -149,9 +147,7 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   fStatusSet := fCSRIO.setFStatus.valid
 
   when (io.req.fire) {
-    req := ioFpOp
     fStatusSet := false.B
-    cvFPUReq := ioFpOp
   }
 }
 
