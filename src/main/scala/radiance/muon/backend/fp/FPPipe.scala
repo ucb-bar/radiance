@@ -15,7 +15,7 @@ trait HasFPPipeParams extends HasCoreParameters {
   def numFP16Lanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFPDivLanes = muonParams.fpPipe.numFPDivLanes
   def fStatusBits = 5
-  def cvFPUTagBits = Isa.regBits + 1
+  def cvFPUTagBits = 1 + numFP16Lanes + Isa.regBits // FP32? + TMask + Rd
 
   def signExtendFp16Lanes(numLanes: Int, data: UInt): UInt = {
     val lanes = VecInit.tabulate(numLanes) { idx =>
@@ -78,7 +78,7 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
     decomposerTypes = Some(Seq(
         UInt(p(MuonKey).archLen.W), UInt(p(MuonKey).archLen.W), UInt(p(MuonKey).archLen.W), Bool()
     )),
-    recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W))),
+    recomposerTypes = Some(Seq(UInt(p(MuonKey).archLen.W), Bool())),
     outLanes = Some(outLanes),
     writebackSched = false, writebackReg = true, requiresRs3 = true)
     with HasFPPipeParams {
@@ -104,12 +104,10 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   val operands = decomposer.get.io.out.bits.data
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
   val isFP16 = fmt === FPFormat.BF16
-  val respIsMine = cvFPUIF.resp.bits.tag(Isa.regBits) === isFP16
+  val respIsMine = cvFPUIF.resp.bits.tag(cvFPUTagBits - 1) === isFP16
   val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result)
   val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
                               cvFPUIF.resp.valid && respIsMine)
-
-
   // assume same fpconv across all lanes
   val fpu_out = recomposer.get.io.out.bits.data(0)
 
@@ -129,18 +127,20 @@ class FPPipeBase(fmt: FPFormat.Type, outLanes: Int)
   cvFPUIF.req.bits.srcFormat := cvFPUReq.srcFmt
   cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
   cvFPUIF.req.bits.intFormat := IntFormat.INT32
-  cvFPUIF.req.bits.tag := Cat(isFP16, Mux(io.req.fire, inst(Rd), reqRd))
+  cvFPUIF.req.bits.tag := Cat(isFP16,
+                              0.U((numFP16Lanes - outLanes).W), decomposer.get.io.out.bits.data(3).asUInt,
+                              Mux(io.req.fire, inst(Rd), reqRd))
   cvFPUIF.resp.ready := recomposer.get.io.in.fire
 
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsMine
+  recomposer.get.io.in.bits.data(1) := VecInit(cvFPUIF.resp.bits.tag(Isa.regBits + outLanes - 1, Isa.regBits).asBools)
   recomposer.get.io.out.ready := io.resp.ready
-
 
   io.resp.valid := recomposer.get.io.out.valid
   io.resp.bits.reg.get.valid := recomposer.get.io.out.valid
   io.resp.bits.reg.get.bits.rd := cvFPURespRd
   io.resp.bits.reg.get.bits.data := fpu_out.asTypeOf(io.resp.bits.reg.get.bits.data)
-  io.resp.bits.reg.get.bits.tmask := reqTmask
+  io.resp.bits.reg.get.bits.tmask := recomposer.get.io.out.bits.data(1).asUInt
 
   // again dumb hack because CVFPU doesnt return input simd mask
   val fStatusSet = RegInit(false.B)
