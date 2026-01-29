@@ -1460,7 +1460,9 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val s2_valid = RegInit(false.B)
         val s2_ready = Wire(Bool())
         val s2_req = RegInit(0.U.asTypeOf(new LSQWritebackReq))
-        val s2_packet = RegInit(0.U(lsuDerived.packetBits.W))
+        val s2_packet_next = Wire(UInt(lsuDerived.packetBits.W))
+        val s2_packet = RegNext(s2_packet_next, 0.U)
+        s2_packet_next := s2_packet
         val s2_fire_prev = RegNext(s1_valid && s2_ready, false.B)
         val s2_metadata = Mux(
             s2_fire_prev,
@@ -1490,19 +1492,19 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             s1_valid := true.B
             s1_req := io.writebackReq.bits
         }
-
+        
         io.loadDataR.enable := true.B
         io.loadDataR.address := Mux(
             s2_ready,
             s1_req.loadDataIdx * lsuDerived.numPackets.U,
-            s2_req.loadDataIdx * lsuDerived.numPackets.U + s2_packet + 1.U
+            s2_req.loadDataIdx * lsuDerived.numPackets.U + s2_packet_next
         )
         
         io.metadataR.enable := true.B
         io.metadataR.address := tokenToMetadataIndex(s1_req.token)
 
         when (io.coreResp.fire) {
-            s2_packet := s2_packet + 1.U
+            s2_packet_next := s2_packet + 1.U
         }
 
         s2_ready := !s2_valid || (s2_valid && finalPacket && io.coreResp.fire)
@@ -1516,7 +1518,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         when (s1_valid && s2_ready) {
             s2_valid := true.B
             s2_req := s1_req
-            s2_packet := 0.U
+            s2_packet_next := 0.U
         }
 
         io.coreResp.valid := s2_valid
