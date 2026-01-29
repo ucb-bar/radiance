@@ -238,13 +238,17 @@ class Backend(
   // debug
   when (execute.io.req.fire) {
     val e = execute.io.req.bits
+
     printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
       cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
       cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
       e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
       "] rs2=[" +
       e.rs2Data.get.map(x => cf"$x%x ").reduce(_ + _) +
-      cf"]\n")
+      cf"] rs3=[" +
+      e.rs3Data.get.map(x => cf"$x%x ").reduce(_ + _) +
+      cf"]\n"
+    )
   }
   when (execute.io.resp.fire) {
     val r = execute.io.resp.bits.reg.get.bits
