@@ -26,7 +26,16 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
 
     val memIO = IO(memoryIO)
     
+    // @richard: use these for flush
+    val flushIO = IO(new Bundle {
+      val globalQueuesEmpty = Output(Bool())
+      val sharedQueuesEmpty = Output(Bool())
+    })
+
     val lsu = Module(new LoadStoreUnit)
+    flushIO.globalQueuesEmpty := lsu.io.globalQueuesEmpty
+    flushIO.sharedQueuesEmpty := lsu.io.sharedQueuesEmpty
+
     lsu.io.coreReservations <> reserveIO
 
     val reqOp = LsuOpDecoder.decode(inst.opcode, inst.f3)

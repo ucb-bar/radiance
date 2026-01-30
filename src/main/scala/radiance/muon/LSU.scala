@@ -250,15 +250,14 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val writebackReq = Decoupled(new LSQWritebackReq) 
 
         // used to flush LSU
-        val queuesEmpty = Output(Bool())
+        val sharedQueuesEmpty = Output(Bool())
+        val globalQueuesEmpty = Output(Bool())
     })
 
     // helper functions for circular fifo indices
     val msb = (x: UInt) => x(x.getWidth - 1)
     val wrapBit = msb
     val idxBits = (x: UInt) => x(x.getWidth - 2, 0)
-
-    
 
     // per-warp Circular FIFO parameterized to be a load queue or store queue
     class PerWarpQueue(
@@ -577,9 +576,13 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
     class PerWarpStoreQueue(warpId: Int, addressSpace: AddressSpaceCfg) 
         extends PerWarpQueue(warpId, addressSpace, loadQueue = false)
     
-    val warpEmptys = Wire(Vec(muonParams.numWarps, Bool()))
-    val allEmpty = warpEmptys.andR
-    io.queuesEmpty := allEmpty
+    val perWarpSharedLoadQueueEmpty = Wire(Vec(muonParams.numWarps, Bool()))
+    val perWarpSharedStoreQueueEmpty = Wire(Vec(muonParams.numWarps, Bool()))
+    val perWarpGlobalLoadQueueEmpty = Wire(Vec(muonParams.numWarps, Bool()))
+    val perWarpGlobalStoreQueueEmpty = Wire(Vec(muonParams.numWarps, Bool()))
+
+    io.sharedQueuesEmpty := perWarpSharedLoadQueueEmpty.andR && perWarpSharedStoreQueueEmpty.andR
+    io.globalQueuesEmpty := perWarpGlobalLoadQueueEmpty.andR && perWarpGlobalStoreQueueEmpty.andR
 
     // instantiate queues
     val globalLoadQueues = Seq.tabulate(muonParams.numWarps)(w => Module(new PerWarpLoadQueue(w, AddressSpaceCfg.Global)))
@@ -656,12 +659,10 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         }
 
         // set flag if all queues for this warp are empty
-        warpEmptys(warp) := {
-            globalLoadQueue.io.empty &&
-            globalStoreQueue.io.empty &&
-            shmemLoadQueue.io.empty &&
-            shmemStoreQueue.io.empty
-        }
+        perWarpSharedLoadQueueEmpty(warp) := shmemLoadQueue.io.empty
+        perWarpSharedStoreQueueEmpty(warp) := shmemStoreQueue.io.empty
+        perWarpGlobalLoadQueueEmpty(warp) := globalLoadQueue.io.empty
+        perWarpGlobalStoreQueueEmpty(warp) := globalStoreQueue.io.empty
     }
 
     // arbitrate memory requests between queues. note that load queue / store queue of a given warp can never
@@ -884,13 +885,16 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val shmemReq = Decoupled(new LsuMemRequest)
         val shmemResp = Flipped(Decoupled(new LsuMemResponse))
 
-        val empty = Output(Bool())
+        val sharedQueuesEmpty = Output(Bool())
+        val globalQueuesEmpty = Output(Bool())
     })
 
     // instantiate lsu queues
     val loadStoreQueues = Module(new LoadStoreQueue)
-    io.empty := loadStoreQueues.io.queuesEmpty
-    dontTouch(io.empty)
+    io.sharedQueuesEmpty := loadStoreQueues.io.sharedQueuesEmpty
+    io.globalQueuesEmpty := loadStoreQueues.io.globalQueuesEmpty
+    dontTouch(io.sharedQueuesEmpty)
+    dontTouch(io.globalQueuesEmpty)
 
     // Dynamic allocation system using free list allocators
     // addressTmask and storeData indices are allocated at queue entry reservation time
