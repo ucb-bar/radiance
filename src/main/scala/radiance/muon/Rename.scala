@@ -54,6 +54,8 @@ class Rename(implicit p: Parameters) extends CoreModule {
   }
 
   val wid = io.rename.bits.wid
+
+  // decoding stage is included in rename
   val decoded = Decoder.decode(io.rename.bits.inst)
 
   val hasReg = Seq(decoded.b(HasRd), decoded.b(HasRs1), decoded.b(HasRs2), decoded.b(HasRs3))
@@ -87,7 +89,7 @@ class Rename(implicit p: Parameters) extends CoreModule {
     val prevWrite = RegNext(Cat(wid, decoded.rd.asTypeOf(aRegT)))
     Mux(
       RegNext(ars === 0.U),
-      0.U,
+      0.U, // always rename to x0
       Mux(
         RegNext(assigning) && (prevRead === prevWrite),
         RegNext(wPort.data),

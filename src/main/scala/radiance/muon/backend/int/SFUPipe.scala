@@ -125,9 +125,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   }
 
   when (inst.b(IsSplit)) {
-    // vortex specifies rs2 addr = 1, but this might get renamed.
-    // however, this logic still holds because x0 always gets renamed to 0;
-    // furthermore, x0 also does not have a wid prefix.
+    // Rs2 of split is guaranteed to be not-renamed
     val invert = inst(Rs2) =/= 0.U
 
     val thenMask = uop.tmask & rs1Mask

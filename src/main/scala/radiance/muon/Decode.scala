@@ -343,7 +343,11 @@ object Decoder {
       case HasRs2 =>
         Some(
           (sd(IsRType) || sd(IsSType) || sd(IsBType)) &&
-            !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
+          // vx_split uses the *address* of rs2 to indicate _n variant, and
+          // never needs the value of its reg.  Safe to disable HasRs to prevent
+          // register renaming
+          !sd(IsSplit) &&
+          !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
         )
       case HasRs3 =>
         Some(Seq(
