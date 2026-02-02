@@ -150,6 +150,7 @@ trait HasCoreParameters {
   def ibufIdxT = UInt(log2Ceil(m.ibufDepth + 1).W)
 
   def ipdomStackEntryT = new Bundle {
+    val divergent = Bool()
     val restoredMask = tmaskT
     val elseMask = tmaskT
     val elsePC = pcT

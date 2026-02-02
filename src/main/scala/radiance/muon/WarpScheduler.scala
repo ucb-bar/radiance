@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
-import freechips.rocketchip.util.UIntIsOneOf
 import org.chipsalliance.cde.config.Parameters
 
 class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
@@ -415,7 +414,6 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
       mask.bits := Mux(j0, ports(wid).readData.elseMask, ports(wid).readData.restoredMask)
     }
 
-
   (ports lazyZip rptr lazyZip wptr).foreach { case (p, ra, wa) =>
     p.enable := false.B
     p.isWrite := false.B
@@ -428,7 +426,7 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
     ports(wid).isWrite := true.B
     val entry = ent.asTypeOf(outer.ipdomStackEntryT)
     ports(wid).writeData := entry
-    branchTaken(wid)(wptr(wid)) := (entry.elseMask === 0.U) // non-divergent branch
+    branchTaken(wid)(wptr(wid)) := !entry.divergent
     pushing(wid) := true.B
     assert(wptr(wid) < m.numIPDOMEntries.U, "ipdom stack is full")
     wptr(wid) := wptr(wid) + 1.U
