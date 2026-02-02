@@ -19,8 +19,7 @@ import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
-import radiance.memory.BoolArrayUtils.BoolSeqUtils
-import radiance.memory.SourceGenerator
+import radiance.memory._
 import radiance.subsystem.{GPUMemParams, GPUMemory, GemminiTileLike, PhysicalCoreParams}
 
 object GemminiCoreParams extends PhysicalCoreParams {
@@ -169,7 +168,6 @@ class GemminiTile private (
     // 32K aligned.
 
     require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
-    require(isPow2(sfm.sramLineSizeInBytes), "scaling fac line size must be power of 2")
 
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
@@ -178,15 +176,17 @@ class GemminiTile private (
         supports = TLMasterToSlaveTransferSizes(
           // there's no real get support because the scaling factor memory is
           // write-only from the control bus
-          get = TransferSizes(1, sfm.sramLineSizeInBytes),
-          putFull = TransferSizes(1, sfm.sramLineSizeInBytes),
-          putPartial = TransferSizes(1, sfm.sramLineSizeInBytes),
+          get = TransferSizes(1, 8),
+          putFull = TransferSizes(1, 8),
+          putPartial = TransferSizes(1, 8),
         )
       )),
-      beatBytes = sfm.sramLineSizeInBytes,
+      beatBytes = 8,
     )))
   }
-  scalingFacNode.foreach(_ := TLWidthWidget(8) := tlSlaveXbar.node)
+  scalingFacNode.foreach(_
+    := TLWidthWidget(8)
+    := tlSlaveXbar.node)
 
   val requantizerMuonManager = gemminiParams.requantizer.map { q =>
     val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
@@ -255,26 +255,22 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
     val typeSelect = node.a.bits.address(conf.addrBits - 1)
     val writeFullAddr = node.a.bits.address(conf.addrBits - 2, 0)
-    val lineAddr = WireInit(writeFullAddr(conf.addrBits - 2, conf.lineOffsetBits))
-
-    // val sramRowAddr = WireInit(lineAddr(conf.addrBits - conf.lineOffsetBits - 1, conf.bankSelectBits))
-    // val bankSelect = WireInit(lineAddr(conf.bankSelectBits - 1, 0))
 
     // weight and activation respectively; weight addresses have highest bit = 0
     val scalingFacWriteReqs = Seq.fill(2)(Wire(Decoupled(new ScalingFactorWriteReq(
-      conf.addrBits - conf.lineOffsetBits, conf.sramLineSizeInBytes * 8))))
+      conf.addrBits - 1, 8 * 8))))
     scalingFacWriteReqs.head.valid := wen && !typeSelect
     scalingFacWriteReqs.last.valid := wen && typeSelect
-    scalingFacWriteReqs.foreach(_.bits.addr := lineAddr)
+    scalingFacWriteReqs.foreach(_.bits.addr := writeFullAddr)
     scalingFacWriteReqs.foreach(_.bits.data := writeData)
 
-    val bothReady = scalingFacWriteReqs.map(_.ready).andR
+    val typeReady = Mux(typeSelect, scalingFacWriteReqs.last.ready, scalingFacWriteReqs.head.ready)
 
-    node.a.ready := node.d.ready && bothReady
-    node.d.valid := node.a.valid && bothReady
+    node.a.ready := node.d.ready && typeReady
+    node.d.valid := node.a.valid && typeReady
     node.d.bits := edge.AccessAck(node.a.bits)
 
-    require(node.params.dataBits == conf.sramLineSizeInBytes * 8)
+    // require(node.params.dataBits == conf.bankWidthBytes * 8)
     assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
     assert(!node.a.valid || (node.a.bits.size === 3.U))
 
