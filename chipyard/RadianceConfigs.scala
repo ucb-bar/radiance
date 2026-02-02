@@ -25,6 +25,7 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithNMemoryChannels(1) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(64) ++
 
+  new WithGPUResetAggregator() ++
   new WithRadianceControlBus ++
   new WithNoMbusScratchpad ++
 
@@ -33,7 +34,7 @@ class RadianceBaseConfig extends Config(
   new chipyard.config.WithControlBusFrequency(500.0) ++
   new chipyard.config.WithSystemBusFrequency(500.0) ++
   new chipyard.config.WithFrontBusFrequency(500.0) ++
-  new chipyard.config.WithOffchipBusFrequency(500.0) ++
+  new chipyard.config.WithOffchipBusFrequency(200.0) ++
   new chipyard.harness.WithHarnessBinderClockFreqMHz(500.0) ++
   new chipyard.config.AbstractConfig)
 
@@ -160,6 +161,7 @@ class RadianceTapeoutSimConfig extends Config(
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 

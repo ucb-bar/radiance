@@ -294,13 +294,33 @@ class WarpScheduler(implicit p: Parameters)
 
   // soft reset procedure
   when (io.softReset) {
-    // TODO
     // reset pc
-    // enable one warp only
+    io.cmdProc match {
+      case Some(_) => require(false)
+      case None =>
+        pcTracker.zipWithIndex.foreach { case (pc, wid) =>
+          pc.valid := (wid == 0).B
+          pc.bits := m.startAddress.U
+        }
+    }
+
     // reset thread masks
-    // clear discards and stalls
-    // clear ipdom stacks
-    // clear all registers (e.g. joins)
+    threadMasks.zipWithIndex.foreach { case (tmask, wid) =>
+      tmask := (if (wid == 0) {
+        -1.S(tmaskT.getWidth.W).asUInt
+      } else {
+        0.U.asTypeOf(tmaskT)
+      })
+    }
+
+    // clear discards and in flights
+    icacheInFlights := 0.U.asTypeOf(icacheInFlights)
+    icacheInFlightsReg := 0.U.asTypeOf(icacheInFlights)
+    discardValid := 0.U.asTypeOf(discardValid)
+
+    // reset stall tracker and ipdom stack
+    stallTracker.reset()
+    ipdomStack.reset()
   }
 
   // misc
@@ -351,6 +371,10 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
     val ibufReady = (outer.io.ibuf(wid).count +&
       RegNext(outer.icacheInFlights(wid))) +& 1.U < m.ibufDepth.U
     stalls(wid).stallReason.asUInt.orR || (!ibufReady)
+  }
+
+  def reset() = {
+    stalls := 0.U.asTypeOf(stalls)
   }
 }
 
@@ -425,5 +449,10 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
       wptr(wid) := wptr(wid) - 1.U
       joiningEnd(wid) := true.B
     }
+  }
+
+  def reset() = {
+    branchTaken := 0.U.asTypeOf(branchTaken)
+    wptr := 0.U.asTypeOf(wptr)
   }
 }
