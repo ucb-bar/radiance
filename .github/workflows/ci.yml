@@ -15,6 +15,7 @@ env:
   CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard"
   # flip to force-reset cache
   CACHE_NUMBER: 0
+  JAVA_HEAP_SIZE: "64G"
 
 jobs:
   build:
