@@ -194,49 +194,42 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   val CVFPUIO = IO(CVFPUIF)
 
   val fCSR = RegInit(0.U.asTypeOf(csrDataT))
-
   val FP16Pipe = Module(new FP16Pipe)
   val FP32Pipe = Module(new FP32Pipe)
-
-  val isFP32 = io.req.bits.uop.inst.b(UseFP32Pipe)
-  val isFP16 = io.req.bits.uop.inst.b(UseFP16Pipe)
+  val rr = Module(new RRArbiter(new CVFPUReq(numFP16Lanes, cvFPUTagBits), 2))
   val cvFPURespIsMine = CVFPUIO.resp.bits.tag(cvFPUTagBits - 1) === isDivSqrt.asBool
-
-  FP16Pipe.io.req.valid := io.req.valid && isFP16
-  FP16Pipe.io.req.bits := io.req.bits
-  FP32Pipe.io.req.valid := io.req.valid && isFP32
-  FP32Pipe.io.req.bits := io.req.bits
-  io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
-
-  val rr = Module(new RRArbiter(
-    new CVFPUReq(numFP16Lanes, cvFPUTagBits), 2))
-  rr.io.in(0) <> FP32Pipe.CVFPUIO.req
-  rr.io.in(1) <> FP16Pipe.CVFPUIO.req
+  val pipes = Seq(FP32Pipe, FP16Pipe)
+  val uses = Seq(io.req.bits.uop.inst.b(UseFP32Pipe), io.req.bits.uop.inst.b(UseFP16Pipe))
   val cvFPUReqBitsPatch = Wire(chiselTypeOf(rr.io.out.bits))
+
+  pipes.zip(uses).zipWithIndex.foreach {
+    case ((pipe, isMine), idx) => {
+      pipe.io.req.valid := io.req.valid && isMine
+      pipe.io.req.bits := io.req.bits
+      rr.io.in(idx) <> pipe.CVFPUIO.req
+      pipe.CVFPUIO.resp.bits  := CVFPUIO.resp.bits
+      pipe.CVFPUIO.resp.valid := CVFPUIO.resp.valid && cvFPURespIsMine
+      pipe.fCSRIO.regData := fCSR
+    }
+  }
+  io.req.ready := Mux1H(uses.zip(pipes.map(_.io.req.ready)))
+
   cvFPUReqBitsPatch := rr.io.out.bits
   cvFPUReqBitsPatch.tag := Cat(isDivSqrt.asBool, rr.io.out.bits.tag(cvFPUTagBits - 2, 0))
   CVFPUIO.req.valid := rr.io.out.valid
   CVFPUIO.req.bits := cvFPUReqBitsPatch
   rr.io.out.ready := CVFPUIO.req.ready
+  CVFPUIO.resp.ready := VecInit(pipes.map(_.CVFPUIO.resp.ready)).asUInt.orR && cvFPURespIsMine
 
-  FP32Pipe.CVFPUIO.resp.bits  := CVFPUIO.resp.bits
-  FP16Pipe.CVFPUIO.resp.bits  := CVFPUIO.resp.bits
-  FP32Pipe.CVFPUIO.resp.valid := CVFPUIO.resp.valid && cvFPURespIsMine
-  FP16Pipe.CVFPUIO.resp.valid := CVFPUIO.resp.valid && cvFPURespIsMine
-  CVFPUIO.resp.ready := (FP32Pipe.CVFPUIO.resp.ready || FP16Pipe.CVFPUIO.resp.ready) && cvFPURespIsMine
-
-  fCSR := MuxCase(fCSR, Seq(
-    fCSRIO.regWrite.valid -> fCSRIO.regWrite.bits,
-    FP16Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP16Pipe.fCSRIO.setFStatus.bits),
-    FP32Pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), FP32Pipe.fCSRIO.setFStatus.bits)
+  fCSR := MuxCase(fCSR, Seq(fCSRIO.regWrite.valid -> fCSRIO.regWrite.bits) ++
+  pipes.map(
+    pipe => pipe.fCSRIO.setFStatus.valid -> Cat(fCSR(archLen, fStatusBits), pipe.fCSRIO.setFStatus.bits)
   ))
   fCSRIO.regData := fCSR
-  FP16Pipe.fCSRIO.regData := fCSR
-  FP32Pipe.fCSRIO.regData := fCSR
 
   // if both ready, prioritize fp32
   FP32Pipe.io.resp.ready := io.resp.ready
   FP16Pipe.io.resp.ready := io.resp.ready && !FP32Pipe.io.resp.valid
-  io.resp.valid := FP32Pipe.io.resp.valid || FP16Pipe.io.resp.valid
+  io.resp.valid := VecInit(pipes.map(_.io.resp.valid)).asUInt.orR
   io.resp.bits := Mux(FP32Pipe.io.resp.valid, FP32Pipe.io.resp.bits, FP16Pipe.io.resp.bits)
 }
