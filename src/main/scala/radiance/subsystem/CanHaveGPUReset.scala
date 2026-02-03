@@ -88,21 +88,23 @@ class GPUResetAggregator(params: GPUResetParams, slaves: Seq[SoftResetFinishNode
       true.B
     }
 
-    val coreFinishes = VecInit(bundles.map(_.finished))
-    val allFinished = coreFinishes.reduceTree(_ && _)
-    regNode.regmap(
-      Seq(
-        0x00 -> Seq(RegField.w(32, softReset(_, _))),
-        0x08 -> Seq(RegField.r(32, allFinished))
-      ) ++
-      coreFinishes.zipWithIndex.map { case (finish, gcid) =>
-        0x10 + gcid * 0x04 -> Seq(RegField.r(32, finish))
-      }
-    : _*)
+    if (slaves.nonEmpty) {
+      val coreFinishes = VecInit(bundles.map(_.finished))
+      val allFinished = coreFinishes.reduceTree(_ && _)
+      regNode.regmap(
+        Seq(
+          0x00 -> Seq(RegField.w(32, softReset(_, _))),
+          0x08 -> Seq(RegField.r(32, allFinished))
+        ) ++
+        coreFinishes.zipWithIndex.map { case (finish, gcid) =>
+          0x10 + gcid * 0x04 -> Seq(RegField.r(32, finish))
+        }
+      : _*)
 
-    val (_, stopSim) = Counter(0 until 1024, allFinished, !allFinished)
-    when (stopSim) {
-      stop("no more active warps for 1k cycles\n")
+      val (_, stopSim) = Counter(0 until 1024, allFinished, !allFinished)
+      when (stopSim) {
+        stop("no more active warps for 1k cycles\n")
+      }
     }
 
   }
