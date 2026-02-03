@@ -184,26 +184,28 @@ throughput of 16 INT32 lanes when doing element-wise operations (1 OP/byte).
 | `0x0000_0000`  | `0x20000` | Shared memory cluster local     |
 | `0x0004_0000`  | `0x40000` | Requantized shared memory       |
 | `0x0008_0000`  |   `0x200` | Shared print and perf buffer    |
-| `0x0008_0200`  |   `0x100` | Core 0 L0d flush MMIO           |
-| `0x0008_0300`  |   `0x100` | Core 1 L0d flush MMIO           |
+| `0x0008_0200`  |   `0x100` | Core 0 L0i flush MMIO           |
+| `0x0008_0300`  |   `0x100` | Core 0 L0d flush MMIO           |
+| `0x0008_0400`  |   `0x100` | Core 1 L0i flush MMIO           |
+| `0x0008_0500`  |   `0x100` | Core 1 L0d flush MMIO           |
 | `0x0008_4000`  |   `0x100` | Gemmini MMIO                    |
 | `0x0008_8000`  |  `0x4000` | Gemmini scaling factor memory   |
 
 Gemmini MMIO has the following address map:
 
-| Address | Bits | Description       |
-|---------|------|-------------------|
-| `0x00`  |   32 | RoCC instruction  |
-| `0x10`  |   32 | RoCC RS1 LSB      |
-| `0x14`  |   32 | RoCC RS1 MSB      |
-| `0x18`  |   32 | RoCC RS2 LSB      |
-| `0x1c`  |   32 | RoCC RS2 MSB      |
-| `0x20`  |   32 | Busy              |
-| `0x28`  |   32 | Num running loops |
-| `0x30`  |   32 | CISC instruction  |
-| `0x40`  |   32 | LUT word 0        |
-| `0x44`  |   32 | LUT word 1        |
-| `0x48`  |   32 | LUT word 2 (RV)   |
+| Address | Bytes | Description       |
+|---------|-------|-------------------|
+| `0x00`  |     4 | RoCC instruction  |
+| `0x10`  |     4 | RoCC RS1 LSB      |
+| `0x14`  |     4 | RoCC RS1 MSB      |
+| `0x18`  |     4 | RoCC RS2 LSB      |
+| `0x1c`  |     4 | RoCC RS2 MSB      |
+| `0x20`  |     4 | Busy              |
+| `0x28`  |     4 | Num running loops |
+| `0x30`  |     4 | CISC instruction  |
+| `0x80`  |   384 | LUT table 0       |
+| `0x200` |   384 | LUT table 1       |
+| `0x380` |   384 | LUT table 2       |
 
 
 GPU to requantizer: fp16 in, fp8 out; addressing scheme: magnify by 2x.
@@ -227,12 +229,24 @@ Requantizer will only see data intended to be requantized and not passthroughed.
 |-----------------|---------------|---------------------------------|
 |   `0x4000_0000` | `0x100000`    | Cluster 0 SMEM (inc. Gemmini)   |
 |   `0x4010_0000` | `0x100000`    | Cluster 1 SMEM (inc. Gemmini)   |
+|   `0x4100_0000` | `0x100`       | GPU reset aggregator            |
 |   `0x6000_0000` | `0x10000`     | GPU device command processor    |
 |   `0x8000_0000` | `0x8000_0000` | CPU-only DRAM (2GB)             |
 | `0x1_0000_0000` | `0x8000_0000` | GPU DRAM (2GB), CPU addressable |
 
 GPU will live in the illusion that addresses start at 0; when its requests leave
 unified L1, it will be rewritten to append the 33rd bit before arriving at L2.
+
+Reset aggregator has the following address map:
+
+| Address | Bytes | Description               |
+|---------|-------|---------------------------|
+| `0x00`  |     4 | GPU reset                 |
+| `0x08`  |     4 | GPU all finished          |
+| `0x10`  |     4 | Cluster 0 core 0 finished |
+| `0x14`  |     4 | Cluster 0 core 1 finished |
+| `0x18`  |     4 | Cluster 1 core 0 finished |
+| `0x1c`  |     4 | Cluster 1 core 1 finished |
 
 <!--
 The Command Processor will need to have its own BootROM to act as failsafe when
