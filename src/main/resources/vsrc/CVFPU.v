@@ -5,8 +5,7 @@ module CVFPU
 #(
   parameter WIDTH = 512,
   parameter LANES = 16,
-  parameter TAG_WIDTH = 1,
-  parameter IS_DIVSQRT_UNIT = 0
+  parameter TAG_WIDTH = 1
 ) (
   input logic                               clock,
   input logic                               reset,
@@ -48,15 +47,9 @@ module CVFPU
       IntFmtMask:    4'b0110   // {int8, int16, int32, int64}
     }),
     .Implementation('{
-      PipeRegs:   '{default: 2},
-      UnitTypes:  IS_DIVSQRT_UNIT ?
-                  '{'{default: fpnew_pkg::DISABLED}, // ADDMUL
+      PipeRegs:   '{default: 1},
+      UnitTypes:  '{'{default: fpnew_pkg::PARALLEL}, // ADDMUL
                     '{default: fpnew_pkg::MERGED},   // DIVSQRT
-                    '{default: fpnew_pkg::DISABLED}, // NONCOMP
-                    '{default: fpnew_pkg::DISABLED}} // CONV
-                  :
-                  '{'{default: fpnew_pkg::MERGED},   // ADDMUL
-                    '{default: fpnew_pkg::DISABLED}, // DIVSQRT
                     '{default: fpnew_pkg::PARALLEL}, // NONCOMP
                     '{default: fpnew_pkg::MERGED}},  // CONV
       PipeConfig: fpnew_pkg::DISTRIBUTED
