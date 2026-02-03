@@ -34,7 +34,7 @@ class RadianceBaseConfig extends Config(
   new chipyard.config.WithControlBusFrequency(500.0) ++
   new chipyard.config.WithSystemBusFrequency(500.0) ++
   new chipyard.config.WithFrontBusFrequency(500.0) ++
-  new chipyard.config.WithOffchipBusFrequency(200.0) ++
+  new chipyard.config.WithOffchipBusFrequency(500.0) ++
   new chipyard.harness.WithHarnessBinderClockFreqMHz(500.0) ++
   new chipyard.config.AbstractConfig)
 
