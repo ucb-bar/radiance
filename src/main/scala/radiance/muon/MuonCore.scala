@@ -62,6 +62,9 @@ case class MuonCoreParams(
   val coreIdBits: Int = log2Ceil(numCores)
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
+  val numFP16Lanes = fpPipe.numFP32Lanes * 2
+  val cvFPUTagBits = 2 + numFP16Lanes + Isa.regBits // DIVSQRT? + FP32? + TMask + Rd
+
   def l0dReqTagBits: Int = {
     val coalVsNonCoal = 1
     val sizeTagBits = 3 // store the size in the cache tag

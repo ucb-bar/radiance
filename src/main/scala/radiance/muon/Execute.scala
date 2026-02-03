@@ -32,6 +32,21 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val lsuPipe = Module(new LSUPipe())
   val sfuPipe = Module(new SFUPipe())
 
+  val CVFPU = Module(new CVFPU(muonParams.numFP16Lanes, muonParams.cvFPUTagBits))
+  CVFPU.io.clock := clock
+  CVFPU.io.reset := reset
+  CVFPU.io.flush := false.B
+  val rr = Module(new RRArbiter(
+    new CVFPUReq(muonParams.numFP16Lanes, muonParams.cvFPUTagBits), 2))
+  CVFPU.io.req <> rr.io.out
+  rr.io.in(0) <> fpAddMulPipe.CVFPUIO.req
+  rr.io.in(1) <> fpDivSqrtPipe.CVFPUIO.req
+  fpAddMulPipe.CVFPUIO.resp.bits := CVFPU.io.resp.bits
+  fpDivSqrtPipe.CVFPUIO.resp.bits := CVFPU.io.resp.bits
+  fpAddMulPipe.CVFPUIO.resp.valid := CVFPU.io.resp.valid
+  fpDivSqrtPipe.CVFPUIO.resp.valid := CVFPU.io.resp.valid
+  CVFPU.io.resp.ready := fpAddMulPipe.CVFPUIO.resp.ready || fpDivSqrtPipe.CVFPUIO.resp.ready
+
   val inst = io.req.bits.uop.inst
 
   sfuPipe.csrIO.fcsr <> fpAddMulPipe.fCSRIO
