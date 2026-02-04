@@ -161,7 +161,7 @@ class GemminiTile private (
   // regNode := TLFragmenter(4, 4) := TLWidthWidget(8) := TLFragmenter(8, 8) := slaveNode
   regNode := tlSlaveXbar.node
 
-  val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
+  val scalingFacManager = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means
     // the scaling factor memory starts 0x8000 + shared mem size,
     // which is usually 0x28000 after cluster base address. this address is
@@ -184,9 +184,21 @@ class GemminiTile private (
       beatBytes = 8,
     )))
   }
-  scalingFacNode.foreach(_
+  scalingFacManager.foreach(_
     := TLWidthWidget(8)
     := tlSlaveXbar.node)
+
+  val scalingFacClient = gemminiParams.scalingFactorMem.map { sfm =>
+    TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v2(
+        name = "gemmini-scaling-fac-client",
+        sourceId = IdRange(0, 1 << 4), // TODO: magic number
+        emits = TLMasterToSlaveTransferSizes(
+          putFull = TransferSizes(sfm.bankWidthBytes, sfm.bankWidthBytes)
+        )
+      ))
+    )))
+  }
 
   val requantizerMuonManager = gemminiParams.requantizer.map { q =>
     val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
@@ -246,7 +258,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // scaling factor
-  outer.scalingFacNode.foreach { scalingFacNode =>
+  outer.scalingFacManager.foreach { scalingFacNode =>
     val conf = outer.gemminiParams.scalingFactorMem.get
     val (node, edge) = scalingFacNode.in.head
 
@@ -278,6 +290,23 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     outer.gemmini.module.mx_io.get.scale_mem_write_act <> scalingFacWriteReqs.last
   }
 
+  outer.scalingFacClient.foreach { scalingFacNode =>
+    val (node, edge) = scalingFacNode.out.head
+    val out = outer.gemmini.module.mx_io.get.scale_factor_out
+
+    node.a.bits := edge.Put(
+      fromSource = 0.U, // overridden
+      toAddress = out.bits.addr,
+      lgSize = log2Ceil(node.params.dataBits / 8).U,
+      data = out.bits.data,
+    )._2
+
+    val (sourceReady, _) = SourceGenerator(node)
+    out.ready := node.a.ready && sourceReady
+    node.a.valid := out.valid && sourceReady
+    node.d.ready := true.B
+  }
+
   // requantizer
   outer.gemminiParams.requantizer.foreach { q =>
     val in = Wire(Decoupled(new RequantizerInBundle(q.numGPUInputLanes, q.inputBits)))
@@ -303,22 +332,13 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
     { // output
       val (node, edge) = outer.requantizerSmemClient.get.out.head
-      node.a.valid := out.valid
-
-      // source
-      val sourceGen = Module(new SourceGenerator(q.outputIdBits))
-      sourceGen.io.reclaim.valid := node.d.fire
-      sourceGen.io.reclaim.bits := node.d.bits.source
-      sourceGen.io.gen := node.a.fire
-
-      out.ready := node.a.ready && sourceGen.io.id.valid
 
       // data
       val isFP4 = out.bits.dataType === RequantizerDataType.FP4
       val fullWidth = q.numOutputLanes
       val halfWidth = q.numOutputLanes / 2
       node.a.bits := edge.Put(
-        fromSource = sourceGen.io.id.bits,
+        fromSource = 0.U, // gets overridden
         toAddress = out.bits.address,
         lgSize = Mux(isFP4,
           log2Ceil(halfWidth).U, // half byte per lane
@@ -334,6 +354,11 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
         )
       )._2
 
+      // source
+      val (sourceReady, _) = SourceGenerator(node)
+      out.ready := node.a.ready && sourceReady
+      node.a.valid := out.valid && sourceReady
+      assert(out.fire === node.a.fire)
       node.d.ready := true.B
     }
 
