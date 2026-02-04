@@ -16,13 +16,11 @@ abstract class TrafficPattern {
   def apply(baseAddr: BigInt, time: Int, index: Int): ScalaTLA = {
     require(reqSize <= busSize)
     val addr = baseAddr + offset(time, index)
-    // Align address to request size (reqSize), not just busSize
-    val alignedAddr = (addr / reqSize) * reqSize
     new ScalaTLA(
-      address = alignedAddr,
+      address = (addr / busSize) * busSize,
       lgSize = lgSize,
       data = None,
-      mask = Some(((1 << reqSize) - 1) << (alignedAddr % busSize).intValue)
+      mask = Some(((1 << reqSize) - 1) << (addr % busSize).intValue)
     )
   }
 
@@ -33,11 +31,11 @@ abstract class TrafficPattern {
   def putSmem(clusterId: Int): (Int, Int) => ScalaTLA = {
     case (x, y) =>
       val getReq = getSmem(clusterId)(x, y)
-      getReq.copy(data = Some(getReq.address))
+      getReq.copy(data = Some(getReq.address)) 
   }
 
   def getDmem(clusterId: Int): (Int, Int) => ScalaTLA = {
-    this(0x100_0000 * clusterId, _, _)
+    this(0x100_0000 + 0x100_0000 * clusterId, _, _)
   }
 
   def putDmem(clusterId: Int): (Int, Int) => ScalaTLA = {
