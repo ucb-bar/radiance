@@ -48,7 +48,7 @@ module CVFPU
     }),
     .Implementation('{
       PipeRegs:   '{default: 1},
-      UnitTypes:  '{'{default: fpnew_pkg::PARALLEL}, // ADDMUL
+      UnitTypes:  '{'{default: fpnew_pkg::MERGED}, // ADDMUL
                     '{default: fpnew_pkg::MERGED},   // DIVSQRT
                     '{default: fpnew_pkg::PARALLEL}, // NONCOMP
                     '{default: fpnew_pkg::MERGED}},  // CONV
