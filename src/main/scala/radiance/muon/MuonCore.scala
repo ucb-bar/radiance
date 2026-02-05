@@ -275,6 +275,10 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasCoreParameters
 
+/** Data memory interface for the core.
+  * The interface is per-lane, with each lane being word-size-wide with its own
+  * tag and ready/valid.  The coalescer at downstream is responsible for merging
+  * them into wide reqs when possible. */
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Vec(
     muonParams.lsu.numLsuLanes,
@@ -286,6 +290,8 @@ class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   )
 }
 
+/** Shared memory interface for the core.
+  * Per-lane similar to DataMemIO. */
 class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Vec(
     muonParams.lsu.numLsuLanes,
@@ -297,6 +303,9 @@ class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   )
 }
 
+/** Instruction memory interface for the core.
+  * The interface is a single, instruction-length-wide lane, serving all lanes
+  * in the backend via SIMD. */
 class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreParameters {
   val req = Decoupled(new MemRequest(
     tagBits = imemTagBits,
@@ -314,7 +323,7 @@ class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 /** Trace IO to software testbench that logs PC and register read data at
- *  issue time. */
+  * issue time. */
 class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = pcT
   val warpId = widT
