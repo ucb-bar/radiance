@@ -62,6 +62,9 @@ case class MuonCoreParams(
   val coreIdBits: Int = log2Ceil(numCores)
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
+  val numFP16Lanes = fpPipe.numFP32Lanes * 2
+  val cvFPUTagBits = 2 + numFP16Lanes + Isa.regBits // DIVSQRT? + FP32? + TMask + Rd
+
   def l0dReqTagBits: Int = {
     val coalVsNonCoal = 1
     val sizeTagBits = 3 // store the size in the cache tag
@@ -150,6 +153,7 @@ trait HasCoreParameters {
   def ibufIdxT = UInt(log2Ceil(m.ibufDepth + 1).W)
 
   def ipdomStackEntryT = new Bundle {
+    val divergent = Bool()
     val restoredMask = tmaskT
     val elseMask = tmaskT
     val elsePC = pcT
@@ -271,6 +275,10 @@ abstract class CoreModule(implicit val p: Parameters) extends Module
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasCoreParameters
 
+/** Data memory interface for the core.
+  * The interface is per-lane, with each lane being word-size-wide with its own
+  * tag and ready/valid.  The coalescer at downstream is responsible for merging
+  * them into wide reqs when possible. */
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Vec(
     muonParams.lsu.numLsuLanes,
@@ -282,6 +290,8 @@ class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   )
 }
 
+/** Shared memory interface for the core.
+  * Per-lane similar to DataMemIO. */
 class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Vec(
     muonParams.lsu.numLsuLanes,
@@ -293,6 +303,9 @@ class SharedMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   )
 }
 
+/** Instruction memory interface for the core.
+  * The interface is a single, instruction-length-wide lane, serving all lanes
+  * in the backend via SIMD. */
 class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreParameters {
   val req = Decoupled(new MemRequest(
     tagBits = imemTagBits,
@@ -310,7 +323,7 @@ class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 /** Trace IO to software testbench that logs PC and register read data at
- *  issue time. */
+  * issue time. */
 class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = pcT
   val warpId = widT

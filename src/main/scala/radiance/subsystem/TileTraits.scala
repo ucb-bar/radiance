@@ -20,5 +20,7 @@ trait GemminiTileLike {
   val gemmini: Gemmini[gemminiParams.T, gemminiParams.U, gemminiParams.V]
   val requantizerMuonManager: Option[TLManagerNode]
   val requantizerSmemClient: Option[TLClientNode]
+  val scalingFacManager: Option[TLManagerNode]
+  val scalingFacClient: Option[TLClientNode]
   val slaveNode: TLNode
 }

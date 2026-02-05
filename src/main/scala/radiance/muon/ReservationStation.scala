@@ -458,7 +458,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       when (valid) {
         val uop = instTable(i).uop
         debugf(cf"${i} | warp:${uop.wid} | pc:0x${uop.pc}%x | " +
-               cf"regs: [rd:${uop.inst.rd} rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
+               cf"[rd:${uop.inst.rd} rs1:${uop.inst.rs1} rs2:${uop.inst.rs2} rs3:${uop.inst.rs3}] | " +
                cf"hasOp:${hasOpTable(i)(0)}${hasOpTable(i)(1)}${hasOpTable(i)(2)} | " +
                cf"opReady:${opReadyTable(i)(0)}${opReadyTable(i)(1)}${opReadyTable(i)(2)} | " +
                cf"busy:${busyTable(i)(0)}${busyTable(i)(1)}${busyTable(i)(2)} | " +

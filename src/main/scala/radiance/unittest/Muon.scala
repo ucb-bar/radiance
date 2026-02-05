@@ -1042,6 +1042,88 @@ with HasBlackBoxResource with HasCoreParameters {
   addResource("/csrc/Cyclotron.cc")
 }
 
+class CyclotronTile(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val imem = new InstMemIO
+    val dmem = new DataMemIO
+    val finished = Output(Bool())
+  })
+
+  val bbox = Module(new CyclotronTileBlackBox)
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  import Cyclotron._
+
+  // imem
+  io.imem.req.ready := bbox.io.imem_req_ready
+  bbox.io.imem_req_valid := io.imem.req.valid
+  bbox.io.imem_req_bits_address := io.imem.req.bits.address
+  bbox.io.imem_req_bits_tag := io.imem.req.bits.tag
+  bbox.io.imem_resp_ready := io.imem.resp.ready
+  io.imem.resp.valid := bbox.io.imem_resp_valid
+  io.imem.resp.bits.tag := bbox.io.imem_resp_bits_tag
+  io.imem.resp.bits.data := bbox.io.imem_resp_bits_data
+  io.imem.resp.bits.metadata := DontCare
+
+  // dmem
+  // TODO: dedup with CyclotronDataMem?
+  bbox.io.dmem_req_valid := VecInit(io.dmem.req.map(_.valid)).asUInt
+  bbox.io.dmem_req_bits_store := VecInit(io.dmem.req.map(_.bits.store)).asUInt
+  bbox.io.dmem_req_bits_tag := VecInit(io.dmem.req.map(_.bits.tag)).asUInt
+  bbox.io.dmem_req_bits_address := VecInit(io.dmem.req.map(_.bits.address)).asUInt
+  bbox.io.dmem_req_bits_size := VecInit(io.dmem.req.map(_.bits.size)).asUInt
+  bbox.io.dmem_req_bits_data := VecInit(io.dmem.req.map(_.bits.data)).asUInt
+  bbox.io.dmem_req_bits_mask := VecInit(io.dmem.req.map(_.bits.mask)).asUInt
+  bbox.io.dmem_resp_ready := VecInit(io.dmem.resp.map(_.ready)).asUInt
+  io.dmem.req.zipWithIndex.foreach { case (req, i) =>
+    req.ready := bbox.io.dmem_req_ready(i)
+  }
+  io.dmem.resp.zipWithIndex.foreach { case (resp, i) =>
+    resp.valid := bbox.io.dmem_resp_valid(i)
+    unflatten(resp.bits.tag, bbox.io.dmem_resp_bits_tag, i)
+    unflatten(resp.bits.data, bbox.io.dmem_resp_bits_data, i)
+    resp.bits.metadata := DontCare
+  }
+
+  io.finished := bbox.io.finished
+}
+
+class CyclotronTileBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+with HasBlackBoxResource with HasCoreParameters {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+    val imem_req_valid = Output(Bool())
+    val imem_req_ready = Input(Bool())
+    val imem_req_bits_address = Output(UInt(addressBits.W))
+    val imem_req_bits_tag = Output(UInt(imemTagBits.W))
+    val imem_resp_ready = Output(Bool())
+    val imem_resp_valid = Input(Bool())
+    val imem_resp_bits_tag = Input(UInt(imemTagBits.W))
+    val imem_resp_bits_data = Input(UInt(imemDataBits.W))
+
+    val dmem_req_valid = Output(UInt(numLanes.W))
+    val dmem_req_ready = Input(UInt(numLanes.W))
+    val dmem_req_bits_store = Output(UInt(numLanes.W))
+    val dmem_req_bits_tag = Output(UInt((numLanes * dmemTagBits).W))
+    val dmem_req_bits_address = Output(UInt((numLanes * addressBits).W))
+    val dmem_req_bits_size = Output(UInt((numLanes * (new DataMemIO).req.head.bits.size.getWidth).W))
+    val dmem_req_bits_data = Output(UInt((numLanes * dmemDataBits).W))
+    val dmem_req_bits_mask = Output(UInt((numLanes * (dmemDataBits / 8)).W))
+    val dmem_resp_ready = Output(UInt(numLanes.W))
+    val dmem_resp_valid = Input(UInt(numLanes.W))
+    val dmem_resp_bits_tag = Input(UInt((numLanes * dmemTagBits).W))
+    val dmem_resp_bits_data = Input(UInt((numLanes * dmemDataBits).W))
+
+    val finished = Output(Bool())
+  })
+
+  addResource("/vsrc/CyclotronTile.v")
+  addResource("/vsrc/Cyclotron.vh")
+  addResource("/csrc/Cyclotron.cc")
+}
+
 class CyclotronInstMem(implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val imem = Flipped(new InstMemIO)

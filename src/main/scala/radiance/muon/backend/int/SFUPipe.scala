@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
-import radiance.memory.BoolArrayUtils.BoolSeqUtils
 import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
@@ -125,19 +124,17 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   }
 
   when (inst.b(IsSplit)) {
-    // vortex specifies rs2 addr = 1, but this might get renamed.
-    // however, this logic still holds because x0 always gets renamed to 0;
-    // furthermore, x0 also does not have a wid prefix.
+    // Rs2 of split is guaranteed to be not-renamed
     val invert = inst(Rs2) =/= 0.U
 
     val thenMask = uop.tmask & rs1Mask
     val elseMask = uop.tmask & (~rs1Mask).asUInt
     val divergent = thenMask.orR && elseMask.orR
 
+    writeback.bits.ipdomPush.bits.divergent := divergent
     writeback.bits.ipdomPush.bits.restoredMask := uop.tmask
     writeback.bits.ipdomPush.bits.elseMask := Mux(invert, thenMask, elseMask)
     writeback.bits.ipdomPush.bits.elsePC := uop.pc + 8.U
-    // this signals to scheduler if branch is non-divergent
     writeback.bits.setTmask.valid := divergent
     writeback.bits.setTmask.bits := Mux(invert, elseMask, thenMask)
   }

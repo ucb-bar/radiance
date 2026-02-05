@@ -14,6 +14,7 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
+import radiance.memory.BoolArrayUtils.BoolSeqUtils
 import radiance.memory._
 import radiance.muon.{BarrierJunction, MuonTile, Synchronizer}
 import radiance.subsystem._
@@ -157,11 +158,14 @@ class RadianceCluster (
   l1cache.inNode := TLFIFOFixer() := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
 
-  val softResetFinishMasters = muonTiles.map { m =>
+  // connect any scaling factor clients to l1
+  gemminiTiles.flatMap(_.scalingFacClient).foreach(l1InXbar := _)
+
+  val softResetFinishMasters = p(GPUResetKey).fold(muonTiles.map { m =>
     val master = SoftResetFinishNode.Master()
     m.softResetFinishSlave := master
     master
-  }
+  })(_ => Seq())
 
   override lazy val module = new RadianceClusterModuleImp(this)
 }
@@ -172,14 +176,15 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   println(s"======= RadianceCluster: csbus outward edges = ${outer.csbus.outwardNode.outward.outputs.length}")
   println(s"======= RadianceCluster: csbus name = ${outer.csbus.busName}")
 
-  // TODO: do we want to aggregate across all clusters
-  val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).asUInt.andR
-  val (_, stopSim) = Counter(0 until 8192, finished, !finished)
-  when (stopSim) {
-    stop("no more active warps for 8k cycles\n")
-  }
+  if (outer.softResetFinishMasters.nonEmpty) {
+    val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).andR
+    val (_, stopSim) = Counter(0 until 8192, finished, !finished)
+    when (stopSim) {
+      stop("no more active warps for 8k cycles\n")
+    }
 
-  outer.softResetFinishMasters.foreach(_.out.head._1.softReset := false.B) // TODO: MMIO
+    outer.softResetFinishMasters.foreach(_.out.head._1.softReset := false.B)
+  }
 
 //  dontTouch(outer.l1cache.module.cacheIO)
 

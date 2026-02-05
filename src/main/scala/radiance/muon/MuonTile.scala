@@ -363,9 +363,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   outer.reportCease(None)
   outer.reportWFI(None)
 
-  if (outer.muonParams.disabled) {
+  when (outer.muonParams.disabled.B || muon.io.softReset) {
     muon.io.imem.req.ready := false.B
-    muon.io.imem.resp.valid := false.B
+    muon.io.imem.resp.valid := false.B // responses will be dropped
+    outer.icacheWordNode.out.foreach(_._1.a.valid := false.B)
   }
 
   val isSim = p(RadianceSimArgs)

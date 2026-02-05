@@ -3,7 +3,6 @@ package radiance.muon
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
-import freechips.rocketchip.util.UIntIsOneOf
 import org.chipsalliance.cde.config.Parameters
 
 class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
@@ -280,7 +279,9 @@ class WarpScheduler(implicit p: Parameters)
               threadMasks(wid) := fullThreadMask
             }
             when ((io.commit.bits.wid === wid.U) || (!pcTracker(wid).valid)) {
-              // set pc if warp is 1. initiator of wspawn or 2. disabled
+              // set pc if warp is
+              // (1) initiator of wspawn or
+              // (2) was not already active before
               pcTracker(wid).bits := wspawn.bits.pc
               pcTracker(wid).valid := true.B
               // spawning(wid) := true.B
@@ -294,13 +295,33 @@ class WarpScheduler(implicit p: Parameters)
 
   // soft reset procedure
   when (io.softReset) {
-    // TODO
     // reset pc
-    // enable one warp only
+    io.cmdProc match {
+      case Some(_) => require(false)
+      case None =>
+        pcTracker.zipWithIndex.foreach { case (pc, wid) =>
+          pc.valid := (wid == 0).B
+          pc.bits := m.startAddress.U
+        }
+    }
+
     // reset thread masks
-    // clear discards and stalls
-    // clear ipdom stacks
-    // clear all registers (e.g. joins)
+    threadMasks.zipWithIndex.foreach { case (tmask, wid) =>
+      tmask := (if (wid == 0) {
+        -1.S(tmaskT.getWidth.W).asUInt
+      } else {
+        0.U.asTypeOf(tmaskT)
+      })
+    }
+
+    // clear discards and in flights
+    icacheInFlights := 0.U.asTypeOf(icacheInFlights)
+    icacheInFlightsReg := 0.U.asTypeOf(icacheInFlights)
+    discardValid := 0.U.asTypeOf(discardValid)
+
+    // reset stall tracker and ipdom stack
+    stallTracker.reset()
+    ipdomStack.reset()
   }
 
   // misc
@@ -352,6 +373,10 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
       RegNext(outer.icacheInFlights(wid))) +& 1.U < m.ibufDepth.U
     stalls(wid).stallReason.asUInt.orR || (!ibufReady)
   }
+
+  def reset() = {
+    stalls := 0.U.asTypeOf(stalls)
+  }
 }
 
 object Predecoder {
@@ -389,7 +414,6 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
       mask.bits := Mux(j0, ports(wid).readData.elseMask, ports(wid).readData.restoredMask)
     }
 
-
   (ports lazyZip rptr lazyZip wptr).foreach { case (p, ra, wa) =>
     p.enable := false.B
     p.isWrite := false.B
@@ -402,7 +426,7 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
     ports(wid).isWrite := true.B
     val entry = ent.asTypeOf(outer.ipdomStackEntryT)
     ports(wid).writeData := entry
-    branchTaken(wid)(wptr(wid)) := (entry.elseMask === 0.U) // non-divergent branch
+    branchTaken(wid)(wptr(wid)) := !entry.divergent
     pushing(wid) := true.B
     assert(wptr(wid) < m.numIPDOMEntries.U, "ipdom stack is full")
     wptr(wid) := wptr(wid) + 1.U
@@ -425,5 +449,10 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
       wptr(wid) := wptr(wid) - 1.U
       joiningEnd(wid) := true.B
     }
+  }
+
+  def reset() = {
+    branchTaken := 0.U.asTypeOf(branchTaken)
+    wptr := 0.U.asTypeOf(wptr)
   }
 }

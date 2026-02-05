@@ -171,6 +171,55 @@ void cyclotron_frontend(
     );
 }
 
+void cyclotron_tile_tick_rs();
+
+void cyclotron_tile_tick(
+    uint8_t*  imem_req_valid_ptr,
+    uint8_t   imem_req_ready,
+    uint32_t* imem_req_bits_address_ptr,
+    uint64_t* imem_req_bits_tag_ptr,
+    uint8_t*  imem_resp_ready_ptr,
+    uint8_t   imem_resp_valid,
+    uint64_t  imem_resp_bits_tag,
+    uint64_t  imem_resp_bits_data,
+    uint8_t*  dmem_req_valid_vec,
+    const uint8_t* dmem_req_ready_vec,
+    uint8_t*  dmem_req_bits_store_vec,
+    uint32_t* dmem_req_bits_address_vec,
+    uint8_t*  dmem_req_bits_size_vec,
+    uint32_t* dmem_req_bits_tag_vec,
+    uint32_t* dmem_req_bits_data_vec,
+    uint8_t*  dmem_req_bits_mask_vec,
+    uint8_t*  dmem_resp_ready_vec,
+    const uint8_t* dmem_resp_valid_vec,
+    const uint32_t* dmem_resp_bits_tag_vec,
+    const uint32_t* dmem_resp_bits_data_vec,
+    uint8_t*  finished_ptr
+) {
+    (void)imem_req_valid_ptr;
+    (void)imem_req_ready;
+    (void)imem_req_bits_address_ptr;
+    (void)imem_req_bits_tag_ptr;
+    (void)imem_resp_ready_ptr;
+    (void)imem_resp_valid;
+    (void)imem_resp_bits_tag;
+    (void)imem_resp_bits_data;
+    (void)dmem_req_valid_vec;
+    (void)dmem_req_ready_vec;
+    (void)dmem_req_bits_store_vec;
+    (void)dmem_req_bits_address_vec;
+    (void)dmem_req_bits_size_vec;
+    (void)dmem_req_bits_tag_vec;
+    (void)dmem_req_bits_data_vec;
+    (void)dmem_req_bits_mask_vec;
+    (void)dmem_resp_ready_vec;
+    (void)dmem_resp_valid_vec;
+    (void)dmem_resp_bits_tag_vec;
+    (void)dmem_resp_bits_data_vec;
+    (void)finished_ptr;
+    cyclotron_tile_tick_rs();
+}
+
 void cyclotron_backend_rs(
     uint8_t issue_valid,
     uint8_t issue_warp_id,

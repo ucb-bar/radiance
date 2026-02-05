@@ -28,12 +28,28 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val aluPipe = Module(new ALUPipe())
   val fpAddMulPipe = Module(new FPPipe(isDivSqrt = false))
   val fpDivSqrtPipe = Module(new FPPipe(isDivSqrt = true))
+  val fpPipes = Seq(fpAddMulPipe, fpDivSqrtPipe)
   val mulDivPipe = Module(new MulDivPipe())
   val lsuPipe = Module(new LSUPipe())
   val sfuPipe = Module(new SFUPipe())
+  val CVFPU = Module(new CVFPU(muonParams.numFP16Lanes, muonParams.cvFPUTagBits))
+  val rr = Module(new RRArbiter(
+    new CVFPUReq(muonParams.numFP16Lanes, muonParams.cvFPUTagBits), 2))
+
+  CVFPU.io.clock := clock
+  CVFPU.io.reset := reset
+  CVFPU.io.flush := false.B
+  CVFPU.io.req <> rr.io.out
+  fpPipes.zipWithIndex.foreach {
+    case (pipe, idx) => {
+      rr.io.in(idx) <> pipe.CVFPUIO.req
+      pipe.CVFPUIO.resp.bits := CVFPU.io.resp.bits
+      pipe.CVFPUIO.resp.valid := CVFPU.io.resp.valid
+    }
+  }
+  CVFPU.io.resp.ready := VecInit(fpPipes.map{_.CVFPUIO.resp.ready}).asUInt.orR
 
   val inst = io.req.bits.uop.inst
-
   sfuPipe.csrIO.fcsr <> fpAddMulPipe.fCSRIO
   // TODO: connect
   fpDivSqrtPipe.fCSRIO.regWrite.valid := false.B
@@ -49,13 +65,13 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   lsuPipe.reserveIO <> io.lsuReserve
   lsuPipe.tokenIO := io.token
 
-  val pipes = Seq(aluPipe, fpAddMulPipe, fpDivSqrtPipe, mulDivPipe, lsuPipe, sfuPipe)
+  val pipes = Seq(aluPipe, mulDivPipe, lsuPipe, sfuPipe) ++ fpPipes
   val uses = Seq(inst.b(UseALUPipe),
-                 inst.b(UseFPPipe) && !inst.b(IsFPDivSqrt),
-                 inst.b(UseFPPipe) && inst.b(IsFPDivSqrt),
                  inst.b(UseMulDivPipe),
                  inst.b(UseLSUPipe),
-                 inst.b(UseSFUPipe))
+                 inst.b(UseSFUPipe)) ++
+             Seq(inst.b(UseFPPipe) && !inst.b(IsFPDivSqrt),
+                 inst.b(UseFPPipe) && inst.b(IsFPDivSqrt))
   
   assert(!io.req.valid || uses.map(_.asUInt).reduce(_ +& _) === 1.U,
     cf"pipeline selection should be one hot, but got ${VecInit(uses).asUInt}%b")

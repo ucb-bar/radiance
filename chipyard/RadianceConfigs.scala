@@ -25,6 +25,7 @@ class RadianceBaseConfig extends Config(
   new freechips.rocketchip.subsystem.WithNMemoryChannels(1) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(64) ++
 
+  new WithGPUResetAggregator() ++
   new WithRadianceControlBus ++
   new WithNoMbusScratchpad ++
 
@@ -160,6 +161,7 @@ class RadianceTapeoutSimConfig extends Config(
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
   new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 
