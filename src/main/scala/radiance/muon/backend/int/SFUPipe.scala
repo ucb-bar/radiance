@@ -140,6 +140,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   }
 
   when (inst.b(IsPred)) {
+    // Rd of pred is guaranteed to be not-renamed
     val invert = inst(Rd) =/= 0.U
     val newTmask = uop.tmask & Mux(invert, (~rs1Mask).asUInt, rs1Mask)
     // vortex logic: if resultant mask is 0, set to first lane's rs2

@@ -336,8 +336,9 @@ object Decoder {
           MuOpcode.MISC_MEM,
         ).contains(op))
       case HasRd =>
-        // we don't use `rd` for vx_split
-        Some(!sd(IsBType) && !sd(IsSType) && !sd(IsSplit))
+        // we don't write to rd for vx_split
+        // rd is an immediate value for vx_pred, similar to rs2 for vx_split
+        Some(!sd(IsBType) && !sd(IsSType) && !sd(IsSplit) && !sd(IsPred))
       case HasRs1 =>
         Some(!sd(IsUJType))
       case HasRs2 =>
