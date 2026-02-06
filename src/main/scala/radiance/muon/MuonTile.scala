@@ -15,7 +15,7 @@ import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.{CacheFlushNode, SoftResetFinishNode}
 import radiance.memory._
 import radiance.subsystem._
-import radiance.unittest.{CyclotronDiffTest, Profiler}
+import radiance.unittest.{CyclotronTile, CyclotronDiffTest, Profiler}
 
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
@@ -26,6 +26,7 @@ case class MuonTileParams(
   icacheUsingD: Option[DCacheParams] = None,
   dcache: Option[DCacheParams] = None,
   peripheralAddr: BigInt = 0,
+  cyclotron: Boolean = false,
   disabled: Boolean = false,
   btb: Option[BTBParams] = None,
   beuAddr: Option[BigInt] = None,
@@ -327,8 +328,11 @@ class MuonTile(
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
-//  val muon = Module(new Muon()(newP))
-  override lazy val module = new MuonTileModuleImp(this)
+  override lazy val module = if (muonParams.cyclotron) {
+    new CyclotronTileModuleImp(this)
+  } else {
+    new MuonTileModuleImp(this)
+  }
 
   override def makeMasterBoundaryBuffers(
       crossing: ClockCrossingType
@@ -357,13 +361,14 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.coreId := outer.muonParams.coreId.U
   muon.io.clusterId := outer.muonParams.clusterId.U
 
-  muon.io.softReset := outer.softResetFinishSlave.in.head._1.softReset
+  val softReset = outer.softResetFinishSlave.in.head._1.softReset
+  muon.io.softReset := softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
   outer.reportCease(None)
   outer.reportWFI(None)
 
-  when (outer.muonParams.disabled.B || muon.io.softReset) {
+  when (outer.muonParams.disabled.B || softReset) {
     muon.io.imem.req.ready := false.B
     muon.io.imem.resp.valid := false.B // responses will be dropped
     outer.icacheWordNode.out.foreach(_._1.a.valid := false.B)
@@ -384,4 +389,43 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
     val cdiff = Module(new CyclotronDiffTest(tick = true))
     cdiff.io.trace <> muon.io.trace.get
   }
+}
+
+class CyclotronTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
+  val cyclotron = Module(new CyclotronTile)
+
+  MuonMemTL.connectTL(cyclotron.io.imem.req, cyclotron.io.imem.resp, outer.icacheWordNode)
+
+  MuonMemTL.multiConnectTL(cyclotron.io.dmem.req, cyclotron.io.dmem.resp, outer.innerLsuNodes)
+  // TODO: smem
+  // MuonMemTL.multiConnectTL(cyclotron.io.smem.req, cyclotron.io.smem.resp, outer.innerSmemNodes)
+
+  // TODO: barrier
+  // val (barrier, _) = outer.barrierMaster.out.head
+  // barrier.req <> cyclotron.io.barrier.req
+  // barrier.resp <> cyclotron.io.barrier.resp
+
+  // TODO: flush
+  // outer.iFlushMaster.out.head._1 <> cyclotron.io.flush.i
+  // outer.dFlushMaster.out.head._1 <> cyclotron.io.flush.d
+
+  // TODO: core/clusterId
+  // cyclotron.io.coreId := outer.cyclotronParams.coreId.U
+  // cyclotron.io.clusterId := outer.cyclotronParams.clusterId.U
+
+  // TODO: softReset
+  val softReset = outer.softResetFinishSlave.in.head._1.softReset
+  // cyclotron.io.softReset := softReset
+  outer.softResetFinishSlave.in.head._1.finished := cyclotron.io.finished
+
+  outer.reportCease(None)
+  outer.reportWFI(None)
+
+  when (outer.muonParams.disabled.B /* TODO: || softReset */) {
+    cyclotron.io.imem.req.ready := false.B
+    cyclotron.io.imem.resp.valid := false.B // responses will be dropped
+    outer.icacheWordNode.out.foreach(_._1.a.valid := false.B)
+  }
+
+  // TODO: perf
 }
