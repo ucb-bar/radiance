@@ -368,7 +368,9 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map { c =>
-    val lut = Seq.fill(c.numTables)(Wire(Decoupled(new QuantLutWriteBundle(c))))
+    val lut = Seq.tabulate(c.numTables) { i =>
+      Wire(Decoupled(new QuantLutWriteBundle(c(i))))
+    }
     val mxIO = outer.gemmini.module.mx_io.get
     (lut zip Seq(mxIO.lut0, mxIO.lut1, mxIO.lut2)).foreach { case (a, b) => a <> b }
     lut
@@ -439,19 +441,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val gemminiLutMMIO = lutIO.map { luts =>
     val config = outer.gemminiParams.lookupTable.get
     require(luts.length == config.numTables)
-    require(luts.head.bits.data.head.getWidth == config.numBits)
-    require(config.numBits % 32 == 0)
 
     val tableBase = 0x80
-    val tableOffset = 0x180
-    val wordsPerEntry = config.numBits / 32
+    val tableSizes = (config.numEntries zip config.numBits).map(x => x._1 * x._2)
+    val tableOffsets = tableSizes.scanLeft(tableBase)(_ + _)
 
-    require(tableOffset >= (config.numEntries * config.numBits) / 8)
-
-    val flops = RegInit(
-      VecInit.fill(config.numTables)(
-      VecInit.fill(config.numEntries)(
-      VecInit.fill(wordsPerEntry)(0.U(32.W)))))
+    val flops = RegInit(MixedVecInit(
+      (config.numEntries zip config.numBits).map { case (numEntries, numBits) =>
+        assert(numBits % 32 == 0)
+        VecInit.fill(numEntries)(VecInit.fill(numBits / 32)(0.U(32.W)))
+      }
+    ))
 
     val maps = luts.zipWithIndex.flatMap { case (io, i) =>
       io.valid := false.B
@@ -471,10 +471,11 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
         lut
       }
 
-      Seq.tabulate(config.numEntries) { j =>
+      Seq.tabulate(config.numEntries(i)) { j =>
+        val wordsPerEntry = config.numBits(j) / 32
         Seq.tabulate(wordsPerEntry) { k =>
-          val addr = tableBase + tableOffset * i + (config.numBits / 32 * j + k) * 4
-          val trigger = (j + 1 == config.numEntries) && (k + 1 == wordsPerEntry) // trigger per table
+          val addr = tableOffsets(i) + (wordsPerEntry * j + k) * 4
+          val trigger = (j + 1 == config.numEntries(i)) && (k + 1 == wordsPerEntry) // trigger per table
 
           addr -> Seq(RegField.w(32, lutRegFunc(flops(i)(j)(k), trigger)))
         }
