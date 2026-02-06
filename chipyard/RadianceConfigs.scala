@@ -148,6 +148,7 @@ class RadianceMuonConfig extends Config(
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 
@@ -156,6 +157,7 @@ class RadianceCyclotronConfig extends Config(
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 
