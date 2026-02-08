@@ -367,6 +367,7 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
     muon.io.imem.req.ready := false.B
     muon.io.imem.resp.valid := false.B // responses will be dropped
     outer.icacheWordNode.out.foreach(_._1.a.valid := false.B)
+    outer.icacheWordNode.out.foreach(_._1.a.ready := true.B) // drain downstream
   }
 
   val isSim = p(RadianceSimArgs)

@@ -19,7 +19,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       val regWrite = Valid(csrDataT)
     }
   })
-  val fenceIO = IO(lsuFenceIO)
+  val fenceIO = IO(Flipped(lsuFenceIO))
   val flushIO = IO(cacheFlushIO)
   val barIO = IO(barrierIO)
   // to fix scala lsp issues
@@ -261,7 +261,8 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   (fences zip Seq(flushIO.i, flushIO.d)).foreach { case (fence, flush) =>
     // start a flush when lsu is clear, and we havent sent out the request yet
-    flush.start := fence.inProgress.valid && !fence.reqSent && (fenceIO.gmemOutstanding === 0.U)
+    // for now: fence fences both dmem and smem. we should have separate fences though TODO
+    flush.start := fence.inProgress.valid && !fence.reqSent && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
     when (flush.start) {
       fence.reqSent := true.B
     }

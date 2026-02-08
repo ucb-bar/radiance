@@ -472,7 +472,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       }
 
       Seq.tabulate(config.numEntries(i)) { j =>
-        val wordsPerEntry = config.numBits(j) / 32
+        val wordsPerEntry = config.numBits(i) / 32
         Seq.tabulate(wordsPerEntry) { k =>
           val addr = tableOffsets(i) + (wordsPerEntry * j + k) * 4
           val trigger = (j + 1 == config.numEntries(i)) && (k + 1 == wordsPerEntry) // trigger per table

@@ -57,9 +57,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.idIO := io.id
   sfuPipe.barIO <> io.barrier
   sfuPipe.flushIO <> io.flush
-  // TODO: LSU needs to provide these
-  sfuPipe.fenceIO.gmemOutstanding := 0.U
-  sfuPipe.fenceIO.smemOutstanding := 0.U
+  sfuPipe.fenceIO := lsuPipe.flushIO
 
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve

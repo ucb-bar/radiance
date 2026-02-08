@@ -246,9 +246,9 @@ trait HasCoreParameters {
 
   def csrDataT = UInt(32.W)
 
-  def lsuFenceIO = Input(new Bundle {
-    val smemOutstanding = UInt((m.logSMEMInFlights + log2Ceil(m.numLanes)).W)
-    val gmemOutstanding = UInt((m.logGMEMInFlights + log2Ceil(m.numLanes)).W)
+  def lsuFenceIO = Output(new Bundle {
+    val globalQueuesEmpty = Bool()
+    val sharedQueuesEmpty = Bool()
   })
 
   def cacheFlushIO = new Bundle {
@@ -368,6 +368,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset
+  be.reset := reset.asBool || io.softReset
   be.io.trace.foreach(_ <> io.trace.get)
   io.perf.backend <> be.io.perf
 

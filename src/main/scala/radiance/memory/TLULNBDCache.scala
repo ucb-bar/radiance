@@ -8,6 +8,7 @@ import freechips.rocketchip.rocket.{NonBlockingDCache, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
 import radiance.subsystem.GPUMemory
 
@@ -103,7 +104,9 @@ class TLULNBDCache(params: TLNBDCacheParams)
   val c2ulNode = LazyModule(new TLCToTLULNode(beatBytes)).node
   val outNode = TLIdentityNode()
 
-  outNode :=* c2ulNode :=* tlcOutNode
+  DisableMonitors { implicit p =>
+    outNode :=* c2ulNode :=* tlcOutNode
+  }
 
   override lazy val module = new TLULNBDCacheModule(this)
 }

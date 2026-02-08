@@ -289,7 +289,7 @@ class WarpScheduler(implicit p: Parameters)
             }
           }
         }
-      }
+     }
   }
 
 
@@ -300,7 +300,7 @@ class WarpScheduler(implicit p: Parameters)
       case Some(_) => require(false)
       case None =>
         pcTracker.zipWithIndex.foreach { case (pc, wid) =>
-          pc.valid := (wid == 0).B
+          pc.valid := false.B
           pc.bits := m.startAddress.U
         }
     }
@@ -322,6 +322,17 @@ class WarpScheduler(implicit p: Parameters)
     // reset stall tracker and ipdom stack
     stallTracker.reset()
     ipdomStack.reset()
+  }
+
+  // coming out of reset: pc valid again
+  when (!io.softReset && RegNext(io.softReset)) {
+    io.cmdProc match {
+      case Some(_) => require(false)
+      case None =>
+        pcTracker.zipWithIndex.foreach { case (pc, wid) =>
+          pc.valid := (wid == 0).B
+        }
+    }
   }
 
   // misc

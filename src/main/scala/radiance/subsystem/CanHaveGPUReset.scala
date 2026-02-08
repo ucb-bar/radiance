@@ -101,7 +101,8 @@ class GPUResetAggregator(params: GPUResetParams, slaves: Seq[SoftResetFinishNode
         }
       : _*)
 
-      val (_, stopSim) = Counter(0 until 1024, allFinished, !allFinished)
+      val haltTrigger = allFinished && !coreResets.head
+      val (_, stopSim) = Counter(0 until 1024, haltTrigger, !haltTrigger)
       when (stopSim) {
         stop("no more active warps for 1k cycles\n")
       }
