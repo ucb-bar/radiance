@@ -926,7 +926,7 @@ object Cyclotron {
   }
 
   def unflatten(destWord: UInt, flattened: UInt, index: Int): Unit = {
-    assert(destWord.widthKnown)
+    assert(destWord.widthKnown, "cannot unflatten to sink with unknown width")
     destWord := splitUInt(flattened, destWord.getWidth)(index)
   }
 }
@@ -1049,51 +1049,62 @@ class CyclotronTile(implicit p: Parameters) extends CoreModule {
     val finished = Output(Bool())
   })
 
-  val bbox = Module(new CyclotronTileBlackBox)
+  val bbox = Module(new CyclotronTileBlackBox(this))
   bbox.io.clock := clock
   bbox.io.reset := reset.asBool
 
   import Cyclotron._
 
   // imem
-  io.imem.req.ready := bbox.io.imem_req_ready
-  bbox.io.imem_req_valid := io.imem.req.valid
-  bbox.io.imem_req_bits_address := io.imem.req.bits.address
-  bbox.io.imem_req_bits_tag := io.imem.req.bits.tag
-  bbox.io.imem_resp_ready := io.imem.resp.ready
-  io.imem.resp.valid := bbox.io.imem_resp_valid
-  io.imem.resp.bits.tag := bbox.io.imem_resp_bits_tag
-  io.imem.resp.bits.data := bbox.io.imem_resp_bits_data
-  io.imem.resp.bits.metadata := DontCare
+  bbox.io.imem_req_ready := io.imem.req.ready
+  io.imem.req.valid := bbox.io.imem_req_valid
+  io.imem.req.bits.address := bbox.io.imem_req_bits_address
+  io.imem.req.bits.tag := bbox.io.imem_req_bits_tag
+  io.imem.req.bits.size := log2Ceil(muonParams.instBits / 8).U
+  io.imem.req.bits.store := false.B
+  io.imem.req.bits.data := 0.U
+  io.imem.req.bits.mask := ((1 << muonParams.instBytes) - 1).U
+  io.imem.resp.ready := bbox.io.imem_resp_ready
+  bbox.io.imem_resp_valid := io.imem.resp.valid
+  bbox.io.imem_resp_bits_tag := io.imem.resp.bits.tag
+  bbox.io.imem_resp_bits_data := io.imem.resp.bits.data
 
   // dmem
-  // TODO: dedup with CyclotronDataMem?
-  bbox.io.dmem_req_valid := VecInit(io.dmem.req.map(_.valid)).asUInt
-  bbox.io.dmem_req_bits_store := VecInit(io.dmem.req.map(_.bits.store)).asUInt
-  bbox.io.dmem_req_bits_tag := VecInit(io.dmem.req.map(_.bits.tag)).asUInt
-  bbox.io.dmem_req_bits_address := VecInit(io.dmem.req.map(_.bits.address)).asUInt
-  bbox.io.dmem_req_bits_size := VecInit(io.dmem.req.map(_.bits.size)).asUInt
-  bbox.io.dmem_req_bits_data := VecInit(io.dmem.req.map(_.bits.data)).asUInt
-  bbox.io.dmem_req_bits_mask := VecInit(io.dmem.req.map(_.bits.mask)).asUInt
-  bbox.io.dmem_resp_ready := VecInit(io.dmem.resp.map(_.ready)).asUInt
   io.dmem.req.zipWithIndex.foreach { case (req, i) =>
-    req.ready := bbox.io.dmem_req_ready(i)
+    req.valid := bbox.io.dmem_req_valid(i)
+    req.bits.store := bbox.io.dmem_req_bits_store(i)
+    unflatten(req.bits.tag, bbox.io.dmem_req_bits_tag, i)
+    unflatten(req.bits.address, bbox.io.dmem_req_bits_address, i)
+    unflatten(req.bits.size, bbox.io.dmem_req_bits_size, i)
+    unflatten(req.bits.data, bbox.io.dmem_req_bits_data, i)
+    unflatten(req.bits.mask, bbox.io.dmem_req_bits_mask, i)
   }
+  bbox.io.dmem_req_ready := VecInit(io.dmem.req.map(_.ready)).asUInt
+
+  bbox.io.dmem_resp_valid := VecInit(io.dmem.resp.map(_.valid)).asUInt
+  bbox.io.dmem_resp_bits_tag := VecInit(io.dmem.resp.map(_.bits.tag)).asUInt
+  bbox.io.dmem_resp_bits_data := VecInit(io.dmem.resp.map(_.bits.data)).asUInt
   io.dmem.resp.zipWithIndex.foreach { case (resp, i) =>
-    resp.valid := bbox.io.dmem_resp_valid(i)
-    unflatten(resp.bits.tag, bbox.io.dmem_resp_bits_tag, i)
-    unflatten(resp.bits.data, bbox.io.dmem_resp_bits_data, i)
+    resp.ready := bbox.io.dmem_resp_ready(i)
     resp.bits.metadata := DontCare
   }
 
   io.finished := bbox.io.finished
 }
 
-class CyclotronTileBlackBox(implicit p: Parameters) extends CyclotronBlackBox
-with HasBlackBoxResource with HasCoreParameters {
+class CyclotronTileBlackBox(outer: CyclotronTile)(implicit val p: Parameters)
+  extends BlackBox(Map(
+    "ARCH_LEN"       -> outer.archLen,
+    "INST_BITS"      -> outer.muonParams.instBits,
+    "IMEM_TAG_BITS"  -> outer.imemTagBits,
+    "DMEM_DATA_BITS" -> outer.archLen,
+    "DMEM_TAG_BITS"  -> outer.dmemTagBits,
+    "NUM_LANES"      -> outer.numLanes,
+  )) with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
     val reset = Input(Bool())
+
     val imem_req_valid = Output(Bool())
     val imem_req_ready = Input(Bool())
     val imem_req_bits_address = Output(UInt(addressBits.W))

@@ -65,6 +65,7 @@ class WithMuonCores(
   crossing: RocketCrossingParams,
   standalone: Boolean,
   noILP: Boolean,
+  cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
   l0i: Option[DCacheParams],
@@ -109,6 +110,7 @@ class WithMuonCores(
         dcache = l0d,
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
         peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset,
+        cyclotron = cyclotron,
         disabled = disabled,
       )
       List.tabulate(n)(i => MuonTileAttachParams(
@@ -127,7 +129,7 @@ class WithMuonCores(
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
     standalone: Boolean = false, noILP: Boolean = false,
-    difftest: Boolean = false, disabled: Boolean = false,
+    cyclotron: Boolean = false, difftest: Boolean = false, disabled: Boolean = false,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -136,7 +138,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, difftest, disabled, l0i, l0d)
+  ), standalone, noILP, cyclotron, difftest, disabled, l0i, l0d)
 }
 
 class WithCyclotronCores(

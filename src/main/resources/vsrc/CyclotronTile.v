@@ -1,22 +1,12 @@
-module CyclotronTile #(
+module CyclotronTileBlackBox #(
   parameter ARCH_LEN = 32,
   parameter INST_BITS = 64,
   parameter IMEM_TAG_BITS = 32,
   parameter DMEM_DATA_BITS = 32,
   parameter DMEM_TAG_BITS = 32,
-  parameter NUM_WARPS = 8,
   parameter NUM_LANES = 16,
-  parameter OP_BITS = 9,
-  parameter REG_BITS = 8,
-  parameter IMM_BITS = 32,
-  parameter CSR_IMM_BITS = 8,
-  parameter PRED_BITS = 4,
   localparam DMEM_SIZE_BITS = $clog2($clog2(DMEM_DATA_BITS / 8) + 1),
-  localparam DMEM_MASK_BITS = (DMEM_DATA_BITS / 8),
-  localparam OPNOEXT_BITS = 7,
-  localparam OPEXT_BITS = 2,
-  localparam WARP_ID_BITS = $clog2(NUM_WARPS),
-  localparam WARP_COUNT_BITS = $clog2(NUM_WARPS+1)
+  localparam DMEM_MASK_BITS = (DMEM_DATA_BITS / 8)
 ) (
   input clock,
   input reset,
@@ -42,6 +32,7 @@ module CyclotronTile #(
   input  logic [NUM_LANES-1:0]                  dmem_resp_valid,
   input  logic [(NUM_LANES*DMEM_TAG_BITS)-1:0]  dmem_resp_bits_tag,
   input  logic [(NUM_LANES*DMEM_DATA_BITS)-1:0] dmem_resp_bits_data,
+
   output logic finished
 );
   `include "Cyclotron.vh"

@@ -144,10 +144,20 @@ class RadianceBringupHostConfig extends Config(
   new chipyard.NoCoresConfig)
 
 class RadianceMuonConfig extends Config(
-  new WithMuonCores(1, difftest = true, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), difftest = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceCyclotronConfig extends Config(
+  new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotron = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 
