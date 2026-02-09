@@ -195,7 +195,7 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   })
   val fCSR = RegInit(0.U.asTypeOf(csrDataT))
 
-  val numFP16Lanes = if (isDivSqrt) numFP16DivLanes else numFP32DivLanes
+  val numFP16Lanes = if (isDivSqrt) numFP16DivLanes else numFP16ALULanes
   val FP16Pipe = Module(new FP16Pipe(isDivSqrt))
   val FP32Pipe = Module(new FP32Pipe(isDivSqrt))
   val CVFPU = Module(new CVFPU(numFP16Lanes, cvFPUTagBits(numFP16Lanes), isDivSqrt))
