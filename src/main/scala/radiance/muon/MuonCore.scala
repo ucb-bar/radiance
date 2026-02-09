@@ -44,7 +44,7 @@ case class MuonCoreParams(
                                           // issue eligiblity check
   // execute
   intPipe: IntPipeParams = IntPipeParams(16, 16),
-  fpPipe: FPPipeParams = FPPipeParams(8, 1),
+  fpPipe: FPPipeParams = FPPipeParams(8, 2),
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
