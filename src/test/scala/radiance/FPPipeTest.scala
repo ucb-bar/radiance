@@ -34,7 +34,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       numWarps = numLanes,
       numLanes = numLanes,
       archLen = archLen,
-      fpPipe = FPPipeParams(numFP32Lanes = numFP32Lanes),
+      fpPipe = FPPipeParams(numFP32Lanes = numFP32Lanes, numFP32DivLanes = numFP32Lanes),
       lsu = LoadStoreUnitParams(numLsuLanes = numLanes)
     )
 
@@ -74,16 +74,18 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
   private class TestFPPipe(implicit p: Parameters)
       extends ExPipe(writebackSched = false, writebackReg = true, requiresRs3 = true)
       with HasFPPipeParams {
-    val FP16Pipe = Module(new FP16Pipe)
-    val FP32Pipe = Module(new FP32Pipe)
-    val CVFPU = Module(new MockCVFPU(numFP32Lanes * 2, cvFPUTagBits))
+    val FP16Pipe = Module(new FP16Pipe(isDivSqrt = false))
+    val FP32Pipe = Module(new FP32Pipe(isDivSqrt = false))
+    private val numFp32Lanes = numFP32ALULanes
+    private val cvFpuTagWidth = cvFPUTagBits(numFp32Lanes * 2)
+    val CVFPU = Module(new MockCVFPU(numFp32Lanes * 2, cvFpuTagWidth))
 
     val cvfpuTest = IO(new Bundle {
       val forceReqReady = Input(Bool())
       val forceRespValid = Input(Bool())
-      val respBits = Input(new CVFPUResp(numFP32Lanes * 2, cvFPUTagBits))
+      val respBits = Input(new CVFPUResp(numFp32Lanes * 2, cvFpuTagWidth))
       val observedReqValid = Output(Bool())
-      val observedReqBits = Output(new CVFPUReq(numFP32Lanes * 2, cvFPUTagBits))
+      val observedReqBits = Output(new CVFPUReq(numFp32Lanes * 2, cvFpuTagWidth))
       val observedRespReady = Output(Bool())
     })
 
@@ -112,7 +114,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
     FP32Pipe.io.req.bits := io.req.bits
     io.req.ready := Mux1H(Seq((isFP32, FP32Pipe.io.req.ready), (isFP16, FP16Pipe.io.req.ready)))
 
-    val rr = Module(new RRArbiter(new CVFPUReq(numFP32Lanes * 2, cvFPUTagBits), 2))
+    val rr = Module(new RRArbiter(new CVFPUReq(numFp32Lanes * 2, cvFpuTagWidth), 2))
     rr.io.in(0) <> FP32Pipe.cvFPUIF.req
     rr.io.in(1) <> FP16Pipe.cvFPUIF.req
     CVFPU.io.req <> rr.io.out
@@ -755,7 +757,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "handle back-to-back FP32 requests" in {
     implicit val p: Parameters = testParams(numLanes = 4, numFP32Lanes = 4)
-    test(new FP32Pipe) { c =>
+    test(new FP32Pipe(isDivSqrt = false)) { c =>
       val muon = p(MuonKey)
       val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
 
@@ -926,7 +928,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "handle FP32 requests with response gaps" in {
     implicit val p: Parameters = testParams(numLanes = 4, numFP32Lanes = 4)
-    test(new FP32Pipe) { c =>
+    test(new FP32Pipe(isDivSqrt = false)) { c =>
       val muon = p(MuonKey)
       val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
 
@@ -1004,7 +1006,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "handle back-to-back FP16 requests" in {
     implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
-    test(new FP16Pipe) { c =>
+    test(new FP16Pipe(isDivSqrt = false)) { c =>
       val muon = p(MuonKey)
       val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
 
@@ -1080,7 +1082,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "handle FP16 requests with response gaps" in {
     implicit val p: Parameters = testParams(numLanes = 8, numFP32Lanes = 4)
-    test(new FP16Pipe) { c =>
+    test(new FP16Pipe(isDivSqrt = false)) { c =>
       val muon = p(MuonKey)
       val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
 
