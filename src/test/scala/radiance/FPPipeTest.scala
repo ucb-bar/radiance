@@ -299,8 +299,6 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
         val tagWidth = c.CVFPUIO.req.bits.tag.getWidth
         c.CVFPUIO.req.bits.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
-        val tagMsb = (c.CVFPUIO.req.bits.tag.peekInt() >> (tagWidth - 1)) & 1
-        require(tagMsb == 0, s"${spec.name}: tag MSB mismatch")
         c.CVFPUIO.req.bits.simdMask.expect(expandedMask(spec.tmask, env.numFP32Lanes).U, s"${spec.name}: SIMD mask mismatch")
         c.CVFPUIO.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
         c.CVFPUIO.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
@@ -438,8 +436,6 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         )
         val tagWidth = c.CVFPUIO.req.bits.tag.getWidth
         c.CVFPUIO.req.bits.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
-        val tagMsb = (c.CVFPUIO.req.bits.tag.peekInt() >> (tagWidth - 1)) & 1
-        require(tagMsb == 0, s"${spec.name}: tag MSB mismatch")
         c.CVFPUIO.req.bits.simdMask.expect(expectedMask.U, s"${spec.name}: SIMD mask mismatch")
         c.CVFPUIO.req.bits.operands(0).expect(expOp0.U, s"${spec.name}: operand0 mismatch")
         c.CVFPUIO.req.bits.operands(1).expect(expOp1.U, s"${spec.name}: operand1 mismatch")
@@ -653,8 +649,6 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
           )
           val tagWidth = observed.tag.getWidth
           observed.tag.expect(expectedTag.U(tagWidth.W), s"${spec.name}: tag mismatch")
-          val tagMsb = (observed.tag.peekInt() >> (tagWidth - 1)) & 1
-          require(tagMsb == 0, s"${spec.name}: tag MSB mismatch")
           val perPacketMask: BigInt =
             if (isFp16) {
               BigInt(packetTmask(packetIdx))
