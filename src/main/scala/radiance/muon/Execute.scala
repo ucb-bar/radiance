@@ -36,6 +36,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val inst = io.req.bits.uop.inst
 
   sfuPipe.csrIO.fcsr <> fpAddMulPipe.fCSRIO
+  fpExPipe.fCSRIO.regData := fpAddMulPipe.fCSRIO.regData
   // TODO: connect
   fpDivSqrtPipe.fCSRIO.regWrite.valid := false.B
   fpDivSqrtPipe.fCSRIO.regWrite.bits := DontCare

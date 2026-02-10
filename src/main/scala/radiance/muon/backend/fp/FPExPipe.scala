@@ -17,9 +17,9 @@ object FpExOpDecoder {
   def decode(opcode: UInt, f3: UInt, f7: UInt, rs2: UInt): FpExOpBundle = {
     val table = Seq[(BitPat, BitPat)](
       // fpexp.h
-      (BitPat(MuOpcode.CUSTOM3) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00001")) -> BitPat("b0"),
+      (BitPat("b1111011") ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00001")) -> BitPat("b0"),
       // fpnexp.h
-      (BitPat(MuOpcode.CUSTOM3) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00010")) -> BitPat("b1")
+      (BitPat("b1111011") ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00010")) -> BitPat("b1")
     )
 
     val result = Wire(new FpExOpBundle)
@@ -43,6 +43,10 @@ class FPExPipe(fmt: FPFormat.Type)
     with HasFPPipeParams {
   val fpEX = Module(new FPEX(FPType.BF16T, numFP16ExpLanes, fpEXTagBits))
 
+  val fCSRIO = IO(new Bundle {
+    val regData = Input(csrDataT)
+  })
+
   val ioFpExOp = FpExOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = RegEnable(ioFpExOp, 0.U.asTypeOf(new FpExOpBundle), io.req.fire)
   val fpExReq = Mux(io.req.fire, ioFpExOp, req)
@@ -58,7 +62,10 @@ class FPExPipe(fmt: FPFormat.Type)
   decomposer.get.io.out.ready := fpEX.io.req.ready
 
   fpEX.io.req.valid := decomposer.get.io.out.valid
-  fpEX.io.req.bits.roundingMode := fpExReq.roundingMode.asUInt
+  fpEX.io.req.bits.roundingMode := Mux(fpExReq.roundingMode === FPRoundingMode.DYN,
+    fCSRIO.regData(7, 5).asTypeOf(FPRoundingMode()),
+    fpExReq.roundingMode
+  ).asUInt
   fpEX.io.req.bits.tag := Mux(io.req.fire, inst(Rd), reqRd)
   fpEX.io.req.bits.neg := fpExReq.neg
   fpEX.io.req.bits.xVec := VecInit(decomposer.get.io.out.bits.data(0).map(reg =>
