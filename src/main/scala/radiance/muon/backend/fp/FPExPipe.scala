@@ -63,12 +63,12 @@ class FPExPipe(fmt: FPFormat.Type)
   fpEX.io.req.bits.neg := fpExReq.neg
   fpEX.io.req.bits.xVec := VecInit(decomposer.get.io.out.bits.data(0).map(reg =>
       reg.asUInt(fpWordBits(fmt) - 1, 0)))
-  fpEX.io.req.bits.laneMask := decomposer.get.io.out.bits.data(1)
+  fpEX.io.req.bits.laneMask := decomposer.get.io.out.bits.data(1).asUInt
   fpEX.io.resp.ready := recomposer.get.io.in.ready
 
   recomposer.get.io.in.valid := fpEX.io.resp.valid
   recomposer.get.io.in.bits.data(0) := signExtFP16FpEXRes
-  recomposer.get.io.in.bits.data(1) := fpEX.io.resp.bits.tag
+  recomposer.get.io.in.bits.data(1) := VecInit(fpEX.io.resp.bits.laneMask.asBools)
   recomposer.get.io.out.ready := io.resp.ready
 
   io.resp.valid := recomposer.get.io.out.valid
