@@ -146,7 +146,7 @@ class FPExPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       applyRespBackpressure: Boolean
   ): Unit = {
     zeroDecoded(c.io.req.bits.uop.inst)
-    pokeDecoded(c.io.req.bits.uop.inst, Opcode, MuOpcode.CUSTOM2.U.litValue)
+    pokeDecoded(c.io.req.bits.uop.inst, Opcode, MuOpcode.CUSTOM3.U.litValue)
     pokeDecoded(c.io.req.bits.uop.inst, F3, 0.U.litValue) // RNE
     pokeDecoded(c.io.req.bits.uop.inst, F7, "b0101110".U.litValue) // bf16 fpexp/fpnexp
     pokeDecoded(c.io.req.bits.uop.inst, Rd, spec.rd)
