@@ -78,6 +78,7 @@ case object UseMulDivPipe    extends DecodeField(1, true)
 case object UseFPPipe        extends DecodeField(1, true)
 case object UseFP32Pipe      extends DecodeField(1, true)
 case object UseFP16Pipe      extends DecodeField(1, true)
+case object UseFPExPipe      extends DecodeField(1, true)
 case object UseLSUPipe       extends DecodeField(1, true)
 case object UseSFUPipe       extends DecodeField(1, true)
 case object HasRd            extends DecodeField(1, true)
@@ -234,7 +235,7 @@ object Decoder {
       IsCSRRW, IsCSRRS, IsCSRRC, IsCSRRWI, IsCSRRSI, IsCSRRCI,
       IsFenceI, IsFenceD,
       IsRType, IsIType, IsSType, IsBType, IsUJType, IsFPDivSqrt,
-      UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
+      UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseFPExPipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
       ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, LuiImm,
@@ -316,6 +317,8 @@ object Decoder {
           MuOpcode.NM_SUB,
           MuOpcode.NM_ADD,
         ).contains(op))
+      case UseFPExPipe =>
+        Some(op == MuOpcode.CUSTOM2 && f7 == "0101110")
       case UseLSUPipe =>
         Some(Seq(
           MuOpcode.LOAD,
@@ -348,7 +351,8 @@ object Decoder {
           // never needs the value of its reg.  Safe to disable HasRs to prevent
           // register renaming
           !sd(IsSplit) &&
-          !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
+          !(op == MuOpcode.OP_FP && f7 == "?10?0??") && // HACK: FCVT case
+          !(op == MuOpcode.CUSTOM2 && f7 == "0101110")  // fpexp.h / fpnexp.h
         )
       case HasRs3 =>
         Some(Seq(
