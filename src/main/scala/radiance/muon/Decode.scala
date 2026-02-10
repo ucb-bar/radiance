@@ -255,7 +255,7 @@ object Decoder {
   def staticDecode(field: DecodeField, op: String,
                    f3: LazyField, f7: LazyField): Option[Boolean] = {
     def sd(f: DecodeField) = staticDecode(f, op, f3, f7).get
-    val isFpExOp = op == MuOpcode.CUSTOM3 && f7 == "0101110"
+    val isFpExOp = op.endsWith("1111011") && f7 == "0101110"
     field match {
       case IsRType =>
         Some(Seq(
