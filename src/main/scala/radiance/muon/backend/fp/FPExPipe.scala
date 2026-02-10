@@ -17,9 +17,9 @@ object FpExOpDecoder {
   def decode(opcode: UInt, f3: UInt, f7: UInt, rs2: UInt): FpExOpBundle = {
     val table = Seq[(BitPat, BitPat)](
       // fpexp.h
-      (BitPat(MuOpcode.CUSTOM2) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00001")) -> BitPat("b0"),
+      (BitPat(MuOpcode.CUSTOM3) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00001")) -> BitPat("b0"),
       // fpnexp.h
-      (BitPat(MuOpcode.CUSTOM2) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00010")) -> BitPat("b1")
+      (BitPat(MuOpcode.CUSTOM3) ## BitPat("b???") ## BitPat("b0101110") ## BitPat("b00010")) -> BitPat("b1")
     )
 
     val result = Wire(new FpExOpBundle)

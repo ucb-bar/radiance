@@ -255,6 +255,7 @@ object Decoder {
   def staticDecode(field: DecodeField, op: String,
                    f3: LazyField, f7: LazyField): Option[Boolean] = {
     def sd(f: DecodeField) = staticDecode(f, op, f3, f7).get
+    val isFpExOp = op == MuOpcode.CUSTOM3 && f7 == "0101110"
     field match {
       case IsRType =>
         Some(Seq(
@@ -318,7 +319,7 @@ object Decoder {
           MuOpcode.NM_ADD,
         ).contains(op))
       case UseFPExPipe =>
-        Some(op == MuOpcode.CUSTOM2 && f7 == "0101110")
+        Some(isFpExOp)
       case UseLSUPipe =>
         Some(Seq(
           MuOpcode.LOAD,
@@ -330,14 +331,14 @@ object Decoder {
           MuOpcode.CUSTOM0,
           MuOpcode.CUSTOM1,
           MuOpcode.CUSTOM2,
-          MuOpcode.CUSTOM3,
           MuOpcode.SYSTEM,
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
           MuOpcode.NU_PAYLOAD,
           MuOpcode.NU_COMPLETE,
           MuOpcode.MISC_MEM,
-        ).contains(op))
+        ).contains(op) &&
+          !isFpExOp)
       case HasRd =>
         // we don't write to rd for vx_split
         // rd is an immediate value for vx_pred, similar to rs2 for vx_split
@@ -352,7 +353,7 @@ object Decoder {
           // register renaming
           !sd(IsSplit) &&
           !(op == MuOpcode.OP_FP && f7 == "?10?0??") && // HACK: FCVT case
-          !(op == MuOpcode.CUSTOM2 && f7 == "0101110")  // fpexp.h / fpnexp.h
+          !isFpExOp  // fpexp.h / fpnexp.h
         )
       case HasRs3 =>
         Some(Seq(
@@ -371,14 +372,14 @@ object Decoder {
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
           MuOpcode.MISC_MEM,
-        ).contains(op) ||
+        ).contains(op) && !isFpExOp ||
           sd(IsTMC) || sd(IsSplit) || sd(IsPred) || sd(IsWSpawn) || sd(IsBar)
         )
       case IsNuInvoke =>
         Some(Seq(
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
-        ).contains(op))
+        ).contains(op) && !isFpExOp)
       case Rs1IsPC =>
         Some(Seq(
           MuOpcode.AUIPC,
@@ -487,4 +488,3 @@ object Decoder {
     dec
   }
 }
-
