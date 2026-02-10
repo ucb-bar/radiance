@@ -8,15 +8,19 @@ import radiance.muon._
 import radiance.muon.backend._
 
 case class FPPipeParams (val numFP32Lanes: Int = 8,
-                         val numFP32DivLanes: Int = 2)
+                         val numFP32DivLanes: Int = 2,
+                         val numFP16ExpLanes: Int = 4)
 
 trait HasFPPipeParams extends HasCoreParameters {
   def numFP32ALULanes = muonParams.fpPipe.numFP32Lanes
   def numFP16ALULanes = muonParams.fpPipe.numFP32Lanes * 2
   def numFP32DivLanes = muonParams.fpPipe.numFP32DivLanes
   def numFP16DivLanes = muonParams.fpPipe.numFP32DivLanes * 2
+  def numFP16ExpLanes = muonParams.fpPipe.numFP16ExpLanes
+  def numFP32ExpLanes = muonParams.fpPipe.numFP16ExpLanes * 2
   def fStatusBits = 5
 
+  def fpEXTagBits = Isa.regBits
   def cvFPUTagBits(numFP16Lanes: Int) = 1 + numFP16Lanes + Isa.regBits // FP32? + TMask + Rd
   def signExtendFp16Lanes(numLanes: Int, data: UInt): UInt = {
     val lanes = VecInit.tabulate(numLanes) { idx =>
@@ -90,10 +94,6 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
     outLanes = Some(outLanes),
     writebackSched = false, writebackReg = true, requiresRs3 = true)
     with HasFPPipeParams {
-  implicit val decomposerTypes =
-    Seq(UInt(archLen.W), UInt(archLen.W), UInt(archLen.W), Bool())
-  implicit val recomposerTypes =
-    Seq(UInt(archLen.W))
   implicit val numFP16Lanes = if (isDivSqrt) numFP16DivLanes else numFP16ALULanes
 
   val cvFPUIF = IO(new Bundle {
