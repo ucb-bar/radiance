@@ -22,13 +22,13 @@ trait HasFPPipeParams extends HasCoreParameters {
 
   def fpEXTagBits = Isa.regBits
   def cvFPUTagBits(numFP16Lanes: Int) = 1 + numFP16Lanes + Isa.regBits // FP32? + TMask + Rd
-  def signExtendFp16Lanes(numLanes: Int, data: UInt): UInt = {
+  def signExtendFp16Lanes(numLanes: Int, data: UInt): Vec[UInt] = {
     val lanes = VecInit.tabulate(numLanes) { idx =>
       data(16 * (idx + 1) - 1, 16 * idx)
     }
-    Cat(lanes.map { lane =>
+    VecInit(lanes.map { lane =>
       Cat(Mux(lane(15), 0xffff.U(16.W), 0.U(16.W)), lane)
-    }.reverse)
+    })
   }
 
   def fpWordBits(fmt: FPFormat.Type) : Int = {
@@ -115,7 +115,7 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
                  .map(operand => VecInit(operand.map(reg => reg.asUInt(fpWordBits(fmt) - 1, 0))))
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
   val respIsMine = cvFPUIF.resp.bits.tag(cvFPUTagBits(numFP16Lanes) - 1) === isFP16
-  val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result)
+  val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result).asUInt
   val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
                               cvFPUIF.resp.valid && respIsMine)
 
