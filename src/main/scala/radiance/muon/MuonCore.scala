@@ -48,7 +48,6 @@ case class MuonCoreParams(
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
-  logSMEMInFlights: Int = 2,
   logGMEMInFlights: Int = 4, // per lane
   logCoalGMEMInFlights: Int = 5, // all lanes
   logNonCoalGMEMInFlights: Int = 5, // all lanes

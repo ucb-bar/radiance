@@ -124,6 +124,8 @@ class MuonTile(
   val slaveNode = TLIdentityNode()
   val masterNode = TLIdentityNode()
 
+  val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
+  val lsuSourceIdBits = lsuDerived.sourceIdBits
 
   // ===========
   // smem
@@ -136,7 +138,7 @@ class MuonTile(
         TLMasterPortParameters.v1(
           clients = Seq(
             TLMasterParameters.v1(
-              sourceId = IdRange(0, 1 << muonParams.core.logSMEMInFlights),
+              sourceId = IdRange(0, 1 << lsuSourceIdBits),
               name = s"muon_${muonParams.coreId}_smem_$i",
               requestFifo = true,
               supportsProbe =
@@ -213,9 +215,6 @@ class MuonTile(
   // ===========
 
   val dFlushMaster = CacheFlushNode.Master()
-
-  val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
-  val lsuSourceIdBits = lsuDerived.sourceIdBits
   
   // LSU expects all-lanes-at-once requests, so request valid is dependent on whether all lanes are ready
   // This interacts poorly with downstream request arbitration (e.g. XBar), so we need buffer to decouple

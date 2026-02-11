@@ -83,7 +83,9 @@ class WithMuonCores(
       numCores = n,
       numClusters = 2, // TODO: magic number
       noILP = noILP,
-      logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
+      // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
+      // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
+      // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
       lsu = LoadStoreUnitParams(
         numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
       ),
