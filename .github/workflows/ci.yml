@@ -121,6 +121,7 @@ jobs:
           cd sims/vcs
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
+          make debug CONFIG=RadianceCyclotronConfig
           make debug CONFIG=RadianceTapeoutSimConfig
 
   run-unit-tests:
@@ -167,7 +168,20 @@ jobs:
           python3 test/run_isa_tests.py -j "$(nproc)" -c core
 
   run-cosim-isa-tests:
-    name: Run Co-sim ISA tests
+    name: Run Cyclotron-as-a-Tile Co-sim ISA tests
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run ISA tests on backend co-sim config
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
+          python3 test/run_isa_tests.py -j "$(nproc)" -c cosim
+
+  run-backend-cosim-isa-tests:
+    name: Run Backend Co-sim ISA tests
     runs-on: as4
     needs: build
     steps:
@@ -182,7 +196,7 @@ jobs:
   clean:
     name: Clean
     runs-on: as4
-    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
+    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests, run-backend-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda
