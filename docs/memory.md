@@ -98,10 +98,7 @@ we use 1R1W dual-ported SRAM banks.
 #### Bank Mapping
 
 In order to achieve full-throughput pipelining, we need to solve the following
-list of read/write conflicts that exist in the above pipelining scheme. Because
-the SRAM banks have separate read and write ports, we only need to solve
-conflicts within each of read accesses and write accesses, instead of globally
-across the two.
+list of read/write conflicts that exist in the above pipelining scheme.
 
 Note that `Xc` and `Xp` indicates the double-buffered consumer/producer tiles
 of a given symbol `X`, respectively:
@@ -121,51 +118,63 @@ of a given symbol `X`, respectively:
 | `WRITE` | `QKp`        | `Pp`          | Gemmini-SIMT double-buffering |
 | `WRITE` | `QKp`        | `O`           | Gemmini-SIMT double-buffering |
 
+Because each SRAM bank has separate 1 read and 1 write ports, there are no
+conflicts that need to be resolved between the producer-consumer pairs (`Xc` -
+`Xp`).
+
 Note that `O` is not double-buffered due to an intra-iteration dependency
 between `O = O + P*V` GEMM and `O` rescale ops.  Every operation on `O` is done
 in-place within the single tile.
-`Q` is also not double-buffered, because the same `Q` tile is read multiple
-times throughout the loop iteration along the entire sequence dimension of
-`K^T`.
+`Q` is also not double-buffered, because access to `Q` is read-only across all
+of the loop iterations.
 
 
 We can solve these conflicts in a mapping that requires 4 banks:
 
-| Bank   |  Tiles           |
-|--------|------------------|
-| Bank 0 | `Kp, Vp, Kc, Vc` |
-| Bank 1 | `QKc, QKp`       |
-| Bank 2 | `O`              |
-| Bank 3 | `Q, Pc, Pp`      |
+| Bank   |  Tiles                      |
+|--------|-----------------------------|
+| Bank 0 | `Kp, Vp, Kc, Vc`            |
+| Bank 1 | `QKc, QKp`                  |
+| Bank 2 | `O`                         |
+| Bank 3 | `Q, Pc, Pp(quant), Pp(B16)` |
 
 #### Capacity Requirement
 
 With the above bank mapping, the total capacity requirement for SMEM becomes:
 
-| `Brow=Bcol` | Head dim `d` | `Q, K, V` Precision | `QK, P, O` Precision | Minimum SMEM Capacity (KiB) | Notes                          |
-|-------------|--------------|---------------------|----------------------|-----------------------------|--------------------------------|
-| 64          | 64           | 32                  | 32                   | 256                         | Virgo                          |
-| 64          | 64           | 8                   | 16                   | 80                          | **Muon** baseline              |
-| 64          | 64           | 16                  | 16                   | 128                         |                                |
-| 128         | 128          | 8                   | 16                   | 320                         |                                |
+| `Brow=Bcol` | Head dim `d` | `Q, K, V, P` Precision | `QK, O` Precision | SMEM Capacity Requirement (KiB) | Notes                          |
+|-------------|--------------|------------------------|-------------------|---------------------------------|--------------------------------|
+| 64          | 64           | 32                     | 32                | 256                             | Virgo                          |
+| 64          | 64           | 8                      | 16                | 80                              |                                |
+| 64          | 64           | 4                      | 16                | 64                              |                                |
+| 64          | 128          | 8                      | 16                | 128                             | **Muon** baseline              |
+| 64          | 128          | 4                      | 16                | 64                              |                                |
+| 128         | 64           | 8                      | 16                | 288                             |                                |
+| 128         | 64           | 4                      | 16                | 256                             |                                |
+| 128         | 128          | 8                      | 16                | 320                             |                                |
 
-Since we need some extra margin above the minimum numbers for storing row-wise
-max/sum factors, etc., the current recommended size for Muon is **128KiB/cluster** with
-`Brow=Bcol` 64 and head dimension 64.
+The SMEM capacity design target for Muon is **128KiB/cluster** with
+`Brow=Bcol` 64 and head dimension 128.
 
 **FP8 Down-conversion.**  Note that the inputs of the two GEMMs: `Q*K` and `P*V`
 need to be down-converted to FP8 for consumption in the matrix PEs.
 
 If we handle down-conversion in SIMT, it creates additional SMEM capacity
 demand, since the converted FP8 values cannot be overwritten into the original
-FP16 tile in-place, unless enforcing a strict ordering between the warps.
+BF16 tile in-place, unless enforcing a strict ordering between the warps.
 Therefore, for `Q`, `K` and `V`, down-conversion must be handled by the DMA
-either in accumulator move-out, or GMEM to SMEM move-in.
+either in accumulator move-out, or GMEM to SMEM move-in.  We handle both cases
+in the Requantizer module described below.
 
-However, `P` down-conversion cannot be handled by the DMA since its value is
-produced in the SMEM as a result of SIMT online softmax operation. Therefore we
-need to allocate separate `P8` and `P16` to handle the conversion without
-mangling the data.  **TODO: Include this in the above mapping scheme.**
+Note that while `Pp` can be stored down-converted in SMEM, it must
+also be stored in BF16 intermediately to enable accurate row-sum computation of
+`l`.  After that, `Pp` can be read and then written back to SMEM through the
+requantizer, to a separate tile.  For this reason, we allocate separate space
+for `Pp (quant)` and `Pp (BF16)` when deriving above table.
+
+Overall, this allocation scheme errs on the side of over-provisioning memory to
+be safe.  Some operations, e.g. `QKc -> Pp`, can be implemented in-place. A
+tighter allocation scheme may be implemented in a kernel.
 
 
 #### Bandwidth Requirement
@@ -208,11 +217,11 @@ Gemmini MMIO has the following address map:
 | `0x380` |   384 | LUT table 2       |
 
 
-GPU to requantizer: fp16 in, fp8 out; addressing scheme: magnify by 2x.
+GPU to requantizer: bf16 in, fp8 out; addressing scheme: magnify by 2x.
 
 Requantizer input interface:
 
-* Data: FP16, 16 elements
+* Data: BF16, 16 elements
 * Address: destination address stride (in 4 byte increments for FP4, 8 byte
   increments for FP8, starting from 0)
 * Data type: FP8/FP6/FP4
