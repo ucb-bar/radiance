@@ -54,6 +54,8 @@ def get_and_check_sim_binary(config, sim_dir):
         sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimConfig-debug"
     elif config == "core":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig-debug"
+    elif config == "cosim":
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig-debug"
     elif config == "backend":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
     else:
@@ -171,7 +173,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
 
     radiance_dir = script_dir.parent
     cyclotron_dir = radiance_dir / "cyclotron"
-    if config == "soc":
+    if config == "soc" or config == "cosim":
         elf_dir = cyclotron_dir / "test" / "fused"
     else:
         elf_dir = cyclotron_dir / "test" / "isa-tests"
@@ -259,7 +261,7 @@ def parse_args():
     parser.add_argument('binary', nargs="?",
                         help="ELF to run; if omitted, sweeps found ELFs on its own")
     parser.add_argument('-c', '--config', default='soc',
-                        help="testbench config to run; (soc|core|backend). default is 'soc'")
+                        help="testbench config to run; (soc|core|cosim|backend). default is 'soc'")
     parser.add_argument('--log-dir', default='isa-test-logs',
                         help="directory to be created to place the logs. default is 'isa-test-logs'")
     parser.add_argument('-j', '--jobs', type=int, default=1,
@@ -271,8 +273,8 @@ def main():
     args = parse_args()
     log_dir_name = args.log_dir
     config = args.config
-    if not (config == "soc" or config == "core" or config == "backend"):
-        print(f"error: unknown config '{config}'. must be (soc|core|backend)")
+    if not (config == "soc" or config == "core" or config == "cosim" or config == "backend"):
+        print(f"error: unknown config '{config}'. must be (soc|core|cosim|backend)")
         sys.exit(1)
 
     script_dir = Path(__file__).resolve().parent
