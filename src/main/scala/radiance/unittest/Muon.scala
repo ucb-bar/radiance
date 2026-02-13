@@ -23,21 +23,6 @@ class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
     // @cleanup: this should be unnecessary with WithMuonCores(headless = true)
     TileKey -> DummyTileParams
   ))))
-  val xbar = TLXbar()
-  val fakeGmem = TLRAM(
-    // FIXME: full GMEM-sized TLRAM hangs the simulator; currently working
-    // around with an arbitrarily small GMEM
-    // address = AddressSet(0x0, (BigInt(1) << p(MuonKey).archLen) - 1),
-    address = AddressSet(0x0, 0x100000 - 1),
-    beatBytes = p(MuonKey).archLen / 8,
-    devName = Some("gmem")
-  )
-
-  // see doc in MuonLSUTestbench for TLBuffer
-  for (lane <- 0 until p(MuonKey).numLanes) {
-    xbar := TLBuffer() := coreTop.lsuNodes(lane)
-  }
-  fakeGmem := xbar
 
   lazy val module = new MuonCoreTestbenchImp
   class MuonCoreTestbenchImp extends LazyModuleImp(this) {
@@ -215,12 +200,6 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     val dmem = Module(new CyclotronDataMem)
     core.io.imem <> imem.io.imem
     core.io.dmem <> dmem.io.dmem
-
-    // MuonMemTL.multiConnectTL(
-    //   core.io.dmem.req,
-    //   core.io.dmem.resp,
-    //   lsuNodes
-    // )
 
     // tie off shared mem
     core.io.smem.req.foreach(_.ready := false.B)
