@@ -19,8 +19,7 @@ import gemmini._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.DisableMonitors
 import org.chipsalliance.diplomacy.lazymodule._
-import radiance.memory.BoolArrayUtils.BoolSeqUtils
-import radiance.memory.SourceGenerator
+import radiance.memory._
 import radiance.subsystem.{GPUMemParams, GPUMemory, GemminiTileLike, PhysicalCoreParams}
 
 object GemminiCoreParams extends PhysicalCoreParams {
@@ -162,14 +161,13 @@ class GemminiTile private (
   // regNode := TLFragmenter(4, 4) := TLWidthWidget(8) := TLFragmenter(8, 8) := slaveNode
   regNode := tlSlaveXbar.node
 
-  val scalingFacNode = gemminiParams.scalingFactorMem.map { sfm =>
+  val scalingFacManager = gemminiParams.scalingFactorMem.map { sfm =>
     // since gemmini slave address starts at 0x3000, +0x5000 means
     // the scaling factor memory starts 0x8000 + shared mem size,
     // which is usually 0x28000 after cluster base address. this address is
     // 32K aligned.
 
     require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
-    require(isPow2(sfm.sramLineSizeInBytes), "scaling fac line size must be power of 2")
 
     TLManagerNode(Seq(TLSlavePortParameters.v1(
       managers = Seq(TLSlaveParameters.v2(
@@ -178,15 +176,29 @@ class GemminiTile private (
         supports = TLMasterToSlaveTransferSizes(
           // there's no real get support because the scaling factor memory is
           // write-only from the control bus
-          get = TransferSizes(1, sfm.sramLineSizeInBytes),
-          putFull = TransferSizes(1, sfm.sramLineSizeInBytes),
-          putPartial = TransferSizes(1, sfm.sramLineSizeInBytes),
+          get = TransferSizes(1, 8),
+          putFull = TransferSizes(1, 8),
+          putPartial = TransferSizes(1, 8),
         )
       )),
-      beatBytes = sfm.sramLineSizeInBytes,
+      beatBytes = 8,
     )))
   }
-  scalingFacNode.foreach(_ := TLWidthWidget(8) := tlSlaveXbar.node)
+  scalingFacManager.foreach(_
+    := TLWidthWidget(8)
+    := tlSlaveXbar.node)
+
+  val scalingFacClient = gemminiParams.scalingFactorMem.map { sfm =>
+    TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v2(
+        name = "gemmini-scaling-fac-client",
+        sourceId = IdRange(0, 1 << 4), // TODO: magic number
+        emits = TLMasterToSlaveTransferSizes(
+          putFull = TransferSizes(sfm.bankWidthBytes, sfm.bankWidthBytes)
+        )
+      ))
+    )))
+  }
 
   val requantizerMuonManager = gemminiParams.requantizer.map { q =>
     val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
@@ -246,7 +258,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   // scaling factor
-  outer.scalingFacNode.foreach { scalingFacNode =>
+  outer.scalingFacManager.foreach { scalingFacNode =>
     val conf = outer.gemminiParams.scalingFactorMem.get
     val (node, edge) = scalingFacNode.in.head
 
@@ -255,31 +267,44 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
     val typeSelect = node.a.bits.address(conf.addrBits - 1)
     val writeFullAddr = node.a.bits.address(conf.addrBits - 2, 0)
-    val lineAddr = WireInit(writeFullAddr(conf.addrBits - 2, conf.lineOffsetBits))
-
-    // val sramRowAddr = WireInit(lineAddr(conf.addrBits - conf.lineOffsetBits - 1, conf.bankSelectBits))
-    // val bankSelect = WireInit(lineAddr(conf.bankSelectBits - 1, 0))
 
     // weight and activation respectively; weight addresses have highest bit = 0
     val scalingFacWriteReqs = Seq.fill(2)(Wire(Decoupled(new ScalingFactorWriteReq(
-      conf.addrBits - conf.lineOffsetBits, conf.sramLineSizeInBytes * 8))))
+      conf.addrBits - 1, 8 * 8))))
     scalingFacWriteReqs.head.valid := wen && !typeSelect
     scalingFacWriteReqs.last.valid := wen && typeSelect
-    scalingFacWriteReqs.foreach(_.bits.addr := lineAddr)
+    scalingFacWriteReqs.foreach(_.bits.addr := writeFullAddr)
     scalingFacWriteReqs.foreach(_.bits.data := writeData)
 
-    val bothReady = scalingFacWriteReqs.map(_.ready).andR
+    val typeReady = Mux(typeSelect, scalingFacWriteReqs.last.ready, scalingFacWriteReqs.head.ready)
 
-    node.a.ready := node.d.ready && bothReady
-    node.d.valid := node.a.valid && bothReady
+    node.a.ready := node.d.ready && typeReady
+    node.d.valid := node.a.valid && typeReady
     node.d.bits := edge.AccessAck(node.a.bits)
 
-    require(node.params.dataBits == conf.sramLineSizeInBytes * 8)
+    // require(node.params.dataBits == conf.bankWidthBytes * 8)
     assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
     assert(!node.a.valid || (node.a.bits.size === 3.U))
 
     outer.gemmini.module.mx_io.get.scale_mem_write_w <> scalingFacWriteReqs.head
     outer.gemmini.module.mx_io.get.scale_mem_write_act <> scalingFacWriteReqs.last
+  }
+
+  outer.scalingFacClient.foreach { scalingFacNode =>
+    val (node, edge) = scalingFacNode.out.head
+    val out = outer.gemmini.module.mx_io.get.scale_factor_out
+
+    node.a.bits := edge.Put(
+      fromSource = 0.U, // overridden
+      toAddress = out.bits.addr,
+      lgSize = log2Ceil(node.params.dataBits / 8).U,
+      data = out.bits.data,
+    )._2
+
+    val (sourceReady, _) = SourceGenerator(node)
+    out.ready := node.a.ready && sourceReady
+    node.a.valid := out.valid && sourceReady
+    node.d.ready := true.B
   }
 
   // requantizer
@@ -307,22 +332,13 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
     { // output
       val (node, edge) = outer.requantizerSmemClient.get.out.head
-      node.a.valid := out.valid
-
-      // source
-      val sourceGen = Module(new SourceGenerator(q.outputIdBits))
-      sourceGen.io.reclaim.valid := node.d.fire
-      sourceGen.io.reclaim.bits := node.d.bits.source
-      sourceGen.io.gen := node.a.fire
-
-      out.ready := node.a.ready && sourceGen.io.id.valid
 
       // data
       val isFP4 = out.bits.dataType === RequantizerDataType.FP4
       val fullWidth = q.numOutputLanes
       val halfWidth = q.numOutputLanes / 2
       node.a.bits := edge.Put(
-        fromSource = sourceGen.io.id.bits,
+        fromSource = 0.U, // gets overridden
         toAddress = out.bits.address,
         lgSize = Mux(isFP4,
           log2Ceil(halfWidth).U, // half byte per lane
@@ -338,6 +354,11 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
         )
       )._2
 
+      // source
+      val (sourceReady, _) = SourceGenerator(node)
+      out.ready := node.a.ready && sourceReady
+      node.a.valid := out.valid && sourceReady
+      assert(out.fire === node.a.fire)
       node.d.ready := true.B
     }
 
@@ -347,7 +368,9 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   // lut
   val lutIO = outer.gemminiParams.lookupTable.map { c =>
-    val lut = Seq.fill(c.numTables)(Wire(Decoupled(new QuantLutWriteBundle(c))))
+    val lut = Seq.tabulate(c.numTables) { i =>
+      Wire(Decoupled(new QuantLutWriteBundle(c(i))))
+    }
     val mxIO = outer.gemmini.module.mx_io.get
     (lut zip Seq(mxIO.lut0, mxIO.lut1, mxIO.lut2)).foreach { case (a, b) => a <> b }
     lut
@@ -418,19 +441,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   val gemminiLutMMIO = lutIO.map { luts =>
     val config = outer.gemminiParams.lookupTable.get
     require(luts.length == config.numTables)
-    require(luts.head.bits.data.head.getWidth == config.numBits)
-    require(config.numBits % 32 == 0)
 
     val tableBase = 0x80
-    val tableOffset = 0x180
-    val wordsPerEntry = config.numBits / 32
+    val tableSizes = (config.numEntries zip config.numBits).map(x => x._1 * x._2)
+    val tableOffsets = tableSizes.scanLeft(tableBase)(_ + _)
 
-    require(tableOffset >= (config.numEntries * config.numBits) / 8)
-
-    val flops = RegInit(
-      VecInit.fill(config.numTables)(
-      VecInit.fill(config.numEntries)(
-      VecInit.fill(wordsPerEntry)(0.U(32.W)))))
+    val flops = RegInit(MixedVecInit(
+      (config.numEntries zip config.numBits).map { case (numEntries, numBits) =>
+        assert(numBits % 32 == 0)
+        VecInit.fill(numEntries)(VecInit.fill(numBits / 32)(0.U(32.W)))
+      }
+    ))
 
     val maps = luts.zipWithIndex.flatMap { case (io, i) =>
       io.valid := false.B
@@ -450,10 +471,11 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
         lut
       }
 
-      Seq.tabulate(config.numEntries) { j =>
+      Seq.tabulate(config.numEntries(i)) { j =>
+        val wordsPerEntry = config.numBits(i) / 32
         Seq.tabulate(wordsPerEntry) { k =>
-          val addr = tableBase + tableOffset * i + (config.numBits / 32 * j + k) * 4
-          val trigger = (j + 1 == config.numEntries) && (k + 1 == wordsPerEntry) // trigger per table
+          val addr = tableOffsets(i) + (wordsPerEntry * j + k) * 4
+          val trigger = (j + 1 == config.numEntries(i)) && (k + 1 == wordsPerEntry) // trigger per table
 
           addr -> Seq(RegField.w(32, lutRegFunc(flops(i)(j)(k), trigger)))
         }

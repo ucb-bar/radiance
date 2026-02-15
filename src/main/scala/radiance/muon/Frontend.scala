@@ -72,7 +72,7 @@ class Frontend(implicit p: Parameters)
       entries = muonParams.ibufDepth * muonParams.numWarps,
       useSyncReadMem = false)
 
-    userQueueDeq.ready := resp.fire
+    userQueueDeq.ready := resp.fire || io.softReset // drain user queue on soft reset
     i$.out.bits.pc := userQueueDeq.bits.pc
     i$.out.bits.wid := userQueueDeq.bits.wid
     assert(!resp.fire || userQueueDeq.valid, "user queue entries got dropped")

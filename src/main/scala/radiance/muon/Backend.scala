@@ -241,9 +241,10 @@ class Backend(
 
     printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
       cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
-      cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} rs1=[" +
+      cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} " +
+      cf"rs1=${e.uop.inst(Rs1)} rs1.data=[" +
       e.rs1Data.get.map(x => cf"$x%x ").reduce(_ + _) +
-      "] rs2=[" +
+      cf"] rs2=${e.uop.inst(Rs2)} rs2.data=[" +
       e.rs2Data.get.map(x => cf"$x%x ").reduce(_ + _) +
       cf"] rs3=[" +
       e.rs3Data.get.map(x => cf"$x%x ").reduce(_ + _) +

@@ -171,6 +171,78 @@ void cyclotron_frontend(
     );
 }
 
+void cyclotron_tile_tick_rs(
+    uint8_t*  imem_req_valid_ptr,
+    uint8_t   imem_req_ready,
+    uint32_t* imem_req_bits_address_ptr,
+    uint64_t* imem_req_bits_tag_ptr,
+    uint8_t*  imem_resp_ready_ptr,
+    uint8_t   imem_resp_valid,
+    uint64_t  imem_resp_bits_tag,
+    uint64_t  imem_resp_bits_data,
+    uint8_t*  dmem_req_valid_vec,
+    const uint8_t* dmem_req_ready_vec,
+    uint8_t*  dmem_req_bits_store_vec,
+    uint32_t* dmem_req_bits_address_vec,
+    uint8_t*  dmem_req_bits_size_vec,
+    uint32_t* dmem_req_bits_tag_vec,
+    uint32_t* dmem_req_bits_data_vec,
+    uint8_t*  dmem_req_bits_mask_vec,
+    uint8_t*  dmem_resp_ready_vec,
+    const uint8_t* dmem_resp_valid_vec,
+    const uint32_t* dmem_resp_bits_tag_vec,
+    const uint32_t* dmem_resp_bits_data_vec,
+    uint8_t*  finished_ptr
+);
+
+void cyclotron_tile_tick(
+    uint8_t*  imem_req_valid_ptr,
+    uint8_t   imem_req_ready,
+    uint32_t* imem_req_bits_address_ptr,
+    uint64_t* imem_req_bits_tag_ptr,
+    uint8_t*  imem_resp_ready_ptr,
+    uint8_t   imem_resp_valid,
+    uint64_t  imem_resp_bits_tag,
+    uint64_t  imem_resp_bits_data,
+    uint8_t*  dmem_req_valid_vec,
+    const uint8_t* dmem_req_ready_vec,
+    uint8_t*  dmem_req_bits_store_vec,
+    uint32_t* dmem_req_bits_address_vec,
+    uint8_t*  dmem_req_bits_size_vec,
+    uint32_t* dmem_req_bits_tag_vec,
+    uint32_t* dmem_req_bits_data_vec,
+    uint8_t*  dmem_req_bits_mask_vec,
+    uint8_t*  dmem_resp_ready_vec,
+    const uint8_t* dmem_resp_valid_vec,
+    const uint32_t* dmem_resp_bits_tag_vec,
+    const uint32_t* dmem_resp_bits_data_vec,
+    uint8_t*  finished_ptr
+) {
+    cyclotron_tile_tick_rs(
+        imem_req_valid_ptr,
+        imem_req_ready,
+        imem_req_bits_address_ptr,
+        imem_req_bits_tag_ptr,
+        imem_resp_ready_ptr,
+        imem_resp_valid,
+        imem_resp_bits_tag,
+        imem_resp_bits_data,
+        dmem_req_valid_vec,
+        dmem_req_ready_vec,
+        dmem_req_bits_store_vec,
+        dmem_req_bits_address_vec,
+        dmem_req_bits_size_vec,
+        dmem_req_bits_tag_vec,
+        dmem_req_bits_data_vec,
+        dmem_req_bits_mask_vec,
+        dmem_resp_ready_vec,
+        dmem_resp_valid_vec,
+        dmem_resp_bits_tag_vec,
+        dmem_resp_bits_data_vec,
+        finished_ptr
+    );
+}
+
 void cyclotron_backend_rs(
     uint8_t issue_valid,
     uint8_t issue_warp_id,

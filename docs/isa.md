@@ -242,10 +242,20 @@ as high for lanes that has non-zero `rs1` values.  Original tmask is
 preserved, i.e. lanes not active before entering `vx_pred` will not be made
 active in the tmask.
 * If the *address* of `rd` is non-zero, use the `vx_pred_n` variant, i.e. tmask
-is set for lanes with zero `rs1` values.
+is set for lanes with zero `rs1` values.  Nothing is written back to `rd`.
 * If no lanes have a non-zero `rs1` value (zero for `vx_pred_n`), set tmask
 to the value of `rs2` of the "leader" lane, i.e. the left-most active lane.
 
+#### `vx_wspawn`
+
+```
+vx_spawn rs1, rs2
+```
+
+Activates warps 1 up to the value of `rs1` in the "leader" lane, if not already active. Has no effect on warp 0.
+Sets `PC` of newly active warps to the value of `rs2` in the "leader" lane. Sets tmask of newly active warps to all 1's.  
+
+Note: this will eventually be superceded by command processor + neutrino
 
 ## New Registers
 

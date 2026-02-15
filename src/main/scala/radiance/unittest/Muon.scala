@@ -23,21 +23,6 @@ class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
     // @cleanup: this should be unnecessary with WithMuonCores(headless = true)
     TileKey -> DummyTileParams
   ))))
-  val xbar = TLXbar()
-  val fakeGmem = TLRAM(
-    // FIXME: full GMEM-sized TLRAM hangs the simulator; currently working
-    // around with an arbitrarily small GMEM
-    // address = AddressSet(0x0, (BigInt(1) << p(MuonKey).archLen) - 1),
-    address = AddressSet(0x0, 0x100000 - 1),
-    beatBytes = p(MuonKey).archLen / 8,
-    devName = Some("gmem")
-  )
-
-  // see doc in MuonLSUTestbench for TLBuffer
-  for (lane <- 0 until p(MuonKey).numLanes) {
-    xbar := TLBuffer() := coreTop.lsuNodes(lane)
-  }
-  fakeGmem := xbar
 
   lazy val module = new MuonCoreTestbenchImp
   class MuonCoreTestbenchImp extends LazyModuleImp(this) {
@@ -215,12 +200,6 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     val dmem = Module(new CyclotronDataMem)
     core.io.imem <> imem.io.imem
     core.io.dmem <> dmem.io.dmem
-
-    // MuonMemTL.multiConnectTL(
-    //   core.io.dmem.req,
-    //   core.io.dmem.resp,
-    //   lsuNodes
-    // )
 
     // tie off shared mem
     core.io.smem.req.foreach(_.ready := false.B)
@@ -926,7 +905,7 @@ object Cyclotron {
   }
 
   def unflatten(destWord: UInt, flattened: UInt, index: Int): Unit = {
-    assert(destWord.widthKnown)
+    assert(destWord.widthKnown, "cannot unflatten to sink with unknown width")
     destWord := splitUInt(flattened, destWord.getWidth)(index)
   }
 }
@@ -1038,6 +1017,99 @@ with HasBlackBoxResource with HasCoreParameters {
   })
 
   addResource("/vsrc/CyclotronBackend.v")
+  addResource("/vsrc/Cyclotron.vh")
+  addResource("/csrc/Cyclotron.cc")
+}
+
+class CyclotronTile(implicit p: Parameters) extends CoreModule {
+  val io = IO(new Bundle {
+    val imem = new InstMemIO
+    val dmem = new DataMemIO
+    val finished = Output(Bool())
+  })
+
+  val bbox = Module(new CyclotronTileBlackBox(this))
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  import Cyclotron._
+
+  // imem
+  bbox.io.imem_req_ready := io.imem.req.ready
+  io.imem.req.valid := bbox.io.imem_req_valid
+  io.imem.req.bits.address := bbox.io.imem_req_bits_address
+  io.imem.req.bits.tag := bbox.io.imem_req_bits_tag
+  io.imem.req.bits.size := log2Ceil(muonParams.instBits / 8).U
+  io.imem.req.bits.store := false.B
+  io.imem.req.bits.data := 0.U
+  io.imem.req.bits.mask := ((1 << muonParams.instBytes) - 1).U
+  io.imem.resp.ready := bbox.io.imem_resp_ready
+  bbox.io.imem_resp_valid := io.imem.resp.valid
+  bbox.io.imem_resp_bits_tag := io.imem.resp.bits.tag
+  bbox.io.imem_resp_bits_data := io.imem.resp.bits.data
+
+  // dmem
+  io.dmem.req.zipWithIndex.foreach { case (req, i) =>
+    req.valid := bbox.io.dmem_req_valid(i)
+    req.bits.store := bbox.io.dmem_req_bits_store(i)
+    unflatten(req.bits.tag, bbox.io.dmem_req_bits_tag, i)
+    unflatten(req.bits.address, bbox.io.dmem_req_bits_address, i)
+    unflatten(req.bits.size, bbox.io.dmem_req_bits_size, i)
+    unflatten(req.bits.data, bbox.io.dmem_req_bits_data, i)
+    unflatten(req.bits.mask, bbox.io.dmem_req_bits_mask, i)
+  }
+  bbox.io.dmem_req_ready := VecInit(io.dmem.req.map(_.ready)).asUInt
+
+  bbox.io.dmem_resp_valid := VecInit(io.dmem.resp.map(_.valid)).asUInt
+  bbox.io.dmem_resp_bits_tag := VecInit(io.dmem.resp.map(_.bits.tag)).asUInt
+  bbox.io.dmem_resp_bits_data := VecInit(io.dmem.resp.map(_.bits.data)).asUInt
+  io.dmem.resp.zipWithIndex.foreach { case (resp, i) =>
+    resp.ready := bbox.io.dmem_resp_ready(i)
+    resp.bits.metadata := DontCare
+  }
+
+  io.finished := bbox.io.finished
+}
+
+class CyclotronTileBlackBox(outer: CyclotronTile)(implicit val p: Parameters)
+  extends BlackBox(Map(
+    "ARCH_LEN"       -> outer.archLen,
+    "INST_BITS"      -> outer.muonParams.instBits,
+    "IMEM_TAG_BITS"  -> outer.imemTagBits,
+    "DMEM_DATA_BITS" -> outer.archLen,
+    "DMEM_TAG_BITS"  -> outer.dmemTagBits,
+    "NUM_LANES"      -> outer.numLanes,
+  )) with HasBlackBoxResource with HasCoreParameters {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    val imem_req_valid = Output(Bool())
+    val imem_req_ready = Input(Bool())
+    val imem_req_bits_address = Output(UInt(addressBits.W))
+    val imem_req_bits_tag = Output(UInt(imemTagBits.W))
+    val imem_resp_ready = Output(Bool())
+    val imem_resp_valid = Input(Bool())
+    val imem_resp_bits_tag = Input(UInt(imemTagBits.W))
+    val imem_resp_bits_data = Input(UInt(imemDataBits.W))
+
+    val dmem_req_valid = Output(UInt(numLanes.W))
+    val dmem_req_ready = Input(UInt(numLanes.W))
+    val dmem_req_bits_store = Output(UInt(numLanes.W))
+    val dmem_req_bits_tag = Output(UInt((numLanes * dmemTagBits).W))
+    val dmem_req_bits_address = Output(UInt((numLanes * addressBits).W))
+    val dmem_req_bits_size = Output(UInt((numLanes * (new DataMemIO).req.head.bits.size.getWidth).W))
+    val dmem_req_bits_data = Output(UInt((numLanes * dmemDataBits).W))
+    val dmem_req_bits_mask = Output(UInt((numLanes * (dmemDataBits / 8)).W))
+    val dmem_resp_ready = Output(UInt(numLanes.W))
+    val dmem_resp_valid = Input(UInt(numLanes.W))
+    val dmem_resp_bits_tag = Input(UInt((numLanes * dmemTagBits).W))
+    val dmem_resp_bits_data = Input(UInt((numLanes * dmemDataBits).W))
+
+    val finished = Output(Bool())
+  })
+
+  addResource("/vsrc/CyclotronTile.v")
   addResource("/vsrc/Cyclotron.vh")
   addResource("/csrc/Cyclotron.cc")
 }

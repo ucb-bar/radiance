@@ -78,6 +78,7 @@ case object UseMulDivPipe    extends DecodeField(1, true)
 case object UseFPPipe        extends DecodeField(1, true)
 case object UseFP32Pipe      extends DecodeField(1, true)
 case object UseFP16Pipe      extends DecodeField(1, true)
+case object UseFPExPipe      extends DecodeField(1, true)
 case object UseLSUPipe       extends DecodeField(1, true)
 case object UseSFUPipe       extends DecodeField(1, true)
 case object HasRd            extends DecodeField(1, true)
@@ -234,7 +235,7 @@ object Decoder {
       IsCSRRW, IsCSRRS, IsCSRRC, IsCSRRWI, IsCSRRSI, IsCSRRCI,
       IsFenceI, IsFenceD,
       IsRType, IsIType, IsSType, IsBType, IsUJType, IsFPDivSqrt,
-      UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseLSUPipe, UseSFUPipe,
+      UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseFPExPipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
       Rs1IsPC, Rs1IsZero, Rs2IsImm, IsBranch, IsJump,
       ImmH8, Imm24, Imm32, CsrAddr, CsrImm, ShAmt, ShOp, LuiImm,
@@ -254,6 +255,7 @@ object Decoder {
   def staticDecode(field: DecodeField, op: String,
                    f3: LazyField, f7: LazyField): Option[Boolean] = {
     def sd(f: DecodeField) = staticDecode(f, op, f3, f7).get
+    val isFpExOp = op.endsWith("1111011") && f7 == "0101110"
     field match {
       case IsRType =>
         Some(Seq(
@@ -316,6 +318,8 @@ object Decoder {
           MuOpcode.NM_SUB,
           MuOpcode.NM_ADD,
         ).contains(op))
+      case UseFPExPipe =>
+        Some(isFpExOp)
       case UseLSUPipe =>
         Some(Seq(
           MuOpcode.LOAD,
@@ -327,23 +331,29 @@ object Decoder {
           MuOpcode.CUSTOM0,
           MuOpcode.CUSTOM1,
           MuOpcode.CUSTOM2,
-          MuOpcode.CUSTOM3,
           MuOpcode.SYSTEM,
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
           MuOpcode.NU_PAYLOAD,
           MuOpcode.NU_COMPLETE,
           MuOpcode.MISC_MEM,
-        ).contains(op))
+        ).contains(op) &&
+          !isFpExOp)
       case HasRd =>
-        // we don't use `rd` for vx_split
-        Some(!sd(IsBType) && !sd(IsSType) && !sd(IsSplit))
+        // we don't write to rd for vx_split
+        // rd is an immediate value for vx_pred, similar to rs2 for vx_split
+        Some(!sd(IsBType) && !sd(IsSType) && !sd(IsSplit) && !sd(IsPred))
       case HasRs1 =>
         Some(!sd(IsUJType))
       case HasRs2 =>
         Some(
           (sd(IsRType) || sd(IsSType) || sd(IsBType)) &&
-            !(op == MuOpcode.OP_FP && f7 == "?10?0??") // HACK: FCVT case
+          // vx_split uses the *address* of rs2 to indicate _n variant, and
+          // never needs the value of its reg.  Safe to disable HasRs to prevent
+          // register renaming
+          !sd(IsSplit) &&
+          !(op == MuOpcode.OP_FP && f7 == "?10?0??") && // HACK: FCVT case
+          !isFpExOp  // fpexp.h / fpnexp.h
         )
       case HasRs3 =>
         Some(Seq(
@@ -362,14 +372,14 @@ object Decoder {
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
           MuOpcode.MISC_MEM,
-        ).contains(op) ||
+        ).contains(op) && !isFpExOp ||
           sd(IsTMC) || sd(IsSplit) || sd(IsPred) || sd(IsWSpawn) || sd(IsBar)
         )
       case IsNuInvoke =>
         Some(Seq(
           MuOpcode.NU_INVOKE,
           MuOpcode.NU_INVOKE_IMM,
-        ).contains(op))
+        ).contains(op) && !isFpExOp)
       case Rs1IsPC =>
         Some(Seq(
           MuOpcode.AUIPC,
@@ -478,4 +488,3 @@ object Decoder {
     dec
   }
 }
-

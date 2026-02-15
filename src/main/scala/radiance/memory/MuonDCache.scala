@@ -129,7 +129,8 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.idx := metaReq.idx
   io.wb_req.bits.tag := meta.tag
   // count and pray (voluntary releases do not require a response, reused src id probably ok)
-  io.wb_req.bits.source := Counter(io.wb_req.fire, 1 << io.wb_req.bits.source.getWidth)._1
+  // the first half of the source space is mapped to releases, we have to avoid the second half
+  io.wb_req.bits.source := Counter(io.wb_req.fire, 1 << (io.wb_req.bits.source.getWidth - 1))._1
   io.wb_req.bits.param := respType
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B

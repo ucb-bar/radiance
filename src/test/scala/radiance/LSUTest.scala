@@ -408,7 +408,8 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
     it should "report empty when all queues are empty" in {
         test(new LoadStoreUnit()(params)) { dut =>
             initExternalIfaces(dut)
-            assert(dut.io.empty.peekBoolean(), "LSU should be empty after reset")
+            val empty = dut.io.globalQueuesEmpty.peekBoolean() && dut.io.sharedQueuesEmpty.peekBoolean();
+            assert(empty, "LSU should be empty after reset")
         }
     }
 
@@ -423,7 +424,8 @@ class LSUTest extends AnyFlatSpec with ChiselScalatestTester {
             clearReservation(dut, 0)
             
             // Should not be empty immediately
-            assert(!dut.io.empty.peekBoolean(), "LSU should not be empty with queued entries")
+            val empty = dut.io.globalQueuesEmpty.peekBoolean() && dut.io.sharedQueuesEmpty.peekBoolean();
+            assert(!empty, "LSU should not be empty with queued entries")
         }
     }
 }

@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
-import radiance.memory.BoolArrayUtils.BoolSeqUtils
 import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
@@ -20,7 +19,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       val regWrite = Valid(csrDataT)
     }
   })
-  val fenceIO = IO(lsuFenceIO)
+  val fenceIO = IO(Flipped(lsuFenceIO))
   val flushIO = IO(cacheFlushIO)
   val barIO = IO(barrierIO)
   // to fix scala lsp issues
@@ -125,24 +124,23 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   }
 
   when (inst.b(IsSplit)) {
-    // vortex specifies rs2 addr = 1, but this might get renamed.
-    // however, this logic still holds because x0 always gets renamed to 0;
-    // furthermore, x0 also does not have a wid prefix.
+    // Rs2 of split is guaranteed to be not-renamed
     val invert = inst(Rs2) =/= 0.U
 
     val thenMask = uop.tmask & rs1Mask
     val elseMask = uop.tmask & (~rs1Mask).asUInt
     val divergent = thenMask.orR && elseMask.orR
 
+    writeback.bits.ipdomPush.bits.divergent := divergent
     writeback.bits.ipdomPush.bits.restoredMask := uop.tmask
     writeback.bits.ipdomPush.bits.elseMask := Mux(invert, thenMask, elseMask)
     writeback.bits.ipdomPush.bits.elsePC := uop.pc + 8.U
-    // this signals to scheduler if branch is non-divergent
     writeback.bits.setTmask.valid := divergent
     writeback.bits.setTmask.bits := Mux(invert, elseMask, thenMask)
   }
 
   when (inst.b(IsPred)) {
+    // Rd of pred is guaranteed to be not-renamed
     val invert = inst(Rd) =/= 0.U
     val newTmask = uop.tmask & Mux(invert, (~rs1Mask).asUInt, rs1Mask)
     // vortex logic: if resultant mask is 0, set to first lane's rs2
@@ -263,7 +261,8 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   (fences zip Seq(flushIO.i, flushIO.d)).foreach { case (fence, flush) =>
     // start a flush when lsu is clear, and we havent sent out the request yet
-    flush.start := fence.inProgress.valid && !fence.reqSent && (fenceIO.gmemOutstanding === 0.U)
+    // for now: fence fences both dmem and smem. we should have separate fences though TODO
+    flush.start := fence.inProgress.valid && !fence.reqSent && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
     when (flush.start) {
       fence.reqSent := true.B
     }

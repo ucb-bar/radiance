@@ -287,6 +287,18 @@ class SourceGenerator[T <: Data](
   dontTouch(outstanding)
 }
 
+object SourceGenerator {
+  def apply(node: TLBundle) = {
+    val sourceGen = Module(new SourceGenerator(node.params.sourceBits))
+    sourceGen.io.gen := node.a.fire
+    node.a.bits.source := sourceGen.io.id.bits
+    sourceGen.io.reclaim.valid := node.d.fire
+    sourceGen.io.reclaim.bits := node.d.bits.source
+
+    (sourceGen.io.id.valid, sourceGen.io.inflight)
+  }
+}
+
 // Simplified spatial-only coalescer - processes one warp per cycle
 class Coalescer(config: CoalescerConfig) extends Module {
   val io = IO(new Bundle {

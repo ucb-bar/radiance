@@ -21,7 +21,7 @@ module CVFPU
   input logic [2:0]                         req_bits_dstFormat,
   input logic [1:0]                         req_bits_intFormat,
   input logic [TAG_WIDTH-1:0]               req_bits_tag,
-  input logic [15:0]                        req_bits_simdMask,
+  input logic [LANES-1:0]                   req_bits_simdMask,
   // Input Handshake
   input  logic                              req_valid,
   output logic                              req_ready,
