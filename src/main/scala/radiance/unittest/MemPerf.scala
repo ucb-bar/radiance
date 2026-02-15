@@ -10,8 +10,10 @@ import freechips.rocketchip.rocket.{BTBParams, DCacheParams, ICacheParams}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.BufferParams
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
+
 import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
@@ -120,7 +122,7 @@ class MemPerfMuonTile(
 
     // Traffic generator nodes (replacing innerLsuNodes from MuonTile)
     val trafficGenNodes = trafficGenerators.map { gen =>
-      (TLBuffer()
+      (TLBuffer(ace = BufferParams(0), bd = BufferParams(16))
         := TLSourceShrinker(1 << muonParams.core.logGMEMInFlights)
         := gen.node)
     }
@@ -146,23 +148,22 @@ class MemPerfMuonTile(
         id = tileId,
         cache = l0dParams,
         cacheTagBits = muonParams.core.l0dReqTagBits,
-        flushAddr = None,  // Disable flush register to avoid unconnected node
+        flushAddr = None, // Disable flush register to avoid unconnected node
       ))(
-        // Add the TileVisibilityNodeKey to Parameters
         p.alterMap(Map(
           TileVisibilityNodeKey -> visibilityNode
         ))
       ))
-      // Note: No flush node created since flushAddr = None
       (l0d.outNode, l0d.inNode, None)
     }.getOrElse {
       val passthru = TLEphemeralNode()
       (passthru, passthru, None)
     }
 
-    // Connect dcache to L0D output (from MuonTile)
     val dcache = visibilityNode
+
     dcache :=
+      TLBuffer(ace = BufferParams(0), bd = BufferParams(16)) :=
       ResponseFIFOFixer() :=
       TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
       TLWidthWidget(coalescedReqWidth) :=
@@ -171,7 +172,7 @@ class MemPerfMuonTile(
     // Coalescer crossbar setup (from MuonTile)
     val coalXbar = LazyModule(new TLXbar).suggestName("coal_out_agg_xbar").node
     val nonCoalXbar = LazyModule(new TLXbar).suggestName("coal_out_nc_xbar").node
-    l0dIn := coalXbar
+    l0dIn := TLBuffer(ace = BufferParams(0), bd = BufferParams(16)) := coalXbar
 
     coalXbar := coalescer.nexusNode
     coalescer.passthroughNodes.foreach(nonCoalXbar := _)
@@ -180,7 +181,7 @@ class MemPerfMuonTile(
       := TLSourceShrinker(1 << muonParams.core.logNonCoalGMEMInFlights)
       := nonCoalXbar)
 
-    // Connect traffic generators to coalescer (replacing lsuNodes.foreach)
+    // Connect traffic generators directly to coalescer
     trafficGenNodes.foreach(coalescer.nexusNode := _)
 
     // Return smem (idle masters) and dcache nodes
@@ -189,7 +190,6 @@ class MemPerfMuonTile(
   }
 
   lazy val module = new BaseTileModuleImp[MemPerfMuonTile](this) {
-
     val time = Counter(true.B, Int.MaxValue)._1
 
     val allLanesFinished = VecInit(outer.trafficGenerators.map(_.module.io.finished)).asUInt.andR
@@ -200,7 +200,9 @@ class MemPerfMuonTile(
     val finishPulse = allLanesFinished && !RegNext(allLanesFinished)
     val patternCount = Counter(finishPulse, patterns.length)._1
     val allFinishPulse = WireInit(false.B)
+
     outer.softResetFinishSlave.in.head._1.finished := RegEnable(true.B, false.B, allFinishPulse)
+
     when (finishPulse) {
       outer.patterns.map(_._1).zipWithIndex.foreach { case (name, i) =>
         when (patternCount === i.U) {

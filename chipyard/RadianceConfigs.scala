@@ -217,5 +217,6 @@ class RadianceMemPerfConfig extends Config(
   new WithMemPerfMuonTileReplacement(InCluster(0)) ++
   new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
   new RadianceBaseConfig
 )
