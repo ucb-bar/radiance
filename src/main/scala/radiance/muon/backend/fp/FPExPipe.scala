@@ -52,7 +52,7 @@ class FPExPipe(fmt: FPFormat.Type)
   val fpExReq = Mux(io.req.fire, ioFpExOp, req)
 
   val fpEXRespRd = RegEnable(fpEX.io.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
-    fpEX.io.resp.valid)
+    recomposer.get.io.in.fire)
   val signExtFP16FpEXRes = signExtendFp16Lanes(numFP16ExpLanes, fpEX.io.resp.bits.result.asUInt)
 
   io.req.ready := decomposer.get.io.in.ready
