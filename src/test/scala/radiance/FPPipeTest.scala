@@ -1035,16 +1035,12 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.io.req.bits.rs3Data.foreach(rs3 => pokeLaneVec(rs3, Seq.fill(rs3.length)(BigInt(0)), env.archLen))
 
       c.io.req.valid.poke(true.B)
-      while (!c.io.req.ready.peek().litToBoolean) {
-        c.clock.step()
-      }
-      c.clock.step()
-      c.io.req.valid.poke(false.B)
-
       var cvReqSeen = false
       var cvReqCycles = 0
       while (!cvReqSeen) {
-        cvReqSeen = c.cvFPUIF.req.valid.peek().litToBoolean
+        val reqReady = c.io.req.ready.peek().litToBoolean
+        val cvReqValid = c.cvFPUIF.req.valid.peek().litToBoolean
+        cvReqSeen = reqReady && cvReqValid
         if (!cvReqSeen) {
           c.clock.step()
           cvReqCycles += 1
@@ -1052,9 +1048,9 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         }
       }
       c.clock.step()
+      c.io.req.valid.poke(false.B)
 
       val acceptedRd = 5
-      val poisonedRd = 19
       val acceptedTag = expectedCvFpuTag(
         isFp16 = false,
         tmask = 0xF,
@@ -1062,23 +1058,122 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         numFP16Lanes = numFP16Lanes,
         rd = acceptedRd
       )
-      val poisonedTag = expectedCvFpuTag(
-        isFp16 = false,
-        tmask = 0xF,
-        outLanes = env.numFP32Lanes,
-        numFP16Lanes = numFP16Lanes,
-        rd = poisonedRd
-      )
       val acceptedResult = packLanes(Seq(0x3f800000L, 0x40000000L, 0x40400000L, 0x40800000L), env.archLen)
-      val poisonedResult = packLanes(Seq(0x41000000L, 0x41100000L, 0x41200000L, 0x41300000L), env.archLen)
 
       c.cvFPUIF.resp.valid.poke(true.B)
       c.cvFPUIF.resp.bits.tag.poke(acceptedTag.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
       c.cvFPUIF.resp.bits.result.poke(acceptedResult.U(c.cvFPUIF.resp.bits.result.getWidth.W))
       c.clock.step()
 
+      (0 until 3).foreach { _ =>
+        c.cvFPUIF.resp.ready.expect(false.B)
+        c.cvFPUIF.resp.bits.tag.poke(acceptedTag.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
+        c.cvFPUIF.resp.bits.result.poke(acceptedResult.U(c.cvFPUIF.resp.bits.result.getWidth.W))
+        c.clock.step()
+      }
+      c.cvFPUIF.resp.valid.poke(false.B)
+
+      c.io.resp.ready.poke(true.B)
+      var respSeen = false
+      var respCycles = 0
+      while (!respSeen) {
+        if (c.io.resp.valid.peek().litToBoolean) {
+          c.io.resp.bits.reg.get.valid.expect(true.B)
+          c.io.resp.bits.reg.get.bits.rd.expect(acceptedRd.U, "rd should remain tied to accepted response tag")
+          c.io.resp.bits.reg.get.bits.tmask.expect("b1111".U)
+          Seq(0x3f800000L, 0x40000000L, 0x40400000L, 0x40800000L).zipWithIndex.foreach { case (value, idx) =>
+            c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(env.archLen.W), s"lane $idx data mismatch")
+          }
+          respSeen = true
+        }
+        if (!respSeen) {
+          c.clock.step()
+          respCycles += 1
+          require(respCycles <= 20, "writeback response not observed")
+        }
+      }
+    }
+  }
+
+  it should "not let a stalled next-packet tag corrupt multipacket rd" in {
+    implicit val p: Parameters = testParams(numLanes = 16, numFP32Lanes = 8)
+    test(new FP32Pipe(isDivSqrt = false)) { c =>
+      val muon = p(MuonKey)
+      val env = TestEnv(muon.archLen, muon.numLanes, muon.fpPipe.numFP32Lanes)
+      val numFP16Lanes = env.numFP32Lanes * 2
+
+      c.io.resp.ready.poke(false.B)
+      c.cvFPUIF.req.ready.poke(true.B)
+      c.cvFPUIF.resp.valid.poke(false.B)
+      c.cvFPUIF.resp.bits.status.poke(0.U)
+      c.cvFPUIF.resp.bits.tag.poke(0.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
+      c.cvFPUIF.resp.bits.result.poke(0.U)
+
+      zeroDecoded(c.io.req.bits.uop.inst)
+      pokeDecoded(c.io.req.bits.uop.inst, Opcode, MuOpcode.OP_FP.U.litValue)
+      pokeDecoded(c.io.req.bits.uop.inst, F3, "b000".U.litValue)
+      pokeDecoded(c.io.req.bits.uop.inst, F7, "b0000000".U.litValue)
+      pokeDecoded(c.io.req.bits.uop.inst, Rd, 21)
+      pokeDecoded(c.io.req.bits.uop.inst, Rs1, 1)
+      pokeDecoded(c.io.req.bits.uop.inst, Rs2, 2)
+      pokeDecoded(c.io.req.bits.uop.inst, HasRd, 1)
+      pokeDecoded(c.io.req.bits.uop.inst, HasRs1, 1)
+      pokeDecoded(c.io.req.bits.uop.inst, HasRs2, 1)
+      pokeDecoded(c.io.req.bits.uop.inst, HasRs3, 0)
+      c.io.req.bits.uop.tmask.poke("hffff".U(c.io.req.bits.uop.tmask.getWidth.W))
+      c.io.req.bits.uop.pc.poke(0.U(env.archLen.W))
+      c.io.req.bits.uop.wid.poke(0.U)
+      pokeLaneVec(c.io.req.bits.rs1Data.get, Seq.fill(env.numLanes)(0x3f800000L), env.archLen)
+      pokeLaneVec(c.io.req.bits.rs2Data.get, Seq.fill(env.numLanes)(0x3f800000L), env.archLen)
+      c.io.req.bits.rs3Data.foreach(rs3 => pokeLaneVec(rs3, Seq.fill(rs3.length)(BigInt(0)), env.archLen))
+
+      c.io.req.valid.poke(true.B)
+      while (!c.io.req.ready.peek().litToBoolean) {
+        c.clock.step()
+      }
+      c.clock.step()
+      c.io.req.valid.poke(false.B)
+      c.clock.step()
+
+      val acceptedRd = 5
+      val poisonedRd = 19
+      val acceptedTag = expectedCvFpuTag(
+        isFp16 = false,
+        tmask = 0xFF,
+        outLanes = env.numFP32Lanes,
+        numFP16Lanes = numFP16Lanes,
+        rd = acceptedRd
+      )
+      val poisonedTag = expectedCvFpuTag(
+        isFp16 = false,
+        tmask = 0xFF,
+        outLanes = env.numFP32Lanes,
+        numFP16Lanes = numFP16Lanes,
+        rd = poisonedRd
+      )
+
+      val packet0Lanes = Seq(0x10000001L, 0x10000002L, 0x10000003L, 0x10000004L,
+        0x10000005L, 0x10000006L, 0x10000007L, 0x10000008L)
+      val packet1Lanes = Seq(0x20000001L, 0x20000002L, 0x20000003L, 0x20000004L,
+        0x20000005L, 0x20000006L, 0x20000007L, 0x20000008L)
+      val expectedLanes = packet0Lanes ++ packet1Lanes
+
+      // Feed two packets for one recomposed response with identical rd tag.
+      c.cvFPUIF.resp.valid.poke(true.B)
+      c.cvFPUIF.resp.bits.tag.poke(acceptedTag.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
+      c.cvFPUIF.resp.bits.result.poke(packLanes(packet0Lanes.map(BigInt(_)), env.archLen).U(c.cvFPUIF.resp.bits.result.getWidth.W))
+      c.cvFPUIF.resp.ready.expect(true.B)
+      c.clock.step()
+
+      c.cvFPUIF.resp.bits.tag.poke(acceptedTag.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
+      c.cvFPUIF.resp.bits.result.poke(packLanes(packet1Lanes.map(BigInt(_)), env.archLen).U(c.cvFPUIF.resp.bits.result.getWidth.W))
+      c.cvFPUIF.resp.ready.expect(true.B)
+      c.clock.step()
+
+      // Recomposer now has a full frame and output is stalled. Drive a different next-op tag
+      // while ready is low; this should not mutate rd of the pending writeback.
       c.cvFPUIF.resp.bits.tag.poke(poisonedTag.U(c.cvFPUIF.resp.bits.tag.getWidth.W))
-      c.cvFPUIF.resp.bits.result.poke(poisonedResult.U(c.cvFPUIF.resp.bits.result.getWidth.W))
+      c.cvFPUIF.resp.bits.result.poke(0.U)
       (0 until 3).foreach { _ =>
         c.cvFPUIF.resp.ready.expect(false.B)
         c.clock.step()
@@ -1091,9 +1186,10 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
       while (!respSeen) {
         if (c.io.resp.valid.peek().litToBoolean) {
           c.io.resp.bits.reg.get.valid.expect(true.B)
-          c.io.resp.bits.reg.get.bits.rd.expect(acceptedRd.U, "rd should come from accepted response tag")
-          c.io.resp.bits.reg.get.bits.tmask.expect("b1111".U)
-          Seq(0x3f800000L, 0x40000000L, 0x40400000L, 0x40800000L).zipWithIndex.foreach { case (value, idx) =>
+          c.io.resp.bits.reg.get.bits.rd.expect(acceptedRd.U,
+            "stalled next-packet tag must not corrupt recomposed response rd")
+          c.io.resp.bits.reg.get.bits.tmask.expect("hffff".U(c.io.resp.bits.reg.get.bits.tmask.getWidth.W))
+          expectedLanes.zipWithIndex.foreach { case (value, idx) =>
             c.io.resp.bits.reg.get.bits.data(idx).expect(value.U(env.archLen.W), s"lane $idx data mismatch")
           }
           respSeen = true
@@ -1101,7 +1197,7 @@ class FPPipeTest extends AnyFlatSpec with ChiselScalatestTester {
         if (!respSeen) {
           c.clock.step()
           respCycles += 1
-          require(respCycles <= 20, "writeback response not observed")
+          require(respCycles <= 30, "multipacket response not observed")
         }
       }
     }
