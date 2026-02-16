@@ -141,7 +141,7 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
   cvFPUIF.req.bits.operands(2) := Mux(shiftOperands, operands(1).asUInt, operands(2).asUInt)
-  cvFPUIF.resp.ready := recomposer.get.io.in.fire
+  cvFPUIF.resp.ready := recomposer.get.io.in.ready
 
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsMine
   recomposer.get.io.in.bits.data(1) := VecInit(cvFPUIF.resp.bits.tag(Isa.regBits + outLanes - 1, Isa.regBits).asBools)
