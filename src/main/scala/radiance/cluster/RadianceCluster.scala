@@ -158,7 +158,7 @@ class RadianceCluster (
   l1cache.inNode := TLFIFOFixer() := l1InXbar
   l1InNodes.foreach(l1InXbar := _)
 
-  // connect any scaling factor clients to l1
+  // connect any scaling factor clients to l2
   gemminiTiles.flatMap(_.scalingFacClient).foreach(csBusXbar := _)
 
   val softResetFinishMasters = p(GPUResetKey).fold(muonTiles.map { m =>

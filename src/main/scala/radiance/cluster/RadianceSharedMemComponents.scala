@@ -150,7 +150,11 @@ class RadianceSharedMemComponents(
     distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)), "gemmini_w")
   }
   val spadSpWriteNodesSingleBank = distAndDuplicate(
-    gemminis.map(g => (g.spad.spad_writer.get.node, g.config.sp_width_projected / 8)), "gemmini_ws")
+    gemminis.map { g =>
+      val shrunk = TLWidthWidget(smemWidth)
+      shrunk := TLFragmenter(smemWidth, smemWidth) := g.spad.spad_writer.get.node
+      (shrunk, g.config.max_spad_writer_bytes min smemWidth)
+    }, "gemmini_ws")
   val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
 
   val preSplitterNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))

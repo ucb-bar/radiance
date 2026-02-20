@@ -185,6 +185,7 @@ class GemminiTile private (
     )))
   }
   scalingFacManager.foreach(_
+    := FlitMergeNode(from = 4, to = 8)
     := TLWidthWidget(8)
     := tlSlaveXbar.node)
 
@@ -443,7 +444,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     require(luts.length == config.numTables)
 
     val tableBase = 0x80
-    val tableSizes = (config.numEntries zip config.numBits).map(x => x._1 * x._2)
+    val tableSizes = (config.numEntries zip config.numBits).map(x => x._1 * x._2 / 8)
     val tableOffsets = tableSizes.scanLeft(tableBase)(_ + _)
 
     val flops = RegInit(MixedVecInit(
