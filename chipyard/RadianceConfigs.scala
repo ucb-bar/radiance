@@ -161,6 +161,15 @@ class RadianceCyclotronConfig extends Config(
   new RadianceBaseConfig
 )
 
+class WithRadianceRocket extends Config(
+  new freechips.rocketchip.rocket.WithCFlushEnabled ++
+  new tacit.WithTraceSinkDMA(1) ++
+  new tacit.WithTraceSinkAlways(0) ++
+  new chipyard.config.WithTraceArbiterMonitor ++
+  new chipyard.WithTacitEncoder ++
+  new freechips.rocketchip.rocket.WithNSmallCores(1)
+)
+
 class RadianceLeanTapeoutSimConfig extends Config(
   new WithMuonCores(2, location = InCluster(1), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
@@ -168,8 +177,7 @@ class RadianceLeanTapeoutSimConfig extends Config(
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
-  new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
-  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new WithRadianceRocket ++
   new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
@@ -182,8 +190,7 @@ class RadianceTapeoutSimConfig extends Config(
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
-  new freechips.rocketchip.rocket.WithCFlushEnabled ++ // thanks kevin
-  new freechips.rocketchip.rocket.WithNSmallCores(1) ++
+  new WithRadianceRocket ++
   new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
