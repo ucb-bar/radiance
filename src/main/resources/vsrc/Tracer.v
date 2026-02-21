@@ -24,7 +24,7 @@ module TracerBlackBox #(
 );
   `include "Cyclotron.vh"
 
-  import "DPI-C" function cyclotron_trace_reg(
+  import "DPI-C" function cyclotron_trace(
     input bit  trace_valid,
     input int  trace_pc,
     input int  trace_warpId,
@@ -59,7 +59,7 @@ module TracerBlackBox #(
   always @(posedge clock) begin
     if (reset) begin
     end else begin
-      cyclotron_trace_reg(
+      cyclotron_trace(
         trace_valid,
         trace_pc,
         trace_warpId,

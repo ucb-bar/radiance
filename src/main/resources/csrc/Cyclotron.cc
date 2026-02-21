@@ -498,7 +498,7 @@ void cyclotron_difftest_reg_rs(
     const uint32_t *trace_regs_2_data
 );
 
-void cyclotron_trace_reg_rs(
+void cyclotron_trace_rs(
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -514,7 +514,7 @@ void cyclotron_trace_reg_rs(
     const uint32_t *trace_regs_2_data
 );
 
-void cyclotron_trace_reg(
+void cyclotron_trace(
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -529,7 +529,7 @@ void cyclotron_trace_reg(
     const uint8_t   trace_regs_2_address,
     const uint32_t *trace_regs_2_data
 ) {
-  cyclotron_trace_reg_rs(
+  cyclotron_trace_rs(
     trace_valid,
     trace_pc,
     trace_warpId,
