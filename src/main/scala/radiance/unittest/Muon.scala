@@ -216,6 +216,12 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.coreId := 0.U
     core.io.clusterId := 0.U
 
+    // inst/mem traces
+    if (core.io.trace.isDefined) {
+      val ctrace = Module(new Tracer)
+      ctrace.io.trace <> core.io.trace.get
+    }
+
     // performance counters
     val cperf = Module(new Profiler)
     cperf.io.perf <> core.io.perf

@@ -354,31 +354,15 @@ class CyclotronDiffTest(tick: Boolean = true)
   class CyclotronDiffTestBlackBox(tick: Boolean)(implicit val p: Parameters)
   extends BlackBox(Map(
         "ARCH_LEN"     -> p(MuonKey).archLen,
-        "INST_BITS"    -> p(MuonKey).instBits,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
-        "OP_BITS"      -> Isa.opcodeBits,
         "REG_BITS"     -> Isa.regBits,
-        "IMM_BITS"     -> 32,
-        "CSR_IMM_BITS" -> Isa.csrImmBits,
-        "PRED_BITS"    -> Isa.predBits,
         "SIM_TICK"     -> (if (tick) 1 else 0),
   )) with HasBlackBoxResource with HasCoreParameters {
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
-
-      val trace = Input(new Bundle {
-        val valid = Bool()
-        val pc = pcT
-        val warpId = widT
-        val tmask = tmaskT
-        val regs = Vec(Isa.maxNumRegs, new Bundle {
-          val enable = Bool()
-          val address = pRegT
-          val data = UInt((muonParams.numLanes * muonParams.archLen).W)
-        })
-      })
+      val trace = Input(new TraceVerilogIO)
     })
 
     addResource("/vsrc/CyclotronDiffTest.v")
@@ -424,6 +408,61 @@ with HasBlackBoxResource {
   addResource("/csrc/Cyclotron.cc")
 }
 
+class TraceVerilogIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val valid = Bool()
+  val pc = pcT
+  val warpId = widT
+  val tmask = tmaskT
+  val regs = Vec(Isa.maxNumRegs, new Bundle {
+    val enable = Bool()
+    val address = pRegT
+    val data = UInt((muonParams.numLanes * muonParams.archLen).W)
+  })
+}
+
+/** Captures Muon's instruction and memory traces and stores into a database. */
+class Tracer(clusterId: Int = 0, coreId: Int = 0)(implicit p: Parameters)
+extends CoreModule {
+  val io = IO(new Bundle {
+    val trace = Flipped(Valid(new TraceIO))
+  })
+
+  val cbox = Module(new TracerBlackBox()(p))
+  cbox.io.clock := clock
+  cbox.io.reset := reset.asBool
+
+  cbox.io.trace.valid := io.trace.valid
+  cbox.io.trace.pc := io.trace.bits.pc
+  cbox.io.trace.warpId := io.trace.bits.warpId
+  cbox.io.trace.tmask := io.trace.bits.tmask
+  (cbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
+    boxtr.enable := tr.enable
+    boxtr.address := tr.address
+    boxtr.data := tr.data.asUInt
+  }
+
+  class TracerBlackBox()(implicit val p: Parameters)
+  extends BlackBox(Map(
+        "CLUSTER_ID" -> clusterId,
+        "CORE_ID" -> coreId,
+        "ARCH_LEN"     -> p(MuonKey).archLen,
+        "NUM_WARPS"    -> p(MuonKey).numWarps,
+        "NUM_LANES"    -> p(MuonKey).numLanes,
+        "REG_BITS"     -> Isa.regBits,
+  )) with HasBlackBoxResource with HasCoreParameters {
+    val io = IO(new Bundle {
+      val clock = Input(Clock())
+      val reset = Input(Bool())
+      val trace = Input(new TraceVerilogIO)
+    })
+
+    addResource("/vsrc/Tracer.v")
+    addResource("/vsrc/Cyclotron.vh")
+    addResource("/csrc/Cyclotron.cc")
+  }
+}
+
+/** Collects Muon's performance counters and prints a performance analysis report at RTL sim. */
 class Profiler(clusterId: Int = 0, coreId: Int = 0)(implicit p: Parameters)
 extends CoreModule {
   val io = IO(new Bundle {
