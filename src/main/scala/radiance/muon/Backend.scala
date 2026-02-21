@@ -21,7 +21,6 @@ class Backend(
     val flush = cacheFlushIO
     val softReset = Input(Bool())
     val perf = Output(new BackendPerfIO)
-    /** PC/reg trace IO for diff-testing against model */
     val trace = Option.when(difftest)(Valid(new TraceIO))
   })
 

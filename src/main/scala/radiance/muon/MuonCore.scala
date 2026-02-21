@@ -7,7 +7,6 @@ import freechips.rocketchip.rocket.ALU
 import freechips.rocketchip.util.ParameterizedBundle
 import org.chipsalliance.cde.config.{Field, Parameters}
 import radiance.cluster.CacheFlushBundle
-import radiance.muon.backend.RegWriteback
 import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
 import radiance.subsystem.PhysicalCoreParams

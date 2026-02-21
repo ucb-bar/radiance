@@ -100,6 +100,12 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.csrIO.fe := io.feCSR
 }
 
+class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
+  val rd = pRegT
+  val data = Vec(muonParams.numLanes, regDataT)
+  val tmask = tmaskT
+}
+
 class ExecutePerfCounter {
   /** total retired instructions */
   val instRetired = new PerfCounter
