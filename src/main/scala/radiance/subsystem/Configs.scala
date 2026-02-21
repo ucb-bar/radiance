@@ -65,6 +65,7 @@ class WithMuonCores(
   crossing: RocketCrossingParams,
   standalone: Boolean,
   noILP: Boolean,
+  trace: Boolean,
   cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
@@ -89,6 +90,7 @@ class WithMuonCores(
       lsu = LoadStoreUnitParams(
         numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
       ),
+      trace = trace || difftest,
       difftest = difftest,
     )
   }
@@ -131,7 +133,8 @@ class WithMuonCores(
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
     standalone: Boolean = false, noILP: Boolean = false,
-    cyclotron: Boolean = false, difftest: Boolean = false, disabled: Boolean = false,
+    trace: Boolean = false, cyclotron: Boolean = false,
+    difftest: Boolean = false, disabled: Boolean = false,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -140,7 +143,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, cyclotron, difftest, disabled, l0i, l0d)
+  ), standalone, noILP, trace, cyclotron, difftest, disabled, l0i, l0d)
 }
 
 class WithCyclotronCores(

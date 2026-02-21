@@ -53,6 +53,7 @@ case class MuonCoreParams(
   // misc
   barrierBits: Int = 4,
   debug: Boolean = false, // enable extra IOs for debug (ex: PC)
+  trace: Boolean = false,   // enable instruction trace generation
   difftest: Boolean = false // enable arch-state differential testing
                             // against cyclotron
 ) extends PhysicalCoreParams {
@@ -343,9 +344,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val finished = Output(Bool())
     val perf = new PerfIO
-    /** PC/reg trace IO for diff-testing against model */
-    val trace = Option.when(muonParams.difftest)(Valid(new TraceIO))
-    // TODO: LCP (threadblock start/done, warp slot, synchronization)
+    val trace = Option.when(muonParams.trace)(Valid(new TraceIO))
   })
   dontTouch(io)
 
@@ -354,7 +353,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
-  val be = Module(new Backend(muonParams.difftest))
+  val be = Module(new Backend(muonParams.trace))
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
   be.io.feCSR := fe.io.csr

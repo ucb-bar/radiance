@@ -29,13 +29,13 @@ class WithMuonLSUDebugIds(width: Int) extends Config((_, _, _) => {
 
 class MuonCoreTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
-  new WithMuonCores(1, standalone = true, difftest = true) ++
+  new WithMuonCores(1, standalone = true, trace = true, difftest = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
 class MuonCoreLongTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest(timeout = 10000000)(_)) ++
-  new WithMuonCores(1, standalone = true, difftest = true) ++
+  new WithMuonCores(1, standalone = true, trace = true, difftest = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
