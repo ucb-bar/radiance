@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.rocket.{ALU, MulDivParams}
-import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 
 object IntOpDecoder {

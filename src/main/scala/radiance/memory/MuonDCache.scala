@@ -7,8 +7,6 @@ import chisel3.experimental.dataview._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
-import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket
 
 // =====================================================================================
 /* this design is a modified version of rocket's NBDcache, with a few notable changes:

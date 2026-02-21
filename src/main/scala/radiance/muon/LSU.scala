@@ -2,11 +2,8 @@ package radiance.muon
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.dataview._
-
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util._
-
 import radiance.muon.AddressSpaceCfg._
 import radiance.memory.MultiReadOneWriteSRAM
 import org.chipsalliance.cde.config.Field
