@@ -13,7 +13,6 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy.BufferParams
 import org.chipsalliance.cde.config._
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
-
 import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
@@ -108,6 +107,8 @@ class MemPerfMuonTile(
 
   val icacheNode: TLNode = idleMaster()
   val softResetFinishSlave = SoftResetFinishNode.Slave()
+  val softResetFinishMaster = SoftResetFinishNode.Master()
+  softResetFinishSlave := softResetFinishMaster
 
   // Define smemNodes and dcacheNode based on testType
   val (smemNodes: Seq[TLNode], dcacheNode: TLNode) = if (testType == "smem") {
@@ -122,7 +123,7 @@ class MemPerfMuonTile(
 
     // Traffic generator nodes (replacing innerLsuNodes from MuonTile)
     val trafficGenNodes = trafficGenerators.map { gen =>
-      (TLBuffer(ace = BufferParams(0), bd = BufferParams(16))
+      (TLBuffer()
         := TLSourceShrinker(1 << muonParams.core.logGMEMInFlights)
         := gen.node)
     }
@@ -163,7 +164,13 @@ class MemPerfMuonTile(
     val dcache = visibilityNode
 
     dcache :=
-      TLBuffer(ace = BufferParams(0), bd = BufferParams(16)) :=
+      TLBuffer(
+        a = BufferParams(0),
+        b = BufferParams(0),
+        c = BufferParams(0),
+        d = BufferParams(5),
+        e = BufferParams(0)
+      ) :=
       ResponseFIFOFixer() :=
       TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
       TLWidthWidget(coalescedReqWidth) :=
@@ -172,7 +179,7 @@ class MemPerfMuonTile(
     // Coalescer crossbar setup (from MuonTile)
     val coalXbar = LazyModule(new TLXbar).suggestName("coal_out_agg_xbar").node
     val nonCoalXbar = LazyModule(new TLXbar).suggestName("coal_out_nc_xbar").node
-    l0dIn := TLBuffer(ace = BufferParams(0), bd = BufferParams(16)) := coalXbar
+    l0dIn := coalXbar
 
     coalXbar := coalescer.nexusNode
     coalescer.passthroughNodes.foreach(nonCoalXbar := _)
@@ -192,6 +199,9 @@ class MemPerfMuonTile(
   lazy val module = new BaseTileModuleImp[MemPerfMuonTile](this) {
     val time = Counter(true.B, Int.MaxValue)._1
 
+    // Drive softResetFinish signals (not used for testing, but required by trait)
+    outer.softResetFinishMaster.out.head._1.softReset := false.B
+    
     val allLanesFinished = VecInit(outer.trafficGenerators.map(_.module.io.finished)).asUInt.andR
     outer.trafficGenerators.foreach(_.module.io.start := allLanesFinished)
 
@@ -199,21 +209,27 @@ class MemPerfMuonTile(
     
     val finishPulse = allLanesFinished && !RegNext(allLanesFinished)
     val patternCount = Counter(finishPulse, patterns.length)._1
-    val allFinishPulse = WireInit(false.B)
-
-    outer.softResetFinishSlave.in.head._1.finished := RegEnable(true.B, false.B, allFinishPulse)
-
+    val testsComplete = RegInit(false.B)
+    
     when (finishPulse) {
       outer.patterns.map(_._1).zipWithIndex.foreach { case (name, i) =>
         when (patternCount === i.U) {
           printf(cf"[TRAFFIC] core ${muonParams.coreId} ${name} finished at time $time\n")
           if (i == outer.patterns.length - 1) {
             printf(cf"[TRAFFIC] core ${muonParams.coreId} all done!\n")
-            allFinishPulse := true.B
+            testsComplete := true.B
           }
         }
       }
     }
+    
+    // Force simulation exit when all patterns are done
+    when (testsComplete && RegNext(testsComplete)) {
+      chisel3.stop()
+    }
+
+    // Drive finished signal
+    outer.softResetFinishMaster.out.head._1.finished := testsComplete
 
     outer.reportCease(Some(RegNext(allPatternsDone)))
     outer.reportWFI(None)

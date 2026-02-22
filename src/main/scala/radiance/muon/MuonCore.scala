@@ -75,8 +75,7 @@ case class MuonCoreParams(
   def l1ReqTagBits: Int = {
     val instVsData = 1
     val coreBits = log2Ceil(numCores)
-    println("l1 tag bits", instVsData + coreBits + 6) // max(log2Ceil(nMSHRs + nMMIOs) for i, d)
-    instVsData + coreBits + 6
+    instVsData + coreBits + 5
   }
 }
 

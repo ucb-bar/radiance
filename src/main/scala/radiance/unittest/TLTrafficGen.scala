@@ -66,7 +66,7 @@ class TLTrafficGen(val nodeName: String, val sourceBits: Int,
 }
 
 class TLTrafficGenImp(outer: TLTrafficGen) extends LazyModuleImp(outer) {
-  val verificationMode = true
+  val verificationMode = false // always ready
 
   // elaboration time
   // ================
