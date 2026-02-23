@@ -334,7 +334,7 @@ class CyclotronDataMemBlackBox(outer: CyclotronDataMem)(implicit val p: Paramete
 class CyclotronDiffTest(tick: Boolean = true)
 (implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
-    val trace = Flipped(Valid(new TraceIO))
+    val trace = Flipped(Valid(new InstTraceIO))
   })
 
   val cbox = Module(new CyclotronDiffTestBlackBox(tick)(p))
@@ -424,22 +424,84 @@ class TraceVerilogIO()(implicit p: Parameters) extends CoreBundle()(p) {
 class Tracer(clusterId: Int = 0, coreId: Int = 0)(implicit p: Parameters)
 extends CoreModule {
   val io = IO(new Bundle {
-    val trace = Flipped(Valid(new TraceIO))
+    val inst = Flipped(Valid(new InstTraceIO))
+    val dmem = new Bundle {
+      val req = Flipped(Vec(
+        muonParams.lsu.numLsuLanes,
+        Valid(new MemRequest(dmemTagBits, addressBits, dmemDataBits))
+      ))
+      val resp = Flipped(Vec(
+        muonParams.lsu.numLsuLanes,
+        Valid(new MemResponse(dmemTagBits, dmemDataBits))
+      ))
+    }
+    val smem = new Bundle {
+      val req = Flipped(Vec(
+        muonParams.lsu.numLsuLanes,
+        Valid(new MemRequest(smemTagBits, addressBits, smemDataBits))
+      ))
+      val resp = Flipped(Vec(
+        muonParams.lsu.numLsuLanes,
+        Valid(new MemResponse(smemTagBits, smemDataBits))
+      ))
+    }
   })
+
+  def connectDmem(dmem: DataMemIO) = {
+    (io.dmem.req zip dmem.req).map { case (io, core) =>
+      io.valid := core.valid
+      io.bits := core.bits
+    }
+    (io.dmem.resp zip dmem.resp).map { case (io, core) =>
+      io.valid := core.valid
+      io.bits := core.bits
+    }
+  }
+  def connectSmem(smem: SharedMemIO) = {
+    (io.smem.req zip smem.req).map { case (io, core) =>
+      io.valid := core.valid
+      io.bits := core.bits
+    }
+    (io.smem.resp zip smem.resp).map { case (io, core) =>
+      io.valid := core.valid
+      io.bits := core.bits
+    }
+  }
 
   val cbox = Module(new TracerBlackBox()(p))
   cbox.io.clock := clock
   cbox.io.reset := reset.asBool
 
-  cbox.io.trace.valid := io.trace.valid
-  cbox.io.trace.pc := io.trace.bits.pc
-  cbox.io.trace.warpId := io.trace.bits.warpId
-  cbox.io.trace.tmask := io.trace.bits.tmask
-  (cbox.io.trace.regs zip io.trace.bits.regs).foreach { case (boxtr, tr) =>
+  cbox.io.inst.valid := io.inst.valid
+  cbox.io.inst.pc := io.inst.bits.pc
+  cbox.io.inst.warpId := io.inst.bits.warpId
+  cbox.io.inst.tmask := io.inst.bits.tmask
+  (cbox.io.inst.regs zip io.inst.bits.regs).foreach { case (boxtr, tr) =>
     boxtr.enable := tr.enable
     boxtr.address := tr.address
     boxtr.data := tr.data.asUInt
   }
+  cbox.io.dmem_req_valid := VecInit(io.dmem.req.map(_.valid)).asUInt
+  cbox.io.dmem_req_bits_store := VecInit(io.dmem.req.map(_.bits.store)).asUInt
+  cbox.io.dmem_req_bits_address := VecInit(io.dmem.req.map(_.bits.address)).asUInt
+  cbox.io.dmem_req_bits_size := VecInit(io.dmem.req.map(_.bits.size)).asUInt
+  cbox.io.dmem_req_bits_tag := VecInit(io.dmem.req.map(_.bits.tag)).asUInt
+  cbox.io.dmem_req_bits_data := VecInit(io.dmem.req.map(_.bits.data)).asUInt
+  cbox.io.dmem_req_bits_mask := VecInit(io.dmem.req.map(_.bits.mask)).asUInt
+  cbox.io.dmem_resp_valid := VecInit(io.dmem.resp.map(_.valid)).asUInt
+  cbox.io.dmem_resp_bits_tag := VecInit(io.dmem.resp.map(_.bits.tag)).asUInt
+  cbox.io.dmem_resp_bits_data := VecInit(io.dmem.resp.map(_.bits.data)).asUInt
+
+  cbox.io.smem_req_valid := VecInit(io.smem.req.map(_.valid)).asUInt
+  cbox.io.smem_req_bits_store := VecInit(io.smem.req.map(_.bits.store)).asUInt
+  cbox.io.smem_req_bits_address := VecInit(io.smem.req.map(_.bits.address)).asUInt
+  cbox.io.smem_req_bits_size := VecInit(io.smem.req.map(_.bits.size)).asUInt
+  cbox.io.smem_req_bits_tag := VecInit(io.smem.req.map(_.bits.tag)).asUInt
+  cbox.io.smem_req_bits_data := VecInit(io.smem.req.map(_.bits.data)).asUInt
+  cbox.io.smem_req_bits_mask := VecInit(io.smem.req.map(_.bits.mask)).asUInt
+  cbox.io.smem_resp_valid := VecInit(io.smem.resp.map(_.valid)).asUInt
+  cbox.io.smem_resp_bits_tag := VecInit(io.smem.resp.map(_.bits.tag)).asUInt
+  cbox.io.smem_resp_bits_data := VecInit(io.smem.resp.map(_.bits.data)).asUInt
 
   class TracerBlackBox()(implicit val p: Parameters)
   extends BlackBox(Map(
@@ -448,12 +510,41 @@ extends CoreModule {
         "ARCH_LEN"     -> p(MuonKey).archLen,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
+        "LSU_LANES"    -> p(MuonKey).lsu.numLsuLanes,
         "REG_BITS"     -> Isa.regBits,
+        "DMEM_TAG_BITS" -> dmemTagBits,
+        "DMEM_DATA_BITS" -> dmemDataBits,
+        "SMEM_TAG_BITS" -> smemTagBits,
+        "SMEM_DATA_BITS" -> smemDataBits,
   )) with HasBlackBoxResource with HasCoreParameters {
+    val dmemSizeBits = log2Ceil(log2Ceil(dmemDataBits / 8) + 1)
+    val smemSizeBits = log2Ceil(log2Ceil(smemDataBits / 8) + 1)
+
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
-      val trace = Input(new TraceVerilogIO)
+      val inst = Input(new TraceVerilogIO)
+      val dmem_req_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val dmem_req_bits_store = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val dmem_req_bits_address = Input(UInt((muonParams.lsu.numLsuLanes * addressBits).W))
+      val dmem_req_bits_size = Input(UInt((muonParams.lsu.numLsuLanes * dmemSizeBits).W))
+      val dmem_req_bits_tag = Input(UInt((muonParams.lsu.numLsuLanes * dmemTagBits).W))
+      val dmem_req_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * dmemDataBits).W))
+      val dmem_req_bits_mask = Input(UInt((muonParams.lsu.numLsuLanes * (dmemDataBits / 8)).W))
+      val dmem_resp_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val dmem_resp_bits_tag = Input(UInt((muonParams.lsu.numLsuLanes * dmemTagBits).W))
+      val dmem_resp_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * dmemDataBits).W))
+
+      val smem_req_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val smem_req_bits_store = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val smem_req_bits_address = Input(UInt((muonParams.lsu.numLsuLanes * addressBits).W))
+      val smem_req_bits_size = Input(UInt((muonParams.lsu.numLsuLanes * smemSizeBits).W))
+      val smem_req_bits_tag = Input(UInt((muonParams.lsu.numLsuLanes * smemTagBits).W))
+      val smem_req_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * smemDataBits).W))
+      val smem_req_bits_mask = Input(UInt((muonParams.lsu.numLsuLanes * (smemDataBits / 8)).W))
+      val smem_resp_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+      val smem_resp_bits_tag = Input(UInt((muonParams.lsu.numLsuLanes * smemTagBits).W))
+      val smem_resp_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * smemDataBits).W))
     })
 
     addResource("/vsrc/Tracer.v")

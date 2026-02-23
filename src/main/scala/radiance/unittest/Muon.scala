@@ -89,7 +89,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   val ibuf = Module(new InstBuffer)
   val cfe = Module(new CyclotronFrontend()(p))
   val cdiff = Module(new CyclotronDiffTest(tick = false)(p))
-  val be = Module(new Backend(muonParams.trace)(p.alterMap(Map(
+  val be = Module(new Backend()(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
 
@@ -219,7 +219,9 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     // inst/mem traces
     if (core.muonParams.trace) {
       val ctrace = Module(new Tracer)
-      ctrace.io.trace <> core.io.trace.get
+      ctrace.io.inst <> core.io.trace.get
+      ctrace.connectDmem(core.io.dmem)
+      ctrace.connectSmem(core.io.smem)
     }
 
     // performance counters

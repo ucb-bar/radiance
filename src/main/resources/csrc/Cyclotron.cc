@@ -511,7 +511,27 @@ void cyclotron_trace_rs(
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
     const uint8_t   trace_regs_2_address,
-    const uint32_t *trace_regs_2_data
+    const uint32_t *trace_regs_2_data,
+    const uint8_t  *dmem_req_valid,
+    const uint8_t  *dmem_req_bits_store,
+    const uint32_t *dmem_req_bits_address,
+    const uint8_t  *dmem_req_bits_size,
+    const uint32_t *dmem_req_bits_tag,
+    const uint32_t *dmem_req_bits_data,
+    const uint8_t  *dmem_req_bits_mask,
+    const uint8_t  *dmem_resp_valid,
+    const uint32_t *dmem_resp_bits_tag,
+    const uint32_t *dmem_resp_bits_data,
+    const uint8_t  *smem_req_valid,
+    const uint8_t  *smem_req_bits_store,
+    const uint32_t *smem_req_bits_address,
+    const uint8_t  *smem_req_bits_size,
+    const uint32_t *smem_req_bits_tag,
+    const uint32_t *smem_req_bits_data,
+    const uint8_t  *smem_req_bits_mask,
+    const uint8_t  *smem_resp_valid,
+    const uint32_t *smem_resp_bits_tag,
+    const uint32_t *smem_resp_bits_data
 );
 
 void cyclotron_trace(
@@ -527,7 +547,27 @@ void cyclotron_trace(
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
     const uint8_t   trace_regs_2_address,
-    const uint32_t *trace_regs_2_data
+    const uint32_t *trace_regs_2_data,
+    const uint8_t  *dmem_req_valid,
+    const uint8_t  *dmem_req_bits_store,
+    const uint32_t *dmem_req_bits_address,
+    const uint8_t  *dmem_req_bits_size,
+    const uint32_t *dmem_req_bits_tag,
+    const uint32_t *dmem_req_bits_data,
+    const uint8_t  *dmem_req_bits_mask,
+    const uint8_t  *dmem_resp_valid,
+    const uint32_t *dmem_resp_bits_tag,
+    const uint32_t *dmem_resp_bits_data,
+    const uint8_t  *smem_req_valid,
+    const uint8_t  *smem_req_bits_store,
+    const uint32_t *smem_req_bits_address,
+    const uint8_t  *smem_req_bits_size,
+    const uint32_t *smem_req_bits_tag,
+    const uint32_t *smem_req_bits_data,
+    const uint8_t  *smem_req_bits_mask,
+    const uint8_t  *smem_resp_valid,
+    const uint32_t *smem_resp_bits_tag,
+    const uint32_t *smem_resp_bits_data
 ) {
   cyclotron_trace_rs(
     trace_valid,
@@ -542,7 +582,27 @@ void cyclotron_trace(
     trace_regs_1_data,
     trace_regs_2_enable,
     trace_regs_2_address,
-    trace_regs_2_data
+    trace_regs_2_data,
+    dmem_req_valid,
+    dmem_req_bits_store,
+    dmem_req_bits_address,
+    dmem_req_bits_size,
+    dmem_req_bits_tag,
+    dmem_req_bits_data,
+    dmem_req_bits_mask,
+    dmem_resp_valid,
+    dmem_resp_bits_tag,
+    dmem_resp_bits_data,
+    smem_req_valid,
+    smem_req_bits_store,
+    smem_req_bits_address,
+    smem_req_bits_size,
+    smem_req_bits_tag,
+    smem_req_bits_data,
+    smem_req_bits_mask,
+    smem_resp_valid,
+    smem_resp_bits_tag,
+    smem_resp_bits_data
   );
 }
 

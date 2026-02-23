@@ -271,9 +271,9 @@ abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundl
   with HasCoreParameters
 
 /** Data memory interface for the core.
-  * The interface is per-lane, with each lane being word-size-wide with its own
-  * tag and ready/valid.  The coalescer at downstream is responsible for merging
-  * them into wide reqs when possible. */
+  * The memory interface is per-lane, with each lane being word-size-wide with
+  * its own tag and ready/valid.  The coalescer at downstream is responsible
+  * for merging them into wide reqs when possible. */
 class DataMemIO(implicit p: Parameters) extends CoreBundle()(p) {
   val req = Vec(
     muonParams.lsu.numLsuLanes,
@@ -319,7 +319,7 @@ class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
 
 /** Trace IO to software testbench that logs PC and register read data at
   * issue time. */
-class TraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
+class InstTraceIO()(implicit p: Parameters) extends CoreBundle()(p) {
   val pc = pcT
   val warpId = widT
   val tmask = tmaskT
@@ -343,7 +343,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val finished = Output(Bool())
     val perf = new PerfIO
-    val trace = Option.when(muonParams.trace)(Valid(new TraceIO))
+    val trace = Option.when(muonParams.trace)(Valid(new InstTraceIO))
   })
   dontTouch(io)
 
@@ -352,7 +352,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished
 
-  val be = Module(new Backend(muonParams.trace))
+  val be = Module(new Backend)
   be.io.dmem <> io.dmem
   be.io.smem <> io.smem
   be.io.feCSR := fe.io.csr

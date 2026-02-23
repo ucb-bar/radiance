@@ -41,13 +41,13 @@ class MuonCoreLongTestConfig extends Config(
 
 class MuonCoreNoILPTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
-  new WithMuonCores(1, standalone = true, noILP = true, difftest = true) ++
+  new WithMuonCores(1, standalone = true, noILP = true, trace = true, difftest = true) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 
 class MuonCoreNoDiffTestConfig extends Config(
   new WithMuonUnitTestHarness(new MuonCoreTest()(_)) ++
-  new WithMuonCores(1, standalone = true, difftest = false) ++
+  new WithMuonCores(1, standalone = true, trace = true, difftest = false) ++
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 4) ++
   new BaseSubsystemConfig)
 

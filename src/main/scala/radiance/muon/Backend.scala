@@ -5,9 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int.LsuOpDecoder
 
-class Backend(
-  difftest: Boolean = false
-)(implicit p: Parameters) extends CoreModule()(p) {
+class Backend(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val lsuReserve = reservationIO
     val dmem = new DataMemIO
@@ -21,7 +19,7 @@ class Backend(
     val flush = cacheFlushIO
     val softReset = Input(Bool())
     val perf = Output(new BackendPerfIO)
-    val trace = Option.when(difftest)(Valid(new TraceIO))
+    val trace = Option.when(muonParams.trace)(Valid(new InstTraceIO))
   })
 
   // -----
