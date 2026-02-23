@@ -15,7 +15,7 @@ import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import radiance.cluster.{CacheFlushNode, SoftResetFinishNode}
 import radiance.memory._
 import radiance.subsystem._
-import radiance.unittest.{CyclotronTile, CyclotronDiffTest, Profiler}
+import radiance.unittest.{CyclotronTile, CyclotronDiffTest, Tracer, Profiler}
 
 case class MuonTileParams(
   core: MuonCoreParams = MuonCoreParams(),
@@ -343,28 +343,28 @@ class MuonTile(
 }
 
 class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
-  val muon = Module(new MuonCore)
+  val core = Module(new MuonCore)
 
-  MuonMemTL.connectTL(muon.io.imem.req, muon.io.imem.resp, outer.icacheWordNode)
+  MuonMemTL.connectTL(core.io.imem.req, core.io.imem.resp, outer.icacheWordNode)
 
-  MuonMemTL.multiConnectTL(muon.io.dmem.req, muon.io.dmem.resp, outer.innerLsuNodes)
-  MuonMemTL.multiConnectTL(muon.io.smem.req, muon.io.smem.resp, outer.innerSmemNodes)
+  MuonMemTL.multiConnectTL(core.io.dmem.req, core.io.dmem.resp, outer.innerLsuNodes)
+  MuonMemTL.multiConnectTL(core.io.smem.req, core.io.smem.resp, outer.innerSmemNodes)
 
   val (barrier, _) = outer.barrierMaster.out.head
-  barrier.req <> muon.io.barrier.req
-  barrier.resp <> muon.io.barrier.resp
+  barrier.req <> core.io.barrier.req
+  barrier.resp <> core.io.barrier.resp
 
-  outer.iFlushMaster.out.head._1 <> muon.io.flush.i
-  outer.dFlushMaster.out.head._1 <> muon.io.flush.d
+  outer.iFlushMaster.out.head._1 <> core.io.flush.i
+  outer.dFlushMaster.out.head._1 <> core.io.flush.d
 
-  muon.io.coreId := outer.muonParams.coreId.U
-  muon.io.clusterId := outer.muonParams.clusterId.U
+  core.io.coreId := outer.muonParams.coreId.U
+  core.io.clusterId := outer.muonParams.clusterId.U
 
   val softReset = outer.softResetFinishSlave.in.head._1.softReset
-  muon.io.softReset := softReset
-  outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
+  core.io.softReset := softReset
+  outer.softResetFinishSlave.in.head._1.finished := core.io.finished
 
-  val justFinished = muon.io.finished && !RegNext(muon.io.finished)
+  val justFinished = core.io.finished && !RegNext(core.io.finished)
   when (justFinished && !softReset) { // override only when finish not caused by reset
     outer.iFlushMaster.out.head._1.start := true.B
     outer.dFlushMaster.out.head._1.start := true.B
@@ -374,26 +374,36 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   outer.reportWFI(None)
 
   when (outer.muonParams.disabled.B || softReset) {
-    muon.io.imem.req.ready := false.B
-    muon.io.imem.resp.valid := false.B // responses will be dropped
+    core.io.imem.req.ready := false.B
+    core.io.imem.resp.valid := false.B // responses will be dropped
     outer.icacheWordNode.out.foreach(_._1.a.valid := false.B)
     outer.icacheWordNode.out.foreach(_._1.a.ready := true.B) // drain downstream
   }
 
+  // inst/mem traces
+  if (core.muonParams.trace) {
+    val ctrace = Module(new Tracer)
+    ctrace.io.inst <> core.io.trace.get
+    ctrace.connectDmem(core.io.dmem)
+    ctrace.connectSmem(core.io.smem)
+  }
+
+  // performance counters
   val isSim = p(RadianceSimArgs)
   if (isSim) {
     val cperf = Module(new Profiler(
       clusterId = outer.muonParams.clusterId,
       coreId = outer.muonParams.coreId
     ))
-    cperf.io.perf <> muon.io.perf
-    cperf.io.finished := muon.io.finished
+    cperf.io.perf <> core.io.perf
+    cperf.io.finished := core.io.finished
   }
 
-  if (muon.muonParams.trace) {
+  // RTL-model difftest
+  if (core.muonParams.difftest) {
     assert(isSim, "muon traces cannot enabled in non-sim mode!")
     val cdiff = Module(new CyclotronDiffTest(tick = true))
-    cdiff.io.trace <> muon.io.trace.get
+    cdiff.io.trace <> core.io.trace.get
   }
 }
 

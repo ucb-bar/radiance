@@ -229,7 +229,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     cperf.io.perf <> core.io.perf
     cperf.io.finished := core.io.finished
 
-    // RTL/model diff-test
+    // RTL-model difftest
     if (core.muonParams.difftest) {
       assert(core.muonParams.trace, "trace should be enabled for difftest")
       val cdiff = Module(new CyclotronDiffTest(tick = true))
