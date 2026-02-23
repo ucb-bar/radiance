@@ -449,21 +449,21 @@ extends CoreModule {
 
   def connectDmem(dmem: DataMemIO) = {
     (io.dmem.req zip dmem.req).map { case (io, core) =>
-      io.valid := core.valid
+      io.valid := core.fire
       io.bits := core.bits
     }
     (io.dmem.resp zip dmem.resp).map { case (io, core) =>
-      io.valid := core.valid
+      io.valid := core.fire
       io.bits := core.bits
     }
   }
   def connectSmem(smem: SharedMemIO) = {
     (io.smem.req zip smem.req).map { case (io, core) =>
-      io.valid := core.valid
+      io.valid := core.fire
       io.bits := core.bits
     }
     (io.smem.resp zip smem.resp).map { case (io, core) =>
-      io.valid := core.valid
+      io.valid := core.fire
       io.bits := core.bits
     }
   }
