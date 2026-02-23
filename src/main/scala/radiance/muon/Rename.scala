@@ -115,13 +115,14 @@ class Rename(implicit p: Parameters) extends CoreModule {
   }
 
   // create & update counters
-  val counters = VecInit.tabulate(m.numWarps) { counterId =>
+  val counters = WireDefault(VecInit.tabulate(m.numWarps) { counterId =>
     Counter(
       r = 1 until m.numArchRegs, // x0 is mapped
       enable = assigning && (counterId.U === wid),
       reset = io.softReset,
     )._1
-  }
+  })
+  dontTouch(counters)
   val (globalCounter, globalOverSubscription) = Counter(
     r = 1 until m.numPhysRegs,
     enable = assigning,
@@ -134,6 +135,9 @@ class Rename(implicit p: Parameters) extends CoreModule {
   // wPort.data := counters(wid).asTypeOf(pRegT)
 
   // check for warp level oversubscription
+  when (assigning) {
+    printf(cf"[RENAME] renamed pc=${io.rename.bits.pc}%x, wid=${io.rename.bits.wid}; new PR usage: ${counters(wid)}, maxPRUsage=${maxPRUsage}\n")
+  }
   assert(!assigning || (counters(wid) < maxPRUsage), cf"warp $wid oversubscribed PRs, capped to $maxPRUsage")
 
   // reset assignment on kernel relaunch
