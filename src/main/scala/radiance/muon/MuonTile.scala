@@ -364,6 +364,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   muon.io.softReset := softReset
   outer.softResetFinishSlave.in.head._1.finished := muon.io.finished
 
+  val justFinished = muon.io.finished && !RegNext(muon.io.finished)
+  muon.io.flush.i.start := justFinished
+  muon.io.flush.d.start := justFinished
+
   outer.reportCease(None)
   outer.reportWFI(None)
 
