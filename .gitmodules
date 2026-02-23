@@ -9,4 +9,4 @@
 	url = https://github.com/richardyrh/cvfpu.git
 [submodule "src/main/scala/radiance/muon/backend/fp/fpEX"]
 	path = src/main/scala/radiance/muon/backend/fp/fpEX
-	url = git@github.com:Sh-Anand/fpEX.git
+	url = https://github.com/Sh-Anand/fpEX.git

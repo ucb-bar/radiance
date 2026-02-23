@@ -1,10 +1,8 @@
 package radiance.muon
 
 import chisel3._
-import chisel3.reflect.DataMirror
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-
 
 class Frontend(implicit p: Parameters)
   extends CoreModule()(p) {

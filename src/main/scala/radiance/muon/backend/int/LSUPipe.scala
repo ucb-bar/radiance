@@ -5,17 +5,12 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.ExPipe
 import radiance.muon.LoadStoreUnit
-import radiance.muon.LsuReservationReq
-import radiance.muon.LsuReservationResp
-import radiance.muon.DataMemIO
-import radiance.muon.SharedMemIO
 import radiance.muon.LSUCoreAdapter
 import radiance.muon.MuOpcode
 import chisel3.util.experimental.decode.decoder
 import chisel3.util.experimental.decode.TruthTable
 import radiance.muon.MemOp
 import radiance.muon.Imm32
-import radiance.muon.LsuQueueToken
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 

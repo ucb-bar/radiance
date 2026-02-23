@@ -3,12 +3,10 @@
 
 package radiance.subsystem
 
-import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.LazyModule
 import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.prci.ClockCrossingType
-import freechips.rocketchip.rocket._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.subsystem.{CanAttachTile, HierarchicalElementCrossingParamsLike}

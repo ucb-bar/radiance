@@ -1,6 +1,7 @@
 package radiance.unittest
 
 import scala.util.Random
+import freechips.rocketchip.resources.BigIntHexContext 
 
 abstract class TrafficPattern {
   val name: String = "pattern"
@@ -12,14 +13,14 @@ abstract class TrafficPattern {
 
   def offset(time: Int, index: Int): Int
 
-  def apply(baseAddr: Int, time: Int, index: Int): ScalaTLA = {
+  def apply(baseAddr: BigInt, time: Int, index: Int): ScalaTLA = {
     require(reqSize <= busSize)
     val addr = baseAddr + offset(time, index)
     new ScalaTLA(
       address = (addr / busSize) * busSize,
       lgSize = lgSize,
       data = None,
-      mask = Some(((1 << reqSize) - 1) << (addr % busSize))
+      mask = Some(((1 << reqSize) - 1) << (addr % busSize).intValue)
     )
   }
 
@@ -30,6 +31,16 @@ abstract class TrafficPattern {
   def putSmem(clusterId: Int): (Int, Int) => ScalaTLA = {
     case (x, y) =>
       val getReq = getSmem(clusterId)(x, y)
+      getReq.copy(data = Some(getReq.address)) 
+  }
+
+  def getDmem(clusterId: Int): (Int, Int) => ScalaTLA = {
+    this(0x100_0000 + 0x100_0000 * clusterId, _, _)
+  }
+
+  def putDmem(clusterId: Int): (Int, Int) => ScalaTLA = {
+    case (x, y) =>
+      val getReq = getDmem(clusterId)(x, y)
       getReq.copy(data = Some(getReq.address))
   }
 }
@@ -141,25 +152,6 @@ object TrafficPatterns {
     Seq(0, 1).map(new RandomAccess(0, 131072 >> lgSize, _))
   }
 
-  // def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
-  //   Seq(("w", (x: TrafficPattern) => x.putSmem _),
-  //     ("r", (x: TrafficPattern) => x.getSmem _))
-  //     .flatMap { case (suffix, func) =>
-
-  //     Seq(
-  //       stridedPatterns,
-  //       randomPatterns,
-  //       tiledPatterns,
-  //       tiledPatterns.map(Transposed(_)),
-  //       swizzledPatterns,
-  //       swizzledPatterns.map(Transposed(_)),
-  //     )
-  //       .flatten
-  //       .map(Bounded(_, size))
-  //       .map(x => (s"${x.name}_$suffix", func(x)(clusterId)))
-  //   }
-  // }
-
   def smemPatterns(clusterId: Int, size: Int = 128 << 10) = {
     Seq(
       stridedPatterns,
@@ -174,6 +166,25 @@ object TrafficPatterns {
       .flatMap(x =>
         Seq(("w", (x: TrafficPattern) => x.putSmem _),
             ("r", (x: TrafficPattern) => x.getSmem _)).map { case (suffix, func) =>
+          (s"${x.name}_$suffix", func(x)(clusterId))
+        }
+      )
+  }
+
+  def dmemPatterns(clusterId: Int, size: Int = 1 << 20) = {
+    Seq(
+      stridedPatterns,
+      randomPatterns,
+      tiledPatterns,
+      tiledPatterns.map(Transposed(_)),
+      swizzledPatterns,
+      swizzledPatterns.map(Transposed(_)),
+    )
+      .flatten
+      .map(Bounded(_, size))
+      .flatMap(x =>
+        Seq(("w", (x: TrafficPattern) => x.putDmem _),
+            ("r", (x: TrafficPattern) => x.getDmem _)).map { case (suffix, func) =>
           (s"${x.name}_$suffix", func(x)(clusterId))
         }
       )

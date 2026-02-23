@@ -48,7 +48,7 @@ object L0iCacheConfig extends DCacheParams(
   nWays = 1,
   rowBits = 32 * 8,
   blockBytes = 32,
-  nMSHRs = 8,
+  nMSHRs = 2,
 )
 
 object L0dCacheConfig extends DCacheParams(
@@ -56,7 +56,7 @@ object L0dCacheConfig extends DCacheParams(
   nWays = 1,
   rowBits = 64 * 8,
   blockBytes = 64,
-  nMSHRs = 8,
+  nMSHRs = 4,
 )
 
 object L1CacheConfig extends DCacheParams(
@@ -64,7 +64,7 @@ object L1CacheConfig extends DCacheParams(
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
-  nMSHRs = 8,
+  nMSHRs = 8, // maybe be able to decrease this
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
@@ -176,6 +176,16 @@ class RadianceSingleClusterConfig extends Config(
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterHostLaunchConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
   new WithGPUResetAggregator(defaultReset = true) ++
   new RadianceBaseConfig
 )
@@ -232,7 +242,8 @@ class RadianceClusterConfig extends Config(
 
 class RadianceMemPerfConfig extends Config(
   new WithMemPerfMuonTileReplacement(InCluster(0)) ++
-  new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++ // try: set to 2 (from 1)
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
   new RadianceBaseConfig
 )

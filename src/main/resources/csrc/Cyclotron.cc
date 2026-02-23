@@ -498,6 +498,54 @@ void cyclotron_difftest_reg_rs(
     const uint32_t *trace_regs_2_data
 );
 
+void cyclotron_trace_rs(
+    const uint8_t   trace_valid,
+    const uint32_t  trace_pc,
+    const uint32_t  trace_warpId,
+    const uint32_t  trace_tmask,
+    const uint8_t   trace_regs_0_enable,
+    const uint8_t   trace_regs_0_address,
+    const uint32_t *trace_regs_0_data,
+    const uint8_t   trace_regs_1_enable,
+    const uint8_t   trace_regs_1_address,
+    const uint32_t *trace_regs_1_data,
+    const uint8_t   trace_regs_2_enable,
+    const uint8_t   trace_regs_2_address,
+    const uint32_t *trace_regs_2_data
+);
+
+void cyclotron_trace(
+    const uint8_t   trace_valid,
+    const uint32_t  trace_pc,
+    const uint32_t  trace_warpId,
+    const uint32_t  trace_tmask,
+    const uint8_t   trace_regs_0_enable,
+    const uint8_t   trace_regs_0_address,
+    const uint32_t *trace_regs_0_data,
+    const uint8_t   trace_regs_1_enable,
+    const uint8_t   trace_regs_1_address,
+    const uint32_t *trace_regs_1_data,
+    const uint8_t   trace_regs_2_enable,
+    const uint8_t   trace_regs_2_address,
+    const uint32_t *trace_regs_2_data
+) {
+  cyclotron_trace_rs(
+    trace_valid,
+    trace_pc,
+    trace_warpId,
+    trace_tmask,
+    trace_regs_0_enable,
+    trace_regs_0_address,
+    trace_regs_0_data,
+    trace_regs_1_enable,
+    trace_regs_1_address,
+    trace_regs_1_data,
+    trace_regs_2_enable,
+    trace_regs_2_address,
+    trace_regs_2_data
+  );
+}
+
 void cyclotron_difftest_reg(
     const uint8_t   trace_sim_tick,
     const uint8_t   trace_valid,
