@@ -84,6 +84,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       start = WireInit(io.req.fire && inst.b(IsFenceD)),
       done = (_: UInt) => flushIO.d.done,
       reqT = UInt(0.W)
+    ),
+    new StallFields(
+      start = WireInit(io.req.fire && inst.b(IsFenceS)),
+      done = (_: UInt) => fenceIO.sharedQueuesEmpty,
+      reqT = UInt(0.W)
     )
   )
 

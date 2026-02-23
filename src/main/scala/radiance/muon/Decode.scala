@@ -67,6 +67,7 @@ case object IsCSRRSI         extends DecodeField
 case object IsCSRRCI         extends DecodeField
 case object IsFenceI         extends DecodeField
 case object IsFenceD         extends DecodeField
+case object IsFenceS         extends DecodeField
 case object IsRType          extends DecodeField(1, true)
 case object IsIType          extends DecodeField(1, true)
 case object IsSType          extends DecodeField(1, true)
@@ -233,7 +234,7 @@ object Decoder {
       Opcode, F3, F7, Rd, Rs1, Rs2, Rs3, Pred,
       IsTMC, IsWSpawn, IsSplit, IsJoin, IsBar, IsPred, IsToHost, IsCSR,
       IsCSRRW, IsCSRRS, IsCSRRC, IsCSRRWI, IsCSRRSI, IsCSRRCI,
-      IsFenceI, IsFenceD,
+      IsFenceI, IsFenceD, IsFenceS,
       IsRType, IsIType, IsSType, IsBType, IsUJType, IsFPDivSqrt,
       UseALUPipe, UseMulDivPipe, UseFPPipe, UseFP32Pipe, UseFP16Pipe, UseFPExPipe, UseLSUPipe, UseSFUPipe,
       HasRd, HasRs1, HasRs2, HasRs3, HasControlHazard,
@@ -414,6 +415,7 @@ object Decoder {
       case IsCSRRCI =>  Some(op == MuOpcode.SYSTEM  && f3 == 7)
       case IsFenceI =>  Some(op == MuOpcode.MISC_MEM && f3 == 1) // flushes i cache
       case IsFenceD =>  Some(op == MuOpcode.MISC_MEM && f3 == 0) // flushes d cache
+      case IsFenceS =>  Some(op == MuOpcode.MISC_MEM && f3 == 2) // shared memory
       case _ => None
     }
   }
