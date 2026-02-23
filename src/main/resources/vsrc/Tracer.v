@@ -58,6 +58,9 @@ module TracerBlackBox #(
   `include "Cyclotron.vh"
 
   import "DPI-C" function cyclotron_trace(
+    input int  cluster_id,
+    input int  core_id,
+
     input bit  inst_valid,
     input int  inst_pc,
     input int  inst_warpId,
@@ -167,6 +170,8 @@ module TracerBlackBox #(
     if (reset) begin
     end else begin
       cyclotron_trace(
+        CLUSTER_ID,
+        CORE_ID,
         inst_valid,
         inst_pc,
         inst_warpId,

@@ -382,7 +382,10 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
 
   // inst/mem traces
   if (core.muonParams.trace) {
-    val ctrace = Module(new Tracer)
+    val ctrace = Module(new Tracer(
+      clusterId = outer.muonParams.clusterId,
+      coreId = outer.muonParams.coreId,
+    ))
     ctrace.io.inst <> core.io.trace.get
     ctrace.connectDmem(core.io.dmem)
     ctrace.connectSmem(core.io.smem)
@@ -393,7 +396,7 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   if (isSim) {
     val cperf = Module(new Profiler(
       clusterId = outer.muonParams.clusterId,
-      coreId = outer.muonParams.coreId
+      coreId = outer.muonParams.coreId,
     ))
     cperf.io.perf <> core.io.perf
     cperf.io.finished := core.io.finished

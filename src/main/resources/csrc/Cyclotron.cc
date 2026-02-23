@@ -481,24 +481,9 @@ void cyclotron_mem(
     );
 };
 
-void cyclotron_difftest_reg_rs(
-    const uint8_t   trace_sim_tick,
-    const uint8_t   trace_valid,
-    const uint32_t  trace_pc,
-    const uint32_t  trace_warpId,
-    const uint32_t  trace_tmask,
-    const uint8_t   trace_regs_0_enable,
-    const uint8_t   trace_regs_0_address,
-    const uint32_t *trace_regs_0_data,
-    const uint8_t   trace_regs_1_enable,
-    const uint8_t   trace_regs_1_address,
-    const uint32_t *trace_regs_1_data,
-    const uint8_t   trace_regs_2_enable,
-    const uint8_t   trace_regs_2_address,
-    const uint32_t *trace_regs_2_data
-);
-
 void cyclotron_trace_rs(
+    const uint32_t  cluster_id,
+    const uint32_t  core_id,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -535,6 +520,8 @@ void cyclotron_trace_rs(
 );
 
 void cyclotron_trace(
+    const uint32_t  cluster_id,
+    const uint32_t  core_id,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -570,6 +557,8 @@ void cyclotron_trace(
     const uint32_t *smem_resp_bits_data
 ) {
   cyclotron_trace_rs(
+    cluster_id,
+    core_id,
     trace_valid,
     trace_pc,
     trace_warpId,
@@ -605,6 +594,23 @@ void cyclotron_trace(
     smem_resp_bits_data
   );
 }
+
+void cyclotron_difftest_reg_rs(
+    const uint8_t   trace_sim_tick,
+    const uint8_t   trace_valid,
+    const uint32_t  trace_pc,
+    const uint32_t  trace_warpId,
+    const uint32_t  trace_tmask,
+    const uint8_t   trace_regs_0_enable,
+    const uint8_t   trace_regs_0_address,
+    const uint32_t *trace_regs_0_data,
+    const uint8_t   trace_regs_1_enable,
+    const uint8_t   trace_regs_1_address,
+    const uint32_t *trace_regs_1_data,
+    const uint8_t   trace_regs_2_enable,
+    const uint8_t   trace_regs_2_address,
+    const uint32_t *trace_regs_2_data
+);
 
 void cyclotron_difftest_reg(
     const uint8_t   trace_sim_tick,

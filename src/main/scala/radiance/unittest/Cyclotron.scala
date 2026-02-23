@@ -505,8 +505,8 @@ extends CoreModule {
 
   class TracerBlackBox()(implicit val p: Parameters)
   extends BlackBox(Map(
-        "CLUSTER_ID" -> clusterId,
-        "CORE_ID" -> coreId,
+        "CLUSTER_ID"   -> clusterId,
+        "CORE_ID"      -> coreId,
         "ARCH_LEN"     -> p(MuonKey).archLen,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
