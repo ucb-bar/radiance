@@ -275,16 +275,17 @@ class WarpScheduler(implicit p: Parameters)
         wspawnMask.asBools.zipWithIndex.map { case (en, wid) =>
           when(en) {
             when (!pcTracker(wid).valid) {
-              // only set thread mask if warp not already active
-              threadMasks(wid) := fullThreadMask
-            }
-            when ((io.commit.bits.wid === wid.U) || (!pcTracker(wid).valid)) {
-              // set pc if warp is
-              // (1) initiator of wspawn or
+              // set pc and tmask if warp is
+              // (1) not the initiator of wspawn and
               // (2) was not already active before
               pcTracker(wid).bits := wspawn.bits.pc
               pcTracker(wid).valid := true.B
+              threadMasks(wid) := fullThreadMask
               // spawning(wid) := true.B
+              stallTracker.unstall(wid.U)
+            }
+            when (io.commit.bits.wid === wid.U) {
+              assert(pcTracker(wid).valid === true.B)
               stallTracker.unstall(wid.U)
             }
           }
