@@ -2,8 +2,10 @@ package radiance.unittest
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Field, Parameters}
 import radiance.muon._
+
+case object CyclotronLinked extends Field[Boolean](false)
 
 object Cyclotron {
   def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {

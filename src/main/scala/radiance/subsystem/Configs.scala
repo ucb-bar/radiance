@@ -20,6 +20,7 @@ import radiance.memory._
 import radiance.muon._
 import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
 import radiance.muon.LoadStoreUnitParams
+import radiance.unittest.CyclotronLinked
 
 sealed trait RadianceSmemSerialization
 case object FullySerialized extends RadianceSmemSerialization
@@ -66,6 +67,7 @@ class WithMuonCores(
   standalone: Boolean,
   noILP: Boolean,
   trace: Boolean,
+  /** cyclotron-as-a-tile: use golden core model */
   cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
@@ -93,6 +95,9 @@ class WithMuonCores(
       trace = trace || difftest,
       difftest = difftest,
     )
+  }
+  case CyclotronLinked => {
+    up(CyclotronLinked) || site(RadianceSimArgs) || trace || difftest || cyclotron
   }
   case TilesLocated(`location`) => {
     if (standalone) {
