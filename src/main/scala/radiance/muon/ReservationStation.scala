@@ -172,10 +172,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   io.collector.readReq.valid := collValid
   // this is clunky, but Mem does not support partial-field updates
   (collOpNeed lazyZip collRegs lazyZip io.collector.readReq.bits.regs)
-    .zipWithIndex.foreach { case ((need, pReg, cReq), rsi) =>
-      assert(cReq.data.isEmpty) // isRead
-      cReq.enable := collValid && need
-      cReq.pReg := Mux(need, pReg, 0.U)
+    .zipWithIndex.foreach { case ((need, pReg, readReqReg), rsi) =>
+      assert(readReqReg.data.isEmpty) // isRead
+      assert(readReqReg.tmask.isEmpty) // isRead
+      readReqReg.enable := collValid && need
+      readReqReg.pReg := Mux(need, pReg, 0.U)
     }
   io.collector.readReq.bits.rsEntryId := collRow
   io.collector.readReq.bits.pc.foreach(_ := collPC)
