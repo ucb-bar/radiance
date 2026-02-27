@@ -21,7 +21,6 @@ class RadianceBaseConfig extends Config(
   new WithSIMTConfig(numWarps = 8, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
   new chipyard.config.WithSystemBusWidth(bitWidth = 256) ++
   new freechips.rocketchip.subsystem.WithExtMemSize(x"1_0000_0000") ++
-  new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
   new freechips.rocketchip.subsystem.WithNMemoryChannels(1) ++
   new freechips.rocketchip.subsystem.WithEdgeDataBits(64) ++
 
@@ -36,6 +35,15 @@ class RadianceBaseConfig extends Config(
   new chipyard.config.WithFrontBusFrequency(500.0) ++
   new chipyard.config.WithOffchipBusFrequency(500.0) ++
   new chipyard.harness.WithHarnessBinderClockFreqMHz(500.0) ++
+
+  new freechips.rocketchip.subsystem.WithInclusiveCache(
+    nWays = 8,
+    capacityKB = 512,
+    outerLatencyCycles = 40,
+    subBankingFactor = 2,
+    writeBytes = 8 // DRAM width
+  ) ++
+  new freechips.rocketchip.subsystem.WithCacheBlockBytes(32) ++
   new chipyard.config.AbstractConfig)
 
 object TapeoutSmemConfig extends RadianceSharedMemKey(
