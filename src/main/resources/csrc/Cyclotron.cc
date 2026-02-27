@@ -597,6 +597,8 @@ void cyclotron_trace(
 
 void cyclotron_difftest_reg_rs(
     const uint8_t   trace_sim_tick,
+    const uint32_t  cluster_id,
+    const uint32_t  core_id,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -614,6 +616,8 @@ void cyclotron_difftest_reg_rs(
 
 void cyclotron_difftest_reg(
     const uint8_t   trace_sim_tick,
+    const uint32_t  cluster_id,
+    const uint32_t  core_id,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -630,6 +634,8 @@ void cyclotron_difftest_reg(
 ) {
   cyclotron_difftest_reg_rs(
     trace_sim_tick,
+    cluster_id,
+    core_id,
     trace_valid,
     trace_pc,
     trace_warpId,

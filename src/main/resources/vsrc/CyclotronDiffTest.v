@@ -1,4 +1,6 @@
 module CyclotronDiffTestBlackBox #(
+  parameter CLUSTER_ID = 0,
+  parameter CORE_ID = 0,
   parameter ARCH_LEN = 32,
   parameter INST_BITS = 64,
   parameter NUM_WARPS = 8,
@@ -37,6 +39,8 @@ module CyclotronDiffTestBlackBox #(
 
   import "DPI-C" function cyclotron_difftest_reg(
     input bit  trace_sim_tick,
+    input int  cluster_id,
+    input int  core_id,
     input bit  trace_valid,
     input int  trace_pc,
     input int  trace_warpId,
@@ -73,6 +77,8 @@ module CyclotronDiffTestBlackBox #(
     end else begin
       cyclotron_difftest_reg(
         SIM_TICK,
+        CLUSTER_ID,
+        CORE_ID,
         trace_valid,
         trace_pc,
         trace_warpId,

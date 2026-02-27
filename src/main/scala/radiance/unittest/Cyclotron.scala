@@ -2,8 +2,10 @@ package radiance.unittest
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
+import org.chipsalliance.cde.config.{Field, Parameters}
 import radiance.muon._
+
+case object CyclotronLinked extends Field[Boolean](false)
 
 object Cyclotron {
   def splitUInt(flattened: UInt, wordBits: Int): Vec[UInt] = {
@@ -331,7 +333,7 @@ class CyclotronDataMemBlackBox(outer: CyclotronDataMem)(implicit val p: Paramete
 /** If `tick` is true, advance cyclotron sim by one tick inside the difftest
  *  logic.  Set to false when some other module does the tick, e.g.
  *  separate cyclotron frontend */
-class CyclotronDiffTest(tick: Boolean = true)
+class CyclotronDiffTest(clusterId: Int = 0, coreId: Int = 0, tick: Boolean = true)
 (implicit p: Parameters) extends CoreModule {
   val io = IO(new Bundle {
     val trace = Flipped(Valid(new InstTraceIO))
@@ -353,6 +355,8 @@ class CyclotronDiffTest(tick: Boolean = true)
 
   class CyclotronDiffTestBlackBox(tick: Boolean)(implicit val p: Parameters)
   extends BlackBox(Map(
+        "CLUSTER_ID"   -> clusterId,
+        "CORE_ID"      -> coreId,
         "ARCH_LEN"     -> p(MuonKey).archLen,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,

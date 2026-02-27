@@ -405,7 +405,11 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   // RTL-model difftest
   if (core.muonParams.difftest) {
     assert(isSim, "muon traces cannot enabled in non-sim mode!")
-    val cdiff = Module(new CyclotronDiffTest(tick = true))
+    val cdiff = Module(new CyclotronDiffTest(
+      clusterId = outer.muonParams.clusterId,
+      coreId = outer.muonParams.coreId,
+      tick = true
+    ))
     cdiff.io.trace <> core.io.trace.get
   }
 }

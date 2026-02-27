@@ -12,8 +12,8 @@ class CollectorRequest(
   val regs = Vec(numPorts, new Bundle {
     val enable = Bool()
     val pReg = pRegT
+    val tmask = Option.when(isWrite)(tmaskT)
     val data = Option.when(isWrite)(Vec(numLanes, regDataT))
-    // TODO: tmask
   })
   val rsEntryId = UInt(rsEntryIdWidth.W)
   val pc = Option.when(muonParams.debug)(pcT)
@@ -39,7 +39,6 @@ class CollectorResponse(
   val collEntry = UInt(collEntryWidth.W)
   val regs = Vec(numPorts, new Bundle {
     val enable = Bool()
-    // TODO: tmask
   })
 }
 
@@ -58,6 +57,7 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
     val collEntry = UInt(collEntryWidth.W)
     val regs = Vec(Isa.maxNumRegs, new Bundle {
       val enable = Bool()
+      // TODO: tmask for @power
     })
   }))
   // same-cycle as `req`
@@ -65,7 +65,6 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
     val enable = Bool()
     val pReg = Option.when(hasPReg)(pRegT)
     val data = Vec(numLanes, regDataT)
-    // TODO: tmask
   }))
 }
 
@@ -92,7 +91,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   def vecRegDataT = Vec(numLanes, regDataT)
   val vecZeros = 0.U.asTypeOf(vecRegDataT)
-  val rfBanks = Seq.fill(Isa.maxNumRegs)(Seq.fill(muonParams.numRegBanks)(SRAM(
+  val rfBanks = Seq.fill(Isa.maxNumRegs)(Seq.fill(muonParams.numRegBanks)(SRAM.masked(
     size = muonParams.numPhysRegs / muonParams.numRegBanks,
     tpe = vecRegDataT,
     numReadPorts = 1,
@@ -166,7 +165,13 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
       val regOut = Mux(nextPReg =/= 0.U,
         VecInit(bankPorts.map(_.data))(nextBankId),
         vecZeros)
-      // TODO: @perf: Skip latching 0.U to collBank
+
+      // latch SRAM output to collector banks
+      //
+      // TODO: @power: Respect readReq.tmask, and latch 0.U for inactive lanes.
+      // Currently the downstream EX does the right thing even when the
+      // collector supplies garbage values for inactive lanes, but this is
+      // better for power.
       collBank.zipWithIndex.foreach { case (entry, i) =>
         when (nextEn && (i.U === nextAllocId)) {
           entry := regOut
@@ -189,14 +194,19 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   io.writeReq.ready := true.B
   val writeEnable = io.writeReq.fire && io.writeReq.bits.regs.head.enable
   val writePReg = io.writeReq.bits.regs.head.pReg
+  val writeTmask = io.writeReq.bits.regs.head.tmask.get
   val writeData = io.writeReq.bits.regs.head.data.get
-  // write to all of rs1/2/3 banks
+  // broadcast write to all of rs1/2/3 banks
   rfBanks.foreach { case banks =>
     val bankWrites = VecInit(banks.map(_.writePorts.head))
-    bankWrites.foreach { b =>
-      b.address := regBankAddr(writePReg)
-      b.data := writeData
-      b.enable := false.B
+    bankWrites.foreach { port =>
+      port.address := regBankAddr(writePReg)
+      port.data := writeData
+      assert(port.mask.isDefined, "RegFile SRAM must be masked")
+      assert(port.mask.get.length == writeTmask.getWidth,
+             "RegFile SRAM mask width does not match tmask width")
+      port.mask.get := VecInit(writeTmask.asBools)
+      port.enable := false.B
     }
     bankWrites(regBankId(writePReg)).enable := writeEnable && (writePReg =/= 0.U)
   }

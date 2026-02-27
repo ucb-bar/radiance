@@ -252,10 +252,12 @@ to the value of `rs2` of the "leader" lane, i.e. the left-most active lane.
 vx_spawn rs1, rs2
 ```
 
-Activates warps 1 up to the value of `rs1` in the "leader" lane, if not already active. Has no effect on warp 0.
-Sets `PC` of newly active warps to the value of `rs2` in the "leader" lane. Sets tmask of newly active warps to all 1's.  
+Activates warps `[0, rs1)`, except the warp that executed this instruction, and
+sets their `PC` to `rs2`.  Sets tmask of newly active warps to all 1's.
+The values of `rs1` and `rs2` are taken from the "leader" lane.
 
-Note: this will eventually be superceded by command processor + neutrino
+Note: `vx_wspawn` eventually be superceded by command processor's scheduling
+capabilities.
 
 ## New Registers
 
