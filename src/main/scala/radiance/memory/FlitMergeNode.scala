@@ -76,6 +76,14 @@ class FlitMergeNode(from: Int, to: Int, alwaysMerge: Boolean = true)
       }.otherwise {
         out.a <> in.a
       }
+
+      // restore size on D channel if merged on A
+      val wasMerged = VecInit.fill(1 << out.a.bits.params.sourceBits)(false.B)
+      when (in.a.fire) {
+        wasMerged(in.a.bits.source) := shouldMerge
+      }
+      in.d <> out.d
+      in.d.bits.size := Mux(wasMerged(out.d.bits.source), log2Ceil(from).U, out.d.bits.size)
     }
   }
 }
