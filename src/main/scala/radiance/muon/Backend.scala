@@ -251,8 +251,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   when (execute.io.resp.fire) {
     val r = execute.io.resp.bits.reg.get.bits
     val s = execute.io.resp.bits.sched.get.bits
-    printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} pc=${s.pc}%x " +
-      cf"scheduler wb=${execute.io.resp.bits.sched.get.valid} " +
+    printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} sched.pc=${s.pc}%x " +
+      cf"sched.wb=${execute.io.resp.bits.sched.get.valid} " +
       cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
       cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
       cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
