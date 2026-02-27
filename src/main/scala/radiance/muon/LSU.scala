@@ -524,7 +524,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         // Mem response interface: triggers state updates (increment loadPackets, mark done, etc.)
         val memResponseIndex = localIndex(io.receivedMemResponse.bits.token.index)
         when (io.receivedMemResponse.valid) {
-            
+            val unexpectedResponse = !valid(memResponseIndex) || !operandsReady(memResponseIndex) || !issued(memResponseIndex)
+            assert(!unexpectedResponse, "unexpected response to LDQ/STQ")
+
             loadPackets(memResponseIndex) := loadPackets(memResponseIndex) + 1.U
 
             when (loadPackets(memResponseIndex) === (lsuDerived.numPackets - 1).U) {
@@ -699,6 +701,9 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         queue.io.receivedMemUpdate.valid := io.receivedMemUpdate.valid && tokenMatchesQueue(io.receivedMemUpdate.bits.token, queue)
         queue.io.receivedMemResponse.valid := io.receivedMemResponse.valid && tokenMatchesQueue(io.receivedMemResponse.bits.token, queue)
     }
+
+    val tokenMatchesAnyQueue = allQueues.map(q => tokenMatchesQueue(io.receivedMemResponse.bits.token, q)).reduce(_ || _)
+    assert(tokenMatchesAnyQueue, "received token didn't match any queue");
 
     // collect response channel of receivedOperands from all queues
     val receivedOperandsTokenMatchesQueue = allQueues.map(q => tokenMatchesQueue(io.receivedOperands.req.bits.token, q))
@@ -1313,13 +1318,13 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     {
         // arbitration: responses from global > responses from shared
         val respValids = Cat(io.shmemResp.valid, io.globalMemResp.valid)
-        val readys = PriorityEncoderOH(respValids)
-        io.globalMemResp.ready := readys(0)
-        io.shmemResp.ready := readys(1)
+        val respValidsOH = PriorityEncoderOH(respValids)
+        io.globalMemResp.ready := respValidsOH(0)
+        io.shmemResp.ready := respValidsOH(1)
 
         val receivedResp = respValids.orR
 
-        val respTagBits = Mux1H(respValids, Seq(
+        val respTagBits = Mux1H(respValidsOH, Seq(
             io.globalMemResp.bits.tag,
             io.shmemResp.bits.tag
         ))
@@ -1331,11 +1336,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val loadDataWriteIdx = (loadStoreQueues.io.memLookup.resp.loadDataIdx * lsuDerived.numPackets.U) + respTag.packet
         val shouldWriteLoadData = loadStoreQueues.io.memLookup.resp.isLoad
         
-        val loadDataWriteVal = Mux1H(respValids, Seq(
+        val loadDataWriteVal = Mux1H(respValidsOH, Seq(
             io.globalMemResp.bits.data,
             io.shmemResp.bits.data
         ))
-        val respValidsVec = Mux1H(respValids, Seq(
+        val respValidsVec = Mux1H(respValidsOH, Seq(
             io.globalMemResp.bits.valid,
             io.shmemResp.bits.valid
         ))
