@@ -15,6 +15,21 @@ from typing import TextIO
 myname = Path(sys.argv[0]).name
 SIM_TIMEOUT = 10 * 60  # seconds
 
+# list of (config, test_name) that are waived
+waivers = [
+    # standalone core config ties off shared memory, so it just hangs
+    # waiting for a response
+    ("core", "mu32-p-lb_shared"),
+    ("core", "mu32-p-lbu_shared"),
+    ("core", "mu32-p-lh_shared"),
+    ("core", "mu32-p-lhu_shared"),
+    ("core", "mu32-p-lw_shared"),
+    ("core", "mu32-p-ld_st_shared"),
+    ("core", "mu32-p-sb_shared"),
+    ("core", "mu32-p-sh_shared"),
+    ("core", "mu32-p-sw_shared"),
+    ("core", "mu32-p-st_ld_shared"),
+]
 
 @dataclass
 class RunningTest:
@@ -283,6 +298,11 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
                 except StopIteration:
                     pending_exhausted = True
                     break
+
+                if (config, elf.name) in waivers:
+                    print(f"waived {elf.name} for config {config}")
+                    continue
+
                 running.append(
                     launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
                 )
