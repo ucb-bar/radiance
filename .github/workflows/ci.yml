@@ -152,7 +152,15 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)"
+          python3 test/run_isa_tests.py -j "$(nproc)" \
+            --json-out test/isa-test-logs/soc/results.json
+      - name: Render ISA test report
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/render_isa_test_report.py \
+            test/isa-test-logs/soc/results.json \
+            --github-step-summary
 
   run-core-isa-tests:
     name: Run Core-standalone ISA tests
@@ -165,7 +173,15 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c core
+          python3 test/run_isa_tests.py -j "$(nproc)" -c core \
+            --json-out test/isa-test-logs/core/results.json
+      - name: Render ISA test report
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/render_isa_test_report.py \
+            test/isa-test-logs/core/results.json \
+            --github-step-summary
 
   run-cosim-isa-tests:
     name: Run Cyclotron-as-a-Tile Co-sim ISA tests
@@ -178,7 +194,15 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c cosim
+          python3 test/run_isa_tests.py -j "$(nproc)" -c cosim \
+            --json-out test/isa-test-logs/cosim/results.json
+      - name: Render ISA test report
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/render_isa_test_report.py \
+            test/isa-test-logs/cosim/results.json \
+            --github-step-summary
 
   run-backend-cosim-isa-tests:
     name: Run Backend Co-sim ISA tests
@@ -191,7 +215,15 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c backend
+          python3 test/run_isa_tests.py -j "$(nproc)" -c backend \
+            --json-out test/isa-test-logs/backend/results.json
+      - name: Render ISA test report
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/render_isa_test_report.py \
+            test/isa-test-logs/backend/results.json \
+            --github-step-summary
 
   clean:
     name: Clean
