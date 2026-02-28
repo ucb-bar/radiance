@@ -2,12 +2,13 @@
 """Run Cyclotron ISA tests via the VCS simulator."""
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TextIO
 
@@ -28,6 +29,35 @@ class RunningTest:
     def close_streams(self):
         self.log_file.close()
         self.err_file.close()
+
+
+@dataclass
+class TestResult:
+    name: str
+    elf: str
+    config: str
+    status: str
+    exit_code: int
+    duration_sec: float
+    log_path: str
+    stderr_path: str
+    failure_reason: str
+
+
+@dataclass
+class RunResult:
+    config: str
+    sim_binary: str
+    log_dir: str
+    total: int
+    passed: int
+    failed: int
+    timed_out: int
+    results: list[TestResult]
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.failed == 0 and self.timed_out == 0 else 1
 
 
 def log_has_error(log_path) -> str:
@@ -126,21 +156,76 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     )
 
 
-def finalize_test(test: RunningTest, status: int) -> int:
+def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
+    duration_sec = time.monotonic() - test.start_time
     try:
         if test.timed_out:
             print(f"[{myname}] FAIL: {test.elf}: timeout after {SIM_TIMEOUT}s")
-            return 1
+            return TestResult(
+                name=test.elf.name,
+                elf=str(test.elf),
+                config=config,
+                status="timeout",
+                exit_code=status,
+                duration_sec=duration_sec,
+                log_path=str(test.log_path),
+                stderr_path=str(test.err_file.name),
+                failure_reason=f"timeout after {SIM_TIMEOUT}s",
+            )
 
         errstring = log_has_error(test.log_path).rstrip("\n")
         if status != 0 or errstring:
             print(f"[{myname}] FAIL: {test.elf} (status: {status})")
             if errstring:
                 print(f"{errstring}")
-            return 1
-        return status
+            failure_reason = errstring if errstring else f"process exited with status {status}"
+            return TestResult(
+                name=test.elf.name,
+                elf=str(test.elf),
+                config=config,
+                status="fail",
+                exit_code=status,
+                duration_sec=duration_sec,
+                log_path=str(test.log_path),
+                stderr_path=str(test.err_file.name),
+                failure_reason=failure_reason,
+            )
+        return TestResult(
+            name=test.elf.name,
+            elf=str(test.elf),
+            config=config,
+            status="pass",
+            exit_code=status,
+            duration_sec=duration_sec,
+            log_path=str(test.log_path),
+            stderr_path=str(test.err_file.name),
+            failure_reason="",
+        )
     finally:
         test.close_streams()
+
+
+def summarize_results(config, binary, log_dir, results):
+    passed = sum(1 for result in results if result.status == "pass")
+    failed = sum(1 for result in results if result.status == "fail")
+    timed_out = sum(1 for result in results if result.status == "timeout")
+    return RunResult(
+        config=config,
+        sim_binary=str(binary),
+        log_dir=str(log_dir),
+        total=len(results),
+        passed=passed,
+        failed=failed,
+        timed_out=timed_out,
+        results=results,
+    )
+
+
+def write_json_result(json_path, run_result: RunResult):
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(asdict(run_result), f, indent=2)
+        f.write("\n")
 
 
 # single-threaded
@@ -152,7 +237,8 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         test.timed_out = True
         test.process.kill()
         status = test.process.wait()
-    return finalize_test(test, status)
+    result = finalize_test(config, test, status)
+    return summarize_results(config, binary, log_dir, [result])
 
 
 def iter_elfs(elf_dir):
@@ -184,7 +270,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
         print(f"error: failed to find any ELF binary in {elf_dir}")
         sys.exit(1)
 
-    statusall = 0
+    results = []
     running = []
     executables_iter = iter(executables)
     pending_exhausted = False
@@ -216,9 +302,8 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
                 if status is None:
                     still_running.append(test)
                     continue
-                result = finalize_test(test, status)
-                if result != 0 and statusall == 0:
-                    statusall = result
+                result = finalize_test(config, test, status)
+                results.append(result)
 
             running = still_running
 
@@ -237,7 +322,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
             test.close_streams()
         raise
 
-    return statusall
+    return summarize_results(config, binary, log_dir, results)
 
 
 def discover_chipyard(script_dir):
@@ -264,6 +349,9 @@ def parse_args():
                         help="testbench config to run; (soc|core|cosim|backend). default is 'soc'")
     parser.add_argument('--log-dir', default='isa-test-logs',
                         help="directory to be created to place the logs. default is 'isa-test-logs'")
+    parser.add_argument('--json-out',
+                        help="write machine-readable test results to this JSON path. "
+                             "default is <log-dir>/<config>/results.json")
     parser.add_argument('-j', '--jobs', type=int, default=1,
                         help="maximum number of parallel simulations (default: 1)")
     return parser.parse_args()
@@ -283,15 +371,21 @@ def main():
     log_dir = script_dir / log_dir_name / config
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     jobs = args.jobs if args.jobs and args.jobs > 0 else 1
+    json_out = Path(args.json_out) if args.json_out else (log_dir / "results.json")
 
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
     print(f"[{myname}] writing logs to {log_dir}")
+    print(f"[{myname}] writing json to {json_out}")
 
     if args.binary:
         elf = Path(args.binary)
-        return run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
-    return sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs)
+        run_result = run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
+    else:
+        run_result = sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs)
+    write_json_result(json_out, run_result)
+    print(f"[{myname}] wrote json results to {json_out.resolve()}")
+    return run_result.exit_code
 
 
 if __name__ == "__main__":
