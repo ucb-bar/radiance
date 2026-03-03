@@ -80,7 +80,7 @@ class FlitMergeNode(from: Int, to: Int, alwaysMerge: Boolean = true)
       }
 
       // restore size on D channel if merged on A
-      val wasMerged = VecInit.fill(1 << out.a.bits.params.sourceBits)(false.B)
+      val wasMerged = RegInit(VecInit.fill(1 << out.a.bits.params.sourceBits)(false.B))
       when (in.a.fire) {
         wasMerged(in.a.bits.source) := shouldMerge
       }
@@ -94,7 +94,7 @@ class FlitMergeNode(from: Int, to: Int, alwaysMerge: Boolean = true)
         Mux(
           wasMerged(out.d.bits.source),
           log2Ceil(from).U,
-          out.d.bits.source
+          out.d.bits.size
         ),
         log2Ceil(from).U
       )

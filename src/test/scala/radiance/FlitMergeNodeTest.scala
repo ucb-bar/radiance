@@ -65,14 +65,14 @@ class FlitMergeNodeTBImp(outer: FlitMergeNodeTB) extends LazyModuleImp(outer) {
 
   // 4B requests that should merge into one 8B request.
   gen.req4LoS1 := clientEdge.Put(
-    fromSource = 1.U,
+    fromSource = 4.U,
     toAddress = 0x0.U,
     lgSize = 2.U,
     data = "h0000000011223344".U,
     mask = "h0f".U
   )._2
   gen.req4HiS2 := clientEdge.Put(
-    fromSource = 2.U,
+    fromSource = 5.U,
     toAddress = 0x4.U,
     lgSize = 2.U,
     data = "h5566778800000000".U,
@@ -81,15 +81,15 @@ class FlitMergeNodeTBImp(outer: FlitMergeNodeTB) extends LazyModuleImp(outer) {
 
   // 8B passthrough request.
   gen.req8S3 := clientEdge.Put(
-    fromSource = 3.U,
+    fromSource = 6.U,
     toAddress = "h20".U,
     lgSize = 3.U,
     data = "hdeadbeefcafebabe".U
   )._2
 
   // 8B manager responses.
-  gen.ackS2Sz3 := managerEdge.AccessAck(toSource = 2.U, lgSize = 3.U)
-  gen.ackS3Sz3 := managerEdge.AccessAck(toSource = 3.U, lgSize = 3.U)
+  gen.ackS2Sz3 := managerEdge.AccessAck(toSource = 5.U, lgSize = 3.U)
+  gen.ackS3Sz3 := managerEdge.AccessAck(toSource = 6.U, lgSize = 3.U)
 }
 
 class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
@@ -140,7 +140,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.a.ready.expect(true.B)
       c.client.d.valid.expect(true.B)
       c.client.d.bits.opcode.expect(TLMessages.AccessAck)
-      c.client.d.bits.source.expect(1.U)
+      c.client.d.bits.source.expect(4.U)
       c.client.d.bits.size.expect(2.U)
       c.manager.a.valid.expect(false.B)
       c.clock.step()
@@ -150,7 +150,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.d.valid.expect(false.B)
       c.manager.a.valid.expect(true.B)
       c.manager.a.bits.opcode.expect(TLMessages.PutPartialData)
-      c.manager.a.bits.source.expect(2.U)
+      c.manager.a.bits.source.expect(5.U)
       c.manager.a.bits.size.expect(3.U)
       c.manager.a.bits.address.expect(0.U)
       c.manager.a.bits.mask.expect("hff".U)
@@ -161,7 +161,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       driveManagerD(c, c.gen.ackS2Sz3)
       c.client.d.valid.expect(true.B)
       c.client.d.bits.opcode.expect(TLMessages.AccessAck)
-      c.client.d.bits.source.expect(2.U)
+      c.client.d.bits.source.expect(5.U)
       c.client.d.bits.size.expect(2.U)
       c.clock.step()
     }
@@ -175,7 +175,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       driveClientA(c, c.gen.req4LoS1)
       c.client.a.ready.expect(true.B)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(1.U)
+      c.client.d.bits.source.expect(4.U)
       c.manager.a.valid.expect(false.B)
       c.clock.step()
 
@@ -185,7 +185,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.d.valid.expect(false.B)
       c.manager.a.valid.expect(true.B)
       c.manager.a.bits.opcode.expect(TLMessages.PutFullData)
-      c.manager.a.bits.source.expect(3.U)
+      c.manager.a.bits.source.expect(6.U)
       c.manager.a.bits.size.expect(3.U)
       c.manager.a.bits.address.expect("h20".U)
       c.manager.a.bits.mask.expect("hff".U)
@@ -198,7 +198,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.d.valid.expect(false.B)
       c.manager.a.valid.expect(true.B)
       c.manager.a.bits.opcode.expect(TLMessages.PutPartialData)
-      c.manager.a.bits.source.expect(2.U)
+      c.manager.a.bits.source.expect(5.U)
       c.manager.a.bits.size.expect(3.U)
       c.manager.a.bits.address.expect(0.U)
       c.manager.a.bits.mask.expect("hff".U)
@@ -209,14 +209,14 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.a.valid.poke(false.B)
       driveManagerD(c, c.gen.ackS3Sz3)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(3.U)
+      c.client.d.bits.source.expect(6.U)
       c.client.d.bits.size.expect(3.U)
       c.clock.step()
 
       // Response for merged 8B request arrives afterward, translated back to 4B size.
       driveManagerD(c, c.gen.ackS2Sz3)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(2.U)
+      c.client.d.bits.source.expect(5.U)
       c.client.d.bits.size.expect(2.U)
       c.clock.step()
     }
@@ -232,7 +232,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.a.ready.expect(false.B) // stalled due to out.d.valid priority
       c.manager.a.valid.expect(false.B)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(3.U)
+      c.client.d.bits.source.expect(6.U)
       c.client.d.bits.size.expect(3.U)
       c.clock.step()
 
@@ -241,7 +241,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       driveClientA(c, c.gen.req4LoS1)
       c.client.a.ready.expect(true.B)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(1.U)
+      c.client.d.bits.source.expect(4.U)
       c.manager.a.valid.expect(false.B)
       c.clock.step()
 
@@ -250,7 +250,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.a.ready.expect(true.B)
       c.manager.a.valid.expect(true.B)
       c.manager.a.bits.opcode.expect(TLMessages.PutPartialData)
-      c.manager.a.bits.source.expect(2.U)
+      c.manager.a.bits.source.expect(5.U)
       c.manager.a.bits.size.expect(3.U)
       c.manager.a.bits.address.expect(0.U)
       c.manager.a.bits.mask.expect("hff".U)
@@ -260,7 +260,7 @@ class FlitMergeNodeTest extends AnyFlatSpec with ChiselScalatestTester {
       c.client.a.valid.poke(false.B)
       driveManagerD(c, c.gen.ackS2Sz3)
       c.client.d.valid.expect(true.B)
-      c.client.d.bits.source.expect(2.U)
+      c.client.d.bits.source.expect(5.U)
       c.client.d.bits.size.expect(2.U)
       c.clock.step()
     }
