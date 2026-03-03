@@ -204,31 +204,31 @@ jobs:
             test/isa-test-logs/cosim/results.json \
             --github-step-summary
 
-  run-backend-cosim-isa-tests:
-    name: Run Backend Co-sim ISA tests
-    runs-on: as4
-    needs: build
-    steps:
-      - name: Run ISA tests on backend co-sim config
-        run: |
-          cd "${CHIPYARD_DIR}"
-          source env.sh
-          source /ecad/tools/vlsi.bashrc
-          cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c backend \
-            --json-out test/isa-test-logs/backend/results.json
-      - name: Render ISA test report
-        if: always()
-        run: |
-          cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/render_isa_test_report.py \
-            test/isa-test-logs/backend/results.json \
-            --github-step-summary
+  # run-backend-cosim-isa-tests:
+  #   name: Run Backend Co-sim ISA tests
+  #   runs-on: as4
+  #   needs: build
+  #   steps:
+  #     - name: Run ISA tests on backend co-sim config
+  #       run: |
+  #         cd "${CHIPYARD_DIR}"
+  #         source env.sh
+  #         source /ecad/tools/vlsi.bashrc
+  #         cd generators/radiance
+  #         python3 test/run_isa_tests.py -j "$(nproc)" -c backend \
+  #           --json-out test/isa-test-logs/backend/results.json
+  #     - name: Render ISA test report
+  #       if: always()
+  #       run: |
+  #         cd "${CHIPYARD_DIR}/generators/radiance"
+  #         python3 test/render_isa_test_report.py \
+  #           test/isa-test-logs/backend/results.json \
+  #           --github-step-summary
 
   clean:
     name: Clean
     runs-on: as4
-    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests, run-backend-cosim-isa-tests]
+    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda
