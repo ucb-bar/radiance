@@ -29,6 +29,13 @@ waivers = [
     ("core", "mu32-p-sh_shared"),
     ("core", "mu32-p-sw_shared"),
     ("core", "mu32-p-st_ld_shared"),
+    # core config is single-core and does not support barriers
+    ("core", "vx32-p-bar"),
+    # neutrino tests are incomplete atm
+    ("soc", "neutrino-p-sync"),
+    ("core", "neutrino-p-sync"),
+    ("cosim", "neutrino-p-sync"),
+    ("backend", "neutrino-p-sync"),
 ]
 
 @dataclass

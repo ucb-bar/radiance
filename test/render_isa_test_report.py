@@ -85,7 +85,7 @@ def render_markdown(run_result):
                 )
             )
             if result["failure_reason"]:
-                lines.append(f"  reason: {escape_cell(result['failure_reason'])}")
+                lines.append(f"  Reason: `{escape_cell(result['failure_reason'])}`")
 
     return "\n".join(lines) + "\n"
 
