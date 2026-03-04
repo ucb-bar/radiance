@@ -125,7 +125,7 @@ class WithMuonCores(
       List.tabulate(n)(i => MuonTileAttachParams(
         muon.copy(
           tileId = i + idOffset,
-          coreId = i /* + coreIdOffset */,
+          coreId = i, // core ID is cluster-local
           clusterId = clusterParams.clusterId,
           peripheralAddr = muon.peripheralAddr + 0x200 + i * 0x200,
         ),
