@@ -56,6 +56,7 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val meta_write = Decoupled(new L1MetaWriteReq)
     val meta_resp = Input(Vec(nWays, new L1Metadata))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
+    val wb_resp_fire = Input(Bool())
   })
 
   val flushing = RegInit(false.B)
@@ -110,12 +111,16 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     metaValid := false.B
   }
 
+  val wb_stall = WireInit(false.B)
+  val wb_and_src_ready = io.wb_req.ready && !wb_stall
+  val wb_and_src_fire = wb_and_src_ready && io.wb_req.valid
+
   val (isDirty, respType, nextCoh) = meta.coh.onCacheControl(M_FLUSH)
   // invalid line gets automatically skipped
 
   // valid line: invalidate in tag array
   // need double fire for dirty lines
-  io.meta_write.valid := metaValid && meta.coh.isValid() && (!isDirty || io.wb_req.ready)
+  io.meta_write.valid := metaValid && meta.coh.isValid() && (!isDirty || wb_and_src_ready)
   io.meta_write.bits.way_en := metaReq.way_en
   io.meta_write.bits.idx := metaReq.idx
   io.meta_write.bits.tag := meta.tag
@@ -123,17 +128,27 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.meta_write.bits.data.coh := nextCoh
 
   // dirty line: send a writeback request with voluntary release
-  io.wb_req.valid := metaValid && meta.coh.isValid() && isDirty && io.meta_write.ready
+  io.wb_req.valid := metaValid && meta.coh.isValid() && isDirty && io.meta_write.ready && !wb_stall
   io.wb_req.bits.idx := metaReq.idx
   io.wb_req.bits.tag := meta.tag
-  // count and pray (voluntary releases do not require a response, reused src id probably ok)
-  // the first half of the source space is mapped to releases, we have to avoid the second half
-  io.wb_req.bits.source := Counter(io.wb_req.fire, 1 << (io.wb_req.bits.source.getWidth - 1))._1
   io.wb_req.bits.param := respType
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
 
-  assert(!io.wb_req.fire || io.meta_write.fire)
+  // count and pray (voluntary releases do not require a response, reused src id probably ok)
+  // the first half of the source space is mapped to releases, we have to avoid the second half
+  val src_width = io.wb_req.bits.source.getWidth - 1
+  io.wb_req.bits.source := Counter(wb_and_src_fire, 1 << src_width)._1
+  val in_flights = RegInit(0.U((src_width + 1).W))
+  when (wb_and_src_fire && !io.wb_resp_fire) {
+    in_flights := in_flights + 1.U
+  }.elsewhen (!wb_and_src_fire && io.wb_resp_fire) {
+    in_flights := in_flights - 1.U
+  }
+  wb_stall := in_flights >= (1 << src_width).U
+
+  // assert(io.wb_req.fire === wb_and_src_fire)
+  assert(!wb_and_src_fire || io.meta_write.fire)
 }
 
 class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int,
@@ -549,6 +564,7 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
+    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }
