@@ -126,19 +126,10 @@ def clipped_payload(row, start: int, end: int) -> bytes:
     address = row[5]
     size = int(row[6])
     data = int(row[7])
-    # Trace DB stores memory data as a 32-bit beat. Reconstruct request-sized
-    # payload bytes from that beat using the byte offset in the address.
-    beat_nbytes = 4
-    beat = (data & 0xFFFF_FFFF).to_bytes(beat_nbytes, byteorder="little", signed=False)
-    offset = int(address) % beat_nbytes
+    # trace DB stores request/load data already shifted to the LSB
     size = max(1, size)
-    avail = beat_nbytes - offset
-    if size <= avail:
-        payload = beat[offset:offset + size]
-    else:
-        # Crossing beat boundary is rare for this trace format; preserve known
-        # bytes and pad tail with zeros rather than failing.
-        payload = beat[offset:] + (b"\x00" * (size - avail))
+    mask = (1 << (size * 8)) - 1
+    payload = (data & mask).to_bytes(size, byteorder="little", signed=False)
 
     payload_end = address + len(payload)
     clip_lo = max(start, address)
