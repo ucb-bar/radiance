@@ -237,7 +237,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       }
       b.inProgress.bits.id := firstRs1.asTypeOf(barIO.req.bits.id)
       b.inProgress.bits.have := 1.U
-      b.inProgress.bits.want := inst(NuNumElems) +& 1.U
+      b.inProgress.bits.want := firstRs2 // inst(NuNumElems) +& 1.U
       assert(inst(F3) === 1.U(3.W), "only support sync, imm retire for neutrino")
       assert(!b.inProgress.valid, "cannot start barrier when one is in progress")
     }

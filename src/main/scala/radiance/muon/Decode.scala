@@ -269,7 +269,9 @@ object Decoder {
           MuOpcode.MADD,
           MuOpcode.MSUB,
           MuOpcode.NM_SUB,
-          MuOpcode.NM_ADD
+          MuOpcode.NM_ADD,
+          MuOpcode.NU_INVOKE,
+          MuOpcode.NU_INVOKE_IMM,
         ).contains(op))
       case IsIType =>
         Some(Seq(
