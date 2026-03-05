@@ -2,7 +2,7 @@ package radiance.cluster
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, BufferParams}
+import freechips.rocketchip.diplomacy.BufferParams
 import freechips.rocketchip.tilelink._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
