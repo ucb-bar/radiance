@@ -372,6 +372,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   val gemminiBaseMMIO = Seq(
     0x00 -> Seq(RegField.w(32, gemminiCommandReg(_, _))),
+    0x08 -> Seq(RegField.r(32, gemminiIO.ready)),
     0x10 -> Seq(
       RegField.w(32, gemminiRs1RegLSB),
       RegField.w(32, gemminiRs1RegMSB)),
@@ -379,7 +380,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       RegField.w(32, gemminiRs2RegLSB),
       RegField.w(32, gemminiRs2RegMSB)),
     0x20 -> Seq(RegField.r(32, gemminiBusyReg(_))),
-    0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_)))
+    0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_))),
   )
 
   val gemminiCiscMMIO = Option.when(!outer.gemminiParams.hasAccSlave) {

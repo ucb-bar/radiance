@@ -366,7 +366,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         mesh_output_delay = 1,
         acc_latency = 3,
         dma_maxbytes = up(CacheBlockBytes),
-        dma_buswidth = up(CacheBlockBytes),
+        dma_buswidth = up(CacheBlockBytes) * 8,
         tl_ext_mem_base = clusterParams.baseAddr, // TODO: no longer need this with address rewriting
         sp_banks = smKey.numBanks,
         sp_capacity = CapacityInKilobytes(smKey.size >> 10),
