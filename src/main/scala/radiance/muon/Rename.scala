@@ -18,13 +18,6 @@ class Rename(implicit p: Parameters) extends CoreModule {
   )
   val assigned = RegInit(defaultAssignment)
 
-  // calculate wmask's (MSB idx + 1) rounded up to the nearest power of 2. eg 0b10001 => 8
-  val logMask = Log2(io.rename.bits.wmask)
-  val logLogMask = Mux(io.rename.bits.wmask <= 1.U, 0.U, Log2(logMask) + 1.U)
-  val clippedLogLogMask = Mux(logLogMask < m.logRenameMinWarps.U, m.logRenameMinWarps.U, logLogMask)
-  // val currentOccupancy = (1.U << clippedLogLogMask).asUInt
-  val maxPRUsage = (m.numPhysRegs.U >> clippedLogLogMask).asUInt
-
   val useSRAM = false
 
   val (rPorts, wPort) = if (useSRAM) {
@@ -68,7 +61,6 @@ class Rename(implicit p: Parameters) extends CoreModule {
     port.address := Cat(wid, addr.asTypeOf(aRegT))
   }
 
-  // val prIdxWidth = log2Ceil(m.numPhysRegs).U - clippedLogLogMask
   // val prWarpPrefix = (wid << prIdxWidth).asUInt
   val prAddr = rPorts.map(_.data)
 
@@ -134,11 +126,9 @@ class Rename(implicit p: Parameters) extends CoreModule {
   wPort.data := globalCounter
   // wPort.data := counters(wid).asTypeOf(pRegT)
 
-  // check for warp level oversubscription
   when (assigning) {
-    printf(cf"[RENAME] renamed pc=${io.rename.bits.pc}%x, wid=${io.rename.bits.wid}; new PR usage: ${counters(wid)}, maxPRUsage=${maxPRUsage}\n")
+    printf(cf"[RENAME] renamed pc=${io.rename.bits.pc}%x, wid=${io.rename.bits.wid}; new PR usage: ${counters(wid)}\n")
   }
-  assert(!assigning || (counters(wid) < maxPRUsage), cf"warp $wid oversubscribed PRs, capped to $maxPRUsage")
 
   // reset assignment on kernel relaunch
   when (io.softReset) {
