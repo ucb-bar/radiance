@@ -52,7 +52,7 @@ object TapeoutSmemConfig extends RadianceSharedMemKey(
 )
 
 object L0iCacheConfig extends DCacheParams(
-  nSets = 128,
+  nSets = 512,
   nWays = 1,
   rowBits = 32 * 8,
   blockBytes = 32,
@@ -60,7 +60,7 @@ object L0iCacheConfig extends DCacheParams(
 )
 
 object L0dCacheConfig extends DCacheParams(
-  nSets = 256,
+  nSets = 64,
   nWays = 1,
   rowBits = 64 * 8,
   blockBytes = 64,
