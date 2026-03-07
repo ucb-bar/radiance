@@ -259,6 +259,17 @@ The values of `rs1` and `rs2` are taken from the "leader" lane.
 Note: `vx_wspawn` eventually be superceded by command processor's scheduling
 capabilities.
 
+#### `vx_bar`
+
+```
+vx_bar rs1, rs2
+```
+
+Waits for `rs2` warps in a single cluster to reach barrier with id given by `rs1`. 
+The values of `rs1` and `rs2` are taken from "leader" lane. TODO: how many barriers? 16?
+
+Note: `vx_bar` will eventually be superceded by neutrino / command processor barrier mechanism
+
 ## New Registers
 
 At 128 registers, we have 96 additional registers to allocate.
