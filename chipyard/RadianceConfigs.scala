@@ -59,6 +59,14 @@ object L0iCacheConfig extends DCacheParams(
   nMSHRs = 2,
 )
 
+object L0iCacheHugeConfig extends DCacheParams(
+  nSets = 8192,
+  nWays = 1,
+  rowBits = 32 * 8,
+  blockBytes = 32,
+  nMSHRs = 4,
+)
+
 object L0dCacheConfig extends DCacheParams(
   nSets = 64,
   nWays = 1,
@@ -188,6 +196,16 @@ class RadianceSingleClusterConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceSingleClusterLargeICacheConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
 class RadianceSingleClusterDiffTestConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true, difftest = true) ++
@@ -213,6 +231,19 @@ class RadianceLeanTapeoutSimConfig extends Config(
   new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceTapeoutSimTraceConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(1), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true) ++
+  new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++
