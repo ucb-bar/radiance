@@ -225,22 +225,7 @@ class GemminiTile private (
   }
 
   // width is max output width & num output lanes
-  val requantizerSmemClient = gemminiParams.requantizer.map { q =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v2(
-        name = "requantizer_out",
-        sourceId = IdRange(0, 1 << q.outputIdBits),
-        emits = TLMasterToSlaveTransferSizes(
-          putFull = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
-            q.numOutputLanes * q.maxOutputBits / 8),
-          putPartial = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
-            q.numOutputLanes * q.maxOutputBits / 8)
-        )
-      ))
-    )))
-  }
-
-  // TLClientNode(Seq(TLMasterPortParameters.v1(Seq(TLMasterParameters.v1("")))))
+  val requantizerSmemClient = None
 
   override lazy val module = new GemminiTileModuleImp(this)
 }
@@ -311,7 +296,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   // requantizer
   outer.gemminiParams.requantizer.foreach { q =>
     val in = Wire(Decoupled(new RequantizerInBundle(q.numGPUInputLanes, q.inputBits)))
-    val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
+    // val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
 
     { // input
       val (node, edge) = outer.requantizerMuonManager.get.in.head
@@ -331,40 +316,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       assert(!node.a.valid || ((node.a.bits.address & q.baseAddr.U) === q.baseAddr.U))
     }
 
-    { // output
-      val (node, edge) = outer.requantizerSmemClient.get.out.head
-
-      // data
-      val isFP4 = out.bits.dataType === RequantizerDataType.FP4
-      val fullWidth = q.numOutputLanes
-      val halfWidth = q.numOutputLanes / 2
-      node.a.bits := edge.Put(
-        fromSource = 0.U, // gets overridden
-        toAddress = out.bits.address,
-        lgSize = Mux(isFP4,
-          log2Ceil(halfWidth).U, // half byte per lane
-          log2Ceil(q.numOutputLanes).U // fp6, fp8: 1 byte per lane
-        ),
-        data = Mux(isFP4,
-          Mux(
-            out.bits.address(log2Ceil(halfWidth)), // not aligned to full line
-            (out.bits.data(halfWidth - 1, 0) << halfWidth).asTypeOf(UInt(fullWidth.W)),
-            out.bits.data
-          ),
-          out.bits.data
-        )
-      )._2
-
-      // source
-      val (sourceReady, _) = SourceGenerator(node)
-      out.ready := node.a.ready && sourceReady
-      node.a.valid := out.valid && sourceReady
-      assert(out.fire === node.a.fire)
-      node.d.ready := true.B
-    }
-
     outer.gemmini.module.mx_io.get.requant_in_gpu <> in
-    outer.gemmini.module.mx_io.get.requant_out <> out
   }
 
   // lut
@@ -420,6 +372,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
   val gemminiBaseMMIO = Seq(
     0x00 -> Seq(RegField.w(32, gemminiCommandReg(_, _))),
+    0x08 -> Seq(RegField.r(32, gemminiIO.ready)),
     0x10 -> Seq(
       RegField.w(32, gemminiRs1RegLSB),
       RegField.w(32, gemminiRs1RegMSB)),
@@ -427,7 +380,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
       RegField.w(32, gemminiRs2RegLSB),
       RegField.w(32, gemminiRs2RegMSB)),
     0x20 -> Seq(RegField.r(32, gemminiBusyReg(_))),
-    0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_)))
+    0x28 -> Seq(RegField.r(32, gemminiRunningLoopsReg(_))),
   )
 
   val gemminiCiscMMIO = Option.when(!outer.gemminiParams.hasAccSlave) {

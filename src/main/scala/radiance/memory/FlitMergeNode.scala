@@ -69,21 +69,36 @@ class FlitMergeNode(from: Int, to: Int, alwaysMerge: Boolean = true)
         val finalOut = WireInit(mergedReq)
         finalOut.data := filledData
         finalOut.mask := filledMask
+        finalOut.source := in.a.bits.source // last beat response
 
         out.a.valid := isLastReq
         out.a.bits := finalOut
-        in.a.ready := Mux(isLastReq, out.a.ready, true.B)
+        // we acknowledge all A subrequests except for the last one immediately
+        in.a.ready := Mux(isLastReq, out.a.ready, in.d.ready && !out.d.valid)
       }.otherwise {
         out.a <> in.a
       }
 
       // restore size on D channel if merged on A
-      val wasMerged = VecInit.fill(1 << out.a.bits.params.sourceBits)(false.B)
+      val wasMerged = RegInit(VecInit.fill(1 << out.a.bits.params.sourceBits)(false.B))
       when (in.a.fire) {
         wasMerged(in.a.bits.source) := shouldMerge
       }
-      in.d <> out.d
-      in.d.bits.size := Mux(wasMerged(out.d.bits.source), log2Ceil(from).U, out.d.bits.size)
+
+      // if D channel has a response, we prioritize passthru; otherwise, we try to
+      // acknowledge all but the last mergeable subrequest from A
+      in.d.valid := out.d.valid || (shouldMerge && in.a.valid && !isLastReq)
+      in.d.bits := Mux(out.d.valid, out.d.bits, ie.AccessAck(in.a.bits))
+      in.d.bits.size := Mux(
+        out.d.valid,
+        Mux(
+          wasMerged(out.d.bits.source),
+          log2Ceil(from).U,
+          out.d.bits.size
+        ),
+        log2Ceil(from).U
+      )
+      out.d.ready := in.d.ready
     }
   }
 }

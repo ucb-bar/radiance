@@ -17,7 +17,7 @@ case class MuonCoreParams(
   archLen: Int = 32,
   // end boilerplate
   numClusters: Int = 2,
-  numCores: Int = 2,
+  numCores: Int = 2, // per-cluster
   numWarps: Int = 8,
   numLanes: Int = 16,
   // schedule, dispatch, rename

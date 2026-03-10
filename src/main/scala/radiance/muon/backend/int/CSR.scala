@@ -51,7 +51,7 @@ class CSRFile(
   case object ClusterId  extends MuonCSR(0xcd0, accessor = wrap(clusterId))
   case object NumLanes   extends MuonCSR(0xfc0, m.numLanes.U)
   case object NumWarps   extends MuonCSR(0xfc1, m.numWarps.U)
-  case object NumCores   extends MuonCSR(0xfc2, m.numCores.U)
+  case object NumCores   extends MuonCSR(0xfc2, m.numCores.U) // per-cluster
   case object BlockIdxX  extends MuonCSR(0xfc3)
   case object BlockIdxY  extends MuonCSR(0xfc4)
   case object BlockIdxZ  extends MuonCSR(0xfc5)

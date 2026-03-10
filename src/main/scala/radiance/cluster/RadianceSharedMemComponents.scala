@@ -2,7 +2,7 @@ package radiance.cluster
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, BufferParams}
+import freechips.rocketchip.diplomacy.BufferParams
 import freechips.rocketchip.tilelink._
 import gemmini._
 import org.chipsalliance.cde.config.Parameters
@@ -162,13 +162,8 @@ class RadianceSharedMemComponents(
     .map(connectOne(_, () => RWSplitterNode(f"muon_aligned_splitter")))
   val muonAligned = Seq.fill(2)(muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
 
-  val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
-    .map(q => q.numOutputLanes * q.maxOutputBits / 8))
-  val quantOutputNodesSingleBank = distAndDuplicate(
-    gemminiTiles.flatMap(_.requantizerSmemClient).map(x =>
-      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.head)
-    ), "quant_w")
-  val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
+  val quantOutputNodes = Seq.fill(smemBanks)(Seq.fill(smemSubbanks)(Seq[TLNexusNode]()))
+  // val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
 
   // connect requantizer managers directly here TODO: move outside, make smemNodes xbars
   gemminiTiles.flatMap(_.requantizerMuonManager).foreach { qm =>

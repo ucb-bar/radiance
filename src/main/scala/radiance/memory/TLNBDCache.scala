@@ -6,7 +6,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket.{DCacheParams, NonBlockingDCache, PRV, SimpleHellaCacheIF}
+import freechips.rocketchip.rocket.{DCacheParams, HellaCacheResp, NonBlockingDCache, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
@@ -21,6 +21,7 @@ case class TLNBDCacheParams(
   cacheTagBits: Int,
   overrideDChannelSize: Option[Int] = None,
   flushAddr: Option[BigInt] = None,
+  makeLandingPads: Boolean = false,
 )
 
 case class DummyCacheCoreParams(
@@ -125,9 +126,11 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
       case None => tlIn.params.sizeBits
     }
 
+    val respBufReady = WireInit(true.B)
+
     // A
-    req.valid := tlIn.a.valid
-    tlIn.a.ready := req.ready
+    req.valid := tlIn.a.valid && respBufReady
+    tlIn.a.ready := req.ready && respBufReady
     req.bits := 0.U.asTypeOf(req.bits.cloneType)
     assert(req.bits.tag.getWidth == tlIn.a.bits.source.getWidth + sizeTagWidth,
       s"cache tag bits doesnt match source:" +
@@ -175,27 +178,49 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
 //    }
 
     // D
+    val (deqBits: HellaCacheResp, deqValid) = if (outer.params.makeLandingPads) {
+      val mshrs = outer.params.cache.nMSHRs + 1
+      val respBuf = Module(new Queue(resp.bits.cloneType, mshrs))
+      respBuf.io.enq.valid := resp.valid
+      respBuf.io.enq.bits := resp.bits
+      assert(!resp.valid || respBuf.io.enq.ready, "response must be ready!")
+      respBuf.io.deq.ready := tlIn.d.ready
+
+      val inFlights = RegInit(0.U(log2Ceil(mshrs + 1).W))
+      when (tlIn.a.fire && !tlIn.d.fire) {
+        inFlights := inFlights + 1.U
+      }.elsewhen (!tlIn.a.fire && tlIn.d.fire) {
+        inFlights := inFlights - 1.U
+      }
+      respBufReady := inFlights < mshrs.U
+
+      assert(respBufReady || !tlIn.a.valid, "this assertion can be safely commented but lmk")
+
+      (respBuf.io.deq.bits, respBuf.io.deq.valid)
+    } else {
+      assert(!resp.valid || tlIn.d.ready, "response must be ready!")
+      (resp.bits, resp.valid)
+    }
     // assert(!resp.valid || !resp.bits.replay, "cannot replay requests")
-    assert(!resp.valid || tlIn.d.ready, "response must be ready!")
-    tlIn.d.valid := resp.valid
-    tlIn.d.bits.data := resp.bits.data
+    tlIn.d.valid := deqValid
+    tlIn.d.bits.data := deqBits.data
     tlIn.d.bits.opcode := MuxCase(TLMessages.AccessAckData, Seq(
-      (resp.bits.cmd === M_XRD) -> TLMessages.AccessAckData,
-      (resp.bits.cmd === M_XWR) -> TLMessages.AccessAck,
+      (deqBits.cmd === M_XRD) -> TLMessages.AccessAckData,
+      (deqBits.cmd === M_XWR) -> TLMessages.AccessAck,
     ))
-    assert(!resp.fire || resp.bits.cmd === M_XRD || resp.bits.cmd === M_XWR)
-    assert(!resp.fire || (resp.bits.has_data === (resp.bits.cmd === M_XRD)))
+    assert(!tlIn.d.fire || deqBits.cmd === M_XRD || deqBits.cmd === M_XWR)
+    assert(!tlIn.d.fire || (deqBits.has_data === (deqBits.cmd === M_XRD)))
     // tlIn.d.bits.user := ???
 
     outer.params.overrideDChannelSize match {
       case Some(size) =>
         req.bits.tag := tlIn.a.bits.source
         tlIn.d.bits.size := size.U
-        tlIn.d.bits.source := resp.bits.tag
+        tlIn.d.bits.source := deqBits.tag
       case None =>
         req.bits.tag := Cat(tlIn.a.bits.size, tlIn.a.bits.source)
-        tlIn.d.bits.size := resp.bits.tag >> tlIn.params.sourceBits
-        tlIn.d.bits.source := resp.bits.tag(tlIn.params.sourceBits - 1, 0)
+        tlIn.d.bits.size := deqBits.tag >> tlIn.params.sourceBits
+        tlIn.d.bits.source := deqBits.tag(tlIn.params.sourceBits - 1, 0)
     }
 
   }
