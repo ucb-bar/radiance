@@ -19,6 +19,8 @@ case class LoadStoreUnitParams(
     val loadDataEntries: Int = 16, // limited to 16 in-flight / waiting to writeback load requests
     val storeDataEntries: Int = 8, // limited to 8 unissued store requests
     val addressEntries: Int = 16,  // limited to 16 unissued memory requests
+
+    val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
 ) {
     val globalLdqIndexBits = log2Up(numGlobalLdqEntries)
     val globalStqIndexBits = log2Up(numGlobalStqEntries)
@@ -194,8 +196,12 @@ class LSQMemReturnReq(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken    
 }
 
-// This interface allows for an optimization for our shared memory design, which is guaranteed to not
-// reorder requests. As such, we can advance head without waiting for load data (or store ack)
+// This interface allows for an optimization for our shared memory design.
+// Specifically, in the absence of bank conflicts, requests *should not* be reordered
+// by the shared memory fabric. Even when there are bank conflicts, it *should* be the case
+// that stores and loads to the same address should respect request ack order. This optimization
+// is gated behind `LoadStoreUnitParams.smemDoesntReorder`.
+// As such, we can advance head without waiting for load data (or store ack)
 class LSQMemUpdate(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
 }
@@ -1324,10 +1330,23 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     reqGen.io.storeData := storeData
     
     // -- Memory Update --
-    
-    // for now, we don't use this at all
-    loadStoreQueues.io.receivedMemUpdate.valid := false.B
-    loadStoreQueues.io.receivedMemUpdate.bits := DontCare
+    if (muonParams.lsu.smemDoesntReorder) {
+        // if io.shmemReq fired last cycle, then send receivedMemUpdate to appropriate queue
+        // it might be possible to send it on the same cycle that it fires, but this seems safer
+        // if the response comes back the next cycle anyways, this should still be fine too
+        val shmemReqFire_d1 = RegNext(io.shmemReq.fire, false.B)
+        val shmemReqToken_d1 = RegNext(
+            io.shmemReq.bits.tag.asTypeOf(new LsuMemTag),
+            0.U.asTypeOf(new LsuMemTag)
+        )
+
+        loadStoreQueues.io.receivedMemUpdate.valid := shmemReqFire_d1
+        loadStoreQueues.io.receivedMemUpdate.bits.token := shmemReqToken_d1.token
+    }
+    else {
+        loadStoreQueues.io.receivedMemUpdate.valid := false.B
+        loadStoreQueues.io.receivedMemUpdate.bits := DontCare
+    }
 
     // -- Receive memory responses --
     {
