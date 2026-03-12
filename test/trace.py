@@ -127,7 +127,7 @@ def query_rows(
             WHERE {" AND ".join(where_clauses)}
             ORDER BY id
         """
-        return conn.execute(sql, params).fetchall()
+        return (sql, params, conn.execute(sql, params).fetchall())
 
     if warp is not None:
         raise ValueError("--warp is only supported for inst table")
@@ -146,7 +146,11 @@ def query_rows(
         WHERE {" AND ".join(where_clauses)}
         ORDER BY id
     """
-    return conn.execute(sql, params).fetchall()
+    return (sql, params, conn.execute(sql, params).fetchall())
+
+
+def compact_sql(sql: str) -> str:
+    return " ".join(sql.split())
 
 
 def fmt_hex(value: int, nbytes: int) -> str:
@@ -277,7 +281,7 @@ def main():
 
     conn = sqlite3.connect(str(args.db))
     try:
-        rows = query_rows(
+        sql, params, rows = query_rows(
             conn,
             args.table,
             args.address,
@@ -296,6 +300,8 @@ def main():
         range_str = "all"
     else:
         range_str = f"[{fmt_hex(args.address[0], 4)}, {fmt_hex(args.address[1], 4)})"
+    print(f"# sql={compact_sql(sql)}")
+    print(f"# params={params}")
     print(
         f"# table={args.table} range={range_str} rows={len(rows)} "
         f"kind={args.kind} cluster={args.cluster} core={args.core} warp={args.warp}"
