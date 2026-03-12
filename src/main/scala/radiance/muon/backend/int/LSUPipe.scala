@@ -15,6 +15,8 @@ import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
 class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) {
+    val idIO = IO(clusterCoreIdT) // only for debugging
+
     val reserveIO = IO(reservationIO)
     
     val tokenIO = IO(Input(lsuTokenT))
@@ -24,6 +26,8 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     val flushIO = IO(lsuFenceIO)
 
     val lsu = Module(new LoadStoreUnit)
+    lsu.idIO := idIO
+
     flushIO.globalQueuesEmpty := lsu.io.globalQueuesEmpty
     flushIO.sharedQueuesEmpty := lsu.io.sharedQueuesEmpty
 
@@ -73,6 +77,8 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     wb.bits.data := VecInit(allData)
 
     val lsuAdapter = Module(new LSUCoreAdapter)
+    lsuAdapter.idIO := idIO
+
     lsuAdapter.io.lsu.globalMemReq :<>= lsu.io.globalMemReq
     lsu.io.globalMemResp :<>= lsuAdapter.io.lsu.globalMemResp
     lsuAdapter.io.lsu.shmemReq :<>= lsu.io.shmemReq

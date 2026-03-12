@@ -45,6 +45,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.flushIO <> io.flush
   sfuPipe.fenceIO := lsuPipe.flushIO
 
+  lsuPipe.idIO := io.id
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve
   lsuPipe.tokenIO := io.token
