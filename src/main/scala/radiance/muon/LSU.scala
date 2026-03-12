@@ -1163,6 +1163,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     val storeData = storeDataMemR.data
     
     class MemRequestGen extends CoreModule {
+        val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val queueRequest = Flipped(Decoupled(new LSQReq))
             val queueResponse = Valid(new LSQResp)
@@ -1296,6 +1297,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // TODO: utilize both memory interfaces in parallel?
     val reqGen = Module(new MemRequestGen)
+    reqGen.idIO := idIO
 
     reqGen.io.queueRequest :<>= loadStoreQueues.io.sendMemRequest.req
     loadStoreQueues.io.sendMemRequest.resp := reqGen.io.queueResponse
@@ -1486,6 +1488,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     // -- Writeback --
     class Writeback extends CoreModule {
+        val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val writebackReq = Flipped(Decoupled(new LSQWritebackReq))
             val coreResp = Decoupled(new LsuResponse)
@@ -1580,7 +1583,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         if (lsuDerived.debugIdBits.isDefined) {
             io.coreResp.bits.debugId.get := s2_req.debugId.get
             when (io.coreResp.fire) {
-                printf(cf"[Writeback] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
+                printf(cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
             }
         }
 
@@ -1600,7 +1603,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         when (io.coreResp.fire) {
             val debugIdMsg = io.coreResp.bits.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
             printf(
-                cf"[Writeback] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
+                cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
                 cf"writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, " +
                 cf"destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n"
             )
@@ -1608,6 +1611,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     val writeback = Module(new Writeback)
+    writeback.idIO := idIO
+
     io.coreResp :<>= writeback.io.coreResp
     writeback.io.writebackReq :<>= loadStoreQueues.io.writebackReq
     
