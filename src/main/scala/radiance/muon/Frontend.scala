@@ -89,14 +89,6 @@ class Frontend(implicit p: Parameters)
   }
 
   { // ibuffer
-    // val eligible = VecInit(ibuffer.io.deq.map(_.valid)).asUInt
-    // warpScheduler.io.issue.eligible.bits := eligible
-    // warpScheduler.io.issue.eligible.valid := io.ibuf.ready
-    warpScheduler.io.issue.eligible.bits := 0.U
-    warpScheduler.io.issue.eligible.valid := false.B
-
-    // val winner = UIntToOH(warpScheduler.io.issue.issued)
-
     (io.ibuf zip ibuffer.io.deq).foreach { case (to, from) =>
       to :<>= from
     }

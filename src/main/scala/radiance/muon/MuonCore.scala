@@ -198,11 +198,6 @@ trait HasCoreParameters {
     val resp = Valid(new LsuReservationResp)
   })
 
-  def issueIO = new Bundle {
-    val eligible = Flipped(Valid(wmaskT))
-    val issued = Output(widT) // comb
-  }
-
   def feCSRIO = Output(new Bundle {
     val wmask = wmaskT
   })
