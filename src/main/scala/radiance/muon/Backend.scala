@@ -129,7 +129,10 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.lsuReserve <> io.lsuReserve
   (io.perf.perWarp zip execute.io.lsuReserve).zipWithIndex.foreach {
     case ((p, reserv), wid) =>
-      val lsuStalled = reserv.req.valid && !reserv.req.ready
+      // FIXME: this replicates needsLsuReserve logic in InstBuffer.
+      // ideally reserv.req.valid should directly reflect needsLsuReserve
+      val ibufIsLSU = io.ibuf(wid).valid && io.ibuf(wid).bits.uop.inst.b(UseLSUPipe)
+      val lsuStalled = (ibufIsLSU || reserv.req.valid) && !reserv.req.ready
       p.stallsBusyLSU := PerfCounter(lsuStalled)
   }
 

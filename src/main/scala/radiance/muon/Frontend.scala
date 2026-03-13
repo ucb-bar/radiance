@@ -86,6 +86,9 @@ class Frontend(implicit p: Parameters)
     renamer.io.rename := warpScheduler.io.rename
     ibuffer.io.enq <> renamer.io.ibuf
     renamer.io.softReset := io.softReset
+    (io.perf.perWarp zip renamer.io.ibuf).foreach { case (p, ren) =>
+      p.instDecoded := PerfCounter(ren.uop.valid)
+    }
   }
 
   { // ibuffer
@@ -97,9 +100,9 @@ class Frontend(implicit p: Parameters)
     io.perf.cyclesDecoded := PerfCounter(ibuffer.io.empty.reduce(!_ || !_))
     val perWarpCyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
     (io.perf.perWarp lazyZip perWarpCyclesDecoded lazyZip ibuffer.io.empty)
-      .foreach { case (wio, wperf, empty) =>
-        wperf.cond(!empty)
-        wio.cyclesDecoded := wperf.value
+      .foreach { case (p, counter, empty) =>
+        counter.cond(!empty)
+        p.cyclesDecoded := counter.value
       }
     
     // io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
@@ -114,6 +117,7 @@ class FrontendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
   /** cycles with at least 1 decoded instructions residing in the ibuf */
   val cyclesDecoded = Perf.T
   val perWarp = Vec(numWarps, new Bundle {
+    val instDecoded = Perf.T
     val cyclesDecoded = Perf.T
   })
 }

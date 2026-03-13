@@ -686,12 +686,10 @@ void profile_perf_counters(
     uint8_t finished
 ) {
   profile_perf_counters_rs(
-      cluster_id, core_id,
-      inst_retired, cycle,
-      cycles_decoded, cycles_eligible, cycles_issued,
-      per_warp_cycles_decoded, per_warp_cycles_issued, per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_busy,
-      per_warp_stalls_busy_lsu,
-      finished);
+      cluster_id, core_id, inst_retired, cycle, cycles_decoded, cycles_eligible,
+      cycles_issued, per_warp_cycles_decoded, per_warp_cycles_issued,
+      per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_busy,
+      per_warp_stalls_busy_lsu, finished);
 }
 
 } // extern "C"
