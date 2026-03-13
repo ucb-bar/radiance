@@ -29,13 +29,24 @@ class RadianceBaseConfig extends Config(
   new WithNoMbusScratchpad ++
   new WithContingentSpad(where = MBUS) ++
 
+  // everything on chip runs at 500MHz, including mbus even when serial TL runs at 200.
+  // serial tl will sync external interfaces to the digital core frequency
   new chipyard.config.WithPeripheryBusFrequency(500.0) ++
   new chipyard.config.WithMemoryBusFrequency(500.0) ++
   new chipyard.config.WithControlBusFrequency(500.0) ++
   new chipyard.config.WithSystemBusFrequency(500.0) ++
   new chipyard.config.WithFrontBusFrequency(500.0) ++
   new chipyard.config.WithOffchipBusFrequency(500.0) ++
-  new chipyard.harness.WithHarnessBinderClockFreqMHz(500.0) ++
+  new chipyard.harness.WithHarnessBinderClockFreqMHz(200.0) ++
+
+  new chipyard.config.WithTileFrequency(500.0) ++
+  new chipyard.clocking.WithClockGroupsCombinedByName(
+    ("uncore", Seq("sbus", "cbus", "implicit", "clock_tap", "pbus", "mbus", "fbus"), Nil),
+  ) ++
+  new chipyard.config.WithSbusToMbusCrossingType(freechips.rocketchip.prci.SynchronousCrossing()) ++
+  new chipyard.config.WithFbusToSbusCrossingType(freechips.rocketchip.prci.SynchronousCrossing()) ++
+  new chipyard.config.WithSbusToCbusCrossingType(freechips.rocketchip.prci.SynchronousCrossing()) ++
+  new chipyard.config.WithCbusToPbusCrossingType(freechips.rocketchip.prci.SynchronousCrossing()) ++
 
   new freechips.rocketchip.subsystem.WithInclusiveCache(
     nWays = 8,
@@ -58,6 +69,14 @@ object L0iCacheConfig extends DCacheParams(
   rowBits = 32 * 8,
   blockBytes = 32,
   nMSHRs = 2,
+)
+
+object L0iCacheHugeConfig extends DCacheParams(
+  nSets = 8192,
+  nWays = 1,
+  rowBits = 32 * 8,
+  blockBytes = 32,
+  nMSHRs = 4,
 )
 
 object L0dCacheConfig extends DCacheParams(
@@ -112,7 +131,10 @@ class WithRadianceTapeoutPeripherals extends Config(
         )),
         slaveWhere = OBUS
       )),
-      phyParams = testchipip.serdes.CreditedSourceSyncSerialPhyParams(phitWidth=4) // narrow link
+      phyParams = testchipip.serdes.CreditedSourceSyncSerialPhyParams(
+        phitWidth = 4,
+        freqMHz = 200,
+      ) // narrow link
     ),
   )) ++
   new testchipip.soc.WithOffchipBusClient(MBUS,       // obus provides path to other chip's memory, and also backs mbus
@@ -189,6 +211,16 @@ class RadianceSingleClusterConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceSingleClusterLargeICacheConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
 class RadianceSingleClusterDiffTestConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true, difftest = true) ++
@@ -214,6 +246,19 @@ class RadianceLeanTapeoutSimConfig extends Config(
   new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceTapeoutSimTraceConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(1), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true) ++
+  new WithRadianceCluster(1, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++

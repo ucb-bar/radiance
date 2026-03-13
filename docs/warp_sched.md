@@ -10,7 +10,7 @@ execution, and handles branches, jumps and splits. An IPDOM stack subblock
 takes care of nesting conditionals. A predecoder preemptively stops new fetches
 from reaching IBuffers after a control flow change.
 
-There are two arbiters: one for which warp to fetch, one for which to issue.
+The warp scheduler contains an arbiter that selects which warp to fetch.
 
 This block is instantiated per core.
 

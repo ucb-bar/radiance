@@ -270,6 +270,15 @@ The values of `rs1` and `rs2` are taken from "leader" lane. TODO: how many barri
 
 Note: `vx_bar` will eventually be superceded by neutrino / command processor barrier mechanism
 
+#### `fence.{i,d,s}`
+`fence.i` flushes the LSU global memory queues and the L0i cache.
+
+`fence.d` flushes the LSU global memory queues and the L0d cache.
+
+`fence.s` flushes the LSU shared memory queues. 
+
+All three instructions are blocking, and essentially have `seqcst` semantics.
+
 ## New Registers
 
 At 128 registers, we have 96 additional registers to allocate.

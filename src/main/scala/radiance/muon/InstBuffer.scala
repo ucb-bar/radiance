@@ -92,8 +92,9 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     val enq = Vec(muonParams.numWarps, Flipped(ibufEnqIO))
-    val deq = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
+    val deq = Vec(muonParams.numWarps, Decoupled(ibufDeqIO))
     val lsuReserve = Flipped(reservationIO)
+    val empty = Vec(muonParams.numWarps, Bool())
   })
 
   val warpBufs = Seq.tabulate(muonParams.numWarps){ wid =>
@@ -164,5 +165,10 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     enq.count := b.io.count
+  }
+
+  // as deq.valid is shadowed by lsu reservation, export a separate empty io
+  (warpBufs zip io.empty).foreach { case (b, empty) =>
+    empty := (b.io.count === 0.U)
   }
 }

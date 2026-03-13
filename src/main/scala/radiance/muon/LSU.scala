@@ -19,6 +19,8 @@ case class LoadStoreUnitParams(
     val loadDataEntries: Int = 16, // limited to 16 in-flight / waiting to writeback load requests
     val storeDataEntries: Int = 8, // limited to 8 unissued store requests
     val addressEntries: Int = 16,  // limited to 16 unissued memory requests
+
+    val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
 ) {
     val globalLdqIndexBits = log2Up(numGlobalLdqEntries)
     val globalStqIndexBits = log2Up(numGlobalStqEntries)
@@ -194,8 +196,12 @@ class LSQMemReturnReq(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken    
 }
 
-// This interface allows for an optimization for our shared memory design, which is guaranteed to not
-// reorder requests. As such, we can advance head without waiting for load data (or store ack)
+// This interface allows for an optimization for our shared memory design.
+// Specifically, in the absence of bank conflicts, requests *should not* be reordered
+// by the shared memory fabric. Even when there are bank conflicts, it *should* be the case
+// that stores and loads to the same address should respect request ack order. This optimization
+// is gated behind `LoadStoreUnitParams.smemDoesntReorder`.
+// As such, we can advance head without waiting for load data (or store ack)
 class LSQMemUpdate(implicit p: Parameters) extends CoreBundle {
     val token = new LsuQueueToken
 }
@@ -218,6 +224,7 @@ class LSQWritebackReq(implicit p: Parameters) extends CoreBundle {
 // TODO: create versions or parameterizations where the LDQ/STQ are shared between warps, 
 // between shared/global, or both
 class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
+    val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val queueReservations = Vec(muonParams.numWarps, new Bundle {
             val req = Flipped(Decoupled(new LSQReservationReq))
@@ -297,6 +304,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             idx(indexBits-1, 0)
         }
 
+        val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val myHead = Output(UInt(circIndexBits.W))
             val myTail = Output(UInt(circIndexBits.W))
@@ -400,7 +408,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
             val debugIdMsg = io.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
             printf(
-                cf"[LSU] Enqueue (LDQ: ${loadQueue}): warp = ${warpId}, index = ${idxBits(tail)}, " +
+                cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Enqueue (LDQ: ${loadQueue}): " +
+                cf"warp = ${warpId}, index = ${idxBits(tail)}, " +
                 cf"op = ${io.op}, otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
             )
 
@@ -681,6 +690,8 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
     })
 
     for (queue <- allQueues) {
+        queue.idIO := idIO
+
         queue.io.sendMemRequest.resp := io.sendMemRequest.resp
     }
 
@@ -873,6 +884,7 @@ object Utils {
 }
 
 class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
+    val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val coreReservations = Vec(muonParams.numWarps, new Bundle {
             val req = Flipped(Decoupled(new LsuReservationReq))
@@ -893,6 +905,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // instantiate lsu queues
     val loadStoreQueues = Module(new LoadStoreQueue)
+    loadStoreQueues.idIO := idIO
+
     io.sharedQueuesEmpty := loadStoreQueues.io.sharedQueuesEmpty
     io.globalQueuesEmpty := loadStoreQueues.io.globalQueuesEmpty
     dontTouch(io.sharedQueuesEmpty)
@@ -1071,8 +1085,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // -- Accept operands from reservation station --
     
-    // by design, we are always ready to accept operands from reservation station 
+    // by design, we are always ready to accept operands from reservation station
+    // token reservation will take care of backpressure
     io.coreReq.ready := true.B
+    dontTouch(io.coreReq)
 
     val queueReceivedOperands = loadStoreQueues.io.receivedOperands
     queueReceivedOperands.req.valid := io.coreReq.valid
@@ -1124,7 +1140,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         metadataMemW.data := metadata
         metadataMemW.enable := true.B
 
-        printf(cf"[LSU] Operands / metadata update: " +
+        printf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Operands / metadata update: " +
           cf"token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), " +
           cf"address = ${address}, " +
           cf"destReg = ${io.coreReq.bits.destReg}, " +
@@ -1149,6 +1165,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     val storeData = storeDataMemR.data
     
     class MemRequestGen extends CoreModule {
+        val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val queueRequest = Flipped(Decoupled(new LSQReq))
             val queueResponse = Valid(new LSQResp)
@@ -1269,12 +1286,20 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.addressSpace := token.addressSpace
 
         when (io.memRequest.fire) {
-            printf(p"[LSU] Mem request sent: tag=0x${Hexadecimal(tag.token.asUInt)}, packet=${packet}, tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, op=${op.asUInt}, data = ${io.memRequest.bits.data}, address = ${io.memRequest.bits.address}\n")
+            printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem request sent: " +
+              p"tag=0x${Hexadecimal(tag.asUInt)}, " +
+              p"packet=${packet}, " +
+              p"tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, " +
+              p"op=${op.asUInt}, " +
+              p"data = ${io.memRequest.bits.data}, " +
+              p"address = ${io.memRequest.bits.address}\n"
+            )
         }
     }
 
     // TODO: utilize both memory interfaces in parallel?
     val reqGen = Module(new MemRequestGen)
+    reqGen.idIO := idIO
 
     reqGen.io.queueRequest :<>= loadStoreQueues.io.sendMemRequest.req
     loadStoreQueues.io.sendMemRequest.resp := reqGen.io.queueResponse
@@ -1309,10 +1334,23 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     reqGen.io.storeData := storeData
     
     // -- Memory Update --
-    
-    // for now, we don't use this at all
-    loadStoreQueues.io.receivedMemUpdate.valid := false.B
-    loadStoreQueues.io.receivedMemUpdate.bits := DontCare
+    if (muonParams.lsu.smemDoesntReorder) {
+        // if io.shmemReq fired last cycle, then send receivedMemUpdate to appropriate queue
+        // it might be possible to send it on the same cycle that it fires, but this seems safer
+        // if the response comes back the next cycle anyways, this should still be fine too
+        val shmemReqFire_d1 = RegNext(io.shmemReq.fire, false.B)
+        val shmemReqToken_d1 = RegNext(
+            io.shmemReq.bits.tag.asTypeOf(new LsuMemTag),
+            0.U.asTypeOf(new LsuMemTag)
+        )
+
+        loadStoreQueues.io.receivedMemUpdate.valid := shmemReqFire_d1
+        loadStoreQueues.io.receivedMemUpdate.bits.token := shmemReqToken_d1.token
+    }
+    else {
+        loadStoreQueues.io.receivedMemUpdate.valid := false.B
+        loadStoreQueues.io.receivedMemUpdate.bits := DontCare
+    }
 
     // -- Receive memory responses --
     {
@@ -1351,10 +1389,15 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         loadDataMemW.enable := false.B
 
         when (receivedResp) {
-            printf(p"[LSU] Mem response received: tag=0x${Hexadecimal(respTag.token.asUInt)}, packet=${respTag.packet}, resp valids=${Binary(respValidsVec.asUInt)}, data = ${loadDataWriteVal}\n")
+            printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem response received: " +
+              p"tag=0x${Hexadecimal(respTag.token.asUInt)}, " +
+              p"packet=${respTag.packet}, " +
+              p"resp valids=${Binary(respValidsVec.asUInt)}, " +
+              p"data = ${loadDataWriteVal}\n"
+            )
             
             when (shouldWriteLoadData) {
-                printf(p"[LSU] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
+                printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
 
                 loadDataMemW.address := loadDataWriteIdx
                 loadDataMemW.data := loadDataWriteVal
@@ -1431,7 +1474,13 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 completionWrite := newCompletion
             }
             
-            printf(cf"[LSU] completion updated: packet=${respTag_d1.packet}, new valids=${newCompletion}, prev valids=${completion_d1}, packet tmask=${packetTmask}, all received=${allPacketLanesReceived}\n")
+            printf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] completion updated: " +
+              cf"packet=${respTag_d1.packet}, " +
+              cf"new valids=${newCompletion}, " +
+              cf"prev valids=${completion_d1}, " +
+              cf"packet tmask=${packetTmask}, " +
+              cf"all received=${allPacketLanesReceived}\n"
+            )
         }
 
         // Notify queue when all requested lanes for this packet are received
@@ -1441,6 +1490,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     // -- Writeback --
     class Writeback extends CoreModule {
+        val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val writebackReq = Flipped(Decoupled(new LSQWritebackReq))
             val coreResp = Decoupled(new LsuResponse)
@@ -1535,7 +1585,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         if (lsuDerived.debugIdBits.isDefined) {
             io.coreResp.bits.debugId.get := s2_req.debugId.get
             when (io.coreResp.fire) {
-                printf(cf"[Writeback] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
+                printf(cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
             }
         }
 
@@ -1555,7 +1605,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         when (io.coreResp.fire) {
             val debugIdMsg = io.coreResp.bits.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
             printf(
-                cf"[Writeback] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
+                cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
                 cf"writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, " +
                 cf"destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n"
             )
@@ -1563,6 +1613,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     val writeback = Module(new Writeback)
+    writeback.idIO := idIO
+
     io.coreResp :<>= writeback.io.coreResp
     writeback.io.writebackReq :<>= loadStoreQueues.io.writebackReq
     
@@ -1575,6 +1627,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
 // See [Downstream memory interface]
 class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
+    val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val lsu = new Bundle {
             val globalMemReq = Flipped(Decoupled(new LsuMemRequest))
@@ -1608,7 +1661,14 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         lsuReq.ready := allReady
         
         when (lsuReq.fire) {
-            printf(p"[LSUCoreAdapter] Core request sent: tag=0x${Hexadecimal(lsuReq.bits.tag)}, tmask=${Binary(lsuReq.bits.tmask.asUInt)}, lane valids=${Binary(Cat(laneValids.reverse))}, data = ${lsuReq.bits.data}, address = ${lsuReq.bits.address}, op = ${lsuReq.bits.op}\n")
+            printf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core request sent: " +
+              p"tag=0x${Hexadecimal(lsuReq.bits.tag)}, " +
+              p"tmask=${Binary(lsuReq.bits.tmask.asUInt)}, " +
+              p"lane valids=${Binary(Cat(laneValids.reverse))}, " +
+              p"data = ${lsuReq.bits.data}, " +
+              p"address = ${lsuReq.bits.address}, " +
+              p"op = ${lsuReq.bits.op}\n"
+            )
         }
     }
 
@@ -1630,7 +1690,13 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         lsuResp.bits.data := respData
         
         when (respValids.orR) {
-            printf(p"[LSUCoreAdapter] Core responses: valids=${Binary(Cat(respValids.reverse))}, leader=${leader}, leaderTag=0x${Hexadecimal(leaderLsuTag)}, matches=${Binary(Cat(matchesLeader.reverse))}, outputValids=${Binary(Cat(lsuResp.bits.valid.reverse))}\n")
+            printf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core responses: " +
+              p"valids=${Binary(Cat(respValids.reverse))}, " +
+              p"leader=${leader}, " +
+              p"leaderTag=0x${Hexadecimal(leaderLsuTag)}, " +
+              p"matches=${Binary(Cat(matchesLeader.reverse))}, " +
+              p"outputValids=${Binary(Cat(lsuResp.bits.valid.reverse))}\n"
+            )
         }
         
         for ((lane, laneId) <- coreResp.zipWithIndex) {

@@ -9,15 +9,14 @@ class Frontend(implicit p: Parameters)
 
   val io = IO(new Bundle {
     val imem = new InstMemIO
-    val ibuf = Vec(muonParams.numWarps, Decoupled(ibufEntryT))
+    val ibuf = Vec(muonParams.numWarps, Decoupled(ibufDeqIO))
     val lsuReserve = Flipped(reservationIO)
-    // TODO: writeback
     val commit = Flipped(schedWritebackT)
-//    val issue = issueIO
     val csr = feCSRIO
     val cmdProc: Option[Bundle] = None
     val softReset = Input(Bool())
     val finished = Output(Bool())
+    val perf = Output(new FrontendPerfIO)
   })
 
   val warpScheduler = Module(new WarpScheduler)
@@ -90,19 +89,18 @@ class Frontend(implicit p: Parameters)
   }
 
   { // ibuffer
-    // val eligible = VecInit(ibuffer.io.deq.map(_.valid)).asUInt
-    // warpScheduler.io.issue.eligible.bits := eligible
-    // warpScheduler.io.issue.eligible.valid := io.ibuf.ready
-    warpScheduler.io.issue.eligible.bits := 0.U
-    warpScheduler.io.issue.eligible.valid := false.B
-
-    // val winner = UIntToOH(warpScheduler.io.issue.issued)
-
     (io.ibuf zip ibuffer.io.deq).foreach { case (to, from) =>
       to :<>= from
     }
 
     io.lsuReserve <> ibuffer.io.lsuReserve
+    io.perf.cyclesDecoded := PerfCounter(ibuffer.io.empty.reduce(!_ || !_))
+    val perWarpCyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
+    (io.perf.perWarp lazyZip perWarpCyclesDecoded lazyZip ibuffer.io.empty)
+      .foreach { case (wio, wperf, empty) =>
+        wperf.cond(!empty)
+        wio.cyclesDecoded := wperf.value
+      }
     
     // io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
     // io.ibuf.valid := eligible.orR
@@ -110,5 +108,12 @@ class Frontend(implicit p: Parameters)
     //   warpBuf.ready := io.ibuf.ready && w
     // }
   }
+}
 
+class FrontendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  /** cycles with at least 1 decoded instructions residing in the ibuf */
+  val cyclesDecoded = Perf.T
+  val perWarp = Vec(numWarps, new Bundle {
+    val cyclesDecoded = Perf.T
+  })
 }

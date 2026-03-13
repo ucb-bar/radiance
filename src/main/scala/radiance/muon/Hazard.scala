@@ -12,23 +12,20 @@ import org.chipsalliance.cde.config.Parameters
 class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
     /** per-warp IBUF interface */
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufDeqIO)))
     /** scoreboard interface */
     val scb = Flipped(new ScoreboardHazardIO)
     // TODO: per-FU RS
     val rsAdmit = Decoupled(new ReservationStationEntry)
     val perf = Output(Vec(numWarps, new Bundle {
-      val cyclesDecoded = Perf.T
       val stallsWAW = Perf.T
       val stallsWAR = Perf.T
     }))
   })
 
-  val cyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAW = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAR = Seq.fill(numWarps)(new PerfCounter)
   io.perf.zipWithIndex.foreach { case (p, wid) =>
-    p.cyclesDecoded := cyclesDecoded(wid).value
     p.stallsWAW := stallsWAW(wid).value
     p.stallsWAR := stallsWAR(wid).value
   }
@@ -58,7 +55,6 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val hasWAW = hasRd && (scbPort.readRd.pendingWrites =/= 0.U)
     val hasWAR = hasRd && (scbPort.readRd.pendingReads =/= 0.U)
 
-    cyclesDecoded(warpId).cond(uopValid)
     stallsWAW(warpId).cond(uopValid && hasWAW)
     stallsWAR(warpId).cond(uopValid && hasWAR)
 
@@ -156,15 +152,4 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
              cf"RS admission blocked due to scoreboard overflow\n")
     }
   }
-}
-
-trait HasIssuePerfCounters extends HasCoreParameters {
-  implicit val p: Parameters
-  val perWarp = Vec(numWarps, new Bundle {
-    val cyclesDecoded = Perf.T
-    val cyclesIssued = Perf.T
-    val stallsWAW = Perf.T
-    val stallsWAR = Perf.T
-    val stallsBusy = Perf.T
-  })
 }

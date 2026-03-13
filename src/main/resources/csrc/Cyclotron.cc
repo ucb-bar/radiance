@@ -665,6 +665,7 @@ void profile_perf_counters_rs(
     const uint64_t* per_warp_stalls_waw,
     const uint64_t* per_warp_stalls_war,
     const uint64_t* per_warp_stalls_busy,
+    const uint64_t* per_warp_stalls_busy_lsu,
     uint8_t finished
 );
 
@@ -681,6 +682,7 @@ void profile_perf_counters(
     const uint64_t* per_warp_stalls_waw,
     const uint64_t* per_warp_stalls_war,
     const uint64_t* per_warp_stalls_busy,
+    const uint64_t* per_warp_stalls_busy_lsu,
     uint8_t finished
 ) {
   profile_perf_counters_rs(
@@ -688,6 +690,7 @@ void profile_perf_counters(
       inst_retired, cycle,
       cycles_decoded, cycles_eligible, cycles_issued,
       per_warp_cycles_decoded, per_warp_cycles_issued, per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_busy,
+      per_warp_stalls_busy_lsu,
       finished);
 }
 

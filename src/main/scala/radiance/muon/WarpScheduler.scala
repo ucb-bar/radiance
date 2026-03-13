@@ -22,12 +22,10 @@ class WarpScheduler(implicit p: Parameters)
   val io = IO(new Bundle {
     val commit = Flipped(schedWritebackT)
     val icache = icacheIO
-    val issue = issueIO
     val csr = feCSRIO
     val rename = renameIO
     val ibuf = Vec(muonParams.numWarps, ibufEnqIO)
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
-
     val softReset = Input(Bool())
     val finished = Output(Bool())
   })
@@ -56,7 +54,6 @@ class WarpScheduler(implicit p: Parameters)
   val fetchWid = WireInit(0.U)
 
   val fetchArbiter = Module(new RRArbiter(UInt(), m.numWarps))
-  val issueArbiter = Module(new RRArbiter(UInt(), m.numWarps))
 
   // increment/set PCs, fetch from i$
   io.icache.in.bits := 0.U.asTypeOf(io.icache.in.bits)
@@ -137,6 +134,9 @@ class WarpScheduler(implicit p: Parameters)
         ipdomStack.pop(iresp.wid) // this will set newPC/newMask, reflected elsewhere
       }
 
+      // TODO: don't guard joins as it clobbers inst trace.  Currently it fails
+      // difftest on vx_join's rs1.
+      // io.rename.valid := true.B
       io.rename.valid := !joins // joins are dealt with internally
     }
   }
@@ -217,16 +217,6 @@ class WarpScheduler(implicit p: Parameters)
   }
   fetchArbiter.io.out.ready := true.B
   fetchWid := fetchArbiter.io.out.bits
-
-  // select warp for issue
-  issueArbiter.io.in.zipWithIndex.foreach { case (arb, wid) =>
-    arb.bits := wid.U
-    arb.valid := io.issue.eligible.bits(wid)
-  }
-  issueArbiter.io.out.ready := io.issue.eligible.valid
-  io.issue.issued := issueArbiter.io.out.bits
-  assert(!io.issue.eligible.valid || !(io.issue.eligible.bits.orR) || issueArbiter.io.out.valid,
-    "issue arbiter out not valid when inputs are valid")
 
   // handle csr reads
 

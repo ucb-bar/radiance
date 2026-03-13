@@ -19,8 +19,8 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val flush = cacheFlushIO
     val softReset = Input(Bool())
     val perf = new Bundle {
-      val instRetired = Output(UInt(Perf.counterWidth.W))
-      val cycles =  Output(UInt(Perf.counterWidth.W))
+      val instRetired = Output(Perf.T)
+      val cycles =  Output(Perf.T)
       // TODO: execute fire
     }
   })
@@ -45,6 +45,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.flushIO <> io.flush
   sfuPipe.fenceIO := lsuPipe.flushIO
 
+  lsuPipe.idIO := io.id
   lsuPipe.memIO <> io.mem
   lsuPipe.reserveIO <> io.lsuReserve
   lsuPipe.tokenIO := io.token
@@ -79,13 +80,13 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   }
   io.resp :<>= respArbiter.io.out
 
-  val mcycle = Wire(UInt(Perf.counterWidth.W))
-  val mcycleReg = RegEnable(mcycle, 0.U(Perf.counterWidth.W), true.B)
-  mcycle := Mux(io.softReset, 0.U(Perf.counterWidth.W), mcycleReg + 1.U)
+  val mcycle = Wire(Perf.T)
+  val mcycleReg = RegEnable(mcycle, 0.U.asTypeOf(Perf.T), true.B)
+  mcycle := Mux(io.softReset, 0.U.asTypeOf(Perf.T), mcycleReg + 1.U)
 
-  val minstret = Wire(UInt(Perf.counterWidth.W))
-  val minstretReg = RegEnable(minstret, 0.U(Perf.counterWidth.W), io.resp.fire)
-  minstret := Mux(io.softReset, 0.U(Perf.counterWidth.W), minstretReg + 1.U)
+  val minstret = Wire(Perf.T)
+  val minstretReg = RegEnable(minstret, 0.U.asTypeOf(Perf.T), io.resp.fire)
+  minstret := Mux(io.softReset, 0.U.asTypeOf(Perf.T), minstretReg + 1.U)
 
   // io.perf.instRetired := minstret
   // io.perf.cycle := mcycleReg

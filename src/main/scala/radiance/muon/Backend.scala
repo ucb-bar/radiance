@@ -12,7 +12,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     val smem = new SharedMemIO
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
-    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufEntryT)))
+    val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufDeqIO)))
     val schedWb = Output(schedWritebackT)
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
@@ -46,23 +46,24 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.reset := true.B
     reservStation.io.issue.ready := false.B
 
-    val issueArb = Module(new RRArbiter(ibufEntryT, io.ibuf.length))
+    val issueArb = Module(new RRArbiter(ibufDeqIO, io.ibuf.length))
     (issueArb.io.in zip io.ibuf).foreach { case (a, b) => a <> b }
     issueArb.io.out
   } else {
     reservStation.io.issue
   }
 
-  io.perf.cyclesDecoded := PerfCounter(io.ibuf.map(_.valid).reduce(_ || _))
   io.perf.cyclesEligible := PerfCounter(issued.valid)
   io.perf.cyclesIssued := PerfCounter(issued.fire)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
-    p.stallsBusy := PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
-                                !issued.ready)
+    // LSU business is accounted for at the IBUF, not at the EX stage; it needs
+    // to be added separately
+    val stallsBusyEX = PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
+                                  !issued.ready)
+    p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
   }
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
-    p.cyclesDecoded := h.cyclesDecoded
     p.stallsWAW := h.stallsWAW
     p.stallsWAR := h.stallsWAR
   }
@@ -126,6 +127,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
+  (io.perf.perWarp zip execute.io.lsuReserve).zipWithIndex.foreach {
+    case ((p, reserv), wid) =>
+      val lsuStalled = reserv.req.valid && !reserv.req.ready
+      p.stallsBusyLSU := PerfCounter(lsuStalled)
+  }
 
   if (noILP) {
     // fallback issue: stall every instruction until writeback
@@ -289,14 +295,18 @@ object PerfCounter {
 }
 
 // use traits to flatten all sub-module counters into this
-class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p)
-with HasIssuePerfCounters {
-  val instRetired = Output(UInt(Perf.counterWidth.W))
-  val cycles = Output(UInt(Perf.counterWidth.W))
-  /** any decoded instruction this cycle? */
-  val cyclesDecoded = Output(UInt(Perf.counterWidth.W))
+class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  val instRetired = Perf.T
+  val cycles = Perf.T
   /** any warp eligible for issue this cycle? */
-  val cyclesEligible = Output(UInt(Perf.counterWidth.W))
+  val cyclesEligible = Perf.T
   /** any warp issued this cycle? */
-  val cyclesIssued = Output(UInt(Perf.counterWidth.W))
+  val cyclesIssued = Perf.T
+  val perWarp = Vec(numWarps, new Bundle {
+    val cyclesIssued = Perf.T
+    val stallsWAW = Perf.T
+    val stallsWAR = Perf.T
+    val stallsBusy = Perf.T
+    val stallsBusyLSU = Perf.T
+  })
 }
