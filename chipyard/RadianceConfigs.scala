@@ -27,6 +27,7 @@ class RadianceBaseConfig extends Config(
   new WithGPUResetAggregator() ++
   new WithRadianceControlBus ++
   new WithNoMbusScratchpad ++
+  new WithContingentSpad(where = MBUS) ++
 
   new chipyard.config.WithPeripheryBusFrequency(500.0) ++
   new chipyard.config.WithMemoryBusFrequency(500.0) ++
