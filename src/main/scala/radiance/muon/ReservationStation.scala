@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 
 class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   /** IBUF entry being admitted to the reservation station. */
-  val ibufEntry = ibufEntryT
+  val ibufEntry = ibufDeqIO
   /** Indicates whether each operand reg (rs1/2/3) has been collected.
    *  If the instruction does not use the operand field, sets to 1. */
   val valid = Vec(Isa.maxNumRegs, Bool())
@@ -21,7 +21,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
     /** instruction issued to the downstream EX pipe */
-    val issue = Decoupled(ibufEntryT)
+    val issue = Decoupled(ibufDeqIO)
     /** writeback from the downstream EX pipe */
     val writeback = Flipped(regWritebackT)
     /** scoreboard interface for collector updates */
@@ -44,7 +44,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // whether this table row is valid
   val validTable     = Mem(numEntries, Bool())
   // @perf: optimize; storing all of Decode fields in RS gets expensive
-  val instTable      = Mem(numEntries, ibufEntryT)
+  val instTable      = Mem(numEntries, ibufDeqIO)
   // whether the instruction uses rs1/2/3
   // not actually a state; combinationally computed from instTable
   val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))

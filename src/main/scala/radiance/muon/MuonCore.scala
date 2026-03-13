@@ -222,7 +222,10 @@ trait HasCoreParameters {
   def uopT = new UOp
   def lsuTokenT = new LsuQueueToken
 
-  def ibufEntryT = new InstBufEntry
+  def ibufDeqIO = new Bundle {
+    val uop = uopT
+    val token = lsuTokenT
+  }
   def ibufEnqIO = new Bundle {
     val count = Input(ibufIdxT)
     val uop = Valid(uopT)
@@ -314,6 +317,7 @@ class InstMemIO(implicit val p: Parameters) extends ParameterizedBundle()(p) wit
 }
 
 class PerfIO()(implicit p: Parameters) extends CoreBundle()(p) {
+  val frontend = new FrontendPerfIO
   val backend = new BackendPerfIO
 }
 
@@ -363,6 +367,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.softReset := io.softReset
   be.reset := reset.asBool || io.softReset
   be.io.trace.foreach(_ <> io.trace.get)
+  io.perf.frontend <> fe.io.perf
   io.perf.backend <> be.io.perf
 
   fe.io.lsuReserve <> be.io.lsuReserve
