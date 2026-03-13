@@ -57,8 +57,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   io.perf.cyclesIssued := PerfCounter(issued.fire)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
-    p.stallsBusy := PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
-                                !issued.ready)
+    // LSU business is accounted for at the IBUF, not at the EX stage; it needs
+    // to be added separately
+    val stallsBusyEX = PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
+                                  !issued.ready)
+    p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
   }
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
     p.stallsWAW := h.stallsWAW
@@ -124,6 +127,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.mem.dmem <> io.dmem
   execute.io.mem.smem <> io.smem
   execute.io.lsuReserve <> io.lsuReserve
+  (io.perf.perWarp zip execute.io.lsuReserve).zipWithIndex.foreach {
+    case ((p, reserv), wid) =>
+      val lsuStalled = reserv.req.valid && !reserv.req.ready
+      p.stallsBusyLSU := PerfCounter(lsuStalled)
+  }
 
   if (noILP) {
     // fallback issue: stall every instruction until writeback
@@ -299,5 +307,6 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
     val stallsBusy = Perf.T
+    val stallsBusyLSU = Perf.T
   })
 }

@@ -1085,8 +1085,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // -- Accept operands from reservation station --
     
-    // by design, we are always ready to accept operands from reservation station 
+    // by design, we are always ready to accept operands from reservation station
+    // token reservation will take care of backpressure
     io.coreReq.ready := true.B
+    dontTouch(io.coreReq)
 
     val queueReceivedOperands = loadStoreQueues.io.receivedOperands
     queueReceivedOperands.req.valid := io.coreReq.valid

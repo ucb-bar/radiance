@@ -580,6 +580,7 @@ extends CoreModule {
   bbox.io.perWarp_stallsWAW := VecInit(io.perf.backend.perWarp.map(_.stallsWAW)).asUInt
   bbox.io.perWarp_stallsWAR := VecInit(io.perf.backend.perWarp.map(_.stallsWAR)).asUInt
   bbox.io.perWarp_stallsBusy := VecInit(io.perf.backend.perWarp.map(_.stallsBusy)).asUInt
+  bbox.io.perWarp_stallsBusyLSU := VecInit(io.perf.backend.perWarp.map(_.stallsBusyLSU)).asUInt
 
   class ProfilerBlackBox()(implicit val p: Parameters)
   extends BlackBox(Map(
@@ -602,6 +603,7 @@ extends CoreModule {
       val perWarp_stallsWAW = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAR = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsBusy = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
+      val perWarp_stallsBusyLSU = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
     })
 
     addResource("/vsrc/Profiler.v")
