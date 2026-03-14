@@ -64,6 +64,7 @@ class TestResult:
     log_path: str
     stderr_path: str
     failure_reason: str
+    cycles: list[dict[str, object]]
     ipc: list[dict[str, object]]
 
 
@@ -104,9 +105,11 @@ def log_has_error(log_path) -> str:
 
 def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
     finished_regex = re.compile(r"Muon \[cluster (\d+) core (\d+)\] finished execution\.")
+    cycles_regex = re.compile(r"Cycles:\s*(\d+)")
     ipc_regex = re.compile(r"IPC:\s*([0-9]+(?:\.[0-9]+)?)")
 
     pending_context: tuple[int, int] | None = None
+    cycles_results = []
     ipc_results = []
 
     with log_path.open("r", encoding="utf-8", errors="ignore") as log_file:
@@ -116,6 +119,17 @@ def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
                 pending_context = (
                     int(finished_match.group(1)),
                     int(finished_match.group(2)),
+                )
+                continue
+
+            cycles_match = cycles_regex.search(line)
+            if cycles_match and pending_context is not None:
+                cycles_results.append(
+                    {
+                        "cluster_id": pending_context[0],
+                        "core_id": pending_context[1],
+                        "cycles": int(cycles_match.group(1)),
+                    }
                 )
                 continue
 
@@ -130,7 +144,7 @@ def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
                 )
                 pending_context = None
 
-    return ipc_results
+    return (cycles_results, ipc_results)
 
 
 def get_and_check_sim_binary(config, sim_dir):
@@ -213,7 +227,7 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
 def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
     duration_sec = time.monotonic() - test.start_time
     try:
-        ipc = extract_ipc_results(test.log_path)
+        cycles, ipc = extract_ipc_results(test.log_path)
         if test.timed_out:
             print(f"[{myname}] FAIL: {test.elf}: timeout after {SIM_TIMEOUT}s")
             return TestResult(
@@ -226,6 +240,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 log_path=str(test.log_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=f"timeout after {SIM_TIMEOUT}s",
+                cycles=cycles,
                 ipc=ipc,
             )
 
@@ -245,6 +260,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 log_path=str(test.log_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=failure_reason,
+                cycles=cycles,
                 ipc=ipc,
             )
         return TestResult(
@@ -257,6 +273,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
             log_path=str(test.log_path),
             stderr_path=str(test.err_file.name),
             failure_reason="",
+            cycles=cycles,
             ipc=ipc,
         )
     finally:
