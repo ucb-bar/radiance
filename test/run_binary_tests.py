@@ -64,6 +64,7 @@ class TestResult:
     log_path: str
     stderr_path: str
     failure_reason: str
+    ipc: list[dict[str, object]]
 
 
 @dataclass
@@ -99,6 +100,37 @@ def log_has_error(log_path) -> str:
                 reason += line
                 curr_lines = context_lines - 1
     return reason
+
+
+def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
+    finished_regex = re.compile(r"Muon \[cluster (\d+) core (\d+)\] finished execution\.")
+    ipc_regex = re.compile(r"IPC:\s*([0-9]+(?:\.[0-9]+)?)")
+
+    pending_context: tuple[int, int] | None = None
+    ipc_results = []
+
+    with log_path.open("r", encoding="utf-8", errors="ignore") as log_file:
+        for line in log_file:
+            finished_match = finished_regex.search(line)
+            if finished_match:
+                pending_context = (
+                    int(finished_match.group(1)),
+                    int(finished_match.group(2)),
+                )
+                continue
+
+            ipc_match = ipc_regex.search(line)
+            if ipc_match and pending_context is not None:
+                ipc_results.append(
+                    {
+                        "cluster_id": pending_context[0],
+                        "core_id": pending_context[1],
+                        "ipc": float(ipc_match.group(1)),
+                    }
+                )
+                pending_context = None
+
+    return ipc_results
 
 
 def get_and_check_sim_binary(config, sim_dir):
@@ -181,6 +213,7 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
 def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
     duration_sec = time.monotonic() - test.start_time
     try:
+        ipc = extract_ipc_results(test.log_path)
         if test.timed_out:
             print(f"[{myname}] FAIL: {test.elf}: timeout after {SIM_TIMEOUT}s")
             return TestResult(
@@ -193,6 +226,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 log_path=str(test.log_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=f"timeout after {SIM_TIMEOUT}s",
+                ipc=ipc,
             )
 
         errstring = log_has_error(test.log_path).rstrip("\n")
@@ -211,6 +245,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 log_path=str(test.log_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=failure_reason,
+                ipc=ipc,
             )
         return TestResult(
             name=test.elf.name,
@@ -222,6 +257,7 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
             log_path=str(test.log_path),
             stderr_path=str(test.err_file.name),
             failure_reason="",
+            ipc=ipc,
         )
     finally:
         test.close_streams()
@@ -307,7 +343,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
                     break
 
                 if (config, elf.name) in waivers:
-                    print(f"waived {elf.name} for config {config}")
+                    print(f"[{myname}] waived {elf} for config '{config}'")
                     continue
 
                 running.append(
