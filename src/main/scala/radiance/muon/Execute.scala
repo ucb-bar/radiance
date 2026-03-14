@@ -18,10 +18,13 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val barrier = barrierIO
     val flush = cacheFlushIO
     val softReset = Input(Bool())
+    val beCSR = new Bundle {
+      val cyclesEligible = Input(Perf.T)
+      val cyclesIssued = Input(Perf.T)
+    }
     val perf = new Bundle {
       val instRetired = Output(Perf.T)
       val cycles =  Output(Perf.T)
-      // TODO: execute fire
     }
   })
   
@@ -93,9 +96,12 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   io.perf.cycles := mcycleReg
   io.perf.instRetired := minstret
 
-  sfuPipe.csrIO.mcycle := mcycleReg
-  sfuPipe.csrIO.minstret := minstretReg
-  sfuPipe.csrIO.fe := io.feCSR
+  sfuPipe.csrIO.perf.mcycle := mcycleReg
+  sfuPipe.csrIO.perf.minstret := minstretReg
+  sfuPipe.csrIO.perf.mcycleDecoded := io.feCSR.cyclesDecoded
+  sfuPipe.csrIO.perf.mcycleEligible := io.beCSR.cyclesEligible
+  sfuPipe.csrIO.perf.mcycleIssued := io.beCSR.cyclesIssued
+  sfuPipe.csrIO.wmask := io.feCSR.wmask
 }
 
 class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {

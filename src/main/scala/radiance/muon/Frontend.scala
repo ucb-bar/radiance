@@ -51,7 +51,7 @@ class Frontend(implicit p: Parameters)
 //    i$.out.bits.pc := resp.bits.metadata.pc
 
     io.commit <> warpScheduler.io.commit
-    io.csr <> warpScheduler.io.csr
+    io.csr.wmask := warpScheduler.io.csrWmask
 
     io.cmdProc.foreach { c =>
       c <> warpScheduler.io.cmdProc.get
@@ -97,7 +97,10 @@ class Frontend(implicit p: Parameters)
     }
 
     io.lsuReserve <> ibuffer.io.lsuReserve
-    io.perf.cyclesDecoded := PerfCounter(ibuffer.io.empty.reduce(!_ || !_))
+
+    val cyclesDecoded = PerfCounter(ibuffer.io.empty.reduce(!_ || !_))
+    io.csr.cyclesDecoded := cyclesDecoded
+    io.perf.cyclesDecoded := cyclesDecoded
     val perWarpCyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
     (io.perf.perWarp lazyZip perWarpCyclesDecoded lazyZip ibuffer.io.empty)
       .foreach { case (p, counter, empty) =>

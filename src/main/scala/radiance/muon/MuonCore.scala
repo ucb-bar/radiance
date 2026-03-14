@@ -200,6 +200,7 @@ trait HasCoreParameters {
 
   def feCSRIO = Output(new Bundle {
     val wmask = wmaskT
+    val cyclesDecoded = Perf.T
   })
 
   def cmdProcIO = Flipped(Valid(new Bundle {

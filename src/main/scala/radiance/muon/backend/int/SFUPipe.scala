@@ -11,9 +11,14 @@ import radiance.muon.backend.int._
 class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val idIO = IO(clusterCoreIdT)
   val csrIO = IO(new Bundle {
-    val fe = Flipped(feCSRIO)
-    val mcycle = Input(UInt(64.W))
-    val minstret = Input(UInt(64.W))
+    val wmask = Input(wmaskT)
+    val perf = new Bundle {
+      val mcycle = Input(Perf.T)
+      val mcycleDecoded = Input(Perf.T)
+      val mcycleEligible = Input(Perf.T)
+      val mcycleIssued = Input(Perf.T)
+      val minstret = Input(Perf.T)
+    }
     val fcsr = new Bundle {
       val regData = Input(csrDataT)
       val regWrite = Valid(csrDataT)
@@ -173,10 +178,13 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     coreId    = idIO.coreId,
     clusterId = idIO.clusterId,
 
-    wmask     = csrIO.fe.wmask,
-    tmask     = uop.tmask,
-    mcycle    = csrIO.mcycle,
-    minstret  = csrIO.minstret,
+    wmask          = csrIO.wmask,
+    tmask          = uop.tmask,
+    mcycle         = csrIO.perf.mcycle,
+    mcycleDecoded  = csrIO.perf.mcycleDecoded,
+    mcycleEligible = csrIO.perf.mcycleEligible,
+    mcycleIssued   = csrIO.perf.mcycleIssued,
+    minstret       = csrIO.perf.minstret,
 
     fcsr      = csrIO.fcsr.regData,
     fcsrWrite = x => {

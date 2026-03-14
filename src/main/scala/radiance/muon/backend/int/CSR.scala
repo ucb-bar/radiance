@@ -15,6 +15,15 @@ abstract class MuonCSR(
   val setter: Option[UInt => Unit] = None,
 )
 
+object PerfCSRs {
+  val mcycleDecoded = CSRs.mhpmcounter3
+  val mcycleDecodedh = CSRs.mhpmcounter3h
+  val mcycleEligible = CSRs.mhpmcounter4
+  val mcycleEligibleh = CSRs.mhpmcounter4h
+  val mcycleIssued = CSRs.mhpmcounter5
+  val mcycleIssuedh = CSRs.mhpmcounter5h
+}
+
 class CSRFile(
   mhartId: UInt,
   threadId: UInt,
@@ -25,6 +34,9 @@ class CSRFile(
   wmask: UInt,
   tmask: UInt,
   mcycle: UInt,
+  mcycleDecoded: UInt,
+  mcycleEligible: UInt,
+  mcycleIssued: UInt,
   minstret: UInt,
 
   fcsr: UInt,
@@ -64,6 +76,12 @@ class CSRFile(
   case object MCycleH    extends MuonCSR(CSRs.mcycleh,   accessor = wrap(mcycle(63, 32)))
   case object MInstRet   extends MuonCSR(CSRs.minstret,  accessor = wrap(minstret(31, 0)))
   case object MInstRetH  extends MuonCSR(CSRs.minstreth, accessor = wrap(minstret(63, 32)))
+  case object MCycleDec  extends MuonCSR(PerfCSRs.mcycleDecoded,   accessor = wrap(mcycleDecoded(31, 0)))
+  case object MCycleDecH extends MuonCSR(PerfCSRs.mcycleDecodedh,  accessor = wrap(mcycleDecoded(63, 32)))
+  case object MCycleEli  extends MuonCSR(PerfCSRs.mcycleEligible,  accessor = wrap(mcycleEligible(31, 0)))
+  case object MCycleEliH extends MuonCSR(PerfCSRs.mcycleEligibleh, accessor = wrap(mcycleEligible(63, 32)))
+  case object MCycleIss  extends MuonCSR(PerfCSRs.mcycleIssued,    accessor = wrap(mcycleIssued(31, 0)))
+  case object MCycleIssH extends MuonCSR(PerfCSRs.mcycleIssuedh,   accessor = wrap(mcycleIssued(63, 32)))
   case object FFlags     extends MuonCSR(CSRs.fflags,    accessor = wrap(fcsr(4, 0)), setter = Some(fcsrWrite))
   case object FRM        extends MuonCSR(CSRs.frm,       accessor = wrap(fcsr(7, 5)), setter = Some(fcsrWrite))
   case object FCSR       extends MuonCSR(CSRs.fcsr,      accessor = wrap(fcsr),       setter = Some(fcsrWrite))
@@ -77,6 +95,7 @@ class CSRFile(
     ThreadIdxX, ThreadIdxY, ThreadIdxZ,
     WarpMask, ThreadMask,
     MCycle, MCycleH, MInstRet, MInstRetH,
+    MCycleDec, MCycleDecH, MCycleEli, MCycleEliH, MCycleIss, MCycleIssH,
     FFlags, FRM, FCSR
   )
 
