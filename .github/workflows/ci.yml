@@ -141,94 +141,94 @@ jobs:
                testOnly radiance.muon.SequencerTest; \
                testOnly radiance.muon.ScoreboardTest"
 
-  run-soc-isa-tests:
-    name: Run SoC ISA tests
+  run-soc-binary-tests:
+    name: Run SoC binary tests
     runs-on: as4
     needs: build
     steps:
-      - name: Run ISA tests on SoC config
+      - name: Run binary tests on SoC config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" \
-            --json-out test/isa-test-logs/soc/results.json
-      - name: Render ISA test report
+          python3 test/run_binary.py -j "$(nproc)" \
+            --json-out test/binary-test-logs/soc/results.json
+      - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/render_isa_test_report.py \
-            test/isa-test-logs/soc/results.json \
+          python3 test/render_binary_test_report.py \
+            test/binary-test-logs/soc/results.json \
             --github-step-summary
 
-  run-core-isa-tests:
-    name: Run Core-standalone ISA tests
+  run-core-binary-tests:
+    name: Run Core-standalone binary tests
     runs-on: as4
     needs: build
     steps:
-      - name: Run ISA tests on core-as-top config
+      - name: Run binary tests on core-as-top config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c core \
-            --json-out test/isa-test-logs/core/results.json
-      - name: Render ISA test report
+          python3 test/run_binary_tests.py -j "$(nproc)" -c core \
+            --json-out test/binary-test-logs/core/results.json
+      - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/render_isa_test_report.py \
-            test/isa-test-logs/core/results.json \
+          python3 test/render_binary_test_report.py \
+            test/binary-test-logs/core/results.json \
             --github-step-summary
 
-  run-cosim-isa-tests:
-    name: Run Cyclotron-as-a-Tile Co-sim ISA tests
+  run-cosim-binary-tests:
+    name: Run Cyclotron-as-a-Tile Co-sim binary tests
     runs-on: as4
     needs: build
     steps:
-      - name: Run ISA tests on backend co-sim config
+      - name: Run binary tests on backend co-sim config
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_isa_tests.py -j "$(nproc)" -c cosim \
-            --json-out test/isa-test-logs/cosim/results.json
-      - name: Render ISA test report
+          python3 test/run_binary_tests.py -j "$(nproc)" -c cosim \
+            --json-out test/binary-test-logs/cosim/results.json
+      - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/render_isa_test_report.py \
-            test/isa-test-logs/cosim/results.json \
+          python3 test/render_binary_test_report.py \
+            test/binary-test-logs/cosim/results.json \
             --github-step-summary
 
-  # run-backend-cosim-isa-tests:
-  #   name: Run Backend Co-sim ISA tests
+  # run-backend-cosim-binary-tests:
+  #   name: Run Backend Co-sim binary tests
   #   runs-on: as4
   #   needs: build
   #   steps:
-  #     - name: Run ISA tests on backend co-sim config
+  #     - name: Run binary tests on backend co-sim config
   #       run: |
   #         cd "${CHIPYARD_DIR}"
   #         source env.sh
   #         source /ecad/tools/vlsi.bashrc
   #         cd generators/radiance
-  #         python3 test/run_isa_tests.py -j "$(nproc)" -c backend \
-  #           --json-out test/isa-test-logs/backend/results.json
-  #     - name: Render ISA test report
+  #         python3 test/run_binary_tests.py -j "$(nproc)" -c backend \
+  #           --json-out test/binary-test-logs/backend/results.json
+  #     - name: Render binary test report
   #       if: always()
   #       run: |
   #         cd "${CHIPYARD_DIR}/generators/radiance"
-  #         python3 test/render_isa_test_report.py \
-  #           test/isa-test-logs/backend/results.json \
+  #         python3 test/render_binary_test_report.py \
+  #           test/binary-test-logs/backend/results.json \
   #           --github-step-summary
 
   clean:
     name: Clean
     runs-on: as4
-    needs: [build, run-unit-tests, run-soc-isa-tests, run-core-isa-tests, run-cosim-isa-tests]
+    needs: [build, run-unit-tests, run-soc-binary-tests, run-core-binary-tests, run-cosim-binary-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda

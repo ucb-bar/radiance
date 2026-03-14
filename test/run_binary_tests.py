@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Cyclotron ISA tests via the VCS simulator."""
+"""Run ELF binary tests via the VCS simulator."""
 
 import argparse
 import json
@@ -277,7 +277,7 @@ def iter_elfs(elf_dir):
 
 
 def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
-    print(f"[{myname}] sweeping all ISA tests using {jobs} parallel jobs")
+    print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
 
     radiance_dir = script_dir.parent
     cyclotron_dir = radiance_dir / "cyclotron"
@@ -364,7 +364,7 @@ def discover_chipyard(script_dir):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Run integration tests on the RTL using muon-isa-test ELF binaries.\n"
+            "Run integration tests on the RTL using ELF binaries.\n"
             "ELF binaries can either be given explicitly, or searched in the filesystem to do a sweep.\n"
             "Requires VCS simulation binary to be built."
         ),
@@ -374,8 +374,8 @@ def parse_args():
                         help="ELF to run; if omitted, sweeps found ELFs on its own")
     parser.add_argument('-c', '--config', default='soc',
                         help="testbench config to run; (soc|core|cosim|backend). default is 'soc'")
-    parser.add_argument('--log-dir', default='isa-test-logs',
-                        help="directory to be created to place the logs. default is 'isa-test-logs'")
+    parser.add_argument('--log-dir', default='binary-test-logs',
+                        help="directory to be created to place the logs. default is 'binary-test-logs'")
     parser.add_argument('--json-out',
                         help="write machine-readable test results to this JSON path. "
                              "default is <log-dir>/<config>/results.json")
