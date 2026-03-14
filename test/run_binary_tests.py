@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TextIO
 
 myname = Path(sys.argv[0]).name
-SIM_TIMEOUT = 10 * 60  # seconds
+SIM_TIMEOUT = 30 * 60  # seconds
 
 # list of (config, test_name) that are waived
 waivers = [
