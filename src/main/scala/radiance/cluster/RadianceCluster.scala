@@ -7,6 +7,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, TransferSizes}
 import freechips.rocketchip.prci.{ClockCrossingType, ClockSinkParameters}
+import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.rocket.DCacheParams
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.tile.TileVisibilityNodeKey
@@ -113,7 +114,14 @@ class RadianceCluster (
 
   // clsbus -> csbus -> sbus
   val scopeNode = AddressScopeNode(AddressSet(0, gmemSize - 1))
-  val orNode = AddressOrNode(gmemAddr)
+  // val orNode = AddressOrNode(gmemAddr)
+  val (orNode, orNodeReg) = MMIOAddressOrNode(
+    mmioAddr = AddressSet(thisClusterParams.baseAddr +
+      thisClusterParams.peripheralAddrOffset + 0x1000, 0xff),
+    default = gmemAddr.U
+  )
+  orNodeReg := HackAtomicNode(8) := clcbus.outwardNode
+
   val csBusXbar = TLXbar()
   val clsBusXbar = TLXbar()
 

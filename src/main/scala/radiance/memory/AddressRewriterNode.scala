@@ -2,7 +2,10 @@ package radiance.memory
 
 import chisel3._
 import chisel3.experimental.SourceInfo
-import freechips.rocketchip.tilelink.TLAdapterNode
+import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.regmapper.RegField
+import freechips.rocketchip.resources.SimpleDevice
+import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.ValName
 import org.chipsalliance.diplomacy.lazymodule._
@@ -36,5 +39,41 @@ object AddressAndNode {
   // not a true inverse either
   def apply(baseAddr: BigInt)(implicit p: Parameters, valName: ValName, sourceInfo: SourceInfo): TLAdapterNode = {
     LazyModule(new AddressRewriterNode(x => x & baseAddr.U, x => x | (~baseAddr.U).asUInt)).node
+  }
+}
+
+class MMIOAddressOrNode(mmioAddr: AddressSet, default: UInt)
+                       (implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode(clientFn = c => c, managerFn = m => m)
+  val regNode = TLRegisterNode(
+    address = Seq(mmioAddr),
+    device = new SimpleDevice(f"address-or-ctrl", Seq(s"address-or-ctrl")),
+    beatBytes = 8,
+    concurrency = 1,
+  )
+
+  lazy val module = new LazyModuleImp(this) {
+    val baseAddr = RegInit(default)
+    regNode.regmap(0 -> Seq(RegField(64, baseAddr)))
+
+    (node.in.map(_._1) zip node.out.map(_._1)).foreach { case (i, o) =>
+      o.a <> i.a
+      o.a.bits.address := i.a.bits.address | baseAddr
+      i.b <> o.b
+      i.b.bits.address := o.b.bits.address & (~baseAddr).asUInt
+      o.c <> i.c
+      o.c.bits.address := i.c.bits.address | baseAddr
+      i.d <> o.d
+      o.e <> i.e
+    }
+  }
+}
+
+object MMIOAddressOrNode {
+  def apply(mmioAddr: AddressSet, default: UInt)
+           (implicit p: Parameters, valName: ValName,
+            sourceInfo: SourceInfo): (TLAdapterNode, TLRegisterNode) = {
+    val mmioOrNode = LazyModule(new MMIOAddressOrNode(mmioAddr, default))
+    (mmioOrNode.node, mmioOrNode.regNode)
   }
 }
