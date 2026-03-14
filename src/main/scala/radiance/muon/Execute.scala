@@ -84,17 +84,14 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val mcycleReg = RegEnable(mcycle, 0.U.asTypeOf(Perf.T), true.B)
   mcycle := Mux(io.softReset, 0.U.asTypeOf(Perf.T), mcycleReg + 1.U)
 
+  // NOTE: using io.resp.fire here excludes stores
+  // NOTE: currently doesn't count vx_join, which gets absorbed in the frontend
   val minstret = Wire(Perf.T)
-  val minstretReg = RegEnable(minstret, 0.U.asTypeOf(Perf.T), io.resp.fire)
+  val minstretReg = RegEnable(minstret, 0.U.asTypeOf(Perf.T), io.req.fire)
   minstret := Mux(io.softReset, 0.U.asTypeOf(Perf.T), minstretReg + 1.U)
 
-  // io.perf.instRetired := minstret
-  // io.perf.cycle := mcycleReg
-  val perf = new ExecutePerfCounter
-  perf.cycles.cond(true.B)
-  perf.instRetired.cond(io.resp.fire)
-  io.perf.cycles := perf.cycles.value
-  io.perf.instRetired := perf.instRetired.value
+  io.perf.cycles := mcycleReg
+  io.perf.instRetired := minstret
 
   sfuPipe.csrIO.mcycle := mcycleReg
   sfuPipe.csrIO.minstret := minstretReg
@@ -105,11 +102,4 @@ class RegWriteback(implicit p: Parameters) extends CoreBundle()(p) {
   val rd = pRegT
   val data = Vec(muonParams.numLanes, regDataT)
   val tmask = tmaskT
-}
-
-class ExecutePerfCounter {
-  /** total retired instructions */
-  val instRetired = new PerfCounter
-  /** total elapsed cycle */
-  val cycles = new PerfCounter
 }

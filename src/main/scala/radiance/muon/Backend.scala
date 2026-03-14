@@ -299,7 +299,9 @@ object PerfCounter {
 
 // use traits to flatten all sub-module counters into this
 class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  /** total retired instructions */
   val instRetired = Perf.T
+  /** total elapsed cycle */
   val cycles = Perf.T
   /** any warp eligible for issue this cycle? */
   val cyclesEligible = Perf.T
