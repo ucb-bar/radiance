@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render ISA test JSON results as markdown."""
+"""Render binary test JSON results as markdown."""
 
 import argparse
 import json
@@ -11,12 +11,12 @@ from pathlib import Path
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Render JSON emitted by run_isa_tests.py into markdown.\n"
+            "Render JSON emitted by run_binary.py into markdown.\n"
             "By default writes markdown to stdout."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("json_path", help="path to JSON results from run_isa_tests.py")
+    parser.add_argument("json_path", help="path to JSON results from run_binary_tests.py")
     parser.add_argument(
         "--output",
         help="write markdown to this file instead of stdout",
@@ -42,6 +42,17 @@ def format_duration(seconds):
     return f"{seconds:.1f}s"
 
 
+def format_ipc(ipc_entries):
+    if not ipc_entries:
+        return "-"
+    if len(ipc_entries) == 1:
+        return f"{ipc_entries[0]['ipc']:.3f}"
+    return ", ".join(
+        f"cl{entry['cluster_id']}.c{entry['core_id']}={entry['ipc']:.3f}"
+        for entry in ipc_entries
+    )
+
+
 def render_markdown(run_result):
     config = run_result["config"]
     total = run_result["total"]
@@ -49,10 +60,10 @@ def render_markdown(run_result):
     failed = run_result["failed"]
     timed_out = run_result["timed_out"]
     sim_binary = run_result["sim_binary"]
-    results = run_result["results"]
+    results = sorted(run_result["results"], key=lambda result: result["name"])
 
     lines = []
-    lines.append(f"## ISA Test Report: `{config}`")
+    lines.append(f"## Binary Test Report: `{config}`")
     lines.append("")
     lines.append(
         f"Summary: {passed} passed, {failed} failed, {timed_out} timed out, {total} total"
@@ -60,15 +71,16 @@ def render_markdown(run_result):
     lines.append("")
     lines.append(f"Simulator: `{sim_binary}`")
     lines.append("")
-    lines.append("| Test | Status | Exit | Duration |")
-    lines.append("| --- | --- | ---: | ---: |")
+    lines.append("| Binary | Status | Exit | Duration | IPC |")
+    lines.append("| --- | --- | ---: | ---: | --- |")
     for result in results:
         lines.append(
-            "| {name} | {status} | {exit_code} | {duration} |".format(
+            "| {name} | {status} | {exit_code} | {duration} | {ipc} |".format(
                 name=escape_cell(result["name"]),
                 status=escape_cell(result["status"]),
                 exit_code=result["exit_code"],
                 duration=format_duration(result["duration_sec"]),
+                ipc=escape_cell(format_ipc(result.get("ipc", []))),
             )
         )
 

@@ -152,7 +152,7 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_binary.py -j "$(nproc)" \
+          python3 test/run_binary_tests.py -j "$(nproc)" \
             --json-out test/binary-test-logs/soc/results.json
       - name: Render binary test report
         if: always()
