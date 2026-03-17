@@ -20,7 +20,9 @@ case class LoadStoreUnitParams(
     val storeDataEntries: Int = 8, // limited to 8 unissued store requests
     val addressEntries: Int = 16,  // limited to 16 unissued memory requests
 
+    // purely performance optimizations; turn off if bad things are happening
     val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
+    val fastHeadUpdate: Boolean = true,    // allow logical head to update on same cycle as memUpdate / memResponse
 ) {
     val globalLdqIndexBits = log2Up(numGlobalLdqEntries)
     val globalStqIndexBits = log2Up(numGlobalStqEntries)
@@ -380,8 +382,11 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val storeDataIdx       = RegInit(VecInit.fill(entries)(0.U(muonParams.lsu.storeDataIdxBits.W)))
         val loadDataIdx        = RegInit(VecInit.fill(entries)(0.U(muonParams.lsu.loadDataIdxBits.W)))
         val loadPackets        = RegInit(VecInit.fill(entries)(0.U(lsuDerived.packetBits.W)))
-        val done               = RegInit(VecInit.fill(entries)(false.B))
+        val doneNext           = Wire(Vec(entries, Bool()))
+        val done               = RegNext(doneNext, VecInit.fill(entries)(false.B))
         val writeback          = RegInit(VecInit.fill(entries)(false.B))
+
+        doneNext := done
 
         val debugId = lsuDerived.debugIdBits.map { bits => 
             RegInit(VecInit.fill(entries)(0.U(bits.W)))
@@ -400,7 +405,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
                 storeDataIdx(idxBits(tail)) := io.storeDataIdx
             }
             loadPackets(idxBits(tail)) := 0.U(lsuDerived.packetBits.W)
-            done(idxBits(tail)) := false.B
+            doneNext(idxBits(tail)) := false.B
             if (lsuDerived.debugIdBits.isDefined) {
                 debugId.get(idxBits(tail)) := io.debugId.get
             }
@@ -521,7 +526,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
         // set done when receiving mem update or mem response, allowing logical head to move forward
         when (io.receivedMemUpdate.valid) {
-            done(localIndex(io.receivedMemUpdate.bits.token.index)) := true.B    
+            doneNext(localIndex(io.receivedMemUpdate.bits.token.index)) := true.B
         }
 
         // Lookup interface: provides loadDataIdx without triggering state updates
@@ -539,7 +544,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
             loadPackets(memResponseIndex) := loadPackets(memResponseIndex) + 1.U
 
             when (loadPackets(memResponseIndex) === (lsuDerived.numPackets - 1).U) {
-                done(memResponseIndex) := true.B
+                doneNext(memResponseIndex) := true.B
 
                 if (loadQueue) {
                     // every load needs to write back
@@ -569,8 +574,13 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
         // update logical head
         // update physical head
-        // TODO: optimize this to be faster (multiple entries? probably want at least same cycle updates)
-        when (logicalHead =/= tail && (!valid(idxBits(logicalHead)) || done(idxBits(logicalHead)))) {
+        val advanceLogicalHead = {
+            !valid(idxBits(logicalHead)) ||
+            done(idxBits(logicalHead)) ||
+            (muonParams.lsu.fastHeadUpdate.B && doneNext(idxBits(logicalHead))) // same-cycle update
+        }
+
+        when (logicalHead =/= tail && advanceLogicalHead) {
             logicalHead := logicalHead + 1.U
         }
         
@@ -1335,17 +1345,17 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     // -- Memory Update --
     if (muonParams.lsu.smemDoesntReorder) {
-        // if io.shmemReq fired last cycle, then send receivedMemUpdate to appropriate queue
-        // it might be possible to send it on the same cycle that it fires, but this seems safer
-        // if the response comes back the next cycle anyways, this should still be fine too
-        val shmemReqFire_d1 = RegNext(io.shmemReq.fire, false.B)
-        val shmemReqToken_d1 = RegNext(
-            io.shmemReq.bits.tag.asTypeOf(new LsuMemTag),
-            0.U.asTypeOf(new LsuMemTag)
-        )
-
-        loadStoreQueues.io.receivedMemUpdate.valid := shmemReqFire_d1
-        loadStoreQueues.io.receivedMemUpdate.bits.token := shmemReqToken_d1.token
+        // if queueRequest fired this cycle w/ shared mem request, then send receivedMemUpdate to appropriate queue
+        // it's critical to get this update back to load/store queues ASAP to ensure full shared memory store throughput
+        val queueRequest = loadStoreQueues.io.sendMemRequest.req
+        val queueRequestToken = queueRequest.bits.token
+        when (queueRequest.fire && queueRequestToken.addressSpace === AddressSpace.sharedMemory) {
+            loadStoreQueues.io.receivedMemUpdate.valid := true.B
+            loadStoreQueues.io.receivedMemUpdate.bits.token := queueRequestToken
+        }.otherwise {
+            loadStoreQueues.io.receivedMemUpdate.valid := false.B
+            loadStoreQueues.io.receivedMemUpdate.bits.token := DontCare
+        }
     }
     else {
         loadStoreQueues.io.receivedMemUpdate.valid := false.B
