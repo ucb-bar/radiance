@@ -186,9 +186,9 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
     (Seq[UpdateRecord] /* new updates */, Bool /* success */) = {
     val maxCount = (if (isWrite) {maxPendingWritesU} else {maxPendingReadsU})
     val countName = (if (isWrite) {"pendingWrites"} else {"pendingReads"})
-    val success = WireDefault(true.B)
 
-    val processUpdates = uniqUpdates.map { u =>
+    val perRegResult = uniqUpdates.map { u =>
+      val success = WireDefault(true.B)
       val dirtied = WireDefault(false.B)
       // are we updating upon another same-cycle update?
       val (hitvec, (currCount, prevDirty)) = lookup(records, u.pReg, isWrite)
@@ -202,7 +202,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
           // stay positive (literally)
           val posDelta = (u.incr > u.decr)
           val overflow = posDelta && ((u.incr - u.decr) > (maxCount - currCount))
-          val underflow = !posDelta && (u.decr - u.incr) > currCount
+          val underflow = !posDelta && ((u.decr - u.incr) > currCount)
 
           success := !overflow && !underflow
           dirtied := success
@@ -210,7 +210,7 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
             newCount := currCount + u.incr - u.decr
           }
 
-          debugf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount:${newCount}, currCount:${currCount}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), success:${success}\n")
+          debugf(cf"applyUpdates: [${debug}] ${countName} pReg:${u.pReg}, newCount:${newCount}, currCount:${currCount}, incr:${u.incr}(${u.incr.getWidth}W), decr:${u.decr}(${u.decr.getWidth}W), success:${success}, overflow:${overflow}, underflow:${underflow}\n")
 
           // underflow should never be possible since the number of retired
           // regs should strictly be smaller than the pending regs, i.e. no
@@ -225,16 +225,19 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
       }
 
       val dirty = prevDirty || dirtied
-      (UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth), hitvec)
+      (UpdateRecord(dirty, u.pReg, newCount, width = currCount.getWidth), hitvec, success)
     }
-    val newRecords = processUpdates.map(_._1)
+    val successes = perRegResult.map(_._3)
+    val success = successes.reduce(_ && _)
+
+    val newRecords = perRegResult.map(_._1)
 
     // if each of the `records` got dirtied by the new updates, we need to
     // invalidate them so we don't do double-updates to the counter table
     val prevRecords: Seq[UpdateRecord] = if (records.isEmpty) {
       Seq()
     } else {
-      val recordsHitvec = processUpdates.map(_._2).map(VecInit(_).asUInt).reduce(_ | _).asBools
+      val recordsHitvec = perRegResult.map(_._2).map(VecInit(_).asUInt).reduce(_ | _).asBools
       assert(recordsHitvec.length == records.length)
       (records zip recordsHitvec).map { case (rec, hit) =>
         UpdateRecord(!hit && rec.dirty, rec.pReg, rec.counter, width = rec.counter.getWidth)

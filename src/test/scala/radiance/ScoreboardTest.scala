@@ -204,7 +204,10 @@ class ScoreboardTest extends AnyFlatSpec {
         c.clock.step()
       }
 
-      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 0)
+      // assert independent successful rs2 update to test against rs1's success
+      // being shadowed by rs2's
+      setUpdate(c.io.hazard.updateRS, pReg = 10, incr = true, decr = false, doWrite = false, doRead = true, rsi = 1)
       c.io.hazard.updateRS.success.expect(false.B)
       c.clock.step()
 
@@ -279,7 +282,7 @@ class ScoreboardTest extends AnyFlatSpec {
 
       c.clock.step()
 
-      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true)
+      setUpdate(c.io.updateColl, pReg = 42, incr = false, decr = true, doWrite = false, doRead = true, rsi = 0)
       setUpdate(c.io.updateWB,   pReg = 42, incr = false, decr = true, doWrite = true, doRead = false)
       c.io.updateColl.success.expect(false.B)
       c.io.updateWB.success.expect(false.B)
