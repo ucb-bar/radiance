@@ -11,14 +11,14 @@ import org.chipsalliance.cde.config.Field
 case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
     
-    val numGlobalLdqEntries: Int = 2, // limited to 8 decoded global load insts per warp
-    val numGlobalStqEntries: Int = 2, // limited to 4 decoded global store insts per warp
-    val numSharedLdqEntries: Int = 2, // limited to 8 decoded shared load insts per warp
-    val numSharedStqEntries: Int = 2, // limited to 8 decoded shared store insts per warp
+    val numGlobalLdqEntries: Int = 32, // limited to 8 decoded global load insts per warp
+    val numGlobalStqEntries: Int = 32, // limited to 4 decoded global store insts per warp
+    val numSharedLdqEntries: Int = 32, // limited to 8 decoded shared load insts per warp
+    val numSharedStqEntries: Int = 32, // limited to 8 decoded shared store insts per warp
 
-    val loadDataEntries: Int = 16, // limited to 16 in-flight / waiting to writeback load requests
-    val storeDataEntries: Int = 8, // limited to 8 unissued store requests
-    val addressEntries: Int = 16,  // limited to 16 unissued memory requests
+    val loadDataEntries: Int = 32, // limited to 16 in-flight / waiting to writeback load requests
+    val storeDataEntries: Int = 32, // limited to 8 unissued store requests
+    val addressEntries: Int = 32,  // limited to 16 unissued memory requests
 
     // purely performance optimizations; turn off if bad things are happening
     val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
