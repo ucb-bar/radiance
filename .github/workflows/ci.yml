@@ -165,6 +165,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" \
+            --elf-dir cyclotron/test/fused \
             --json-out test/binary-test-logs/soc/results.json
       - name: Render binary test report
         if: always()
@@ -186,6 +187,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c core \
+            --elf-dir cyclotron/test/isa-tests \
             --json-out test/binary-test-logs/core/results.json
       - name: Render binary test report
         if: always()
@@ -207,6 +209,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c cosim \
+            --elf-dir cyclotron/test/fused \
             --json-out test/binary-test-logs/cosim/results.json
       - name: Render binary test report
         if: always()
@@ -228,6 +231,7 @@ jobs:
   #         source /ecad/tools/vlsi.bashrc
   #         cd generators/radiance
   #         python3 test/run_binary_tests.py -j "$(nproc)" -c backend \
+  #           --elf-dir cyclotron/test/isa-tests \
   #           --json-out test/binary-test-logs/backend/results.json
   #     - name: Render binary test report
   #       if: always()
