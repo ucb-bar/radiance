@@ -1015,8 +1015,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val metadataMemR1 = Wire(new MemoryReadPort(new Metadata, addrWidth))
         val metadataMemW = Wire(new MemoryWritePort(new Metadata, addrWidth, false))
 
-        val addressR0 = RegNext(metadataMemR0.address, 0.U(addrWidth))
-        val addressR1 = RegNext(metadataMemR1.address, 0.U(addrWidth))
+        val addressR0 = RegNext(metadataMemR0.address, 0.U(addrWidth.W))
+        val addressR1 = RegNext(metadataMemR1.address, 0.U(addrWidth.W))
         metadataMemR0.data := metadataMem(addressR0)
         metadataMemR1.data := metadataMem(addressR1)
         when (metadataMemW.enable) {
