@@ -20,6 +20,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
     val perf = Output(Vec(numWarps, new Bundle {
       val stallsWAW = Perf.T
       val stallsWAR = Perf.T
+      val stallsScoreboard = Perf.T
     }))
   })
 
@@ -146,6 +147,15 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   // admission fire
   assert(!io.rsAdmit.fire || (!io.scb.updateRS.enable || io.scb.updateRS.success),
          "uop entered RS without succeeding scoreboard update")
+
+  val stallsScoreboard = Seq.fill(numWarps)(new PerfCounter)
+  stallsScoreboard.zipWithIndex.foreach { case (p, wid) =>
+    p.cond((wid.U === chosenWarpId) && rsAdmitChosen.valid && !io.scb.updateRS.success)
+  }
+  io.perf.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsScoreboard := stallsScoreboard(wid).value
+  }
+
   if (muonParams.debug) {
     when (io.rsAdmit.valid && io.rsAdmit.ready && !io.scb.updateRS.success) {
       debugf(cf"hazard: IBUF head (PC=${io.rsAdmit.bits.ibufEntry.uop.pc}%x) passed hazard check, but " +

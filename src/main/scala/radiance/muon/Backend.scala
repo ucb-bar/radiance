@@ -69,6 +69,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
     p.stallsWAW := h.stallsWAW
     p.stallsWAR := h.stallsWAR
+    p.stallsScoreboard := h.stallsScoreboard
   }
 
   // -----------------
@@ -316,6 +317,7 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
     val cyclesIssued = Perf.T
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
+    val stallsScoreboard = Perf.T
     val stallsBusy = Perf.T
     val stallsBusyLSU = Perf.T
   })

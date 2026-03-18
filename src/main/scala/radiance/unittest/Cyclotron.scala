@@ -590,6 +590,7 @@ extends CoreModule {
   bbox.io.perWarp_cyclesIssued := VecInit(io.perf.backend.perWarp.map(_.cyclesIssued)).asUInt
   bbox.io.perWarp_stallsWAW := VecInit(io.perf.backend.perWarp.map(_.stallsWAW)).asUInt
   bbox.io.perWarp_stallsWAR := VecInit(io.perf.backend.perWarp.map(_.stallsWAR)).asUInt
+  bbox.io.perWarp_stallsScoreboard := VecInit(io.perf.backend.perWarp.map(_.stallsScoreboard)).asUInt
   bbox.io.perWarp_stallsBusy := VecInit(io.perf.backend.perWarp.map(_.stallsBusy)).asUInt
   bbox.io.perWarp_stallsBusyLSU := VecInit(io.perf.backend.perWarp.map(_.stallsBusyLSU)).asUInt
 
@@ -613,6 +614,7 @@ extends CoreModule {
       val perWarp_cyclesIssued = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAW = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAR = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
+      val perWarp_stallsScoreboard = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsBusy = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsBusyLSU = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
     })
