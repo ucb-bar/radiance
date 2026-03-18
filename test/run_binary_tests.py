@@ -169,7 +169,7 @@ def get_and_check_sim_binary(config, sim_dir):
 
 
 def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
-    elf = Path(elf)
+    elf = Path(elf).resolve()
     elf_name = elf.name
     fsdb_path = log_dir / f"{elf_name}.fsdb"
     log_path = log_dir / f"{elf_name}.log"
@@ -324,20 +324,23 @@ def iter_elfs(elf_dir):
             path = Path(root) / filename
             try:
                 if path.is_file() and os.access(path, os.X_OK):
-                    yield path
+                    yield path.resolve()
             except OSError:
                 continue
 
 
-def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs):
-    print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
-
+def default_elf_dir(config, script_dir):
     radiance_dir = script_dir.parent
     cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc" or config == "cosim":
-        elf_dir = cyclotron_dir / "test" / "fused"
-    else:
-        elf_dir = cyclotron_dir / "test" / "isa-tests"
+        return cyclotron_dir / "test" / "fused"
+    return cyclotron_dir / "test" / "isa-tests"
+
+
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_dir=None):
+    print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
+
+    elf_dir = Path(elf_dir) if elf_dir is not None else default_elf_dir(config, script_dir)
     print(f"[{myname}] ELF dir: {elf_dir}")
 
     executables = sorted(iter_elfs(elf_dir))
@@ -432,6 +435,8 @@ def parse_args():
     parser.add_argument('--json-out',
                         help="write machine-readable test results to this JSON path. "
                              "default is <log-dir>/<config>/results.json")
+    parser.add_argument('--elf-dir', type=Path,
+                        help="directory to recursively search for ELF binaries when sweeping")
     parser.add_argument('-j', '--jobs', type=int, default=1,
                         help="maximum number of parallel simulations (default: 1)")
     return parser.parse_args()
@@ -459,10 +464,19 @@ def main():
     print(f"[{myname}] writing json to {json_out}")
 
     if args.binary:
-        elf = Path(args.binary)
+        elf = Path(args.binary).resolve()
         run_result = run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
     else:
-        run_result = sweep(config, sim_binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs)
+        run_result = sweep(
+            config,
+            sim_binary,
+            log_dir,
+            script_dir,
+            chipyard_dir,
+            sim_dir,
+            jobs,
+            args.elf_dir,
+        )
     write_json_result(json_out, run_result)
     print(f"[{myname}] wrote json results to {json_out.resolve()}")
     return run_result.exit_code
