@@ -53,8 +53,11 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.io.issue
   }
 
-  io.perf.cyclesEligible := PerfCounter(issued.valid)
-  io.perf.cyclesIssued := PerfCounter(issued.fire)
+  val cyclesEligible = PerfCounter(issued.valid)
+  val cyclesIssued = PerfCounter(issued.fire)
+
+  io.perf.cyclesEligible := cyclesEligible
+  io.perf.cyclesIssued := cyclesIssued
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
@@ -120,6 +123,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
+  execute.io.beCSR.cyclesEligible := cyclesEligible
+  execute.io.beCSR.cyclesIssued := cyclesIssued
   execute.io.barrier <> io.barrier
   execute.io.flush <> io.flush
   execute.io.req.bits := executeIn
@@ -299,7 +304,9 @@ object PerfCounter {
 
 // use traits to flatten all sub-module counters into this
 class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
+  /** total retired instructions */
   val instRetired = Perf.T
+  /** total elapsed cycle */
   val cycles = Perf.T
   /** any warp eligible for issue this cycle? */
   val cyclesEligible = Perf.T

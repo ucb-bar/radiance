@@ -22,7 +22,7 @@ class WarpScheduler(implicit p: Parameters)
   val io = IO(new Bundle {
     val commit = Flipped(schedWritebackT)
     val icache = icacheIO
-    val csr = feCSRIO
+    val csrWmask = Output(wmaskT)
     val rename = renameIO
     val ibuf = Vec(muonParams.numWarps, ibufEnqIO)
     val cmdProc = cmdProcOpt.map(_ => cmdProcIO)
@@ -220,7 +220,7 @@ class WarpScheduler(implicit p: Parameters)
 
   // handle csr reads
 
-  io.csr.wmask := VecInit(pcTracker.map(_.valid)).asUInt
+  io.csrWmask := VecInit(pcTracker.map(_.valid)).asUInt
   // io.csr.resp := DontCare
   // when (io.csr.read.fire) {
   //   val req = io.csr.read.bits

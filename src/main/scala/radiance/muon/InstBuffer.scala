@@ -115,9 +115,6 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
     b.io.enq.bits := enq.uop.bits
     assert(!b.io.enq.valid || b.io.enq.ready, s"warp $wid ibuf full")
 
-    // this is slow (more latency), but safe
-    // for memory instructions, we first acquire LSU token, then dequeue,
-    // rather than trying to do both on the same cycle
     val inst = b.io.deq.bits.inst
     val needsLsuReserve = b.io.deq.valid && inst.b(UseLSUPipe)
     val opext = inst.opcode(8, 7)
@@ -130,7 +127,6 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
     when (needsLsuReserve) {
       val acquiredToken = RegInit(0.U.asTypeOf(new LsuQueueToken))
       val acquiredTokenValid = RegInit(false.B)
-      
       deq.valid := false.B
       b.io.deq.ready := false.B
       reserve.req.valid := true.B
@@ -142,6 +138,25 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
         acquiredTokenValid := true.B
       }
 
+      if (muonParams.combinationalTokenReserve) {
+        // try to immediately dequeue upon successful LSU reservation
+        // combinationally connects LSU and issue logic
+        when (reserve.req.fire) {
+          deq.valid := true.B
+          b.io.deq.ready := deq.ready
+
+          deq.bits.uop := b.io.deq.bits
+          deq.bits.token := reserve.resp.bits.token
+
+          when (deq.fire) {
+            acquiredTokenValid := false.B
+          }
+        }
+      }
+
+      // this is slower (more latency), but safer
+      // token acquisition and inst buffer dequeue happen on different cycles
+      // prevents back-to-back issuing of memory instructions
       when (acquiredTokenValid) {
         deq.valid := true.B
         b.io.deq.ready := deq.ready

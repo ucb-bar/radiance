@@ -42,14 +42,31 @@ def format_duration(seconds):
     return f"{seconds:.1f}s"
 
 
+def format_cycles(cycle_entries):
+    if not cycle_entries:
+        return "-"
+    sorted_entries = sorted(
+        cycle_entries, key=lambda entry: (entry["cluster_id"], entry["core_id"])
+    )
+    if len(sorted_entries) == 1:
+        return str(sorted_entries[0]["cycles"])
+    return ", ".join(
+        str(entry["cycles"])
+        for entry in sorted_entries
+    )
+
+
 def format_ipc(ipc_entries):
     if not ipc_entries:
         return "-"
-    if len(ipc_entries) == 1:
-        return f"{ipc_entries[0]['ipc']:.3f}"
+    sorted_entries = sorted(
+        ipc_entries, key=lambda entry: (entry["cluster_id"], entry["core_id"])
+    )
+    if len(sorted_entries) == 1:
+        return f"{sorted_entries[0]['ipc']:.3f}"
     return ", ".join(
-        f"cl{entry['cluster_id']}.c{entry['core_id']}={entry['ipc']:.3f}"
-        for entry in ipc_entries
+        f"{entry['ipc']:.3f}"
+        for entry in sorted_entries
     )
 
 
@@ -71,15 +88,16 @@ def render_markdown(run_result):
     lines.append("")
     lines.append(f"Simulator: `{sim_binary}`")
     lines.append("")
-    lines.append("| Binary | Status | Exit | Duration | IPC |")
-    lines.append("| --- | --- | ---: | ---: | --- |")
+    lines.append("| Binary | Status | Exit | Duration | Cycles | IPC |")
+    lines.append("| --- | --- | ---: | ---: | --- | --- |")
     for result in results:
         lines.append(
-            "| {name} | {status} | {exit_code} | {duration} | {ipc} |".format(
+            "| {name} | {status} | {exit_code} | {duration} | {cycles} | {ipc} |".format(
                 name=escape_cell(result["name"]),
                 status=escape_cell(result["status"]),
                 exit_code=result["exit_code"],
                 duration=format_duration(result["duration_sec"]),
+                cycles=escape_cell(format_cycles(result.get("cycles", []))),
                 ipc=escape_cell(format_ipc(result.get("ipc", []))),
             )
         )

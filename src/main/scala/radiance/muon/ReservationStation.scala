@@ -42,7 +42,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val useCollector = muonParams.useCollector
 
   // whether this table row is valid
-  val validTable     = Mem(numEntries, Bool())
+  val validTable     = RegInit(VecInit.fill(numEntries)(false.B))
   // @perf: optimize; storing all of Decode fields in RS gets expensive
   val instTable      = Mem(numEntries, ibufDeqIO)
   // whether the instruction uses rs1/2/3
@@ -112,6 +112,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
            cf"PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
     printTable
   }
+
+  val rsOccupancy = WireDefault(PopCount(validTable))
+  dontTouch(rsOccupancy)
 
   // -----------------
   // collector control
@@ -443,12 +446,6 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     read.pReg := 0.U
     read.incr := false.B
     read.decr := false.B
-  }
-
-  // reset
-  when (reset.asBool) {
-    (0 until numEntries).foreach { i => validTable(i) := false.B }
-    // @synthesis: do other entries need to be reset?
   }
 
   // debug print
