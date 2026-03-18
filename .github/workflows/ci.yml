@@ -11,8 +11,9 @@ defaults:
 
 env:
   CHIPYARD_RELPATH: chipyard-work
-  # need to be persistent cross-action
-  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-shared/chipyard"
+  CHIPYARD_RUN_ROOT: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}"
+  CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}/chipyard"
+  CONDA_CACHE_ROOT: "/scratch/buildbot/radiance-ci-shared/conda"
   # flip to force-reset cache
   CACHE_NUMBER: 0
   JAVA_HEAP_SIZE: "64G"
@@ -43,12 +44,17 @@ jobs:
           submodules: recursive
 
       - name: Checkout Chipyard
+        id: checkout-chipyard
         run: |
-          [ -d "${CHIPYARD_DIR}" ] && echo "${CHIPYARD_DIR} already exists, aborting" && exit 1
-          mkdir -p "${CHIPYARD_DIR}"
+          mkdir -p "${CHIPYARD_RUN_ROOT}"
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
-          echo "CHIPYARD_HASH=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          CHIPYARD_HASH="$(git rev-parse HEAD)"
+          CONDA_ENV_DIR="${CONDA_CACHE_ROOT}/chipyard-${CHIPYARD_HASH}/.conda-env"
+          echo "CHIPYARD_HASH=${CHIPYARD_HASH}" >> "${GITHUB_ENV}"
+          echo "CONDA_ENV_DIR=${CONDA_ENV_DIR}" >> "${GITHUB_ENV}"
+          echo "chipyard_hash=${CHIPYARD_HASH}" >> "${GITHUB_OUTPUT}"
+          echo "conda_env_dir=${CONDA_ENV_DIR}" >> "${GITHUB_OUTPUT}"
           # for caching
           ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
@@ -78,9 +84,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ${{ env.CHIPYARD_DIR }}/.conda-env
-            ${{ env.CHIPYARD_RELPATH }}/env.sh
-          key: chipyard-${{ env.CHIPYARD_HASH }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
+            ${{ steps.checkout-chipyard.outputs.conda_env_dir }}
+          key: chipyard-${{ steps.checkout-chipyard.outputs.chipyard_hash }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
         run: |
@@ -234,4 +239,4 @@ jobs:
       - name: Cleanup workspace, chipyard and conda
         run: |
           [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"
-          [ -d "${CHIPYARD_DIR}" ] && rm -rf "${CHIPYARD_DIR}"
+          [ -d "${CHIPYARD_RUN_ROOT}" ] && rm -rf "${CHIPYARD_RUN_ROOT}"
