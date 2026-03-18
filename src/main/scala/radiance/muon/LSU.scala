@@ -1012,16 +1012,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     val metadataMemR0 = metadataMem.readPorts(0)
     val metadataMemR1 = metadataMem.readPorts(1)
     val metadataMemW  = metadataMem.writePorts(0)
-    
-    // only SyncReadMem supports forwarding (`WriteFirst`), so we just need to 
-    // be careful to only do one read, one write 
-    val completionTable = SyncReadMem(
-        totalQueueEntries, 
-        Vec(muonParams.numLanes, Bool()),
-        SyncReadMem.WriteFirst
-    )
-    // TODO: we don't need this if we can flush completionTable to 0's
-    val completionTableValid = RegInit(VecInit(Seq.fill(totalQueueEntries)(false.B)))
+
+    val completionTableNext = Wire(Vec(totalQueueEntries, Vec(muonParams.numLanes, Bool())))
+    val completionTable = RegNext(completionTableNext, 0.U.asTypeOf(completionTableNext))
+    completionTableNext := completionTable
 
     // -- Handle reservations from core --
 
@@ -1424,15 +1418,12 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val respMetadata_d1 = metadataMemR0.data
 
         // Read accumulated tmask for this packet
-        val completion_d1 = completionTable.read(metadataIdx)
+        val completion_d1 = completionTable(metadataIdx)
 
         val receivedResp_d1 = RegNext(receivedResp, false.B)
         val respValidsVec_d1 = RegNext(respValidsVec, 0.U.asTypeOf(respValidsVec))
         val metadataIdx_d1 = RegNext(metadataIdx, 0.U)
         val respTag_d1 = RegNext(respTag, 0.U.asTypeOf(respTag))
-        val completionValid_d1 = RegNext(completionTableValid(metadataIdx), false.B)
-
-        when (receivedResp) { completionTableValid(metadataIdx) := true.B }
         
         val allRequestedLanesReceived_d1 = Wire(Bool())
         allRequestedLanesReceived_d1 := false.B
@@ -1441,8 +1432,6 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             // Extract packet-specific tmask (which lanes were requested for this packet)
             val packetTmask = Utils.selectPacket(respMetadata_d1.tmask, respTag_d1.packet)(this)
 
-            val completion_d1_masked = Mux(completionValid_d1, completion_d1, VecInit(Seq.fill(muonParams.numLanes)(false.B)))
-            
             // Place respValidsVec_d1 at the correct position in the full completion vector
             val newCompletion = Wire(Vec(muonParams.numLanes, Bool()))
             for (i <- 0 until muonParams.numLanes) {
@@ -1450,8 +1439,8 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 val laneInPacket = i % muonParams.lsu.numLsuLanes
                 val isThisPacket = respTag_d1.packet === packetNum.U
                 newCompletion(i) := Mux(isThisPacket, 
-                    completion_d1_masked(i) || respValidsVec_d1(laneInPacket),
-                    completion_d1_masked(i)
+                    completion_d1(i) || respValidsVec_d1(laneInPacket),
+                    completion_d1(i)
                 )
             }
             
@@ -1469,7 +1458,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             val allPacketLanesReceived = (completionUInt & packetTmaskUInt) === packetTmaskUInt
             
             val completionWrite = Wire(Vec(muonParams.numLanes, Bool()))
-            completionTable.write(metadataIdx_d1, completionWrite)
+            completionTableNext(metadataIdx_d1) := completionWrite
             
 
             when (allPacketLanesReceived) {
