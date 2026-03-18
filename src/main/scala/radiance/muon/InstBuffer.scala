@@ -90,6 +90,8 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
 }
 
 class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
+  val idIO = IO(clusterCoreIdT) // only for debugging
+
   val io = IO(new Bundle {
     val enq = Vec(muonParams.numWarps, Flipped(ibufEnqIO))
     val deq = Vec(muonParams.numWarps, Decoupled(ibufDeqIO))
@@ -136,6 +138,11 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
       when (reserve.req.fire) {
         acquiredToken := reserve.resp.bits.token
         acquiredTokenValid := true.B
+
+        printf(
+          cf"[IBUF clid=${idIO.clusterId} cid=${idIO.coreId}] warp ${wid} @ pc=0x${Hexadecimal(b.io.deq.bits.pc)} " +
+          cf"acquired token 0x${Hexadecimal(reserve.resp.bits.token.asUInt)}\n"
+        )
       }
 
       if (muonParams.combinationalTokenReserve) {

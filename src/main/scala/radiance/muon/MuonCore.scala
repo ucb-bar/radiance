@@ -30,7 +30,7 @@ case class MuonCoreParams(
   startAddress: BigInt = x"1000_0000",
   // issue
   numIssueQueueEntries: Int = 8, // RS
-  maxPendingReads: Int = 3,      // scoreboard
+  maxPendingReads: Int = 7,      // scoreboard
   noILP: Boolean = false, // fallback to single-in-flight instruction issue
                           // logic ("bypass")
   // collector
@@ -349,6 +349,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   dontTouch(io)
 
   val fe = Module(new Frontend)
+  fe.idIO.clusterId := io.clusterId
+  fe.idIO.coreId := io.coreId
   fe.io.imem <> io.imem
   fe.io.softReset := io.softReset
   io.finished := fe.io.finished

@@ -45,6 +45,9 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val fe = Module(new Frontend()(p))
   val cbe = Module(new CyclotronBackendBlackBox)
 
+  fe.idIO.clusterId := 0.U
+  fe.idIO.coreId := 0.U
+
   cbe.io.clock := clock
   cbe.io.reset := reset.asBool
 
@@ -92,6 +95,9 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   val be = Module(new Backend()(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
+
+  ibuf.idIO.coreId := 0.U
+  ibuf.idIO.clusterId := 0.U
 
   // imem in the ISA model is not used
   cfe.io.imem.req.valid := false.B
