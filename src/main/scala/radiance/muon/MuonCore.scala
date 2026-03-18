@@ -30,7 +30,7 @@ case class MuonCoreParams(
   startAddress: BigInt = x"1000_0000",
   // issue
   numIssueQueueEntries: Int = 8, // RS
-  maxPendingReads: Int = 3,      // scoreboard
+  maxPendingReads: Int = 7,      // scoreboard
   noILP: Boolean = false, // fallback to single-in-flight instruction issue
                           // logic ("bypass")
   // collector
