@@ -1007,8 +1007,10 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val metadataMemR1 = Wire(new MemoryReadPort(new Metadata, addrWidth))
         val metadataMemW = Wire(new MemoryWritePort(new Metadata, addrWidth, false))
 
-        metadataMemR0.data := metadataMem(metadataMemR0.address)
-        metadataMemR1.data := metadataMem(metadataMemR1.address)
+        val addressR0 = RegNext(metadataMemR0.address, 0.U(addrWidth))
+        val addressR1 = RegNext(metadataMemR1.address, 0.U(addrWidth))
+        metadataMemR0.data := metadataMem(addressR0)
+        metadataMemR1.data := metadataMem(addressR1)
         when (metadataMemW.enable) {
             metadataMem(metadataMemW.address) := metadataMemW.data
         }
@@ -1421,11 +1423,11 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         val respMetadata_d1 = metadataMemR0.data
 
         // Read accumulated tmask for this packet
-        val completion_d1 = completionTable(metadataIdx)
+        val metadataIdx_d1 = RegNext(metadataIdx, 0.U)
+        val completion_d1 = completionTable(metadataIdx_d1)
 
         val receivedResp_d1 = RegNext(receivedResp, false.B)
         val respValidsVec_d1 = RegNext(respValidsVec, 0.U.asTypeOf(respValidsVec))
-        val metadataIdx_d1 = RegNext(metadataIdx, 0.U)
         val respTag_d1 = RegNext(respTag, 0.U.asTypeOf(respTag))
         
         val allRequestedLanesReceived_d1 = Wire(Bool())
