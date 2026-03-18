@@ -999,19 +999,22 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     val loadDataMemW = loadDataMem.writePorts(0)
     
     val totalQueueEntries = muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
-    
-    // TODO: need 2R1W (read for writeback tmask, read for tracking packet completion, write on receive operands)
-    // is it expensive?
-    val metadataMem = MultiReadOneWriteSRAM(
-        totalQueueEntries, 
-        new Metadata,
-        numReadPorts = 2,
-        masked = false,
-    )
 
-    val metadataMemR0 = metadataMem.readPorts(0)
-    val metadataMemR1 = metadataMem.readPorts(1)
-    val metadataMemW  = metadataMem.writePorts(0)
+    val (metadataMemR0, metadataMemR1, metadataMemW) = {
+        val addrWidth = log2Up(totalQueueEntries)
+        val metadataMem = RegInit(VecInit.fill(totalQueueEntries)(0.U.asTypeOf(new Metadata)))
+        val metadataMemR0 = Wire(new MemoryReadPort(new Metadata, addrWidth))
+        val metadataMemR1 = Wire(new MemoryReadPort(new Metadata, addrWidth))
+        val metadataMemW = Wire(new MemoryWritePort(new Metadata, addrWidth, false))
+
+        metadataMemR0.data := metadataMem(metadataMemR0.address)
+        metadataMemR1.data := metadataMem(metadataMemR1.address)
+        when (metadataMemW.enable) {
+            metadataMem(metadataMemW.address) := metadataMemW.data
+        }
+
+        (metadataMemR0, metadataMemR1, metadataMemW)
+    }
 
     val completionTableNext = Wire(Vec(totalQueueEntries, Vec(muonParams.numLanes, Bool())))
     val completionTable = RegNext(completionTableNext, 0.U.asTypeOf(completionTableNext))
