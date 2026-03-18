@@ -391,7 +391,21 @@ object Predecoder {
 }
 
 class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
-  val ipdomStackMem = Seq.fill(m.numWarps)(SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 0, 0, 1))
+  // val ipdomStackMem = Seq.fill(m.numWarps)(SRAM(m.numIPDOMEntries, outer.ipdomStackEntryT, 0, 0, 1))
+  val ipdomStackMem = Seq.fill(m.numWarps) {
+    Mem(m.numIPDOMEntries, outer.ipdomStackEntryT)
+  }
+  val readAddr = WireInit(VecInit.fill(m.numWarps)( 0.U(log2Ceil(m.numIPDOMEntries).W)))
+  val readData = VecInit((ipdomStackMem zip readAddr).map { case (mem, addr) =>
+    RegNext(mem.read(addr))
+  })
+  val writeEnable = WireInit(VecInit.fill(m.numWarps)(false.B))
+  val writeAddr = WireInit(0.U.asTypeOf(readAddr.cloneType))
+  val writeData = Wire(Vec(m.numWarps, outer.ipdomStackEntryT))
+  (ipdomStackMem lazyZip writeEnable lazyZip writeAddr lazyZip writeData).foreach { case (m, en, a, d) =>
+    when (en) { m.write(a, d) }
+  }
+
   val branchTaken = RegInit(VecInit.fill(m.numWarps)(VecInit.fill(m.numIPDOMEntries)(false.B)))
 
   val wptr = RegInit(VecInit.fill(m.numWarps)(0.U(log2Ceil(m.numIPDOMEntries + 1).W)))
@@ -399,8 +413,6 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   val pushing = WireInit(VecInit.fill(m.numWarps)(false.B))
   val joiningElse = RegInit(VecInit.fill(m.numWarps)(false.B))
   val joiningEnd = RegInit(VecInit.fill(m.numWarps)(false.B))
-
-  val ports = VecInit(ipdomStackMem.map(m => m.readwritePorts(0)))
 
   val newPC = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(outer.pcT))))
   val newMask = WireInit(VecInit.fill(m.numWarps)(0.U.asTypeOf(Valid(outer.tmaskT))))
@@ -411,23 +423,28 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
   (joiningElse lazyZip joiningEnd lazyZip newPC lazyZip newMask).zipWithIndex
     .foreach { case ((j0, j1, pc, mask), wid) =>
       pc.valid := j0
-      pc.bits := ports(wid).readData.elsePC
+      pc.bits := readData(wid).elsePC
       mask.valid := j0 || j1
-      mask.bits := Mux(j0, ports(wid).readData.elseMask, ports(wid).readData.restoredMask)
+      mask.bits := Mux(j0, readData(wid).elseMask, readData(wid).restoredMask)
     }
 
-  (ports lazyZip rptr lazyZip wptr).foreach { case (p, ra, wa) =>
-    p.enable := false.B
-    p.isWrite := false.B
-    p.address := Mux(p.isWrite, wa, ra)
-    p.writeData := DontCare
+  Seq.tabulate(m.numWarps) { i =>
+  // (readAddr lazyZip writeAddr lazyZip rptr lazyZip wptr).foreach { case (pra, pwa, ra, wa) =>
+    // p.enable := false.B
+    // p.isWrite := false.B
+    // p.address := Mux(p.isWrite, wa, ra)
+    writeData(i) := DontCare
+    readAddr(i) := rptr(i)
+    writeAddr(i) := wptr(i)
   }
 
   def push(wid: UInt, ent: Bundle): Unit = {
-    ports(wid).enable := true.B
-    ports(wid).isWrite := true.B
     val entry = ent.asTypeOf(outer.ipdomStackEntryT)
-    ports(wid).writeData := entry
+    // ports(wid).enable := true.B
+    // ports(wid).isWrite := true.B
+    // ports(wid).writeData := entry
+    writeEnable(wid) := true.B
+    writeData(wid) := entry
     branchTaken(wid)(wptr(wid)) := !entry.divergent
     pushing(wid) := true.B
     assert(wptr(wid) < m.numIPDOMEntries.U, "ipdom stack is full")
@@ -436,8 +453,8 @@ class IPDOMStack(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 
   def pop(wid: UInt) = {
     assert(!pushing(wid)) // there should never be a simultaneous push and pop
-    ports(wid).enable := true.B
-    ports(wid).isWrite := false.B
+    // ports(wid).enable := true.B
+    // ports(wid).isWrite := false.B
     assert(wptr(wid) > 0.U, "ipdom stack is empty")
 
     when (!branchTaken(wid)(rptr(wid))) {

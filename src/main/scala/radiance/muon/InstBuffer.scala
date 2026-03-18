@@ -103,7 +103,7 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
       entries = muonParams.ibufDepth,
       pipe = false,
       flow = false,
-      useSyncReadMem = true,
+      useSyncReadMem = false,
       hasFlush = false
     )).suggestName(s"ibuf_w$wid")
     buf.ram.suggestName(s"ibuf")
