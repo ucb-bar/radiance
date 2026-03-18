@@ -25,7 +25,7 @@ case class MuonCoreParams(
   numArchRegs: Int = 128,
   logRenameMinWarps: Int = 1, // minimum 2 warps share PRF
   numIPDOMEntries: Int = 8,
-  ibufDepth: Int = 4,
+  ibufDepth: Int = 8,
   combinationalTokenReserve: Boolean = true, // perf: reserve token combinationally with dequeue from ibuf
   startAddress: BigInt = x"1000_0000",
   // issue

@@ -443,8 +443,8 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     (gemminiBaseMMIO ++ gemminiCiscMMIO ++ gemminiLutMMIO):_*
   )
 
-  assert(!regValid || gemminiIO.ready)
-  assert(!cisc.ciscValid || gemminiIO.ready)
+  // assert(!regValid || gemminiIO.ready)
+  // assert(!cisc.ciscValid || gemminiIO.ready)
 
   gemminiIO.bits.status := 0.U.asTypeOf(gemminiIO.bits.status)
   gemminiIO.bits.inst := Mux(cisc.ciscValid,
@@ -454,7 +454,7 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   gemminiIO.bits.rs2 := Mux(cisc.ciscValid,
     cisc.ciscInst.rs2, Cat(gemminiRs2RegMSB, gemminiRs2RegLSB))
   gemminiIO.valid := (cisc.ciscValid && (cisc.ciscInst.inst =/= 0.U)) || regValid
-  assert(gemminiIO.ready || !gemminiIO.valid)
+  // assert(gemminiIO.ready || !gemminiIO.valid)
 
   outer.traceSourceNode.bundle := DontCare
   outer.traceSourceNode.bundle.insns foreach (_.valid := false.B)

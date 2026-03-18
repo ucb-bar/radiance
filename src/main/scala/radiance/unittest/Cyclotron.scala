@@ -78,7 +78,18 @@ abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Ma
       "PRED_BITS"    -> Isa.predBits,
 ))
 
-class CyclotronFrontendBlackBox(implicit p: Parameters) extends CyclotronBlackBox
+class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map(
+      "ARCH_LEN"      -> p(MuonKey).archLen,
+      "INST_BITS"     -> p(MuonKey).instBits,
+      "IMEM_TAG_BITS" -> p(MuonKey).l0iReqTagBits,
+      "NUM_WARPS"     -> p(MuonKey).numWarps,
+      "NUM_LANES"     -> p(MuonKey).numLanes,
+      "OP_BITS"       -> Isa.opcodeBits,
+      "REG_BITS"      -> Isa.regBits,
+      "IMM_BITS"      -> 32,
+      "CSR_IMM_BITS"  -> Isa.csrImmBits,
+      "PRED_BITS"     -> Isa.predBits,
+))
 with HasBlackBoxResource with HasCoreParameters {
   val io = IO(new Bundle {
     val clock = Input(Clock())
