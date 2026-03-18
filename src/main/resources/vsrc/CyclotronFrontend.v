@@ -1,6 +1,7 @@
 module CyclotronFrontendBlackBox #(
   parameter ARCH_LEN = 32,
   parameter INST_BITS = 64,
+  parameter IMEM_TAG_BITS = 64,
   parameter NUM_WARPS = 8,
   parameter NUM_LANES = 16,
   parameter OP_BITS = 9,
@@ -22,12 +23,12 @@ module CyclotronFrontendBlackBox #(
   input  logic                     imem_req_bits_store,
   input  logic [ARCH_LEN-1:0]      imem_req_bits_address,
   input  logic [1:0]               imem_req_bits_size,
-  input  logic [5:0]               imem_req_bits_tag,
+  input  logic [IMEM_TAG_BITS-1:0] imem_req_bits_tag,
   input  logic [INST_BITS-1:0]     imem_req_bits_data,
   input  logic [(INST_BITS/8)-1:0] imem_req_bits_mask,
   input  logic                     imem_resp_ready,
   output logic                     imem_resp_valid,
-  output logic [5:0]               imem_resp_bits_tag,
+  output logic [IMEM_TAG_BITS-1:0] imem_resp_bits_tag,
   output logic [INST_BITS-1:0]     imem_resp_bits_data,
 
   // Decode interface: per-warp instruction buffer heads
@@ -76,7 +77,7 @@ module CyclotronFrontendBlackBox #(
 
   bit  __imem_req_ready;
   bit  __imem_resp_valid;
-  byte __imem_resp_bits_tag;
+  logic [IMEM_TAG_BITS-1:0] __imem_resp_bits_tag;
   longint __imem_resp_bits_data;
 
   // "in": C->verilog, "out": verilog->C
