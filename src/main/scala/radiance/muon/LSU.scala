@@ -11,14 +11,19 @@ import org.chipsalliance.cde.config.Field
 case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
 
+    // metadata queue depths
     val numGlobalLdqEntries: Int = 16, // limited to 16 decoded global load insts per warp
     val numGlobalStqEntries: Int = 16, // limited to 16 decoded global store insts per warp
     val numSharedLdqEntries: Int = 16, // limited to 16 decoded shared load insts per warp
     val numSharedStqEntries: Int = 16, // limited to 16 decoded shared store insts per warp
 
+    // data queue depths
     val loadDataEntries: Int = 16, // limited to 16 in-flight / waiting to writeback load requests
+                                   // shared across num{Global,Shared}LdqEntries
     val storeDataEntries: Int = 8, // limited to 8 unissued store requests
+                                   // shared across num{Global,Shared}StqEntries
     val addressEntries: Int = 16,  // limited to 16 unissued memory requests
+                                   // shared across all metadata queues
 
     // implementation details
     val metadataAsFlops: Boolean = false, // metadata can be implemented as flops or as SRAM
