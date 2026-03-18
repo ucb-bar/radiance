@@ -13,7 +13,6 @@ env:
   CHIPYARD_RELPATH: chipyard-work
   CHIPYARD_RUN_ROOT: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}"
   CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}/chipyard"
-  CONDA_CACHE_ROOT: "/scratch/buildbot/radiance-ci-shared/conda"
   # flip to force-reset cache
   CACHE_NUMBER: 0
   JAVA_HEAP_SIZE: "64G"
@@ -50,11 +49,8 @@ jobs:
           git clone --depth 1 --branch graphics "https://github.com/ucb-bar/chipyard.git" "${CHIPYARD_DIR}"
           cd "${CHIPYARD_DIR}"
           CHIPYARD_HASH="$(git rev-parse HEAD)"
-          CONDA_ENV_DIR="${CONDA_CACHE_ROOT}/chipyard-${CHIPYARD_HASH}/.conda-env"
           echo "CHIPYARD_HASH=${CHIPYARD_HASH}" >> "${GITHUB_ENV}"
-          echo "CONDA_ENV_DIR=${CONDA_ENV_DIR}" >> "${GITHUB_ENV}"
           echo "chipyard_hash=${CHIPYARD_HASH}" >> "${GITHUB_OUTPUT}"
-          echo "conda_env_dir=${CONDA_ENV_DIR}" >> "${GITHUB_OUTPUT}"
           # for caching
           ln -sf "${CHIPYARD_DIR}" "${GITHUB_WORKSPACE}/${CHIPYARD_RELPATH}"
 
@@ -64,6 +60,17 @@ jobs:
           auto-update-conda: true
           auto-activate-base: true
           activate-environment: ""
+
+      - name: Configure conda env
+        id: conda-env
+        run: |
+          CONDA_BASE="$(conda info --base)"
+          CONDA_ENV_NAME="chipyard-${CHIPYARD_HASH}"
+          CONDA_ENV_DIR="${CONDA_BASE}/envs/${CONDA_ENV_NAME}"
+          echo "CONDA_ENV_NAME=${CONDA_ENV_NAME}" >> "${GITHUB_ENV}"
+          echo "CONDA_ENV_DIR=${CONDA_ENV_DIR}" >> "${GITHUB_ENV}"
+          echo "conda_env_name=${CONDA_ENV_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "conda_env_dir=${CONDA_ENV_DIR}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup rust
         run: |
@@ -84,7 +91,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ${{ steps.checkout-chipyard.outputs.conda_env_dir }}
+            ${{ steps.conda-env.outputs.conda_env_dir }}
           key: chipyard-${{ steps.checkout-chipyard.outputs.chipyard_hash }}-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_NUMBER }}
 
       - name: Setup Chipyard
