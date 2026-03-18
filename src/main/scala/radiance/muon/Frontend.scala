@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 class Frontend(implicit p: Parameters)
   extends CoreModule()(p) {
 
+  val idIO = IO(clusterCoreIdT)
   val io = IO(new Bundle {
     val imem = new InstMemIO
     val ibuf = Vec(muonParams.numWarps, Decoupled(ibufDeqIO))
@@ -22,6 +23,7 @@ class Frontend(implicit p: Parameters)
   val warpScheduler = Module(new WarpScheduler)
   val renamer = Module(new Rename())
   val ibuffer = Module(new InstBuffer)
+  ibuffer.idIO := idIO
 
   { // scheduler & fetch
     val i$ = warpScheduler.io.icache
