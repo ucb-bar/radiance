@@ -424,15 +424,13 @@ class ScoreboardTest extends AnyFlatSpec {
       reset(c)
       clearIO(c)
 
-      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
-      c.io.hazard.updateRS.success.expect(true.B)
-      c.clock.step()
+      for (i <- 0 until (m.maxPendingReads - 1)) {
+        setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
+        c.io.hazard.updateRS.success.expect(true.B)
+        c.clock.step()
+      }
 
-      setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true)
-      c.io.hazard.updateRS.success.expect(true.B)
-      c.clock.step()
-
-      // pendingReads(42) == 2
+      // pendingReads(42) == (maxPendingReads - 1)
 
       setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 0)
       setUpdate(c.io.hazard.updateRS, pReg = 42, incr = true, decr = false, doWrite = false, doRead = true, rsi = 1)
@@ -443,13 +441,14 @@ class ScoreboardTest extends AnyFlatSpec {
       c.io.updateColl.success.expect(true.B)
       c.clock.step()
 
-      // pendingReads(42): 2 +  -1 (updateColl) + 3 (updateRS, failed) = 1
+      // pendingReads(42): (maxPendingReads - 1) +  -1 (updateColl) + 3 (updateRS, failed)
+      //                   = (maxPendingReads - 2)
 
       clearIO(c)
 
       c.io.hazard.warps(0).readRs1.enable.poke(true.B)
       c.io.hazard.warps(0).readRs1.pReg.poke(42.U)
-      c.io.hazard.warps(0).readRs1.pendingReads.expect(1.U)
+      c.io.hazard.warps(0).readRs1.pendingReads.expect((m.maxPendingReads - 2).U)
       c.io.hazard.warps(0).readRs1.pendingWrites.expect(0.U)
     }
   }
