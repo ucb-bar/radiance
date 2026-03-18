@@ -20,6 +20,9 @@ case class LoadStoreUnitParams(
     val storeDataEntries: Int = 8, // limited to 8 unissued store requests
     val addressEntries: Int = 16,  // limited to 16 unissued memory requests
 
+    // implementation details
+    val metadataAsFlops: Boolean = false, // metadata can be implemented as flops or as SRAM
+
     // purely performance optimizations; turn off if bad things are happening
     val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
     val fastHeadUpdate: Boolean = true,    // allow logical head to update on same cycle as memUpdate / memResponse
@@ -1000,7 +1003,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     
     val totalQueueEntries = muonParams.numWarps * (muonParams.lsu.numGlobalLdqEntries + muonParams.lsu.numGlobalStqEntries + muonParams.lsu.numSharedLdqEntries + muonParams.lsu.numSharedStqEntries)
 
-    val (metadataMemR0, metadataMemR1, metadataMemW) = {
+    val (metadataMemR0, metadataMemR1, metadataMemW) = if (muonParams.lsu.metadataAsFlops) {
         val addrWidth = log2Up(totalQueueEntries)
         val metadataMem = RegInit(VecInit.fill(totalQueueEntries)(0.U.asTypeOf(new Metadata)))
         val metadataMemR0 = Wire(new MemoryReadPort(new Metadata, addrWidth))
@@ -1014,6 +1017,19 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         when (metadataMemW.enable) {
             metadataMem(metadataMemW.address) := metadataMemW.data
         }
+
+        (metadataMemR0, metadataMemR1, metadataMemW)
+    } else {
+        val metadataMem = MultiReadOneWriteSRAM(
+            totalQueueEntries,
+            new Metadata,
+            numReadPorts = 2,
+            masked = false
+        )
+
+        val metadataMemR0 = metadataMem.readPorts(0)
+        val metadataMemR1 = metadataMem.readPorts(1)
+        val metadataMemW = metadataMem.writePorts(0)
 
         (metadataMemR0, metadataMemR1, metadataMemW)
     }
