@@ -55,7 +55,5 @@ EXT_INCDIRS += \
 
 endif
 
-VCS_NONCC_OPTS += +vcs+initreg+random
-
 # go brrr
 VCS_NONCC_OPTS += -j$(shell nproc)
