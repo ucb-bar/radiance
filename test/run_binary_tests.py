@@ -176,6 +176,9 @@ def run_bindiff(
     trace_table = bindiff_spec.get("trace_table", "dmem")
     trace_kind = bindiff_spec.get("trace_kind", "all")
     trace_address = bindiff_spec.get("trace_address")
+    cluster_id = bindiff_spec.get("cluster_id")
+    core_id = bindiff_spec.get("core_id")
+    warp = bindiff_spec.get("warp")
 
     if not isinstance(golden_rel, str) or not golden_rel:
         return ("fail", "bindiff manifest missing golden_bin", None)
@@ -185,6 +188,12 @@ def run_bindiff(
         return ("fail", "bindiff manifest has invalid trace_kind", None)
     if trace_address is not None and not isinstance(trace_address, str):
         return ("fail", "bindiff manifest has invalid trace_address", None)
+    if cluster_id is not None and not isinstance(cluster_id, int):
+        return ("fail", "bindiff manifest has invalid cluster_id", None)
+    if core_id is not None and not isinstance(core_id, int):
+        return ("fail", "bindiff manifest has invalid core_id", None)
+    if warp is not None and not isinstance(warp, int):
+        return ("fail", "bindiff manifest has invalid warp", None)
 
     sqlite_path = sim_dir / f"{elf.name}.sqlite"
     golden_bin = chipyard_dir / golden_rel
@@ -219,6 +228,12 @@ def run_bindiff(
     ]
     if trace_address is not None:
         trace_cmd.extend(["--address", trace_address])
+    if cluster_id is not None:
+        trace_cmd.extend(["--cluster", str(cluster_id)])
+    if core_id is not None:
+        trace_cmd.extend(["--core", str(core_id)])
+    if warp is not None:
+        trace_cmd.extend(["--warp", str(warp)])
 
     bindiff_cmd = [
         sys.executable,
