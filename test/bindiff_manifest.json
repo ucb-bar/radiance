@@ -1,0 +1,14 @@
+{
+  "mxgemm.fp8.m128n128k256.tm128tn128tk256.fullout": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.bf16.m128n128k256.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000"
+  },
+  "mxgemm.fp8.m64n64k64.tm64tn64tk64.fullout": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.bf16.m64n64k64.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000"
+  }
+}

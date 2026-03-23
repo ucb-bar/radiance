@@ -66,6 +66,9 @@ class TestResult:
     failure_reason: str
     cycles: list[dict[str, object]]
     ipc: list[dict[str, object]]
+    bindiff_status: str | None
+    bindiff_failure_reason: str
+    bindiff_log_path: str | None
 
 
 @dataclass
@@ -147,6 +150,122 @@ def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
     return (cycles_results, ipc_results)
 
 
+def load_bindiff_manifest(script_dir: Path) -> dict[str, dict[str, object]]:
+    manifest_path = script_dir / "bindiff_manifest.json"
+    if not manifest_path.exists():
+        return {}
+    with manifest_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"bindiff manifest must contain a JSON object: {manifest_path}")
+    return data
+
+
+def run_bindiff(
+    elf: Path,
+    log_dir: Path,
+    chipyard_dir: Path,
+    sim_dir: Path,
+    script_dir: Path,
+    bindiff_spec: dict[str, object] | None,
+) -> tuple[str | None, str, str | None]:
+    if bindiff_spec is None:
+        return (None, "", None)
+
+    golden_rel = bindiff_spec.get("golden_bin")
+    trace_table = bindiff_spec.get("trace_table", "dmem")
+    trace_kind = bindiff_spec.get("trace_kind", "all")
+    trace_address = bindiff_spec.get("trace_address")
+
+    if not isinstance(golden_rel, str) or not golden_rel:
+        return ("fail", "bindiff manifest missing golden_bin", None)
+    if not isinstance(trace_table, str) or not trace_table:
+        return ("fail", "bindiff manifest has invalid trace_table", None)
+    if not isinstance(trace_kind, str) or not trace_kind:
+        return ("fail", "bindiff manifest has invalid trace_kind", None)
+    if trace_address is not None and not isinstance(trace_address, str):
+        return ("fail", "bindiff manifest has invalid trace_address", None)
+
+    sqlite_path = sim_dir / f"{elf.name}.sqlite"
+    golden_bin = chipyard_dir / golden_rel
+    candidate_bin = log_dir / f"{elf.name}.bindiff.bin"
+    bindiff_log_path = log_dir / f"{elf.name}.bindiff.log"
+    trace_script = script_dir / "trace.py"
+    bindiff_script = script_dir / "bindiff.py"
+
+    if not sqlite_path.exists():
+        return (
+            "fail",
+            f"sqlite trace not found: {sqlite_path}",
+            str(bindiff_log_path),
+        )
+    if not golden_bin.exists():
+        return (
+            "fail",
+            f"golden bin not found: {golden_bin}",
+            str(bindiff_log_path),
+        )
+
+    trace_cmd = [
+        sys.executable,
+        str(trace_script),
+        str(sqlite_path),
+        "--table",
+        trace_table,
+        "--dump-bin",
+        str(candidate_bin),
+        "--kind",
+        trace_kind,
+    ]
+    if trace_address is not None:
+        trace_cmd.extend(["--address", trace_address])
+
+    bindiff_cmd = [
+        sys.executable,
+        str(bindiff_script),
+        str(golden_bin),
+        str(candidate_bin),
+    ]
+
+    bindiff_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with bindiff_log_path.open("w", encoding="utf-8") as bindiff_log:
+        bindiff_log.write(f"$ {' '.join(trace_cmd)}\n")
+        trace_result = subprocess.run(
+            trace_cmd,
+            cwd=chipyard_dir,
+            stdout=bindiff_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if trace_result.returncode != 0:
+            return (
+                "fail",
+                f"trace dump failed with status {trace_result.returncode}",
+                str(bindiff_log_path),
+            )
+
+        bindiff_log.write(f"\n$ {' '.join(bindiff_cmd)}\n")
+        diff_result = subprocess.run(
+            bindiff_cmd,
+            cwd=chipyard_dir,
+            stdout=bindiff_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    if diff_result.returncode == 0:
+        return (
+            "pass",
+            "",
+            str(bindiff_log_path),
+        )
+    return (
+        "fail",
+        f"bindiff failed with status {diff_result.returncode}",
+        str(bindiff_log_path),
+    )
+
+
 def get_and_check_sim_binary(config, sim_dir):
     if config == "soc":
         sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimConfig-debug"
@@ -224,7 +343,16 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     )
 
 
-def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
+def finalize_test(
+    config: str,
+    test: RunningTest,
+    status: int,
+    bindiff_manifest: dict[str, dict[str, object]],
+    chipyard_dir: Path,
+    sim_dir: Path,
+    script_dir: Path,
+    log_dir: Path,
+) -> TestResult:
     duration_sec = time.monotonic() - test.start_time
     try:
         cycles, ipc = extract_ipc_results(test.log_path)
@@ -242,6 +370,9 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 failure_reason=f"timeout after {SIM_TIMEOUT}s",
                 cycles=cycles,
                 ipc=ipc,
+                bindiff_status=None,
+                bindiff_failure_reason="",
+                bindiff_log_path=None,
             )
 
         errstring = log_has_error(test.log_path).rstrip("\n")
@@ -262,19 +393,38 @@ def finalize_test(config: str, test: RunningTest, status: int) -> TestResult:
                 failure_reason=failure_reason,
                 cycles=cycles,
                 ipc=ipc,
+                bindiff_status=None,
+                bindiff_failure_reason="",
+                bindiff_log_path=None,
             )
+        bindiff_status, bindiff_failure_reason, bindiff_log_path = run_bindiff(
+            test.elf,
+            log_dir,
+            chipyard_dir,
+            sim_dir,
+            script_dir,
+            bindiff_manifest.get(test.elf.name),
+        )
+        result_status = "pass"
+        failure_reason = ""
+        if bindiff_status == "fail":
+            result_status = "fail"
+            failure_reason = bindiff_failure_reason
         return TestResult(
             name=test.elf.name,
             elf=str(test.elf),
             config=config,
-            status="pass",
+            status=result_status,
             exit_code=status,
             duration_sec=duration_sec,
             log_path=str(test.log_path),
             stderr_path=str(test.err_file.name),
-            failure_reason="",
+            failure_reason=failure_reason,
             cycles=cycles,
             ipc=ipc,
+            bindiff_status=bindiff_status,
+            bindiff_failure_reason=bindiff_failure_reason,
+            bindiff_log_path=bindiff_log_path,
         )
     finally:
         test.close_streams()
@@ -304,7 +454,7 @@ def write_json_result(json_path, run_result: RunResult):
 
 
 # single-threaded
-def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
+def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir, script_dir, bindiff_manifest):
     test = launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
     try:
         status = test.process.wait(timeout=SIM_TIMEOUT)
@@ -312,7 +462,16 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         test.timed_out = True
         test.process.kill()
         status = test.process.wait()
-    result = finalize_test(config, test, status)
+    result = finalize_test(
+        config,
+        test,
+        status,
+        bindiff_manifest,
+        chipyard_dir,
+        sim_dir,
+        script_dir,
+        log_dir,
+    )
     return summarize_results(config, binary, log_dir, [result])
 
 
@@ -337,7 +496,7 @@ def default_elf_dir(config, script_dir):
     return cyclotron_dir / "test" / "isa-tests"
 
 
-def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_dir=None):
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, bindiff_manifest, elf_dir=None):
     print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
 
     elf_dir = Path(elf_dir) if elf_dir is not None else default_elf_dir(config, script_dir)
@@ -385,7 +544,16 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_
                 if status is None:
                     still_running.append(test)
                     continue
-                result = finalize_test(config, test, status)
+                result = finalize_test(
+                    config,
+                    test,
+                    status,
+                    bindiff_manifest,
+                    chipyard_dir,
+                    sim_dir,
+                    script_dir,
+                    log_dir,
+                )
                 results.append(result)
 
             running = still_running
@@ -457,6 +625,7 @@ def main():
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     jobs = args.jobs if args.jobs and args.jobs > 0 else 1
     json_out = Path(args.json_out) if args.json_out else (log_dir / "results.json")
+    bindiff_manifest = load_bindiff_manifest(script_dir)
 
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
@@ -465,7 +634,16 @@ def main():
 
     if args.binary:
         elf = Path(args.binary).resolve()
-        run_result = run_binary(config, sim_binary, elf, log_dir, chipyard_dir, sim_dir)
+        run_result = run_binary(
+            config,
+            sim_binary,
+            elf,
+            log_dir,
+            chipyard_dir,
+            sim_dir,
+            script_dir,
+            bindiff_manifest,
+        )
     else:
         run_result = sweep(
             config,
@@ -475,6 +653,7 @@ def main():
             chipyard_dir,
             sim_dir,
             jobs,
+            bindiff_manifest,
             args.elf_dir,
         )
     write_json_result(json_out, run_result)
