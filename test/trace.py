@@ -250,15 +250,35 @@ def clipped_payload(row, start: int, end: int) -> bytes:
 
 
 def dump_image(rows, start: int, end: int) -> bytes:
-    size = max(0, end - start)
-    image = bytearray(size)
+    fragments: list[tuple[int, bytes]] = []
     for row in rows:
         address = row[5]
         payload = clipped_payload(row, start, end)
         if not payload:
             continue
-        image_off = max(start, address) - start
-        image[image_off:image_off + len(payload)] = payload
+        fragments.append((max(start, address), payload))
+
+    image = bytearray()
+    cursor = start
+    for fragment_start, payload in sorted(fragments, key=lambda fragment: fragment[0]):
+        if fragment_start > cursor:
+            gap_start = cursor
+            gap_end = fragment_start
+            raise ValueError(
+                "trace rows do not fully cover requested dump range: "
+                f"gap at [{fmt_hex(gap_start, 4)}, {fmt_hex(gap_end, 4)})"
+            )
+
+        overlap = max(0, cursor - fragment_start)
+        if overlap < len(payload):
+            image.extend(payload[overlap:])
+            cursor += len(payload) - overlap
+
+    if cursor != end:
+        raise ValueError(
+            "trace rows do not fully cover requested dump range: "
+            f"gap at [{fmt_hex(cursor, 4)}, {fmt_hex(end, 4)})"
+        )
     return bytes(image)
 
 
@@ -310,12 +330,16 @@ def main():
 
     if args.dump_bin:
         dump_start, dump_end = args.address if args.address is not None else infer_range_from_rows(rows)
-        blob = dump_image(rows, dump_start, dump_end)
+        try:
+            blob = dump_image(rows, dump_start, dump_end)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
         args.dump_bin.parent.mkdir(parents=True, exist_ok=True)
         args.dump_bin.write_bytes(blob)
         print(
             f"# wrote {len(blob)} bytes to {args.dump_bin} "
-            f"(kind={args.kind}, layout=image, range=[{fmt_hex(dump_start, 4)}, {fmt_hex(dump_end, 4)}))"
+            f"(kind={args.kind}, layout=dense, range=[{fmt_hex(dump_start, 4)}, {fmt_hex(dump_end, 4)}))"
         )
 
     return 0
