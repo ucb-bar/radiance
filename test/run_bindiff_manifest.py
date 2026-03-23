@@ -28,7 +28,6 @@ def main():
     args = parse_args()
     sqlite_path = args.sqlite.resolve()
     script_dir = Path(__file__).resolve().parent
-    manifest_path = script_dir / "bindiff_manifest.json"
     if not sqlite_path.exists():
         print(f"error: sqlite trace not found: {sqlite_path}", file=sys.stderr)
         return 2
@@ -39,21 +38,19 @@ def main():
         script_dir=script_dir,
     )
 
-    print(f"# manifest file: {manifest_path}")
-
     if bindiff_status is None:
         print(f"# no bindiff manifest entry for {sqlite_path.stem}")
         return 0
 
-    print(f"# SQLite file: {sqlite_path}")
     if bindiff_log_path:
-        print(f"# log file: {bindiff_log_path}")
+        bindiff_log = Path(bindiff_log_path)
+        if bindiff_log.exists():
+            sys.stdout.write(bindiff_log.read_text(encoding="utf-8"))
 
     if bindiff_status == "pass":
-        print("# PASS")
         return 0
-
-    print(f"# FAIL reason={bindiff_failure_reason}")
+    if bindiff_status == "fail" and not bindiff_log_path:
+        print(f"error: {bindiff_failure_reason}", file=sys.stderr)
     return 1
 
 
