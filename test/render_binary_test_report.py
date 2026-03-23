@@ -70,6 +70,13 @@ def format_ipc(ipc_entries):
     )
 
 
+def format_bindiff(result):
+    bindiff_status = result.get("bindiff_status")
+    if bindiff_status is None:
+        return "-"
+    return bindiff_status
+
+
 def render_markdown(run_result):
     config = run_result["config"]
     total = run_result["total"]
@@ -88,13 +95,14 @@ def render_markdown(run_result):
     lines.append("")
     lines.append(f"Simulator: `{sim_binary}`")
     lines.append("")
-    lines.append("| Binary | Status | Exit | Duration | Cycles | IPC |")
-    lines.append("| --- | --- | ---: | ---: | --- | --- |")
+    lines.append("| Binary | Status | Bindiff | Exit | Duration | Cycles | IPC |")
+    lines.append("| --- | --- | --- | ---: | ---: | --- | --- |")
     for result in results:
         lines.append(
-            "| {name} | {status} | {exit_code} | {duration} | {cycles} | {ipc} |".format(
+            "| {name} | {status} | {bindiff} | {exit_code} | {duration} | {cycles} | {ipc} |".format(
                 name=escape_cell(result["name"]),
                 status=escape_cell(result["status"]),
+                bindiff=escape_cell(format_bindiff(result)),
                 exit_code=result["exit_code"],
                 duration=format_duration(result["duration_sec"]),
                 cycles=escape_cell(format_cycles(result.get("cycles", []))),
@@ -116,6 +124,18 @@ def render_markdown(run_result):
             )
             if result["failure_reason"]:
                 lines.append(f"  Reason: `{escape_cell(result['failure_reason'])}`")
+            if result.get("bindiff_failure_reason"):
+                lines.append(
+                    "  Bindiff: `{reason}`".format(
+                        reason=escape_cell(result["bindiff_failure_reason"])
+                    )
+                )
+            if result.get("bindiff_log_path"):
+                lines.append(
+                    "  Bindiff log: `{path}`".format(
+                        path=escape_cell(result["bindiff_log_path"])
+                    )
+                )
 
     return "\n".join(lines) + "\n"
 
