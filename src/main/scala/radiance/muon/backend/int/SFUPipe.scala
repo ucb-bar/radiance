@@ -310,6 +310,6 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
 
   // override busy
   when (io.req.fire) {
-    busy := !inst.b(IsNuInvoke) && !inst.b(IsFenceI) && !inst.b(IsFenceD)
+    busy := !inst.b(IsNuInvoke) && !inst.b(IsFenceI) && !inst.b(IsFenceD) && !inst.b(IsFenceS)
   }
 }
