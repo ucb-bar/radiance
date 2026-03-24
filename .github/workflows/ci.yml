@@ -13,6 +13,8 @@ env:
   CHIPYARD_RELPATH: chipyard-work
   CHIPYARD_RUN_ROOT: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}"
   CHIPYARD_DIR: "/scratch/buildbot/radiance-ci-runs/${{ github.run_id }}-${{ github.run_attempt }}/chipyard"
+  CHIPYARD_LOG_ROOT: "/scratch/buildbot/radiance-ci-logs"
+  CHIPYARD_RUN_LOG_DIR: "/scratch/buildbot/radiance-ci-logs/${{ github.run_id }}-${{ github.run_attempt }}"
   # flip to force-reset cache
   CACHE_NUMBER: 0
   JAVA_HEAP_SIZE: "64G"
@@ -35,6 +37,7 @@ jobs:
           cat /proc/cpuinfo | tail -n20
           vmstat -SM
           df -h
+          mkdir -p "${CHIPYARD_RUN_LOG_DIR}"
           [ -d "${{ github.workspace }}" ] && rm -rf "${{ github.workspace }}"/*
 
       - name: Checkout
@@ -165,19 +168,20 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" \
+            --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/fused \
-            --json-out test/binary-test-logs/soc/results.json
+            --json-out "${CHIPYARD_RUN_LOG_DIR}/soc/results.json"
       - name: Run bindiff tests on SoC config
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/run_bindiff_tests.py test/binary-test-logs/soc/results.json
+          python3 test/run_bindiff_tests.py "${CHIPYARD_RUN_LOG_DIR}/soc/results.json"
       - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
           python3 test/render_binary_test_report.py \
-            test/binary-test-logs/soc/results.json \
+            "${CHIPYARD_RUN_LOG_DIR}/soc/results.json" \
             --github-step-summary
 
   run-core-binary-tests:
@@ -192,19 +196,20 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c core \
+            --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/isa-tests \
-            --json-out test/binary-test-logs/core/results.json
+            --json-out "${CHIPYARD_RUN_LOG_DIR}/core/results.json"
       - name: Run bindiff tests on core-as-top config
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/run_bindiff_tests.py test/binary-test-logs/core/results.json
+          python3 test/run_bindiff_tests.py "${CHIPYARD_RUN_LOG_DIR}/core/results.json"
       - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
           python3 test/render_binary_test_report.py \
-            test/binary-test-logs/core/results.json \
+            "${CHIPYARD_RUN_LOG_DIR}/core/results.json" \
             --github-step-summary
 
   run-cosim-binary-tests:
@@ -219,19 +224,20 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c cosim \
+            --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/fused \
-            --json-out test/binary-test-logs/cosim/results.json
+            --json-out "${CHIPYARD_RUN_LOG_DIR}/cosim/results.json"
       - name: Run bindiff tests on backend co-sim config
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
-          python3 test/run_bindiff_tests.py test/binary-test-logs/cosim/results.json
+          python3 test/run_bindiff_tests.py "${CHIPYARD_RUN_LOG_DIR}/cosim/results.json"
       - name: Render binary test report
         if: always()
         run: |
           cd "${CHIPYARD_DIR}/generators/radiance"
           python3 test/render_binary_test_report.py \
-            test/binary-test-logs/cosim/results.json \
+            "${CHIPYARD_RUN_LOG_DIR}/cosim/results.json" \
             --github-step-summary
 
   # run-backend-cosim-binary-tests:
