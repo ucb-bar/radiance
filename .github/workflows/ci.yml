@@ -167,6 +167,11 @@ jobs:
           python3 test/run_binary_tests.py -j "$(nproc)" \
             --elf-dir cyclotron/test/fused \
             --json-out test/binary-test-logs/soc/results.json
+      - name: Run bindiff tests on SoC config
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/run_bindiff_tests.py test/binary-test-logs/soc/results.json
       - name: Render binary test report
         if: always()
         run: |
@@ -189,6 +194,11 @@ jobs:
           python3 test/run_binary_tests.py -j "$(nproc)" -c core \
             --elf-dir cyclotron/test/isa-tests \
             --json-out test/binary-test-logs/core/results.json
+      - name: Run bindiff tests on core-as-top config
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/run_bindiff_tests.py test/binary-test-logs/core/results.json
       - name: Render binary test report
         if: always()
         run: |
@@ -211,6 +221,11 @@ jobs:
           python3 test/run_binary_tests.py -j "$(nproc)" -c cosim \
             --elf-dir cyclotron/test/fused \
             --json-out test/binary-test-logs/cosim/results.json
+      - name: Run bindiff tests on backend co-sim config
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/run_bindiff_tests.py test/binary-test-logs/cosim/results.json
       - name: Render binary test report
         if: always()
         run: |

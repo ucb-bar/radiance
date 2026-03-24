@@ -12,8 +12,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TextIO
 
-from bindiff_manifest import load_bindiff_manifest, run_bindiff_from_spec
-
 myname = Path(sys.argv[0]).name
 SIM_TIMEOUT = 30 * 60  # seconds
 
@@ -232,11 +230,6 @@ def finalize_test(
     config: str,
     test: RunningTest,
     status: int,
-    bindiff_manifest: dict[str, dict[str, object]],
-    chipyard_dir: Path,
-    sim_dir: Path,
-    script_dir: Path,
-    log_dir: Path,
 ) -> TestResult:
     duration_sec = time.monotonic() - test.start_time
     try:
@@ -282,34 +275,21 @@ def finalize_test(
                 bindiff_failure_reason="",
                 bindiff_log_path=None,
             )
-        bindiff_status, bindiff_failure_reason, bindiff_log_path = run_bindiff_from_spec(
-            sqlite_path=sim_dir / f"{test.elf.name}.sqlite",
-            elf_name=test.elf.name,
-            log_dir=log_dir,
-            chipyard_dir=chipyard_dir,
-            script_dir=script_dir,
-            bindiff_spec=bindiff_manifest.get(test.elf.name),
-        )
-        result_status = "pass"
-        failure_reason = ""
-        if bindiff_status == "fail":
-            result_status = "fail"
-            failure_reason = bindiff_failure_reason
         return TestResult(
             name=test.elf.name,
             elf=str(test.elf),
             config=config,
-            status=result_status,
+            status="pass",
             exit_code=status,
             duration_sec=duration_sec,
             log_path=str(test.log_path),
             stderr_path=str(test.err_file.name),
-            failure_reason=failure_reason,
+            failure_reason="",
             cycles=cycles,
             ipc=ipc,
-            bindiff_status=bindiff_status,
-            bindiff_failure_reason=bindiff_failure_reason,
-            bindiff_log_path=bindiff_log_path,
+            bindiff_status=None,
+            bindiff_failure_reason="",
+            bindiff_log_path=None,
         )
     finally:
         test.close_streams()
@@ -339,7 +319,7 @@ def write_json_result(json_path, run_result: RunResult):
 
 
 # single-threaded
-def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir, script_dir, bindiff_manifest):
+def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     test = launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
     try:
         status = test.process.wait(timeout=SIM_TIMEOUT)
@@ -351,11 +331,6 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir, script_dir, 
         config,
         test,
         status,
-        bindiff_manifest,
-        chipyard_dir,
-        sim_dir,
-        script_dir,
-        log_dir,
     )
     return summarize_results(config, binary, log_dir, [result])
 
@@ -381,7 +356,7 @@ def default_elf_dir(config, script_dir):
     return cyclotron_dir / "test" / "isa-tests"
 
 
-def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, bindiff_manifest, elf_dir=None):
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_dir=None):
     print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
 
     elf_dir = Path(elf_dir) if elf_dir is not None else default_elf_dir(config, script_dir)
@@ -433,11 +408,6 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, bind
                     config,
                     test,
                     status,
-                    bindiff_manifest,
-                    chipyard_dir,
-                    sim_dir,
-                    script_dir,
-                    log_dir,
                 )
                 results.append(result)
 
@@ -510,8 +480,6 @@ def main():
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     jobs = args.jobs if args.jobs and args.jobs > 0 else 1
     json_out = Path(args.json_out) if args.json_out else (log_dir / "results.json")
-    bindiff_manifest = load_bindiff_manifest(script_dir)
-
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
     print(f"[{myname}] writing logs to {log_dir}")
@@ -526,8 +494,6 @@ def main():
             log_dir,
             chipyard_dir,
             sim_dir,
-            script_dir,
-            bindiff_manifest,
         )
     else:
         run_result = sweep(
@@ -538,7 +504,6 @@ def main():
             chipyard_dir,
             sim_dir,
             jobs,
-            bindiff_manifest,
             args.elf_dir,
         )
     write_json_result(json_out, run_result)

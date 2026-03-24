@@ -60,7 +60,12 @@ def run_bindiff_from_spec(
     bindiff_script = script_dir / "bindiff.py"
 
     if not sqlite_path.exists():
-        return ("fail", f"sqlite trace not found: {sqlite_path}", str(bindiff_log_path))
+        parent_listing = ", ".join(sorted(path.name for path in sqlite_path.parent.iterdir()))
+        return (
+            "fail",
+            f"sqlite trace not found: {sqlite_path}; contents of {sqlite_path.parent}: {parent_listing}",
+            str(bindiff_log_path),
+        )
     if not golden_bin.exists():
         return ("fail", f"golden bin not found: {golden_bin}", str(bindiff_log_path))
 
