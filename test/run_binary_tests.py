@@ -467,7 +467,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    log_dir_name = args.log_dir
     config = args.config
     if not (config == "soc" or config == "core" or config == "cosim" or config == "backend"):
         print(f"error: unknown config '{config}'. must be (soc|core|cosim|backend)")
@@ -476,10 +475,13 @@ def main():
     script_dir = Path(__file__).resolve().parent
     chipyard_dir = discover_chipyard(script_dir)
     sim_dir = chipyard_dir / "sims/vcs"
-    log_dir = script_dir / log_dir_name / config
+    log_dir_base = Path(args.log_dir)
+    if not log_dir_base.is_absolute():
+        log_dir_base = script_dir / log_dir_base
+    log_dir = log_dir_base / config
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     jobs = args.jobs if args.jobs and args.jobs > 0 else 1
-    json_out = Path(args.json_out) if args.json_out else (log_dir / "results.json")
+    json_out = Path(args.json_out).resolve() if args.json_out else (log_dir / "results.json")
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
     print(f"[{myname}] writing logs to {log_dir}")
