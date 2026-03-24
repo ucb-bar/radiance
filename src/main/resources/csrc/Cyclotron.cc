@@ -31,9 +31,34 @@ const char *vpi_get_binary() {
 #endif
 }
 
-void cyclotron_init_rs(const char* elfname);
-void cyclotron_init(const char* elfname) {
-  cyclotron_init_rs(elfname);
+const char *vpi_get_trace_db_path() {
+#ifndef NO_VPI
+  static std::string trace_db_path;
+  s_vpi_vlog_info info;
+  if (!vpi_get_vlog_info(&info)) {
+    trace_db_path.clear();
+    return trace_db_path.c_str();
+  }
+  for (int i = 1; i < info.argc; i++) {
+    const char *arg = info.argv[i];
+    if (arg == nullptr)
+      continue;
+    constexpr const char *kPrefix = "+trace-db=";
+    if (std::string(arg).rfind(kPrefix, 0) == 0) {
+      trace_db_path = arg + std::char_traits<char>::length(kPrefix);
+      return trace_db_path.c_str();
+    }
+  }
+  trace_db_path.clear();
+  return trace_db_path.c_str();
+#else
+  return "";
+#endif
+}
+
+void cyclotron_init_rs(const char* elfname, const char* trace_db_path);
+void cyclotron_init(const char* elfname, const char* trace_db_path) {
+  cyclotron_init_rs(elfname, trace_db_path);
 }
 
 void cyclotron_fetch_rs(

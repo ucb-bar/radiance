@@ -4,14 +4,17 @@
 // (2) C function declaration
 // (3) Verilog DPI calls inside initial/always blocks
 
-import "DPI-C" function void cyclotron_init(input string elffile);
+import "DPI-C" function void cyclotron_init(input string elffile, input string trace_db_path);
 
 import "DPI-C" function string vpi_get_binary();
+import "DPI-C" function string vpi_get_trace_db_path();
 
 task automatic cyclotron_init_task();
   string elffile;
+  string trace_db_path;
   elffile = vpi_get_binary();
-  cyclotron_init(elffile);
+  trace_db_path = vpi_get_trace_db_path();
+  cyclotron_init(elffile, trace_db_path);
 endtask
 
 import "DPI-C" function void cyclotron_imem(
