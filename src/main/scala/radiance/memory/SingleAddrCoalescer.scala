@@ -39,7 +39,7 @@ class SingleAddrCoalescer(val sourceBits: Int = 2)
       out.a.valid := in.a.valid && !coalescibleOut
       in.a.ready := Mux(coalescibleOut, coalOut.a.ready && coalSource.io.id.valid, out.a.ready)
 
-      in.d.valid := out.d.valid && !coalescedIn // TODO FIXME HACK, ASSUMES UNIFORM D READY
+      in.d.valid := out.d.valid && !coalescedIn
       out.d.ready := in.d.ready && !coalescedIn // coalesced response has priority
     }
 
@@ -48,7 +48,8 @@ class SingleAddrCoalescer(val sourceBits: Int = 2)
     val leader = PriorityMux(inA.map(a => (a.valid, a.bits)))
     val leaderReady = PriorityMux(inA.map(a => (a.valid, a.ready)))
 
-    coalescibleOut := inA.map(x => !x.valid || (x.bits.address === leader.address)).andR
+    coalescibleOut := inA.map(x => !x.valid || (x.bits.address === leader.address &&
+      x.bits.opcode === leader.opcode && x.bits.size === leader.size)).andR
 
     coalOut.a.valid := coalescibleOut && inA.map(_.valid).orR && coalSource.io.id.valid
     coalOut.a.bits := leader
