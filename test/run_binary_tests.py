@@ -43,6 +43,7 @@ class RunningTest:
     elf: Path
     process: subprocess.Popen
     log_path: Path
+    sqlite_path: Path
     log_file: TextIO
     err_file: TextIO
     start_time: float
@@ -62,6 +63,7 @@ class TestResult:
     exit_code: int
     duration_sec: float
     log_path: str
+    sqlite_path: str
     stderr_path: str
     failure_reason: str
     cycles: list[dict[str, object]]
@@ -176,6 +178,7 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     fsdb_path = log_dir / f"{elf_name}.fsdb"
     log_path = log_dir / f"{elf_name}.log"
     out_path = log_dir / f"{elf_name}.out"
+    sqlite_path = (log_dir / f"{elf_name}.sqlite").resolve()
 
     dramsim_ini = (
         chipyard_dir
@@ -196,6 +199,7 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         "+ntb_random_seed_automatic",
         "+verbose",
         f"+fsdbfile={fsdb_path}",
+        f"+trace-db={sqlite_path}",
         f"+loadmem={elf}",
         "+permissive-off",
         str(elf),
@@ -220,6 +224,7 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         elf=elf,
         process=process,
         log_path=log_path,
+        sqlite_path=sqlite_path,
         log_file=log_file,
         err_file=err_file,
         start_time=time.monotonic(),
@@ -244,6 +249,7 @@ def finalize_test(
                 exit_code=status,
                 duration_sec=duration_sec,
                 log_path=str(test.log_path),
+                sqlite_path=str(test.sqlite_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=f"timeout after {SIM_TIMEOUT}s",
                 cycles=cycles,
@@ -267,6 +273,7 @@ def finalize_test(
                 exit_code=status,
                 duration_sec=duration_sec,
                 log_path=str(test.log_path),
+                sqlite_path=str(test.sqlite_path),
                 stderr_path=str(test.err_file.name),
                 failure_reason=failure_reason,
                 cycles=cycles,
@@ -283,6 +290,7 @@ def finalize_test(
             exit_code=status,
             duration_sec=duration_sec,
             log_path=str(test.log_path),
+            sqlite_path=str(test.sqlite_path),
             stderr_path=str(test.err_file.name),
             failure_reason="",
             cycles=cycles,

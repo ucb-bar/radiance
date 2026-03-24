@@ -51,7 +51,6 @@ def main():
     json_path = args.json_path.resolve()
     script_dir = Path(__file__).resolve().parent
     chipyard_dir = script_dir.parents[2].resolve()
-    sim_dir = chipyard_dir / "sims/vcs"
     bindiff_manifest = load_bindiff_manifest(script_dir)
     run_result = read_results(json_path)
     log_dir = Path(run_result["log_dir"]).resolve()
@@ -72,7 +71,11 @@ def main():
         if bindiff_spec is None:
             continue
 
-        sqlite_path = sim_dir / f"{name}.sqlite"
+        sqlite_path_str = result.get("sqlite_path")
+        if sqlite_path_str:
+            sqlite_path = Path(sqlite_path_str).resolve()
+        else:
+            sqlite_path = chipyard_dir / "sims/vcs" / f"{name}.sqlite"
         print(f"[{myname}] bindiff {name}")
         bindiff_status, bindiff_failure_reason, bindiff_log_path = run_bindiff_from_spec(
             sqlite_path=sqlite_path,
