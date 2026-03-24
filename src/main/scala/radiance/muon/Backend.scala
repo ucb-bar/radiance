@@ -162,7 +162,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
         willWriteback := MemOp.isLoad(memOp) || MemOp.isAtomic(memOp)
       }
       val expanded = issued.bits.uop.inst.expand()
-      when (expanded.b(IsNuInvoke) || expanded.b(IsFenceD) || expanded.b(IsFenceI)) {
+      when (expanded.b(IsNuInvoke) || expanded.b(IsFenceD) || expanded.b(IsFenceI) || expanded.b(IsFenceS)) {
         willWriteback := false.B
       }
     }
