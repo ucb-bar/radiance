@@ -137,7 +137,7 @@ jobs:
           make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
           make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
           make debug CONFIG=RadianceCyclotronConfig
-          make debug CONFIG=RadianceTapeoutSimConfig
+          make debug CONFIG=RadianceTapeoutSimTraceConfig
 
   run-unit-tests:
     name: Run Unit-tests

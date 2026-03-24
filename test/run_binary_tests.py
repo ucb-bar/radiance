@@ -151,7 +151,7 @@ def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
 
 def get_and_check_sim_binary(config, sim_dir):
     if config == "soc":
-        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimTraceConfig-debug"
     elif config == "core":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig-debug"
     elif config == "cosim":
