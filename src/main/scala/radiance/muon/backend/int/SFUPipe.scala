@@ -90,14 +90,18 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       done = (_: UInt) => flushIO.d.done,
       reqT = UInt(0.W)
     ),
+
+  )
+
+  val fences_smem = Seq.tabulate(m.numWarps) { wid =>
     new StallFields(
-      start = WireInit(io.req.fire && inst.b(IsFenceS)),
+      start = WireInit(io.req.fire && (wid.U === io.req.bits.uop.wid) && inst.b(IsFenceS)),
       done = (_: UInt) => fenceIO.sharedQueuesEmpty,
       reqT = UInt(0.W)
     )
-  )
+  }
 
-  val stalls = barriers ++ fences
+  val stalls = barriers ++ fences ++ fences_smem
 
   writeback.valid := true.B
 
