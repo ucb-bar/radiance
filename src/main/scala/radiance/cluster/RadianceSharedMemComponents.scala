@@ -152,7 +152,10 @@ class RadianceSharedMemComponents(
   val spadSpWriteNodesSingleBank = distAndDuplicate(
     gemminis.map { g =>
       val shrunk = TLWidthWidget(smemWidth)
-      shrunk := TLFragmenter(smemWidth, smemWidth) := g.spad.spad_writer.get.node
+      (shrunk
+        := TLFragmenter(smemWidth, smemWidth)
+        := TLBuffer(ace = BufferParams.pipe, bd = BufferParams.none)
+        := g.spad.spad_writer.get.node)
       (shrunk, g.config.max_spad_writer_bytes min smemWidth)
     }, "gemmini_ws")
   val spadSpWriteNodes = Seq.fill(smemBanks)(spadSpWriteNodesSingleBank) // executed only once
