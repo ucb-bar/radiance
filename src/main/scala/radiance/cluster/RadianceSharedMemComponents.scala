@@ -162,8 +162,13 @@ class RadianceSharedMemComponents(
     .map(connectOne(_, () => RWSplitterNode(f"muon_aligned_splitter")))
   val muonAligned = Seq.fill(2)(muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
 
-  val quantOutputNodes = Seq.fill(smemBanks)(Seq.fill(smemSubbanks)(Seq[TLNexusNode]()))
-  // val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
+  val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
+    .map(q => q.numOutputLanes * q.maxOutputBits / 8))
+  val quantOutputNodesSingleBank = distAndDuplicate(
+    gemminiTiles.flatMap(_.requantizerSmemClient).map(x =>
+      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.head)
+    ), "quant_w")
+  val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
 
   // connect requantizer managers directly here TODO: move outside, make smemNodes xbars
   gemminiTiles.flatMap(_.requantizerMuonManager).foreach { qm =>
