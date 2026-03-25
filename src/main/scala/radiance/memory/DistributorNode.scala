@@ -124,7 +124,8 @@ class DistributorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyMo
         cn.d.valid := true.B
         when (cn.d.ready) {
           assert((arrived | partialFire).andR)
-          when (mn.head.d.valid) {
+          // only update metadata the first time lane 0 d fires
+          when (mn.head.d.valid && !arrived(0)) {
             setMetadata(cd, mn.head.d.bits)
           }.otherwise {
             cd := cdReg
@@ -139,7 +140,7 @@ class DistributorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyMo
         when (cn.d.ready) {
           arrived := arrived | partialValid
           cdReg.data := cdReg.data | partialData
-          when (mn.head.d.valid) { setMetadata(cdReg, mn.head.d.bits) }
+          when (mn.head.d.valid && !arrived(0)) { setMetadata(cdReg, mn.head.d.bits) }
         }
       }
     }
