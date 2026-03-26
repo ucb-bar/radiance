@@ -37,6 +37,18 @@ def resolve_bindiff_spec(
     return candidates[0]
 
 
+def extract_bindiff_failure_reason(bindiff_log_path: Path, fallback: str) -> str:
+    if not bindiff_log_path.exists():
+        return fallback
+    fail_line = None
+    with bindiff_log_path.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith("# FAIL:"):
+                fail_line = stripped
+    return fail_line if fail_line is not None else fallback
+
+
 def run_bindiff_from_spec(
     *,
     sqlite_path: Path,
@@ -143,7 +155,9 @@ def run_bindiff_from_spec(
 
     if diff_result.returncode == 0:
         return ("pass", "", str(bindiff_log_path))
-    return ("fail", f"bindiff failed with status {diff_result.returncode}", str(bindiff_log_path))
+    fallback = f"bindiff failed with status {diff_result.returncode}"
+    reason = extract_bindiff_failure_reason(bindiff_log_path, fallback)
+    return ("fail", reason, str(bindiff_log_path))
 
 
 def run_bindiff_from_sqlite(

@@ -58,6 +58,7 @@ def main():
     diff_count = 0
     printed = 0
     common_len = min(len(golden), len(candidate))
+    total_bytes = max(len(golden), len(candidate))
 
     print(f"# golden={args.golden} bytes={len(golden)}")
     print(f"# candidate={args.candidate} bytes={len(candidate)}")
@@ -111,7 +112,8 @@ def main():
         print(f"# ... {hidden} more differences not shown")
     if size_mismatch_line is not None:
         print(size_mismatch_line)
-    print(f"# FAIL: {diff_count} bytes differ")
+    diff_pct = 0.0 if total_bytes == 0 else 100.0 * diff_count / total_bytes
+    print(f"# FAIL: {diff_count}/{total_bytes} bytes differ ({diff_pct:.2f}%)")
     return 1
 
 
