@@ -28,7 +28,7 @@ class AliasingTLRAM(sizeInKB: Int,
   )))
 
   lazy val module = new LazyModuleImp(this) {
-    val backingSRAM = SRAM.masked(size = sizeInKB << 10, tpe = Vec(widthInBytes, UInt(8.W)), 0, 0, 1)
+    val backingSRAM = SRAM.masked(size = (sizeInKB << 10 / widthInBytes), tpe = Vec(widthInBytes, UInt(8.W)), 0, 0, 1)
     val port = backingSRAM.readwritePorts.head
     val mask = (sizeInKB << 10) - 1
 
