@@ -293,6 +293,7 @@ class TetheredRadianceTapeoutConfig extends Config(
   new chipyard.harness.WithMultiChipSerialTL(0, 1) ++                // connect the serial-tl ports of the chips together
   new chipyard.harness.WithMultiChip(0, new Config(
     new WithRadianceTapeoutPeripherals ++
+    new WithGPUResetAggregator(defaultReset = true) ++
     new RadianceTapeoutSimConfig)
   ) ++ // ChipTop0 is the design-to-be-taped-out
   new chipyard.harness.WithMultiChip(1, new RadianceBringupHostConfig))  // ChipTop1 is the bringup design
