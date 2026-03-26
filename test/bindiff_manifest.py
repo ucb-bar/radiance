@@ -18,6 +18,25 @@ def load_bindiff_manifest(script_dir: Path) -> dict[str, dict[str, object]]:
     return data
 
 
+def resolve_bindiff_spec(
+    manifest: dict[str, dict[str, object]], sqlite_name: str
+) -> tuple[str, dict[str, object] | None]:
+    exact = manifest.get(sqlite_name)
+    if exact is not None:
+        return (sqlite_name, exact)
+
+    candidates = [
+        (manifest_name, spec)
+        for manifest_name, spec in manifest.items()
+        if manifest_name in sqlite_name
+    ]
+    if not candidates:
+        return (sqlite_name, None)
+
+    candidates.sort(key=lambda item: len(item[0]), reverse=True)
+    return candidates[0]
+
+
 def run_bindiff_from_spec(
     *,
     sqlite_path: Path,
@@ -136,8 +155,7 @@ def run_bindiff_from_sqlite(
     script_dir = script_dir.resolve() if script_dir is not None else Path(__file__).resolve().parent
     chipyard_dir = script_dir.parents[2].resolve()
     manifest = load_bindiff_manifest(script_dir)
-    elf_name = sqlite_path.stem
-    bindiff_spec = manifest.get(elf_name)
+    elf_name, bindiff_spec = resolve_bindiff_spec(manifest, sqlite_path.stem)
     if log_dir is None:
         log_dir = sqlite_path.parent
     return run_bindiff_from_spec(

@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from bindiff_manifest import load_bindiff_manifest, run_bindiff_from_spec
+from bindiff_manifest import load_bindiff_manifest, resolve_bindiff_spec, run_bindiff_from_spec
 
 myname = Path(sys.argv[0]).name
 
@@ -67,19 +67,20 @@ def main():
         if result.get("status") != "pass":
             continue
 
-        bindiff_spec = bindiff_manifest.get(name)
-        if bindiff_spec is None:
-            continue
-
         sqlite_path_str = result.get("sqlite_path")
         if sqlite_path_str:
             sqlite_path = Path(sqlite_path_str).resolve()
         else:
             sqlite_path = chipyard_dir / "sims/vcs" / f"{name}.sqlite"
+
+        elf_name, bindiff_spec = resolve_bindiff_spec(bindiff_manifest, sqlite_path.stem)
+        if bindiff_spec is None:
+            continue
+
         print(f"[{myname}] bindiff {name}")
         bindiff_status, bindiff_failure_reason, bindiff_log_path = run_bindiff_from_spec(
             sqlite_path=sqlite_path,
-            elf_name=name,
+            elf_name=elf_name,
             log_dir=log_dir,
             chipyard_dir=chipyard_dir,
             script_dir=script_dir,
