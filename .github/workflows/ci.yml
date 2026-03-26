@@ -188,10 +188,10 @@ jobs:
     name: Run Core-standalone binary tests
     runs-on: as4
     needs: build
+    continue-on-error: true
     steps:
       - name: Run binary tests on core-as-top config
         # waive non-essential core/cosim tests tapeout
-        continue-on-error: true
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
@@ -218,10 +218,10 @@ jobs:
     name: Run Cyclotron-as-a-Tile Co-sim binary tests
     runs-on: as4
     needs: build
+    continue-on-error: true
     steps:
       - name: Run binary tests on backend co-sim config
         # waive non-essential core/cosim tests tapeout
-        continue-on-error: true
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
