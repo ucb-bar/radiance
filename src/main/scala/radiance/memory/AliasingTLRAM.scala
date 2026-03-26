@@ -41,8 +41,10 @@ class AliasingTLRAM(sizeInKB: Int,
 
     val skidBuffer = Module(new Queue(gen = node.d.bits.cloneType, 2, false, false))
     skidBuffer.io.enq.valid := RegNext(node.a.fire)
-    skidBuffer.io.enq.bits := RegNext(edge.AccessAck(node.a.bits))
-    skidBuffer.io.enq.bits.data := port.readData
+    skidBuffer.io.enq.bits := Mux(
+      node.a.bits.opcode === TLMessages.Get,
+      edge.AccessAck(RegNext(node.a.bits)),
+      edge.AccessAck(RegNext(node.a.bits), port.readData))
     node.a.ready := skidBuffer.io.count <= 1.U
 
     node.d.valid := skidBuffer.io.deq.valid
