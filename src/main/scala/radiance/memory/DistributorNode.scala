@@ -144,6 +144,7 @@ class DistributorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyMo
         }
       }
     }
+    cd.size := log2Ceil(from).U
   }
 }
 
