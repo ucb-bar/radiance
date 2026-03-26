@@ -17,9 +17,6 @@ SIM_TIMEOUT = 30 * 60  # seconds
 
 # list of (config, test_name) that are waived
 waivers = [
-    # these are waived due to outdated binaries; higher priority to fix
-    ("soc", "gemv"),
-    ("soc", "swiglu"),
     # these are confirmed working in end-to-end kernels, but not root-caused
     # for isa-tests
     ("soc", "mu32-p-flush"),
