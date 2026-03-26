@@ -83,6 +83,7 @@ def render_markdown(run_result):
     passed = run_result["passed"]
     failed = run_result["failed"]
     timed_out = run_result["timed_out"]
+    waived = run_result.get("waived", 0)
     sim_binary = run_result["sim_binary"]
     results = sorted(run_result["results"], key=lambda result: result["name"])
 
@@ -90,7 +91,7 @@ def render_markdown(run_result):
     lines.append(f"## Binary Test Report: `{config}`")
     lines.append("")
     lines.append(
-        f"Summary: {passed} passed, {failed} failed, {timed_out} timed out, {total} total"
+        f"Summary: {passed} passed, {failed} failed, {timed_out} timed out, {waived} waived, {total} total"
     )
     lines.append("")
     lines.append(f"Simulator: `{sim_binary}`")
@@ -110,7 +111,7 @@ def render_markdown(run_result):
             )
         )
 
-    failures = [r for r in results if r["status"] != "pass"]
+    failures = [r for r in results if r["status"] not in ("pass", "waived")]
     if failures:
         lines.append("")
         lines.append("### Failures")

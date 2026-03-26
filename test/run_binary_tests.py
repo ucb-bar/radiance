@@ -82,6 +82,7 @@ class RunResult:
     passed: int
     failed: int
     timed_out: int
+    waived: int
     results: list[TestResult]
 
     @property
@@ -307,6 +308,7 @@ def summarize_results(config, binary, log_dir, results):
     passed = sum(1 for result in results if result.status == "pass")
     failed = sum(1 for result in results if result.status == "fail")
     timed_out = sum(1 for result in results if result.status == "timeout")
+    waived = sum(1 for result in results if result.status == "waived")
     return RunResult(
         config=config,
         sim_binary=str(binary),
@@ -315,6 +317,7 @@ def summarize_results(config, binary, log_dir, results):
         passed=passed,
         failed=failed,
         timed_out=timed_out,
+        waived=waived,
         results=results,
     )
 
@@ -324,6 +327,29 @@ def write_json_result(json_path, run_result: RunResult):
     with json_path.open("w", encoding="utf-8") as f:
         json.dump(asdict(run_result), f, indent=2)
         f.write("\n")
+
+
+def make_waived_result(config: str, elf: Path, log_dir: Path) -> TestResult:
+    elf = elf.resolve()
+    elf_name = elf.name
+    reason = f"waived for config '{config}'"
+    return TestResult(
+        name=elf_name,
+        elf=str(elf),
+        config=config,
+        status="waived",
+        exit_code=0,
+        duration_sec=0.0,
+        log_path=str(log_dir / f"{elf_name}.log"),
+        sqlite_path=str((log_dir / f"{elf_name}.sqlite").resolve()),
+        stderr_path=str(log_dir / f"{elf_name}.out"),
+        failure_reason=reason,
+        cycles=[],
+        ipc=[],
+        bindiff_status=None,
+        bindiff_failure_reason="",
+        bindiff_log_path=None,
+    )
 
 
 # single-threaded
@@ -391,6 +417,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_
 
                 if (config, elf.name) in waivers:
                     print(f"[{myname}] waived {elf} for config '{config}'")
+                    results.append(make_waived_result(config, elf, log_dir))
                     continue
 
                 running.append(
