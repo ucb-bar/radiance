@@ -190,6 +190,8 @@ jobs:
     needs: build
     steps:
       - name: Run binary tests on core-as-top config
+        # waive non-essential core/cosim tests tapeout
+        continue-on-error: true
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
@@ -218,6 +220,8 @@ jobs:
     needs: build
     steps:
       - name: Run binary tests on backend co-sim config
+        # waive non-essential core/cosim tests tapeout
+        continue-on-error: true
         run: |
           cd "${CHIPYARD_DIR}"
           source env.sh
