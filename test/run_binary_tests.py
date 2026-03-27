@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TextIO
 
 myname = Path(sys.argv[0]).name
-SIM_TIMEOUT = 45 * 60  # seconds
+DEFAULT_SIM_TIMEOUT = 45 * 60  # seconds
 
 # list of (config, test_name) that are waived
 waivers = [
@@ -250,12 +250,13 @@ def finalize_test(
     config: str,
     test: RunningTest,
     status: int,
+    timeout_sec: int,
 ) -> TestResult:
     duration_sec = time.monotonic() - test.start_time
     try:
         cycles, ipc = extract_ipc_results(test.log_path)
         if test.timed_out:
-            print(f"[{myname}] FAIL: {test.elf}: timeout after {SIM_TIMEOUT}s")
+            print(f"[{myname}] FAIL: {test.elf}: timeout after {timeout_sec}s")
             return TestResult(
                 name=test.elf.name,
                 elf=str(test.elf),
@@ -266,7 +267,7 @@ def finalize_test(
                 log_path=str(test.log_path),
                 sqlite_path=str(test.sqlite_path),
                 stderr_path=str(test.err_file.name),
-                failure_reason=f"timeout after {SIM_TIMEOUT}s",
+                failure_reason=f"timeout after {timeout_sec}s",
                 cycles=cycles,
                 ipc=ipc,
                 bindiff_status=None,
@@ -367,10 +368,10 @@ def make_waived_result(config: str, elf: Path, log_dir: Path) -> TestResult:
 
 
 # single-threaded
-def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
+def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir, timeout_sec):
     test = launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir)
     try:
-        status = test.process.wait(timeout=SIM_TIMEOUT)
+        status = test.process.wait(timeout=timeout_sec)
     except subprocess.TimeoutExpired:
         test.timed_out = True
         test.process.kill()
@@ -379,6 +380,7 @@ def run_binary(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         config,
         test,
         status,
+        timeout_sec,
     )
     return summarize_results(config, binary, log_dir, [result])
 
@@ -406,7 +408,7 @@ def default_elf_dir(config, script_dir):
     return cyclotron_dir / "test" / "isa-tests"
 
 
-def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_dir=None):
+def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, timeout_sec, elf_dir=None):
     print(f"[{myname}] sweeping all ELF tests using {jobs} parallel jobs")
 
     elf_dir = Path(elf_dir) if elf_dir is not None else default_elf_dir(config, script_dir)
@@ -448,7 +450,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_
                 status = test.process.poll()
                 if status is None:
                     elapsed = time.monotonic() - test.start_time
-                    if elapsed > SIM_TIMEOUT:
+                    if elapsed > timeout_sec:
                         test.timed_out = True
                         test.process.kill()
                         status = test.process.wait()
@@ -459,6 +461,7 @@ def sweep(config, binary, log_dir, script_dir, chipyard_dir, sim_dir, jobs, elf_
                     config,
                     test,
                     status,
+                    timeout_sec,
                 )
                 results.append(result)
 
@@ -513,6 +516,8 @@ def parse_args():
                         help="directory to recursively search for ELF binaries when sweeping")
     parser.add_argument('-j', '--jobs', type=int, default=1,
                         help="maximum number of parallel simulations (default: 1)")
+    parser.add_argument('--timeout', type=int, default=DEFAULT_SIM_TIMEOUT,
+                        help=f"per-test simulator timeout in seconds (default: {DEFAULT_SIM_TIMEOUT})")
     return parser.parse_args()
 
 
@@ -532,11 +537,13 @@ def main():
     log_dir = log_dir_base / config
     sim_binary = get_and_check_sim_binary(config, sim_dir)
     jobs = args.jobs if args.jobs and args.jobs > 0 else 1
+    timeout_sec = args.timeout if args.timeout and args.timeout > 0 else DEFAULT_SIM_TIMEOUT
     json_out = Path(args.json_out).resolve() if args.json_out else (log_dir / "results.json")
     print(f"[{myname}] using config '{config}'")
     print(f"[{myname}] sim binary: {sim_binary}")
     print(f"[{myname}] writing logs to {log_dir}")
     print(f"[{myname}] writing json to {json_out}")
+    print(f"[{myname}] per-test timeout: {timeout_sec}s")
 
     if args.binary:
         elf = Path(args.binary).resolve()
@@ -547,6 +554,7 @@ def main():
             log_dir,
             chipyard_dir,
             sim_dir,
+            timeout_sec,
         )
     else:
         run_result = sweep(
@@ -557,6 +565,7 @@ def main():
             chipyard_dir,
             sim_dir,
             jobs,
+            timeout_sec,
             args.elf_dir,
         )
     write_json_result(json_out, run_result)
