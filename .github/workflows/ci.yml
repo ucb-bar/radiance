@@ -134,10 +134,11 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd sims/vcs
-          make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
+          make debug CONFIG=RadianceTapeoutSimTraceConfig
+          make debug CONFIG=TetheredRadianceTapeoutConfig
           make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
           make debug CONFIG=RadianceCyclotronConfig
-          make debug CONFIG=RadianceTapeoutSimTraceConfig
+          make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
 
   run-unit-tests:
     name: Run Unit-tests
@@ -244,6 +245,34 @@ jobs:
             "${CHIPYARD_RUN_LOG_DIR}/cosim/results.json" \
             --github-step-summary
 
+  run-tethered-binary-tests:
+    name: Run Host-launch binary tests
+    runs-on: as4
+    needs: build
+    steps:
+      - name: Run binary tests on host-launch config
+        run: |
+          cd "${CHIPYARD_DIR}"
+          source env.sh
+          source /ecad/tools/vlsi.bashrc
+          cd generators/radiance
+          python3 test/run_binary_tests.py -j "$(nproc)" -c hostlaunch \
+            --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
+            --elf-dir cyclotron/test/host-launch \
+            --json-out "${CHIPYARD_RUN_LOG_DIR}/hostlaunch/results.json"
+      - name: Run bindiff tests on host-launch config
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/run_bindiff_tests.py "${CHIPYARD_RUN_LOG_DIR}/hostlaunch/results.json"
+      - name: Render binary test report
+        if: always()
+        run: |
+          cd "${CHIPYARD_DIR}/generators/radiance"
+          python3 test/render_binary_test_report.py \
+            "${CHIPYARD_RUN_LOG_DIR}/hostlaunch/results.json" \
+            --github-step-summary
+
   # run-backend-cosim-binary-tests:
   #   name: Run Backend Co-sim binary tests
   #   runs-on: as4
@@ -269,7 +298,7 @@ jobs:
   clean:
     name: Clean
     runs-on: as4
-    needs: [build, run-unit-tests, run-soc-binary-tests, run-core-binary-tests, run-cosim-binary-tests]
+    needs: [build, run-unit-tests, run-soc-binary-tests, run-core-binary-tests, run-cosim-binary-tests, run-tethered-binary-tests]
     if: always()
     steps:
       - name: Cleanup workspace, chipyard and conda
