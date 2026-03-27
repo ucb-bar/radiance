@@ -274,6 +274,11 @@ class RadianceTapeoutSimTraceConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceTapeoutSimTraceHostLaunchConfig extends Config(
+  new WithGPUResetAggregator(defaultReset = true) ++
+  new RadianceTapeoutSimTraceConfig
+)
+
 class RadianceTapeoutSimConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(1), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
