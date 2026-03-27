@@ -169,6 +169,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c hostlaunch \
+            --timeout 3600 \
             --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/host-launch \
             --json-out "${CHIPYARD_RUN_LOG_DIR}/hostlaunch/results.json"
