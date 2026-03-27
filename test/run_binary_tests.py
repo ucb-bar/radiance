@@ -171,6 +171,8 @@ def get_and_check_sim_binary(config, sim_dir):
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig-debug"
     elif config == "cosim":
         sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig-debug"
+    elif config == "hostlaunch":
+        sim_binary = sim_dir / "simv-chipyard.harness-TetheredRadianceTapeoutConfig-debug"
     elif config == "backend":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
     else:
@@ -399,6 +401,8 @@ def default_elf_dir(config, script_dir):
     cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc" or config == "cosim":
         return cyclotron_dir / "test" / "fused"
+    if config == "hostlaunch":
+        return cyclotron_dir / "test" / "host-launch"
     return cyclotron_dir / "test" / "isa-tests"
 
 
@@ -515,8 +519,8 @@ def parse_args():
 def main():
     args = parse_args()
     config = args.config
-    if not (config == "soc" or config == "core" or config == "cosim" or config == "backend"):
-        print(f"error: unknown config '{config}'. must be (soc|core|cosim|backend)")
+    if not (config == "soc" or config == "core" or config == "cosim" or config == "hostlaunch" or config == "backend"):
+        print(f"error: unknown config '{config}'. must be (soc|core|cosim|hostlaunch|backend)")
         sys.exit(1)
 
     script_dir = Path(__file__).resolve().parent
