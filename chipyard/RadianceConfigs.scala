@@ -103,7 +103,7 @@ class WithRadianceControlBus extends Config ((site, here, up) => {
   // this bus key propagates to ccbus and clcbus, might need to split off
 })
 
-class WithRadianceTapeoutPeripherals extends Config(
+class WithRadianceTapeoutPeripheralsBase extends Config(
   new testchipip.soc.WithChipIdPin ++                               // Add pin to identify chips
   new chipyard.harness.WithSerialTLTiedOff(tieoffs=Some(Seq(1))) ++ // Tie-off the chip-to-chip link in single-chip sims
   new testchipip.serdes.WithSerialTL(Seq(
@@ -143,8 +143,16 @@ class WithRadianceTapeoutPeripherals extends Config(
   ) ++
   new testchipip.soc.WithOffchipBus ++
   new freechips.rocketchip.subsystem.WithNoMemPort ++
-  new WithRadianceSimParams(false) ++
-  new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v")
+  new WithRadianceSimParams(false)
+)
+
+class WithRadianceTapeoutPeripherals extends Config(
+  new freechips.rocketchip.subsystem.WithClockGateModel("/vsrc/TSMCCGWrapper.v") ++
+  new WithRadianceTapeoutPeripheralsBase
+)
+
+class WithRadianceTapeoutPeripheralsNoClockGate extends Config(
+  new WithRadianceTapeoutPeripheralsBase
 )
 
 class RadianceBringupHostConfig extends Config(
@@ -292,9 +300,9 @@ class TetheredRadianceTapeoutConfig extends Config(
   new chipyard.harness.WithAbsoluteFreqHarnessClockInstantiator ++   // use absolute freqs for sims in the harness
   new chipyard.harness.WithMultiChipSerialTL(0, 1) ++                // connect the serial-tl ports of the chips together
   new chipyard.harness.WithMultiChip(0, new Config(
-    new WithRadianceTapeoutPeripherals ++
+    new WithRadianceTapeoutPeripheralsNoClockGate ++
     new WithGPUResetAggregator(defaultReset = true) ++
-    new RadianceTapeoutSimConfig)
+    new RadianceTapeoutSimTraceConfig)
   ) ++ // ChipTop0 is the design-to-be-taped-out
   new chipyard.harness.WithMultiChip(1, new RadianceBringupHostConfig))  // ChipTop1 is the bringup design
 
