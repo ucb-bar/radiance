@@ -6,15 +6,16 @@ import freechips.rocketchip.tilelink.TLAdapterNode
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule._
 
-class ResponseFIFOFixer(implicit p: Parameters) extends LazyModule {
+class ResponseFIFOFixer(throwAwayPrefix: Int = 0)
+                       (implicit p: Parameters) extends LazyModule {
   val node = TLAdapterNode(clientFn = c => c, managerFn = m => m)
 
   lazy val module = new LazyModuleImp(this) {
 
     (node.out zip node.in).foreach { case ((ob, _), (ib, _)) =>
       val sourceBits = ib.params.sourceBits
-
-      val buffer = RegInit(VecInit.fill(1 << sourceBits)(0.U.asTypeOf(Valid(ob.d.bits.cloneType))))
+      val entryBits = sourceBits - throwAwayPrefix
+      val buffer = RegInit(VecInit.fill(1 << entryBits)(0.U.asTypeOf(Valid(ob.d.bits.cloneType))))
       val ids = Module(new Queue(UInt(sourceBits.W), 1 << sourceBits, false, true))
 
       // track all outgoing A request sources
@@ -33,11 +34,12 @@ class ResponseFIFOFixer(implicit p: Parameters) extends LazyModule {
       val oldestSource = WireInit(ids.io.deq.bits)
       val responseInOrder = oldestSource === ob.d.bits.source
       val inOrderValid = responseInOrder && ob.d.valid
-      val bufferedValid = buffer(oldestSource).valid
+      val bufferedValid = buffer(oldestSource(entryBits - 1, 0)).valid
+      val currDinBuf = buffer(ob.d.bits.source(entryBits - 1, 0))
 
       ib.d.valid := inOrderValid || bufferedValid
-      ib.d.bits := Mux(inOrderValid, ob.d.bits, buffer(oldestSource).bits)
-      ob.d.ready := Mux(inOrderValid, ib.d.ready, !buffer(ob.d.bits.source).valid)
+      ib.d.bits := Mux(inOrderValid, ob.d.bits, buffer(oldestSource(entryBits -  1, 0)).bits)
+      ob.d.ready := Mux(inOrderValid, ib.d.ready, !currDinBuf.valid)
 
       when (ib.d.fire) {
         when (bufferedValid) {
@@ -49,8 +51,8 @@ class ResponseFIFOFixer(implicit p: Parameters) extends LazyModule {
       when (ob.d.fire) {
         when (!responseInOrder) {
           // store ooo response in buffer
-          buffer(ob.d.bits.source).bits := ob.d.bits
-          buffer(ob.d.bits.source).valid := true.B
+          currDinBuf.bits := ob.d.bits
+          currDinBuf.valid := true.B
         }
       }
 
@@ -58,7 +60,7 @@ class ResponseFIFOFixer(implicit p: Parameters) extends LazyModule {
         "conflicting sources of d bits")
       assert(!inOrderValid || (ib.d.fire === ob.d.fire),
         "in order entry dropped")
-      assert(!ob.d.fire || inOrderValid || !buffer(ob.d.bits.source).valid,
+      assert(!ob.d.fire || inOrderValid || !currDinBuf.valid,
         "writing ooo entry that's already valid")
     }
   }
@@ -67,5 +69,9 @@ class ResponseFIFOFixer(implicit p: Parameters) extends LazyModule {
 object ResponseFIFOFixer {
   def apply()(implicit p: Parameters) = {
     LazyModule(new ResponseFIFOFixer).node
+  }
+
+  def apply(throwAwayPrefix: Int)(implicit p: Parameters) = {
+    LazyModule(new ResponseFIFOFixer(throwAwayPrefix)).node
   }
 }

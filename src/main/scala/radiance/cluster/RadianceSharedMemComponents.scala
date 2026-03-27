@@ -116,7 +116,8 @@ class RadianceSharedMemComponents(
   }
 
 
-  def distAndDuplicate(nodesAndWidths: Seq[(TLNode, Int)], suffix: String): Seq[Seq[TLNexusNode]] = {
+  def distAndDuplicate(nodesAndWidths: Seq[(TLNode, Int)],
+                       suffix: String, ordered: Boolean = false): Seq[Seq[TLNexusNode]] = {
     val wordFanoutNodes = nodesAndWidths.zipWithIndex.map { case ((node, width), i) =>
       val spSubbanks = width / wordSize
       val dist = DistributorNode(from = width, to = wordSize)
@@ -125,9 +126,17 @@ class RadianceSharedMemComponents(
       }
       val fanout = Seq.tabulate(spSubbanks) { w =>
         // TODO: do we need this skid buffer
-        val buf = TLBuffer(BufferParams(2, false, false), BufferParams(0))
+        val buf = TLBuffer(BufferParams.pipe, BufferParams(0))
         buf := dist
-        connectXbarName(buf, Some(s"dist_fanout_$suffix${i}w${w}"))
+        val fanoutSource = if (ordered) {
+          // first 2 bits are xbar artifacts
+          val fifoFixer = ResponseFIFOFixer(throwAwayPrefix = log2Ceil(smemWidth / width))
+          fifoFixer := buf
+          fifoFixer
+        } else {
+          buf
+        }
+        connectXbarName(fanoutSource, Some(s"dist_fanout_$suffix${i}w${w}"), TLArbiter.lowestIndexFirst)
       }
       Seq.fill(smemWidth / width)(fanout).flatten // smem wider than spad, duplicate masters
     }
@@ -143,7 +152,8 @@ class RadianceSharedMemComponents(
 
   // (banks, subbanks, gemminis)
   val spadReadNodes = Seq.fill(smemBanks) {
-    distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width_projected / 8)), "gemmini_r")
+    distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width_projected / 8)),
+      "gemmini_r", ordered = true)
   }
   // TODO: these nodes probably dont do anything, eliminate?
   val spadWriteNodes = Seq.fill(smemBanks) {
