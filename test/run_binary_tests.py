@@ -171,7 +171,7 @@ def get_and_check_sim_binary(config, sim_dir):
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig-debug"
     elif config == "cosim":
         sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig-debug"
-    elif config == "hostlaunch":
+    elif config == "tethered":
         sim_binary = sim_dir / "simv-chipyard.harness-TetheredRadianceTapeoutConfig-debug"
     elif config == "backend":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
@@ -403,7 +403,7 @@ def default_elf_dir(config, script_dir):
     cyclotron_dir = radiance_dir / "cyclotron"
     if config == "soc" or config == "cosim":
         return cyclotron_dir / "test" / "fused"
-    if config == "hostlaunch":
+    if config == "tethered":
         return cyclotron_dir / "test" / "host-launch"
     return cyclotron_dir / "test" / "isa-tests"
 
@@ -506,7 +506,7 @@ def parse_args():
     parser.add_argument('binary', nargs="?",
                         help="ELF to run; if omitted, sweeps found ELFs on its own")
     parser.add_argument('-c', '--config', default='soc',
-                        help="testbench config to run; (soc|core|cosim|backend). default is 'soc'")
+                        help="testbench config to run; (soc|core|cosim|tethered|backend). default is 'soc'")
     parser.add_argument('--log-dir', default='binary-test-logs',
                         help="directory to be created to place the logs. default is 'binary-test-logs'")
     parser.add_argument('--json-out',
@@ -524,8 +524,8 @@ def parse_args():
 def main():
     args = parse_args()
     config = args.config
-    if not (config == "soc" or config == "core" or config == "cosim" or config == "hostlaunch" or config == "backend"):
-        print(f"error: unknown config '{config}'. must be (soc|core|cosim|hostlaunch|backend)")
+    if not (config == "soc" or config == "core" or config == "cosim" or config == "tethered" or config == "backend"):
+        print(f"error: unknown config '{config}'. must be (soc|core|cosim|tethered|backend)")
         sys.exit(1)
 
     script_dir = Path(__file__).resolve().parent

@@ -168,7 +168,7 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
-          python3 test/run_binary_tests.py -j "$(nproc)" -c hostlaunch \
+          python3 test/run_binary_tests.py -j "$(nproc)" -c tethered \
             --timeout 3600 \
             --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/host-launch \
