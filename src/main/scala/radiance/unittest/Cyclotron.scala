@@ -584,9 +584,11 @@ extends CoreModule {
   bbox.io.instRetired := io.perf.backend.instRetired
   bbox.io.cycles := io.perf.backend.cycles
   bbox.io.cyclesDecoded := io.perf.frontend.cyclesDecoded
+  bbox.io.cyclesDispatched := io.perf.backend.cyclesDispatched
   bbox.io.cyclesEligible := io.perf.backend.cyclesEligible
   bbox.io.cyclesIssued := io.perf.backend.cyclesIssued
   bbox.io.perWarp_cyclesDecoded := VecInit(io.perf.frontend.perWarp.map(_.cyclesDecoded)).asUInt
+  bbox.io.perWarp_cyclesDispatched := VecInit(io.perf.backend.perWarp.map(_.cyclesDispatched)).asUInt
   bbox.io.perWarp_cyclesIssued := VecInit(io.perf.backend.perWarp.map(_.cyclesIssued)).asUInt
   bbox.io.perWarp_stallsWAW := VecInit(io.perf.backend.perWarp.map(_.stallsWAW)).asUInt
   bbox.io.perWarp_stallsWAR := VecInit(io.perf.backend.perWarp.map(_.stallsWAR)).asUInt
@@ -608,9 +610,11 @@ extends CoreModule {
       val instRetired = Input(Perf.T)
       val cycles = Input(Perf.T)
       val cyclesDecoded = Input(Perf.T)
+      val cyclesDispatched = Input(Perf.T)
       val cyclesEligible = Input(Perf.T)
       val cyclesIssued = Input(Perf.T)
       val perWarp_cyclesDecoded = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
+      val perWarp_cyclesDispatched = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_cyclesIssued = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAW = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_stallsWAR = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))

@@ -53,12 +53,17 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.io.issue
   }
 
+  val cyclesDispatched = PerfCounter(reservStation.io.admit.fire)
   val cyclesEligible = PerfCounter(issued.valid)
   val cyclesIssued = PerfCounter(issued.fire)
 
+  io.perf.cyclesDispatched := cyclesDispatched
   io.perf.cyclesEligible := cyclesEligible
   io.perf.cyclesIssued := cyclesIssued
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.cyclesDispatched :=
+      PerfCounter(reservStation.io.admit.fire &&
+                  (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
     // to be added separately
@@ -124,6 +129,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset
   execute.io.feCSR := io.feCSR
+  execute.io.beCSR.cyclesDispatched := cyclesDispatched
   execute.io.beCSR.cyclesEligible := cyclesEligible
   execute.io.beCSR.cyclesIssued := cyclesIssued
   execute.io.barrier <> io.barrier
@@ -309,11 +315,14 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
   val instRetired = Perf.T
   /** total elapsed cycle */
   val cycles = Perf.T
+  /** any warp dispatched from IBUF->RS this cycle? */
+  val cyclesDispatched = Perf.T
   /** any warp eligible for issue this cycle? */
   val cyclesEligible = Perf.T
   /** any warp issued this cycle? */
   val cyclesIssued = Perf.T
   val perWarp = Vec(numWarps, new Bundle {
+    val cyclesDispatched = Perf.T
     val cyclesIssued = Perf.T
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T

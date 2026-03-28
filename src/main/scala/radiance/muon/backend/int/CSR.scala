@@ -18,10 +18,12 @@ abstract class MuonCSR(
 object PerfCSRs {
   val mcycleDecoded = CSRs.mhpmcounter3
   val mcycleDecodedh = CSRs.mhpmcounter3h
-  val mcycleEligible = CSRs.mhpmcounter4
-  val mcycleEligibleh = CSRs.mhpmcounter4h
-  val mcycleIssued = CSRs.mhpmcounter5
-  val mcycleIssuedh = CSRs.mhpmcounter5h
+  val mcycleDispatched = CSRs.mhpmcounter4
+  val mcycleDispatchedh = CSRs.mhpmcounter4h
+  val mcycleEligible = CSRs.mhpmcounter5
+  val mcycleEligibleh = CSRs.mhpmcounter5h
+  val mcycleIssued = CSRs.mhpmcounter6
+  val mcycleIssuedh = CSRs.mhpmcounter6h
 }
 
 class CSRFile(
@@ -35,6 +37,7 @@ class CSRFile(
   tmask: UInt,
   mcycle: UInt,
   mcycleDecoded: UInt,
+  mcycleDispatched: UInt,
   mcycleEligible: UInt,
   mcycleIssued: UInt,
   minstret: UInt,
@@ -78,6 +81,8 @@ class CSRFile(
   case object MInstRetH  extends MuonCSR(CSRs.minstreth, accessor = wrap(minstret(63, 32)))
   case object MCycleDec  extends MuonCSR(PerfCSRs.mcycleDecoded,   accessor = wrap(mcycleDecoded(31, 0)))
   case object MCycleDecH extends MuonCSR(PerfCSRs.mcycleDecodedh,  accessor = wrap(mcycleDecoded(63, 32)))
+  case object MCycleDisp  extends MuonCSR(PerfCSRs.mcycleDispatched, accessor = wrap(mcycleDispatched(31, 0)))
+  case object MCycleDispH extends MuonCSR(PerfCSRs.mcycleDispatchedh,accessor = wrap(mcycleDispatched(63, 32)))
   case object MCycleEli  extends MuonCSR(PerfCSRs.mcycleEligible,  accessor = wrap(mcycleEligible(31, 0)))
   case object MCycleEliH extends MuonCSR(PerfCSRs.mcycleEligibleh, accessor = wrap(mcycleEligible(63, 32)))
   case object MCycleIss  extends MuonCSR(PerfCSRs.mcycleIssued,    accessor = wrap(mcycleIssued(31, 0)))
@@ -95,7 +100,7 @@ class CSRFile(
     ThreadIdxX, ThreadIdxY, ThreadIdxZ,
     WarpMask, ThreadMask,
     MCycle, MCycleH, MInstRet, MInstRetH,
-    MCycleDec, MCycleDecH, MCycleEli, MCycleEliH, MCycleIss, MCycleIssH,
+    MCycleDec, MCycleDecH, MCycleDisp, MCycleDispH, MCycleEli, MCycleEliH, MCycleIss, MCycleIssH,
     FFlags, FRM, FCSR
   )
 

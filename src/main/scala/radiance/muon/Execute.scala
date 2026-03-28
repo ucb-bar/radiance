@@ -19,6 +19,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val flush = cacheFlushIO
     val softReset = Input(Bool())
     val beCSR = new Bundle {
+      val cyclesDispatched = Input(Perf.T)
       val cyclesEligible = Input(Perf.T)
       val cyclesIssued = Input(Perf.T)
     }
@@ -99,6 +100,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.csrIO.perf.mcycle := mcycleReg
   sfuPipe.csrIO.perf.minstret := minstretReg
   sfuPipe.csrIO.perf.mcycleDecoded := io.feCSR.cyclesDecoded
+  sfuPipe.csrIO.perf.mcycleDispatched := io.beCSR.cyclesDispatched
   sfuPipe.csrIO.perf.mcycleEligible := io.beCSR.cyclesEligible
   sfuPipe.csrIO.perf.mcycleIssued := io.beCSR.cyclesIssued
   sfuPipe.csrIO.wmask := io.feCSR.wmask

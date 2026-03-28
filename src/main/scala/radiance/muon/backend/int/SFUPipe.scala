@@ -15,6 +15,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     val perf = new Bundle {
       val mcycle = Input(Perf.T)
       val mcycleDecoded = Input(Perf.T)
+      val mcycleDispatched = Input(Perf.T)
       val mcycleEligible = Input(Perf.T)
       val mcycleIssued = Input(Perf.T)
       val minstret = Input(Perf.T)
@@ -186,6 +187,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     tmask          = uop.tmask,
     mcycle         = csrIO.perf.mcycle,
     mcycleDecoded  = csrIO.perf.mcycleDecoded,
+    mcycleDispatched = csrIO.perf.mcycleDispatched,
     mcycleEligible = csrIO.perf.mcycleEligible,
     mcycleIssued   = csrIO.perf.mcycleIssued,
     minstret       = csrIO.perf.minstret,
