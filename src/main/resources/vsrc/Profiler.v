@@ -15,6 +15,7 @@ module ProfilerBlackBox #(
   input logic [COUNTER_WIDTH-1:0] cyclesIssued,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesDecoded,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesDispatched,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesEligible,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesIssued,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAW,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAR,
@@ -28,6 +29,7 @@ module ProfilerBlackBox #(
 
   longint per_warp_cycles_decoded [0:NUM_WARPS-1];
   longint per_warp_cycles_dispatched [0:NUM_WARPS-1];
+  longint per_warp_cycles_eligible [0:NUM_WARPS-1];
   longint per_warp_cycles_issued [0:NUM_WARPS-1];
   longint per_warp_stalls_waw [0:NUM_WARPS-1];
   longint per_warp_stalls_war [0:NUM_WARPS-1];
@@ -41,6 +43,7 @@ module ProfilerBlackBox #(
     for (i = 0; i < NUM_WARPS; i = i + 1) begin
       assign per_warp_cycles_decoded[i] = perWarp_cyclesDecoded[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_cycles_dispatched[i] = perWarp_cyclesDispatched[i*COUNTER_WIDTH +: COUNTER_WIDTH];
+      assign per_warp_cycles_eligible[i] = perWarp_cyclesEligible[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_cycles_issued[i] = perWarp_cyclesIssued[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_waw[i] = perWarp_stallsWAW[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_war[i] = perWarp_stallsWAR[i*COUNTER_WIDTH +: COUNTER_WIDTH];
@@ -62,6 +65,7 @@ module ProfilerBlackBox #(
     input longint cycles_issued,
     input longint per_warp_cycles_decoded[NUM_WARPS],
     input longint per_warp_cycles_dispatched[NUM_WARPS],
+    input longint per_warp_cycles_eligible[NUM_WARPS],
     input longint per_warp_cycles_issued[NUM_WARPS],
     input longint per_warp_stalls_waw[NUM_WARPS],
     input longint per_warp_stalls_war[NUM_WARPS],
@@ -88,6 +92,7 @@ module ProfilerBlackBox #(
         cyclesIssued,
         per_warp_cycles_decoded,
         per_warp_cycles_dispatched,
+        per_warp_cycles_eligible,
         per_warp_cycles_issued,
         per_warp_stalls_waw,
         per_warp_stalls_war,

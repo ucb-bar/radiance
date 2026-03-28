@@ -36,6 +36,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       val readData = Flipped(new CollectorOperandRead)
     }
     val perf = Output(Vec(numWarps, new Bundle {
+      val cyclesEligible = Perf.T
       val stallsRSFull = Perf.T
     }))
   })
@@ -278,9 +279,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val newOpReadys = newOpReadyTable(i)
     val busys = busyTable(i)
     // using newOpReadys here considers ops that will-be-collected next cycle
-    // as issue-eligible, eliminating one cycle latency from coll req -> issue
+    // as issue-eligible, eliminating one cycle latency from coll done -> issue
     // sched. enabling this optimization also brings some area benefit, since
-    // reducing this latency allows shallower collector banks, which are
+    // reducing this latency allows for shallower collector banks, which are
     // generally large
     val allCollected = (if (muonParams.forwardCollectorIssue)
       newOpReadys else opReadys).reduce(_ && _)
@@ -318,7 +319,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       collPtrTable(i)
     })
 
-    // deregister upon issue
+    // retire from RS upon issue
     when (candidate.fire) {
       validTable(i) := false.B
     }
@@ -350,6 +351,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   //   // port.data input is not used
   // }
   dontTouch(issuedId)
+
+  // connect per-warp eligible perf counters
+  io.perf.zipWithIndex.foreach { case (p, wid) =>
+    val eligiblesThisWarp = eligibles.map { row =>
+      row.valid && (row.bits.entry.uop.wid === wid.U)
+    }
+    val hasEligibleThisWarp = eligiblesThisWarp.reduce(_ || _)
+    p.cyclesEligible := PerfCounter(hasEligibleThisWarp)
+  }
 
   // if not using collector, RS only directly uses the readData port and never
   // sends readReq / gets readResp back, so we need to signal scoreboard
