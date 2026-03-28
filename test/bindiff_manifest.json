@@ -54,5 +54,12 @@
     "trace_kind": "write",
     "trace_address": "0x40000000,0x40008000",
     "cluster_id": 0
+  },
+  "requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m64n64k64.fp8out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40001000",
+    "cluster_id": 0
   }
 }
