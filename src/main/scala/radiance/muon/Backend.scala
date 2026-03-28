@@ -64,6 +64,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     p.cyclesDispatched :=
       PerfCounter(reservStation.io.admit.fire &&
                   (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
+    p.stallsRSFull := reservStation.io.perf(wid).stallsRSFull
+
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
     // to be added separately
@@ -327,6 +329,7 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
     val stallsWAW = Perf.T
     val stallsWAR = Perf.T
     val stallsScoreboard = Perf.T
+    val stallsRSFull = Perf.T
     val stallsBusy = Perf.T
     val stallsBusyLSU = Perf.T
   })

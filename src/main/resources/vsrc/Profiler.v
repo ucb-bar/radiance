@@ -19,6 +19,7 @@ module ProfilerBlackBox #(
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAW,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAR,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsScoreboard,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsRSFull,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsBusy,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsBusyLSU
 );
@@ -31,6 +32,7 @@ module ProfilerBlackBox #(
   longint per_warp_stalls_waw [0:NUM_WARPS-1];
   longint per_warp_stalls_war [0:NUM_WARPS-1];
   longint per_warp_stalls_scoreboard [0:NUM_WARPS-1];
+  longint per_warp_stalls_rs_full [0:NUM_WARPS-1];
   longint per_warp_stalls_busy [0:NUM_WARPS-1];
   longint per_warp_stalls_busy_lsu [0:NUM_WARPS-1];
 
@@ -43,6 +45,7 @@ module ProfilerBlackBox #(
       assign per_warp_stalls_waw[i] = perWarp_stallsWAW[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_war[i] = perWarp_stallsWAR[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_scoreboard[i] = perWarp_stallsScoreboard[i*COUNTER_WIDTH +: COUNTER_WIDTH];
+      assign per_warp_stalls_rs_full[i] = perWarp_stallsRSFull[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_busy[i] = perWarp_stallsBusy[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_busy_lsu[i] = perWarp_stallsBusyLSU[i*COUNTER_WIDTH +: COUNTER_WIDTH];
     end
@@ -63,6 +66,7 @@ module ProfilerBlackBox #(
     input longint per_warp_stalls_waw[NUM_WARPS],
     input longint per_warp_stalls_war[NUM_WARPS],
     input longint per_warp_stalls_scoreboard[NUM_WARPS],
+    input longint per_warp_stalls_rs_full[NUM_WARPS],
     input longint per_warp_stalls_busy[NUM_WARPS],
     input longint per_warp_stalls_busy_lsu[NUM_WARPS],
     input bit     finished
@@ -88,6 +92,7 @@ module ProfilerBlackBox #(
         per_warp_stalls_waw,
         per_warp_stalls_war,
         per_warp_stalls_scoreboard,
+        per_warp_stalls_rs_full,
         per_warp_stalls_busy,
         per_warp_stalls_busy_lsu,
         finished

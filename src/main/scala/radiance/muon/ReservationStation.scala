@@ -35,6 +35,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
+    val perf = Output(Vec(numWarps, new Bundle {
+      val stallsRSFull = Perf.T
+    }))
   })
 
   val numEntries = muonParams.numIssueQueueEntries
@@ -97,6 +100,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
+  io.perf.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsRSFull :=
+      PerfCounter(io.admit.valid && !hasEmptyRow &&
+                  io.admit.bits.ibufEntry.uop.wid === wid.U)
+  }
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
   when (io.admit.fire) {
