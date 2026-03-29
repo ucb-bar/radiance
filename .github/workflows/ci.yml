@@ -134,11 +134,11 @@ jobs:
           source env.sh
           source /ecad/tools/vlsi.bashrc
           cd sims/vcs
-          make debug CONFIG=RadianceTapeoutSimTraceConfig
-          make debug CONFIG=TetheredRadianceTapeoutConfig
-          make debug SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
-          make debug CONFIG=RadianceCyclotronConfig
-          make debug SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
+          make default CONFIG=RadianceTapeoutSimTraceConfig
+          make default CONFIG=TetheredRadianceTapeoutConfig
+          make default SUB_PROJECT=muon CONFIG=MuonCoreTestConfig
+          make default CONFIG=RadianceCyclotronConfig
+          make default SUB_PROJECT=muon CONFIG=MuonBackendTestConfig
 
   run-unit-tests:
     name: Run Unit-tests

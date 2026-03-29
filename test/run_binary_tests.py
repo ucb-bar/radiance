@@ -166,17 +166,17 @@ def extract_ipc_results(log_path: Path) -> list[dict[str, object]]:
 
 def get_and_check_sim_binary(config, sim_dir):
     if config == "soc":
-        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimTraceConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutSimTraceConfig"
     elif config == "core":
-        sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.unittest-MuonCoreTestConfig"
     elif config == "cosim":
-        sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig"
     elif config == "tethered":
-        sim_binary = sim_dir / "simv-chipyard.harness-TetheredRadianceTapeoutConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-TetheredRadianceTapeoutConfig"
     elif config == "tapeout":
-        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutNDAFreeConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutNDAFreeConfig"
     elif config == "backend":
-        sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
+        sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig"
     else:
         assert False, "unknown config"
 
