@@ -16,6 +16,9 @@ abstract class MuonCSR(
 )
 
 object PerfCSRs {
+  private def hpmCounter(n: Int): Int = CSRs.mhpmcounter3 + (n - 3)
+  private def hpmCounterH(n: Int): Int = CSRs.mhpmcounter3h + (n - 3)
+
   val mcycleDecoded = CSRs.mhpmcounter3
   val mcycleDecodedh = CSRs.mhpmcounter3h
   val mcycleDispatched = CSRs.mhpmcounter4
@@ -24,6 +27,19 @@ object PerfCSRs {
   val mcycleEligibleh = CSRs.mhpmcounter5h
   val mcycleIssued = CSRs.mhpmcounter6
   val mcycleIssuedh = CSRs.mhpmcounter6h
+
+  def perWarpStallsWAW(wid: Int): Int = hpmCounter(7 + 6 * wid)
+  def perWarpStallsWAWh(wid: Int): Int = hpmCounterH(7 + 6 * wid)
+  def perWarpStallsWAR(wid: Int): Int = hpmCounter(8 + 6 * wid)
+  def perWarpStallsWARh(wid: Int): Int = hpmCounterH(8 + 6 * wid)
+  def perWarpStallsScoreboard(wid: Int): Int = hpmCounter(9 + 6 * wid)
+  def perWarpStallsScoreboardh(wid: Int): Int = hpmCounterH(9 + 6 * wid)
+  def perWarpStallsRSFull(wid: Int): Int = hpmCounter(10 + 6 * wid)
+  def perWarpStallsRSFullh(wid: Int): Int = hpmCounterH(10 + 6 * wid)
+  def perWarpStallsBusy(wid: Int): Int = hpmCounter(11 + 6 * wid)
+  def perWarpStallsBusyh(wid: Int): Int = hpmCounterH(11 + 6 * wid)
+  def perWarpStallsBusyLSU(wid: Int): Int = hpmCounter(12 + 6 * wid)
+  def perWarpStallsBusyLSUh(wid: Int): Int = hpmCounterH(12 + 6 * wid)
 }
 
 class CSRFile(
@@ -40,12 +56,24 @@ class CSRFile(
   mcycleDispatched: UInt,
   mcycleEligible: UInt,
   mcycleIssued: UInt,
+  perWarpStallsWAW: Seq[UInt],
+  perWarpStallsWAR: Seq[UInt],
+  perWarpStallsScoreboard: Seq[UInt],
+  perWarpStallsRSFull: Seq[UInt],
+  perWarpStallsBusy: Seq[UInt],
+  perWarpStallsBusyLSU: Seq[UInt],
   minstret: UInt,
 
   fcsr: UInt,
   fcsrWrite: UInt => Unit,
 )(implicit m: MuonCoreParams, implicit val p: Parameters) extends HasCoreParameters {
   def wrap(x: UInt) = Some(() => x)
+  require(perWarpStallsWAW.length == 4)
+  require(perWarpStallsWAR.length == 4)
+  require(perWarpStallsScoreboard.length == 4)
+  require(perWarpStallsRSFull.length == 4)
+  require(perWarpStallsBusy.length == 4)
+  require(perWarpStallsBusyLSU.length == 4)
   case object MVendorId  extends MuonCSR(CSRs.mvendorid) // 0: non commercial
   case object MArchId    extends MuonCSR(CSRs.marchid, 0x6D756F6E.U)
   case object MImpId     extends MuonCSR(CSRs.mimpid, 0x20260408.U) // 🙏
@@ -87,6 +115,22 @@ class CSRFile(
   case object MCycleEliH extends MuonCSR(PerfCSRs.mcycleEligibleh, accessor = wrap(mcycleEligible(63, 32)))
   case object MCycleIss  extends MuonCSR(PerfCSRs.mcycleIssued,    accessor = wrap(mcycleIssued(31, 0)))
   case object MCycleIssH extends MuonCSR(PerfCSRs.mcycleIssuedh,   accessor = wrap(mcycleIssued(63, 32)))
+  val perWarpPerfCSRs = Seq.tabulate(4) { wid =>
+    Seq(
+      new MuonCSR(PerfCSRs.perWarpStallsWAW(wid), accessor = wrap(perWarpStallsWAW(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsWAWh(wid), accessor = wrap(perWarpStallsWAW(wid)(63, 32))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsWAR(wid), accessor = wrap(perWarpStallsWAR(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsWARh(wid), accessor = wrap(perWarpStallsWAR(wid)(63, 32))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsScoreboard(wid), accessor = wrap(perWarpStallsScoreboard(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsScoreboardh(wid), accessor = wrap(perWarpStallsScoreboard(wid)(63, 32))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsRSFull(wid), accessor = wrap(perWarpStallsRSFull(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsRSFullh(wid), accessor = wrap(perWarpStallsRSFull(wid)(63, 32))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsBusy(wid), accessor = wrap(perWarpStallsBusy(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsBusyh(wid), accessor = wrap(perWarpStallsBusy(wid)(63, 32))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsBusyLSU(wid), accessor = wrap(perWarpStallsBusyLSU(wid)(31, 0))) {},
+      new MuonCSR(PerfCSRs.perWarpStallsBusyLSUh(wid), accessor = wrap(perWarpStallsBusyLSU(wid)(63, 32))) {},
+    )
+  }.flatten
   case object FFlags     extends MuonCSR(CSRs.fflags,    accessor = wrap(fcsr(4, 0)), setter = Some(fcsrWrite))
   case object FRM        extends MuonCSR(CSRs.frm,       accessor = wrap(fcsr(7, 5)), setter = Some(fcsrWrite))
   case object FCSR       extends MuonCSR(CSRs.fcsr,      accessor = wrap(fcsr),       setter = Some(fcsrWrite))
@@ -100,7 +144,8 @@ class CSRFile(
     ThreadIdxX, ThreadIdxY, ThreadIdxZ,
     WarpMask, ThreadMask,
     MCycle, MCycleH, MInstRet, MInstRetH,
-    MCycleDec, MCycleDecH, MCycleDisp, MCycleDispH, MCycleEli, MCycleEliH, MCycleIss, MCycleIssH,
+    MCycleDec, MCycleDecH, MCycleDisp, MCycleDispH, MCycleEli, MCycleEliH, MCycleIss, MCycleIssH
+  ) ++ perWarpPerfCSRs ++ Seq(
     FFlags, FRM, FCSR
   )
 

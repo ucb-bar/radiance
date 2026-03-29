@@ -22,6 +22,14 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
       val cyclesDispatched = Input(Perf.T)
       val cyclesEligible = Input(Perf.T)
       val cyclesIssued = Input(Perf.T)
+      val perWarp = Input(Vec(4, new Bundle {
+        val stallsWAW = Perf.T
+        val stallsWAR = Perf.T
+        val stallsScoreboard = Perf.T
+        val stallsRSFull = Perf.T
+        val stallsBusy = Perf.T
+        val stallsBusyLSU = Perf.T
+      }))
     }
     val perf = new Bundle {
       val instRetired = Output(Perf.T)
@@ -103,6 +111,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.csrIO.perf.mcycleDispatched := io.beCSR.cyclesDispatched
   sfuPipe.csrIO.perf.mcycleEligible := io.beCSR.cyclesEligible
   sfuPipe.csrIO.perf.mcycleIssued := io.beCSR.cyclesIssued
+  sfuPipe.csrIO.perf.perWarp := io.beCSR.perWarp
   sfuPipe.csrIO.wmask := io.feCSR.wmask
 }
 
