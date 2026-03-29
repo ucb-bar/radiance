@@ -15,8 +15,17 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     val perf = new Bundle {
       val mcycle = Input(Perf.T)
       val mcycleDecoded = Input(Perf.T)
+      val mcycleDispatched = Input(Perf.T)
       val mcycleEligible = Input(Perf.T)
       val mcycleIssued = Input(Perf.T)
+      val perWarp = Input(Vec(4, new Bundle {
+        val stallsWAW = Perf.T
+        val stallsWAR = Perf.T
+        val stallsScoreboard = Perf.T
+        val stallsRSFull = Perf.T
+        val stallsBusy = Perf.T
+        val stallsBusyLSU = Perf.T
+      }))
       val minstret = Input(Perf.T)
     }
     val fcsr = new Bundle {
@@ -186,8 +195,15 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     tmask          = uop.tmask,
     mcycle         = csrIO.perf.mcycle,
     mcycleDecoded  = csrIO.perf.mcycleDecoded,
+    mcycleDispatched = csrIO.perf.mcycleDispatched,
     mcycleEligible = csrIO.perf.mcycleEligible,
     mcycleIssued   = csrIO.perf.mcycleIssued,
+    perWarpStallsWAW = csrIO.perf.perWarp.map(_.stallsWAW),
+    perWarpStallsWAR = csrIO.perf.perWarp.map(_.stallsWAR),
+    perWarpStallsScoreboard = csrIO.perf.perWarp.map(_.stallsScoreboard),
+    perWarpStallsRSFull = csrIO.perf.perWarp.map(_.stallsRSFull),
+    perWarpStallsBusy = csrIO.perf.perWarp.map(_.stallsBusy),
+    perWarpStallsBusyLSU = csrIO.perf.perWarp.map(_.stallsBusyLSU),
     minstret       = csrIO.perf.minstret,
 
     fcsr      = csrIO.fcsr.regData,

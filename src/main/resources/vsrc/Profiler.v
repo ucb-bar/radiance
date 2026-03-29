@@ -10,13 +10,17 @@ module ProfilerBlackBox #(
   input logic [COUNTER_WIDTH-1:0] instRetired,
   input logic [COUNTER_WIDTH-1:0] cycles,
   input logic [COUNTER_WIDTH-1:0] cyclesDecoded,
+  input logic [COUNTER_WIDTH-1:0] cyclesDispatched,
   input logic [COUNTER_WIDTH-1:0] cyclesEligible,
   input logic [COUNTER_WIDTH-1:0] cyclesIssued,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesDecoded,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesDispatched,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesEligible,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_cyclesIssued,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAW,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsWAR,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsScoreboard,
+  input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsRSFull,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsBusy,
   input logic [(NUM_WARPS*COUNTER_WIDTH)-1:0] perWarp_stallsBusyLSU
 );
@@ -24,10 +28,13 @@ module ProfilerBlackBox #(
   `include "Cyclotron.vh"
 
   longint per_warp_cycles_decoded [0:NUM_WARPS-1];
+  longint per_warp_cycles_dispatched [0:NUM_WARPS-1];
+  longint per_warp_cycles_eligible [0:NUM_WARPS-1];
   longint per_warp_cycles_issued [0:NUM_WARPS-1];
   longint per_warp_stalls_waw [0:NUM_WARPS-1];
   longint per_warp_stalls_war [0:NUM_WARPS-1];
   longint per_warp_stalls_scoreboard [0:NUM_WARPS-1];
+  longint per_warp_stalls_rs_full [0:NUM_WARPS-1];
   longint per_warp_stalls_busy [0:NUM_WARPS-1];
   longint per_warp_stalls_busy_lsu [0:NUM_WARPS-1];
 
@@ -35,10 +42,13 @@ module ProfilerBlackBox #(
   generate
     for (i = 0; i < NUM_WARPS; i = i + 1) begin
       assign per_warp_cycles_decoded[i] = perWarp_cyclesDecoded[i*COUNTER_WIDTH +: COUNTER_WIDTH];
+      assign per_warp_cycles_dispatched[i] = perWarp_cyclesDispatched[i*COUNTER_WIDTH +: COUNTER_WIDTH];
+      assign per_warp_cycles_eligible[i] = perWarp_cyclesEligible[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_cycles_issued[i] = perWarp_cyclesIssued[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_waw[i] = perWarp_stallsWAW[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_war[i] = perWarp_stallsWAR[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_scoreboard[i] = perWarp_stallsScoreboard[i*COUNTER_WIDTH +: COUNTER_WIDTH];
+      assign per_warp_stalls_rs_full[i] = perWarp_stallsRSFull[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_busy[i] = perWarp_stallsBusy[i*COUNTER_WIDTH +: COUNTER_WIDTH];
       assign per_warp_stalls_busy_lsu[i] = perWarp_stallsBusyLSU[i*COUNTER_WIDTH +: COUNTER_WIDTH];
     end
@@ -50,13 +60,17 @@ module ProfilerBlackBox #(
     input longint inst_retired,
     input longint cycle,
     input longint cycles_decoded,
+    input longint cycles_dispatched,
     input longint cycles_eligible,
     input longint cycles_issued,
     input longint per_warp_cycles_decoded[NUM_WARPS],
+    input longint per_warp_cycles_dispatched[NUM_WARPS],
+    input longint per_warp_cycles_eligible[NUM_WARPS],
     input longint per_warp_cycles_issued[NUM_WARPS],
     input longint per_warp_stalls_waw[NUM_WARPS],
     input longint per_warp_stalls_war[NUM_WARPS],
     input longint per_warp_stalls_scoreboard[NUM_WARPS],
+    input longint per_warp_stalls_rs_full[NUM_WARPS],
     input longint per_warp_stalls_busy[NUM_WARPS],
     input longint per_warp_stalls_busy_lsu[NUM_WARPS],
     input bit     finished
@@ -73,13 +87,17 @@ module ProfilerBlackBox #(
         instRetired,
         cycles,
         cyclesDecoded,
+        cyclesDispatched,
         cyclesEligible,
         cyclesIssued,
         per_warp_cycles_decoded,
+        per_warp_cycles_dispatched,
+        per_warp_cycles_eligible,
         per_warp_cycles_issued,
         per_warp_stalls_waw,
         per_warp_stalls_war,
         per_warp_stalls_scoreboard,
+        per_warp_stalls_rs_full,
         per_warp_stalls_busy,
         per_warp_stalls_busy_lsu,
         finished

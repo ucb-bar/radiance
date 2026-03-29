@@ -35,6 +35,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
+    val perf = Output(new Bundle {
+      val cyclesDispatched = Perf.T
+      val cyclesEligible = Perf.T
+      val perWarp = Vec(numWarps, new Bundle {
+        val cyclesDispatched = Perf.T
+        val cyclesEligible = Perf.T
+        val stallsRSFull = Perf.T
+      })
+    })
   })
 
   val numEntries = muonParams.numIssueQueueEntries
@@ -97,6 +106,11 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsRSFull :=
+      PerfCounter(io.admit.valid && !hasEmptyRow &&
+                  io.admit.bits.ibufEntry.uop.wid === wid.U)
+  }
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
   when (io.admit.fire) {
@@ -115,6 +129,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   val rsOccupancy = WireDefault(PopCount(validTable))
   dontTouch(rsOccupancy)
+
+  io.perf.cyclesDispatched := PerfCounter(rsOccupancy =/= 0.U)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    val validThisWarp = (0 until numEntries).map { i =>
+      validTable(i) && (instTable(i).uop.wid === wid.U)
+    }
+    val hasThisWarp = validThisWarp.reduce(_ || _)
+    p.cyclesDispatched := PerfCounter(hasThisWarp)
+  }
 
   // -----------------
   // collector control
@@ -270,9 +293,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val newOpReadys = newOpReadyTable(i)
     val busys = busyTable(i)
     // using newOpReadys here considers ops that will-be-collected next cycle
-    // as issue-eligible, eliminating one cycle latency from coll req -> issue
+    // as issue-eligible, eliminating one cycle latency from coll done -> issue
     // sched. enabling this optimization also brings some area benefit, since
-    // reducing this latency allows shallower collector banks, which are
+    // reducing this latency allows for shallower collector banks, which are
     // generally large
     val allCollected = (if (muonParams.forwardCollectorIssue)
       newOpReadys else opReadys).reduce(_ && _)
@@ -310,7 +333,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       collPtrTable(i)
     })
 
-    // deregister upon issue
+    // retire from RS upon issue
     when (candidate.fire) {
       validTable(i) := false.B
     }
@@ -342,6 +365,17 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   //   // port.data input is not used
   // }
   dontTouch(issuedId)
+
+  // connect per-warp eligible perf counters
+  val hasEligible = eligibles.map(_.valid).reduce(_ || _)
+  io.perf.cyclesEligible := PerfCounter(hasEligible)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    val eligiblesThisWarp = eligibles.map { row =>
+      row.valid && (row.bits.entry.uop.wid === wid.U)
+    }
+    val hasEligibleThisWarp = eligiblesThisWarp.reduce(_ || _)
+    p.cyclesEligible := PerfCounter(hasEligibleThisWarp)
+  }
 
   // if not using collector, RS only directly uses the readData port and never
   // sends readReq / gets readResp back, so we need to signal scoreboard
