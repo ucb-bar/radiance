@@ -35,10 +35,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
       val readResp = Flipped(CollectorResponse(Isa.maxNumRegs, isWrite = false))
       val readData = Flipped(new CollectorOperandRead)
     }
-    val perf = Output(Vec(numWarps, new Bundle {
+    val perf = Output(new Bundle {
+      val cyclesDispatched = Perf.T
       val cyclesEligible = Perf.T
-      val stallsRSFull = Perf.T
-    }))
+      val perWarp = Vec(numWarps, new Bundle {
+        val cyclesDispatched = Perf.T
+        val cyclesEligible = Perf.T
+        val stallsRSFull = Perf.T
+      })
+    })
   })
 
   val numEntries = muonParams.numIssueQueueEntries
@@ -101,7 +106,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val rowEmptyVec = VecInit((0 until numEntries).map(!validTable(_)))
   val hasEmptyRow = rowEmptyVec.reduce(_ || _)
   io.admit.ready := hasEmptyRow
-  io.perf.zipWithIndex.foreach { case (p, wid) =>
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.stallsRSFull :=
       PerfCounter(io.admit.valid && !hasEmptyRow &&
                   io.admit.bits.ibufEntry.uop.wid === wid.U)
@@ -124,6 +129,15 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   val rsOccupancy = WireDefault(PopCount(validTable))
   dontTouch(rsOccupancy)
+
+  io.perf.cyclesDispatched := PerfCounter(rsOccupancy =/= 0.U)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    val validThisWarp = (0 until numEntries).map { i =>
+      validTable(i) && (instTable(i).uop.wid === wid.U)
+    }
+    val hasThisWarp = validThisWarp.reduce(_ || _)
+    p.cyclesDispatched := PerfCounter(hasThisWarp)
+  }
 
   // -----------------
   // collector control
@@ -353,7 +367,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   dontTouch(issuedId)
 
   // connect per-warp eligible perf counters
-  io.perf.zipWithIndex.foreach { case (p, wid) =>
+  val hasEligible = eligibles.map(_.valid).reduce(_ || _)
+  io.perf.cyclesEligible := PerfCounter(hasEligible)
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val eligiblesThisWarp = eligibles.map { row =>
       row.valid && (row.bits.entry.uop.wid === wid.U)
     }

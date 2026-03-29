@@ -53,20 +53,20 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.io.issue
   }
 
-  val cyclesDispatched = PerfCounter(reservStation.io.admit.fire)
   val cyclesEligible = PerfCounter(issued.valid)
   val cyclesIssued = PerfCounter(issued.fire)
 
+  val cyclesDispatched = reservStation.io.perf.cyclesDispatched
   io.perf.cyclesDispatched := cyclesDispatched
-  io.perf.cyclesEligible := cyclesEligible
+  io.perf.cyclesEligible := reservStation.io.perf.cyclesEligible
   io.perf.cyclesIssued := cyclesIssued
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesDispatched :=
       PerfCounter(reservStation.io.admit.fire &&
                   (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
-    p.stallsRSFull := reservStation.io.perf(wid).stallsRSFull
+    p.stallsRSFull := reservStation.io.perf.perWarp(wid).stallsRSFull
 
-    p.cyclesEligible := reservStation.io.perf(wid).cyclesEligible
+    p.cyclesEligible := reservStation.io.perf.perWarp(wid).cyclesEligible
     p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
     // to be added separately
