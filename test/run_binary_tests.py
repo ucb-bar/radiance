@@ -173,6 +173,8 @@ def get_and_check_sim_binary(config, sim_dir):
         sim_binary = sim_dir / "simv-chipyard.harness-RadianceCyclotronConfig-debug"
     elif config == "tethered":
         sim_binary = sim_dir / "simv-chipyard.harness-TetheredRadianceTapeoutConfig-debug"
+    elif config == "tapeout":
+        sim_binary = sim_dir / "simv-chipyard.harness-RadianceTapeoutNDAFreeConfig-debug"
     elif config == "backend":
         sim_binary = sim_dir / "simv-chipyard.unittest-MuonBackendTestConfig-debug"
     else:
@@ -506,7 +508,7 @@ def parse_args():
     parser.add_argument('binary', nargs="?",
                         help="ELF to run; if omitted, sweeps found ELFs on its own")
     parser.add_argument('-c', '--config', default='soc',
-                        help="testbench config to run; (soc|core|cosim|tethered|backend). default is 'soc'")
+                        help="testbench config to run; (soc|core|cosim|tethered|tapeout|backend). default is 'soc'")
     parser.add_argument('--log-dir', default='binary-test-logs',
                         help="directory to be created to place the logs. default is 'binary-test-logs'")
     parser.add_argument('--json-out',
@@ -524,8 +526,8 @@ def parse_args():
 def main():
     args = parse_args()
     config = args.config
-    if not (config == "soc" or config == "core" or config == "cosim" or config == "tethered" or config == "backend"):
-        print(f"error: unknown config '{config}'. must be (soc|core|cosim|tethered|backend)")
+    if not (config == "soc" or config == "core" or config == "cosim" or config == "tethered" or config == "tapeout" or config == "backend"):
+        print(f"error: unknown config '{config}'. must be (soc|core|cosim|tethered|tapeout|backend)")
         sys.exit(1)
 
     script_dir = Path(__file__).resolve().parent
