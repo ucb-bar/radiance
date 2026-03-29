@@ -130,8 +130,8 @@ class RadianceSharedMemComponents(
         buf := dist
         val fanoutSource = if (ordered) {
           // first 2 bits are xbar artifacts
-          val fifoFixer = ResponseFIFOFixer(throwAwayPrefix = log2Ceil(smemWidth / width))
-          fifoFixer := buf
+          val fifoFixer = ResponseFIFOFixer()
+          fifoFixer := TLSourceShrinker(8) := buf
           fifoFixer
         } else {
           buf
