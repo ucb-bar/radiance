@@ -268,7 +268,7 @@ class MuonTile(
     wordSizeInBytes = muonParams.core.archLen / 8,
     numOldSrcIds = 1 << lsuSourceIdBits,
     numNewSrcIds = 1 << muonParams.core.logCoalGMEMInFlights,
-    respQueueDepth = 2,
+    respQueueDepth = 4,
     numCoalReqs = 1,
   )))
 
