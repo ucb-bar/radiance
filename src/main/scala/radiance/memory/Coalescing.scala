@@ -500,7 +500,7 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   )
   
   val respQueues = Seq.tabulate(config.numLanes) { _ =>
-    Module(new Queue(respQueueEntryT, entries = config.respQueueDepth, flow = false))
+    Module(new MultiPortQueue(respQueueEntryT, 2, 1, 2, config.respQueueDepth, flow = false))
   }
 
   // INPUT: Responses from nexusNode outputs (non-coalesced, lanes 0 to n-1)
@@ -512,22 +512,13 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
       // Use local source ID directly - no remapping
       resp.fromTLD(tlOut.d.bits, tlOut.d.fire)
 
-      // arbitrate non-coalesced vs. uncoalesced responses
-      val respArbiter = Module(
-        new RRArbiter(respQueueEntryT.cloneType, 2)
-      )
-      respArbiter.io.in(0).valid := tlOut.d.valid
-      respArbiter.io.in(0).bits := resp
-      tlOut.d.ready := respArbiter.io.in(0).ready
+      respQueue.io.enq(0).valid := tlOut.d.valid
+      respQueue.io.enq(0).bits := resp
+      respQueue.io.deq.head.ready := tlIn.d.ready
 
-      val uncoalResp = uncoalescer.io.respQueueIO(lane)
-      respArbiter.io.in(1) <> uncoalResp.head
-
-      respQueue.io.enq <> respArbiter.io.out
-
-      respQueue.io.deq.ready := tlIn.d.ready
-      tlIn.d.valid := respQueue.io.deq.valid
-      tlIn.d.bits := respQueue.io.deq.bits.toTLD(edgeIn)
+      tlIn.d.valid := respQueue.io.deq.head.valid
+      tlIn.d.bits := respQueue.io.deq.head.bits.toTLD(edgeIn)
+      tlOut.d.ready := respQueue.io.enq(0).ready
   }
 
   // INPUT: Coalesced responses from nexusNode output (lane n)
@@ -539,6 +530,11 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   uncoalescer.io.inflightLookup <> inflightTable.io.lookupResult
   inflightTable.io.lookupSourceId.valid := coalSourceGen.io.inResp.valid
   inflightTable.io.lookupSourceId.bits := coalSourceGen.io.inResp.bits.source
+
+  (respQueues zip uncoalescer.io.respQueueIO).foreach {
+    case (q, uncoalResp) =>
+      q.io.enq(1) <> uncoalResp.head
+  }
 
   coalSourceGen.io.outResp <> tlCoal.d
 }
