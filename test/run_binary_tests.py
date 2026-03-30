@@ -192,7 +192,6 @@ def get_and_check_sim_binary(config, sim_dir):
 def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
     elf = Path(elf).resolve()
     elf_name = elf.name
-    fsdb_path = log_dir / f"{elf_name}.fsdb"
     log_path = log_dir / f"{elf_name}.log"
     out_path = log_dir / f"{elf_name}.out"
     sqlite_path = (log_dir / f"{elf_name}.sqlite").resolve()
@@ -215,12 +214,12 @@ def launch_test(config, binary, elf, log_dir, chipyard_dir, sim_dir):
         "+max-cycles=10000000",
         "+ntb_random_seed_automatic",
         "+verbose",
-        f"+fsdbfile={fsdb_path}",
         f"+trace-db={sqlite_path}",
-        f"+loadmem={elf}",
         "+permissive-off",
         str(elf),
     ]
+    if config != "tapeout":
+        cmd.insert(-2, f"+loadmem={elf}")
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
