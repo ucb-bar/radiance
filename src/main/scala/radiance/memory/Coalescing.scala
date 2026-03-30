@@ -242,11 +242,9 @@ class SourceGenerator[T <: Data](
   io.inflight := (outstanding > 0.U) || io.gen
 
   val numSourceId = 1 << sourceWidth
-  val occupancyTable = Mem(numSourceId, Bool())
-  val metadataTable = metadata.map(Mem(numSourceId, _))
-  
-  when(reset.asBool) {
-    (0 until numSourceId).foreach { occupancyTable(_) := false.B }
+  val occupancyTable = RegInit(VecInit.fill(numSourceId)(false.B))
+  val metadataTable = metadata.map { m =>
+    RegInit(VecInit.fill(numSourceId)(0.U.asTypeOf(m)))
   }
   
   val frees = (0 until numSourceId).map(!occupancyTable(_))
@@ -647,19 +645,12 @@ class InFlightTable(
     val lookupResult = Decoupled(entryT)
   })
 
-  val table = Mem(entries, new Bundle {
-    val valid = Bool()
-    val bits = entryT.cloneType
+  val table = RegInit(VecInit.fill(entries){
+    val r = Wire(Valid(entryT))
+    r.valid := false.B
+    r.bits := 0.U.asTypeOf(entryT)
+    r
   })
-
-  when(reset.asBool) {
-    (0 until entries).foreach { i =>
-      table(i).valid := false.B
-      table(i).bits.lanes.foreach { l =>
-        l := 0.U.asTypeOf(l.cloneType)
-      }
-    }
-  }
 
   val full = Wire(Bool())
   full := (0 until entries).map(table(_).valid).reduce(_ && _)
