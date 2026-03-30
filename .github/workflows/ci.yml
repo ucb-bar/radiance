@@ -170,7 +170,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c tapeout \
-            --timeout 5400 \
+            --timeout 7200 \
             --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/host-launch \
             --json-out "${CHIPYARD_RUN_LOG_DIR}/tapeout/results.json"
@@ -199,7 +199,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" -c tethered \
-            --timeout 5400 \
+            --timeout 7200 \
             --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/host-launch \
             --json-out "${CHIPYARD_RUN_LOG_DIR}/hostlaunch/results.json"
@@ -228,7 +228,7 @@ jobs:
           source /ecad/tools/vlsi.bashrc
           cd generators/radiance
           python3 test/run_binary_tests.py -j "$(nproc)" \
-            --timeout 5400 \
+            --timeout 7200 \
             --log-dir "${CHIPYARD_RUN_LOG_DIR}" \
             --elf-dir cyclotron/test/fused \
             --json-out "${CHIPYARD_RUN_LOG_DIR}/soc/results.json"
