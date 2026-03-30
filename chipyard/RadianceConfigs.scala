@@ -88,7 +88,7 @@ object L0dCacheConfig extends DCacheParams(
 )
 
 object L1CacheConfig extends DCacheParams(
-  nSets = 512,
+  nSets = 256,
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
