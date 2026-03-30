@@ -64,18 +64,8 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
   }
 
   // flip-flops
-  val readTable = Mem(muonParams.numPhysRegs, UInt(scoreboardReadCountBits.W))
-  val writeTable = Mem(muonParams.numPhysRegs, UInt(scoreboardWriteCountBits.W))
-
-  // reset
-  // TODO: @synthesis: this blows up the number of write ports.
-  // Rewrite to plain Regs instead of using Mem.
-  when (reset.asBool) {
-    (0 until muonParams.numPhysRegs).foreach { pReg =>
-      readTable(pReg) := 0.U
-      writeTable(pReg) := 0.U
-    }
-  }
+  val readTable = RegInit(VecInit.fill(muonParams.numPhysRegs)(0.U(scoreboardReadCountBits.W)))
+  val writeTable = RegInit(VecInit.fill(muonParams.numPhysRegs)(0.U(scoreboardWriteCountBits.W)))
 
   // update
   // ------
