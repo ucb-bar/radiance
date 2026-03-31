@@ -50,7 +50,7 @@ class RadianceBaseConfig extends Config(
 
   new freechips.rocketchip.subsystem.WithInclusiveCache(
     nWays = 8,
-    capacityKB = 512,
+    capacityKB = 256,
     outerLatencyCycles = 40,
     subBankingFactor = 2,
     writeBytes = 8 // DRAM width
