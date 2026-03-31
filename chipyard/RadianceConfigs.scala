@@ -92,7 +92,7 @@ object L1CacheConfig extends DCacheParams(
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
-  nMSHRs = 4,
+  nMSHRs = 8, // maybe be able to decrease this
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
