@@ -50,7 +50,7 @@ class RadianceBaseConfig extends Config(
 
   new freechips.rocketchip.subsystem.WithInclusiveCache(
     nWays = 8,
-    capacityKB = 256,
+    capacityKB = 512,
     outerLatencyCycles = 40,
     subBankingFactor = 2,
     writeBytes = 8 // DRAM width
@@ -92,7 +92,7 @@ object L1CacheConfig extends DCacheParams(
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
-  nMSHRs = 8, // maybe be able to decrease this
+  nMSHRs = 4,
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
