@@ -14,10 +14,10 @@ import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 import scala.collection.mutable.ArrayBuffer
 
 abstract class RadianceSmemNodeProvider {
-  val priorityRNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
-  val priorityWNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
-  val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]]
-  val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]]
+  val priorityRNodes: Seq[Seq[Seq[TLNode]]] = Seq.empty
+  val priorityWNodes: Seq[Seq[Seq[TLNode]]] = Seq.empty
+  val uniformRNodes: Seq[Seq[Seq[TLNode]]]
+  val uniformWNodes: Seq[Seq[Seq[TLNode]]]
   val nonuniformRNodes: Seq[TLNode]
   val nonuniformWNodes: Seq[TLNode]
   val clcbusClients: Seq[TLNode] = Seq()
@@ -48,7 +48,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val (priorityRNodes, priorityWNodes) =
     (smNodes.priorityRNodes, smNodes.priorityWNodes)
 
-  implicit val disableMonitors = config.disableMonitors // otherwise it generate 1k+ different tl monitors
+  implicit val disableMonitors: Boolean = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
   val smemDevice = new SimpleDevice(f"rad-smem", Seq(s"rad-smem"))
   // collection of read and write managers for each sram (sub)bank

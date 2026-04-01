@@ -170,7 +170,22 @@ class RadianceSharedMemComponents(
   val preSplitterNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))
   val muonSplitterNodes = preSplitterNodes
     .map(connectOne(_, () => RWSplitterNode(f"muon_aligned_splitter")))
-  val muonAligned = Seq.fill(2)(muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
+  // first map connects 1st edge (reads) from muonSplitterNodes;
+  // second map connects 2nd edge (writes)
+  val muonAlignedReads = muonSplitterNodes.map { w =>
+    // the fanout TLXbar here de-asserts d.ready even for banks that don't hold
+    // d.valid as a result of arbitration. That d.ready is coupled to a.ready
+    // of the SMEM banks, asserting backpressure to Gemmini accessing *any*
+    // bank. Fix that by re-asserting the pessimistic d.ready after the xbar
+    val r = DReadyRewriterNode()
+    r :*= connectXbarName(w, Some("muon_aligned_fanout_read"))
+    r
+  }
+  val muonAlignedWrites = muonSplitterNodes.map { w =>
+    val r = DReadyRewriterNode()
+    r :*= connectXbarName(w, Some("muon_aligned_fanout_write"))
+    r
+  }
 
   val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
     .map(q => q.numOutputLanes * q.maxOutputBits / 8))
@@ -198,15 +213,15 @@ class RadianceSharedMemComponents(
 
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
-  override val priorityRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes
-  override val priorityWNodes: Seq[Seq[Seq[TLNexusNode]]] = spadWriteNodes
+  override val priorityRNodes: Seq[Seq[Seq[TLNode]]] = spadReadNodes
+  override val priorityWNodes: Seq[Seq[Seq[TLNode]]] = spadWriteNodes
   // these nodes access an entire line simultaneously
-  override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.fill(smemBanks) {
-    muonAligned.head.map { mrw => Seq(mrw) }
+  override val uniformRNodes: Seq[Seq[Seq[TLNode]]] = Seq.fill(smemBanks) {
+    muonAlignedReads.map { mrw => Seq(mrw) }
   }
-  override val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]] =
+  override val uniformWNodes: Seq[Seq[Seq[TLNode]]] =
     (spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwsb, qb) =>
-      (gwsb lazyZip muonAligned.last lazyZip qb).map { case (gwsw, mww, qw) =>
+      (gwsb lazyZip muonAlignedWrites lazyZip qb).map { case (gwsw, mww, qw) =>
         Seq(mww) ++ gwsw ++ qw
       }
     }
