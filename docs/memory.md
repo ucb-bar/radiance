@@ -128,15 +128,19 @@ in-place within the single tile.
 `Q` is also not double-buffered, because access to `Q` is read-only across all
 of the loop iterations.
 
-
 We can solve these conflicts in a mapping that requires 4 banks:
+
+**MxGemmini requirement:** The MxGemmini PEs require the A input matrix to be
+mapped to either bank 0 or 1, and the B matrix to either bank 2 or 3.  We
+satisfy this requrement by mapping Q and P matrices to bank 0, and K and V
+matrices to bank 3.
 
 | Bank   |  Tiles                      |
 |--------|-----------------------------|
-| Bank 0 | `Kp, Vp, Kc, Vc`            |
+| Bank 0 | `Q, Pc, Pp(quant), Pp(B16)` |
 | Bank 1 | `QKc, QKp`                  |
 | Bank 2 | `O`                         |
-| Bank 3 | `Q, Pc, Pp(quant), Pp(B16)` |
+| Bank 3 | `Kp, Vp, Kc, Vc`            |
 
 #### Capacity Requirement
 
