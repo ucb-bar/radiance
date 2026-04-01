@@ -200,12 +200,12 @@ class RadianceSharedMemComponents(
 
   // these nodes access an entire line simultaneously
   override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes.map(grb => {
-    (grb zip muonAligned.head).map { case (grw, mrw) => Seq(mrw) ++ grw }
+    (grb zip muonAligned.head).map { case (grw, mrw) => grw ++ Seq(mrw) }
   })
   override val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]] =
     (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
       (gwb lazyZip gwsb lazyZip muonAligned.last lazyZip qb).map { case (gww, gwsw, mww, qw) =>
-        Seq(mww) ++ gww ++ gwsw ++ qw
+        gww ++ gwsw ++ qw ++ Seq(mww)
       }
     }
 
