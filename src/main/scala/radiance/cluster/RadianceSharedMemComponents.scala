@@ -198,14 +198,16 @@ class RadianceSharedMemComponents(
 
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
+  override val priorityRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes
+  override val priorityWNodes: Seq[Seq[Seq[TLNexusNode]]] = spadWriteNodes
   // these nodes access an entire line simultaneously
-  override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes.map(grb => {
-    (grb zip muonAligned.head).map { case (grw, mrw) => Seq(mrw) ++ grw }
-  })
+  override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.fill(smemBanks) {
+    muonAligned.head.map { mrw => Seq(mrw) }
+  }
   override val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]] =
-    (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
-      (gwb lazyZip gwsb lazyZip muonAligned.last lazyZip qb).map { case (gww, gwsw, mww, qw) =>
-        Seq(mww) ++ gww ++ gwsw ++ qw
+    (spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwsb, qb) =>
+      (gwsb lazyZip muonAligned.last lazyZip qb).map { case (gwsw, mww, qw) =>
+        Seq(mww) ++ gwsw ++ qw
       }
     }
 

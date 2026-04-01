@@ -14,6 +14,8 @@ import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 import scala.collection.mutable.ArrayBuffer
 
 abstract class RadianceSmemNodeProvider {
+  val priorityRNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
+  val priorityWNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
   val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]]
   val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]]
   val nonuniformRNodes: Seq[TLNode]
@@ -43,6 +45,8 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val smNodes = provider()
   val (uniformRNodes, uniformWNodes, nonuniformRNodes, nonuniformWNodes) =
     (smNodes.uniformRNodes, smNodes.uniformWNodes, smNodes.nonuniformRNodes, smNodes.nonuniformWNodes)
+  val (priorityRNodes, priorityWNodes) =
+    (smNodes.priorityRNodes, smNodes.priorityWNodes)
 
   implicit val disableMonitors = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
@@ -167,6 +171,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             case TwoPort => {
               val subbankRXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
                 .suggestName(s"smem_b${bid}_w${wid}_r_xbar").node
+              priorityRNodes(bid)(wid).foreach( subbankRXbar :=* _ )
               subbankRXbar := uniformNodesOut.head(bid)(wid)
               nonuniformRNodes.foreach( subbankRXbar :=* _ )
               readPorts.head := subbankRXbar
@@ -180,6 +185,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
           val subbankWXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
             .suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
           writePort := subbankWXbar
+          priorityWNodes(bid)(wid).foreach( subbankWXbar :=* _ )
           subbankWXbar := uniformNodesOut.last(bid)(wid)
           nonuniformWNodes.foreach( subbankWXbar :=* _ )
         }
@@ -187,6 +193,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } else { // not stride by word
     require(config.memType == TwoPort, "double read ports not implemented")
+    require(priorityRNodes.isEmpty && priorityWNodes.isEmpty, "unimplemented")
 
     val smemRXbar = TLXbar()
     val smemWXbar = TLXbar()
