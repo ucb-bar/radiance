@@ -118,7 +118,6 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 
   // collector allocation table
   val allocTable = new CollectorAllocTable(numCollEntries)(p)
-  when (reset.asBool) { allocTable.reset }
   val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
   // TODO: skip allocation when noen of readReq.regs.enable is set
   when (io.readReq.fire) {
@@ -236,17 +235,18 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
 class CollectorAllocTable(numEntries: Int)(implicit val p: Parameters)
 extends HasCoreParameters {
   val idWidth = log2Up(numEntries)
-  val table = Mem(numEntries, new CollectorAllocTableEntry)
+  val table = RegInit(VecInit.fill(numEntries){
+    val r = Wire(new CollectorAllocTableEntry)
+    r.valid := false.B
+    r.hasOps := VecInit.fill(Isa.maxNumRegs)(false.B)
+    r
+  })
 
   val emptyVec = VecInit((0 until numEntries).map(!table(_).valid))
   val hasEmpty = WireDefault(emptyVec.reduce(_ || _))
   val emptyId = PriorityEncoder(emptyVec)
   dontTouch(emptyVec)
   dontTouch(hasEmpty)
-
-  def reset = {
-    (0 until numEntries).foreach { table(_) := (new CollectorAllocTableEntry).empty }
-  }
 
   def read(id: UInt): CollectorAllocTableEntry = {
     table(id)
@@ -255,7 +255,6 @@ extends HasCoreParameters {
   def hasFree: Bool = hasEmpty
 
   def alloc: (Bool /*valid*/, UInt /*id*/) = {
-    // Mem doesn't support partial-field updates
     val newEntry = WireDefault(table(emptyId))
     newEntry.valid := true.B
     when (hasEmpty) {
@@ -286,5 +285,4 @@ class CollectorAllocTableEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val valid = Bool()
   val hasOps = Vec(Isa.maxNumRegs, Bool())
   // val rsEntryId = UInt(rsEntryIdWidth.W)
-  def empty = 0.U.asTypeOf(this)
 }

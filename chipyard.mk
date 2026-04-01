@@ -57,3 +57,9 @@ endif
 
 # go brrr
 VCS_NONCC_OPTS += -j$(shell nproc)
+
+# initialize X's for consistent results.
+# NOTE: disable for thorough testing
+# VCS recommends putting +random at the compile flag and +1 at runtime
+VCS_NONCC_OPTS += +vcs+initreg+random
+EXTRA_SIM_FLAGS += +vcs+initreg+1

@@ -292,6 +292,13 @@ class RadianceTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceTapeoutNDAFreeConfig extends Config(
+  new chipyard.clocking.WithClockTapIOCells ++
+  new WithRadianceTapeoutPeripheralsNoClockGate ++
+  new WithGPUResetAggregator(defaultReset = true) ++
+  new RadianceTapeoutSimTraceConfig
+)
+
 class RadianceGemminiOnlyConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(1, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), disabled = true) ++

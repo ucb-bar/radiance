@@ -6,18 +6,18 @@
     "trace_address": "0x40000000,0x40002000",
     "cluster_id": 0
   },
-  "mxgemm.fp8.singletile.tm64tn64tk64.fp8out.soc": {
-    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m64n64k64.fp8out.bin",
-    "trace_table": "dmem",
-    "trace_kind": "write",
-    "trace_address": "0x40000000,0x40001000",
-    "cluster_id": 0
-  },
   "mxgemm.fp8.singletile.tm128tn128tk256.fullout.soc": {
     "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m128n128k256.fullout.bin",
     "trace_table": "dmem",
     "trace_kind": "write",
     "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp8.m64n64k128.tm64tn64tk64.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m64n64k128.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000",
     "cluster_id": 0
   },
   "mxgemm.fp8.m128n128k512.tm128tn128tk256.fullout.soc": {
@@ -55,6 +55,83 @@
     "trace_address": "0x40000000,0x40008000",
     "cluster_id": 0
   },
+  "mxgemm.fp6.m128n128k1024.tm128tn128tk512.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp6.m128n128k1024.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp6.m128n128k256.tm128tn128tk128.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp6.m128n128k256.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm64tn64tk64.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m64n64k64.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm64tn64tk64.requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m64n64k64.fp4out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40000800",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.m64n64k128.tm64tn64tk64.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m64n64k128.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm128tn128tk128.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k128.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm128tn128tk128.requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k128.fp4out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.m128n128k256.tm128tn128tk128.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k256.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm128tn128tk512.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k512.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.singletile.tm128tn128tk512.requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k512.fp4out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40002000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp4.m128n128k1024.tm128tn128tk512.fullout.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp4.m128n128k1024.fullout.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
   "requant.soc": {
     "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m64n64k64.fp8out.bin",
     "trace_table": "dmem",
@@ -62,11 +139,25 @@
     "trace_address": "0x40000000,0x40001000",
     "cluster_id": 0
   },
-  "mxgemm.fp6.m128n128k1024.tm128tn128tk512.fullout.soc": {
-    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp6.m128n128k1024.fullout.bin",
+  "mxgemm.simt_contention.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp6.m128n128k256.fullout.bin",
     "trace_table": "dmem",
     "trace_kind": "write",
     "trace_address": "0x40000000,0x40008000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp8.singletile.tm64tn64tk64.requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m64n64k64.fp8out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40001000",
+    "cluster_id": 0
+  },
+  "mxgemm.fp8.singletile.tm128tn128tk256.requant.soc": {
+    "golden_bin": "generators/radiance/cyclotron/test/golden-tensors/C_out.mxgemm.fp8.m128n128k256.fp8out.bin",
+    "trace_table": "dmem",
+    "trace_kind": "write",
+    "trace_address": "0x40000000,0x40004000",
     "cluster_id": 0
   }
 }

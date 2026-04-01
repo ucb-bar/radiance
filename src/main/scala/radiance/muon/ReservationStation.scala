@@ -53,7 +53,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // whether this table row is valid
   val validTable     = RegInit(VecInit.fill(numEntries)(false.B))
   // @perf: optimize; storing all of Decode fields in RS gets expensive
-  val instTable      = Mem(numEntries, ibufDeqIO)
+  val instTable      = RegInit(VecInit.fill(numEntries)(0.U.asTypeOf(ibufDeqIO)))
   // whether the instruction uses rs1/2/3
   // not actually a state; combinationally computed from instTable
   val hasOpTable     = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, Bool())))
@@ -61,13 +61,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   // not actually a state; combinationally computed from instTable
   val rsTable        = Wire(Vec(numEntries, Vec(Isa.maxNumRegs, pRegT)))
   // whether the valid operands are not busy & have been collected from regfile
-  val opReadyTable   = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val opReadyTable   = RegInit(VecInit.fill(numEntries)(VecInit.fill(Isa.maxNumRegs)(false.B)))
   // whether the operands are being written-to by in-flight insts in EX
-  val busyTable      = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val busyTable      = RegInit(VecInit.fill(numEntries)(VecInit.fill(Isa.maxNumRegs)(false.B)))
   // whether the operands are currently being collected
   // a partial set of hasOpTable; not all of the operands can be collected at
   // once
-  val collFiredTableMem = Mem(numEntries, Vec(Isa.maxNumRegs, Bool()))
+  val collFiredTableMem = RegInit(VecInit.fill(numEntries)(VecInit.fill(Isa.maxNumRegs)(false.B)))
   def collFiredTable(row: UInt): Vec[Bool] = {
     useCollector match {
       case true  => collFiredTableMem(row)
@@ -78,7 +78,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   def collFiredTable(row: Int): Vec[Bool] = collFiredTable(row.U)
   // where the operand lives in the collector banks.  RS uses this to allocate a
   // spot in the collector & feed the correct data to EX upon issue.
-  val collPtrTable   = Mem(numEntries, UInt(numCollEntriesWidth.W))
+  val collPtrTable   = RegInit(VecInit.fill(numEntries)(0.U(numCollEntriesWidth.W)))
   // whether this entry has received the final `rseadResp` from collector this
   // cycle. Used when `forwardCollectorIssue` is enabled, to indicate whether
   // we need to use the forwarded opReady and collPtr data instead of the
