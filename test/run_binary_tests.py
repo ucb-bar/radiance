@@ -17,10 +17,10 @@ DEFAULT_SIM_TIMEOUT = 45 * 60  # seconds
 
 # list of (config, test_name_regex) that are waived
 waivers = [
-    # waive all SoC ISA-style tests for the tapeout rush
-    ("soc", r".*rv32.*"),
-    ("soc", r".*vx32.*"),
-    ("soc", r".*mu32.*"),
+    # # waive all SoC ISA-style tests for the tapeout rush
+    # ("soc", r".*rv32.*"),
+    # ("soc", r".*vx32.*"),
+    # ("soc", r".*mu32.*"),
     # these are failing due to outdated elfs
     ("soc", r"swiglu"),
     # neutrino tests are incomplete atm
