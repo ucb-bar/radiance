@@ -276,7 +276,7 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
       Mux(!dataPipe.valid, sramReadBackupReg.bits, dataPipe.bits).asUInt)
     rNode.d.valid := dataPipe.valid || sramReadBackupReg.valid
     // r node A is not ready only if D is not ready and both slots filled
-    rNode.a.ready := rNode.d.ready && !(dataPipe.valid && sramReadBackupReg.valid)
+    rNode.a.ready := rNode.d.ready || !(dataPipe.valid && sramReadBackupReg.valid)
     dataPipe.ready := rNode.d.ready
     metadataPipe.ready := rNode.d.ready
   }
