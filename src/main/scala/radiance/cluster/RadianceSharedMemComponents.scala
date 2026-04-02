@@ -11,7 +11,6 @@ import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
 import radiance.subsystem._
 
-// virgo-specific tilelink nodes
 // generic smem implementation is in RadianceSharedMem.scala
 class RadianceSharedMemComponents(
   clusterParams: RadianceClusterParams,
@@ -129,8 +128,9 @@ class RadianceSharedMemComponents(
         val buf = TLBuffer(BufferParams.pipe, BufferParams(0))
         buf := dist
         val fanoutSource = if (ordered) {
-          // first 2 bits are xbar artifacts
+          // ensure in-order response that gemmini DMA expects
           val fifoFixer = ResponseFIFOFixer()
+          // first 2 bits are xbar artifacts
           fifoFixer := TLSourceShrinker(8) := buf
           fifoFixer
         } else {
@@ -214,16 +214,15 @@ class RadianceSharedMemComponents(
 
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
-  override val priorityRNodes: Seq[Seq[Seq[TLNode]]] = spadReadNodes
-  override val priorityWNodes: Seq[Seq[Seq[TLNode]]] = spadWriteNodes
   // these nodes access an entire line simultaneously
-  override val uniformRNodes: Seq[Seq[Seq[TLNode]]] = Seq.fill(smemBanks) {
-    muonAlignedReads.map { mrw => Seq(mrw) }
-  }
+  // (banks, subbanks, (gemminis + muon))
+  override val uniformRNodes: Seq[Seq[Seq[TLNode]]] = spadReadNodes.map(grb => {
+    (grb zip muonAlignedReads).map { case (grw, mrw) => grw ++ Seq(mrw) }
+  })
   override val uniformWNodes: Seq[Seq[Seq[TLNode]]] =
-    (spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwsb, qb) =>
-      (gwsb lazyZip muonAlignedWrites lazyZip qb).map { case (gwsw, mww, qw) =>
-        Seq(mww) ++ gwsw ++ qw
+    (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
+      (gwb lazyZip gwsb lazyZip muonAlignedWrites lazyZip qb).map { case (gww, gwsw, mww, qw) =>
+        gww ++ gwsw ++ qw ++ Seq(mww)
       }
     }
 
@@ -260,6 +259,7 @@ class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]
       require(anyLaneValidInCore.length == outer.numCores)
       require(laneOutFire.length == outer.numLanes)
 
+      // round-robin scheduling across cores
       // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
       val coreSelect = TLArbiter.roundRobin(
         outer.numCores,

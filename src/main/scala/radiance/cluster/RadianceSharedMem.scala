@@ -14,8 +14,6 @@ import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 import scala.collection.mutable.ArrayBuffer
 
 abstract class RadianceSmemNodeProvider {
-  val priorityRNodes: Seq[Seq[Seq[TLNode]]] = Seq.empty
-  val priorityWNodes: Seq[Seq[Seq[TLNode]]] = Seq.empty
   val uniformRNodes: Seq[Seq[Seq[TLNode]]]
   val uniformWNodes: Seq[Seq[Seq[TLNode]]]
   val nonuniformRNodes: Seq[TLNode]
@@ -45,8 +43,6 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val smNodes = provider()
   val (uniformRNodes, uniformWNodes, nonuniformRNodes, nonuniformWNodes) =
     (smNodes.uniformRNodes, smNodes.uniformWNodes, smNodes.nonuniformRNodes, smNodes.nonuniformWNodes)
-  val (priorityRNodes, priorityWNodes) =
-    (smNodes.priorityRNodes, smNodes.priorityWNodes)
 
   implicit val disableMonitors: Boolean = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
@@ -171,7 +167,6 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             case TwoPort => {
               val subbankRXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
                 .suggestName(s"smem_b${bid}_w${wid}_r_xbar").node
-              priorityRNodes(bid)(wid).foreach( subbankRXbar :=* _ )
               subbankRXbar := uniformNodesOut.head(bid)(wid)
               nonuniformRNodes.foreach( subbankRXbar :=* _ )
               readPorts.head := subbankRXbar
@@ -182,10 +177,11 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             }
           }
 
-          val subbankWXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
-            .suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
+          val subbankWXbar = LazyModule(new TLXbar(
+            // prioritize uniform over nonuniform
+            TLArbiter.lowestIndexFirst
+          )).suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
           writePort := subbankWXbar
-          priorityWNodes(bid)(wid).foreach( subbankWXbar :=* _ )
           subbankWXbar := uniformNodesOut.last(bid)(wid)
           nonuniformWNodes.foreach( subbankWXbar :=* _ )
         }
@@ -193,7 +189,6 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } else { // not stride by word
     require(config.memType == TwoPort, "double read ports not implemented")
-    require(priorityRNodes.isEmpty && priorityWNodes.isEmpty, "unimplemented")
 
     val smemRXbar = TLXbar()
     val smemWXbar = TLXbar()
@@ -376,9 +371,9 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
           VecInit(wordsInIdx.toSeq).asUInt.orR
         }.toSeq).asUInt.suggestName(s"valid_sources_rw${rw}_b${bid}")
       }
-      // use round robin to decide uniform select
+      // prioritize lower-index nodes (i.e. Gemmini)
       (wordSelects1h zip Seq(validRSources, validWSources)).zipWithIndex.foreach { case ((ws, vs), rw) =>
-        ws := TLArbiter.roundRobin(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
+        ws := TLArbiter.lowestIndexFirst(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
       }
       // mask valid into xbar to prevent triggering assertion
       (wordSelects1h lazyZip outer.uniformPolicyNodes lazyZip outer.uniformNodesIn).foreach { case (ws, pn, ui) =>
