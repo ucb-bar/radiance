@@ -136,7 +136,7 @@ class RadianceSharedMemComponents(
         } else {
           buf
         }
-        connectXbarName(fanoutSource, Some(s"dist_fanout_$suffix${i}w${w}"), TLArbiter.lowestIndexFirst)
+        connectXbarName(fanoutSource, Some(s"dist_fanout_$suffix${i}_w${w}"), TLArbiter.lowestIndexFirst)
       }
       Seq.fill(smemWidth / width)(fanout).flatten // smem wider than spad, duplicate masters
     }
@@ -151,13 +151,14 @@ class RadianceSharedMemComponents(
   gemminis.foreach(g => require(g.spad.spad_writer.isDefined))
 
   // (banks, subbanks, gemminis)
-  val spadReadNodes = Seq.fill(smemBanks) {
+  val spadReadNodes = Seq.tabulate(smemBanks) { b =>
     distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width_projected / 8)),
-      "gemmini_r", ordered = true)
+      s"gemmini_r_b${b}_", ordered = true)
   }
   // TODO: these nodes probably dont do anything, eliminate?
-  val spadWriteNodes = Seq.fill(smemBanks) {
-    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)), "gemmini_w")
+  val spadWriteNodes = Seq.tabulate(smemBanks) { b =>
+    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)),
+      s"gemmini_w_b${b}_")
   }
   val spadSpWriteNodesSingleBank = distAndDuplicate(
     gemminis.map { g =>
