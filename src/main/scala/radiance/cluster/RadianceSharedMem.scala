@@ -224,6 +224,10 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
   def makeReadBuffer[U <: Data](port: ReadPort[U], rNode: TLBundle, rEdge: TLEdgeIn): Unit = {
     port.ren := rNode.a.fire
 
+    // although d.ready may be true at the ren time of SRAM, it may not be one
+    // cycle later when SRAM returns data. for this, we need to stage the
+    // result somewhere so that there's always a landing pad for the read
+    // port's data.
     val dataPipeIn = Wire(DecoupledIO(port.data.cloneType))
     dataPipeIn.valid := RegNext(port.ren)
     dataPipeIn.bits := port.data
@@ -270,8 +274,9 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
       Mux(rNode.d.valid, metadataPipe.bits.size, 0.U),
       Mux(!dataPipe.valid, sramReadBackupReg.bits, dataPipe.bits).asUInt)
     rNode.d.valid := dataPipe.valid || sramReadBackupReg.valid
-    // r node A is not ready only if D is not ready and both slots filled
-    rNode.a.ready := rNode.d.ready || !(dataPipe.valid && sramReadBackupReg.valid)
+    // shut off A ready when both dataPipe and backup reg is valid; otherwise,
+    // backup reg may become stale and out-of-order
+    rNode.a.ready := rNode.d.ready && !(dataPipe.valid && sramReadBackupReg.valid)
     dataPipe.ready := rNode.d.ready
     metadataPipe.ready := rNode.d.ready
   }
