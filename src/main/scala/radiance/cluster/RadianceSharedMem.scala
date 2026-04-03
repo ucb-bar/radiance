@@ -14,6 +14,8 @@ import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 import scala.collection.mutable.ArrayBuffer
 
 abstract class RadianceSmemNodeProvider {
+  val priorityRNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
+  val priorityWNodes: Seq[Seq[Seq[TLNexusNode]]] = Seq.empty
   val uniformRNodes: Seq[Seq[Seq[TLNode]]]
   val uniformWNodes: Seq[Seq[Seq[TLNode]]]
   val nonuniformRNodes: Seq[TLNode]
@@ -43,6 +45,8 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val smNodes = provider()
   val (uniformRNodes, uniformWNodes, nonuniformRNodes, nonuniformWNodes) =
     (smNodes.uniformRNodes, smNodes.uniformWNodes, smNodes.nonuniformRNodes, smNodes.nonuniformWNodes)
+  val (priorityRNodes, priorityWNodes) =
+    (smNodes.priorityRNodes, smNodes.priorityWNodes)
 
   implicit val disableMonitors: Boolean = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
@@ -167,6 +171,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             case TwoPort => {
               val subbankRXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
                 .suggestName(s"smem_b${bid}_w${wid}_r_xbar").node
+              priorityRNodes(bid)(wid).foreach( subbankRXbar :=* _ )
               subbankRXbar := uniformNodesOut.head(bid)(wid)
               nonuniformRNodes.foreach( subbankRXbar :=* _ )
               readPorts.head := subbankRXbar
@@ -177,11 +182,10 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             }
           }
 
-          val subbankWXbar = LazyModule(new TLXbar(
-            // prioritize uniform over nonuniform
-            TLArbiter.lowestIndexFirst
-          )).suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
+          val subbankWXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
+            .suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
           writePort := subbankWXbar
+          priorityWNodes(bid)(wid).foreach( subbankWXbar :=* _ )
           subbankWXbar := uniformNodesOut.last(bid)(wid)
           nonuniformWNodes.foreach( subbankWXbar :=* _ )
         }
@@ -189,6 +193,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
     }
   } else { // not stride by word
     require(config.memType == TwoPort, "double read ports not implemented")
+    require(priorityRNodes.isEmpty && priorityWNodes.isEmpty, "unimplemented")
 
     val smemRXbar = TLXbar()
     val smemWXbar = TLXbar()
@@ -218,25 +223,30 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
 
   val smNodesImp = outer.providerImp.map(impFn => impFn(outer.smNodes))
 
+  private def clientPortOf(node: TLNode): TLMasterPortParameters =
+    node.outward.asInstanceOf[TLFormatNode].edges.out.head.client
+
   case class ReadPort[U <: Data](ren: Bool, data: U)
   case class WritePort[U <: Data](wen: Bool, data: U, mask: UInt)
 
-  def makeReadBuffer[U <: Data](port: ReadPort[U], rNode: TLBundle, rEdge: TLEdgeIn): Unit = {
+  def makeReadBuffer[U <: Data](port: ReadPort[U], rNode: TLBundle, rEdge: TLEdgeIn, priority: Bool = false.B): Unit = {
     port.ren := rNode.a.fire
+
+    val priorityFireReg = RegNext(priority && rNode.a.fire)
 
     // although d.ready may be true at the ren time of SRAM, it may not be one
     // cycle later when SRAM returns data. for this, we need to stage the
     // result somewhere so that there's always a landing pad for the read
     // port's data.
     val dataPipeIn = Wire(DecoupledIO(port.data.cloneType))
-    dataPipeIn.valid := RegNext(port.ren)
+    dataPipeIn.valid := RegNext(port.ren && !priority)
     dataPipeIn.bits := port.data
 
     val metadataPipeIn = Wire(DecoupledIO(new Bundle {
       val source = rNode.a.bits.source.cloneType
       val size = rNode.a.bits.size.cloneType
     }))
-    metadataPipeIn.valid := port.ren
+    metadataPipeIn.valid := port.ren && (!priority)
     metadataPipeIn.bits.source := rNode.a.bits.source
     metadataPipeIn.bits.size := rNode.a.bits.size
 
@@ -249,7 +259,7 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
     assert((dataPipe.valid || sramReadBackupReg.valid) === metadataPipe.valid)
 
     // data pipe is filled, but D is not ready and SRAM read came back
-    when (dataPipe.valid && !rNode.d.ready && dataPipeIn.valid) {
+    when (dataPipe.valid && !rNode.d.ready && dataPipeIn.valid && !priorityFireReg) {
       assert(!dataPipeIn.ready) // we should fill backup reg only if data pipe is not enqueueing
       assert(!sramReadBackupReg.valid) // backup reg should be empty
       assert(!metadataPipeIn.ready) // metadata should be filled previous cycle
@@ -259,26 +269,51 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
       assert(dataPipeIn.ready || !dataPipeIn.valid) // do not skip any response
     }
 
-    assert(metadataPipeIn.fire || !port.ren) // when requesting sram, metadata needs to be ready
-    assert(rNode.d.fire === metadataPipe.fire) // metadata dequeues iff D fires
+    assert(metadataPipeIn.fire || !(port.ren && !priority)) // when requesting sram, metadata needs to be ready
+    // assert(rNode.d.fire === metadataPipe.fire) // metadata dequeues iff D fires
 
     // when D becomes ready, and data pipe has emptied, time for backup to empty
-    when (rNode.d.ready && sramReadBackupReg.valid && !dataPipe.valid) {
+    when (rNode.d.ready && sramReadBackupReg.valid && !dataPipe.valid && !priorityFireReg) {
       sramReadBackupReg.valid := false.B
     }
     // must empty backup before filling data pipe
     assert(!(sramReadBackupReg.valid && dataPipe.valid && dataPipeIn.fire))
 
-    rNode.d.bits := rEdge.AccessAck(
-      Mux(rNode.d.valid, metadataPipe.bits.source, 0.U),
-      Mux(rNode.d.valid, metadataPipe.bits.size, 0.U),
-      Mux(!dataPipe.valid, sramReadBackupReg.bits, dataPipe.bits).asUInt)
-    rNode.d.valid := dataPipe.valid || sramReadBackupReg.valid
+    val priorityMetadataPipeIn = Wire(DecoupledIO(new Bundle {
+      val source = rNode.a.bits.source.cloneType
+      val size = rNode.a.bits.size.cloneType
+    }))
+    priorityMetadataPipeIn.valid := port.ren && priority
+    priorityMetadataPipeIn.bits.source := rNode.a.bits.source
+    priorityMetadataPipeIn.bits.size := rNode.a.bits.size
+    val priorityMetadataPipe = Pipeline(priorityMetadataPipeIn, 1)
+    assert(priorityMetadataPipe.valid === priorityFireReg)
+
+    when (priorityFireReg) {
+      rNode.d.bits := rEdge.AccessAck(
+        Mux(rNode.d.valid, priorityMetadataPipe.bits.source, 0.U),
+        Mux(rNode.d.valid, priorityMetadataPipe.bits.size, 0.U),
+        port.data.asUInt
+      )
+      rNode.d.valid := priorityFireReg
+    }.otherwise {
+      rNode.d.bits := rEdge.AccessAck(
+        Mux(rNode.d.valid, metadataPipe.bits.source, 0.U),
+        Mux(rNode.d.valid, metadataPipe.bits.size, 0.U),
+        Mux(!dataPipe.valid, sramReadBackupReg.bits, dataPipe.bits).asUInt)
+      rNode.d.valid := dataPipe.valid || sramReadBackupReg.valid
+    }
     // shut off A ready when both dataPipe and backup reg is valid; otherwise,
     // backup reg may become stale and out-of-order
-    rNode.a.ready := rNode.d.ready && !(dataPipe.valid && sramReadBackupReg.valid)
-    dataPipe.ready := rNode.d.ready
-    metadataPipe.ready := rNode.d.ready
+    rNode.a.ready :=
+      Mux(priority,
+        rNode.d.ready,
+        rNode.d.ready && !(dataPipe.valid && sramReadBackupReg.valid))
+    assert(!priorityFireReg || rNode.d.ready, "gemmini !d.ready is not supported")
+
+    dataPipe.ready := rNode.d.ready && !priorityFireReg
+    metadataPipe.ready := rNode.d.ready && !priorityFireReg
+    priorityMetadataPipe.ready := rNode.d.ready && priorityFireReg
   }
 
   def makeWriteBuffer[U <: Data](port: WritePort[U], wNode: TLBundle, wEdge: TLEdgeIn): Unit = {
@@ -310,6 +345,13 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
         val memWidth = outer.smemWidth
         val wordWidth = outer.wordSize
 
+        val subbankXbarInParams =
+          outer.priorityRNodes(bid)(wid).map(_.edges.out.head.client) ++
+          Seq(outer.uniformNodesOut.head(bid)(wid).edges.out.head.client) ++
+          outer.nonuniformRNodes.map(clientPortOf)
+        val priorityRSourceRanges =
+          TLXbar.mapInputIds(subbankXbarInParams).take(outer.priorityRNodes(bid)(wid).length)
+
         outer.config.memType match {
           case TwoPort =>
             val mem = TwoPortSyncMem(
@@ -334,7 +376,8 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
             assert((wid.U === ((rNode.a.bits.address & (memWidth - 1).U) >>
               log2Ceil(wordWidth).U).asUInt) || !rNode.a.valid, "word id mismatch with request")
 
-            makeReadBuffer(ReadPort(mem.io.ren, mem.io.rdata), rNode, rEdge)
+            val priorityR = priorityRSourceRanges.map(_.contains(rNode.a.bits.source)).reduce(_ || _)
+            makeReadBuffer(ReadPort(mem.io.ren, mem.io.rdata), rNode, rEdge, priorityR)
             makeWriteBuffer(WritePort(mem.io.wen, mem.io.wdata, mem.io.mask), wNode, wEdge)
 
           case TwoReadOneWrite =>
@@ -376,9 +419,9 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
           VecInit(wordsInIdx.toSeq).asUInt.orR
         }.toSeq).asUInt.suggestName(s"valid_sources_rw${rw}_b${bid}")
       }
-      // prioritize lower-index nodes (i.e. Gemmini)
+      // use round robin to decide uniform select
       (wordSelects1h zip Seq(validRSources, validWSources)).zipWithIndex.foreach { case ((ws, vs), rw) =>
-        ws := TLArbiter.lowestIndexFirst(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
+        ws := TLArbiter.roundRobin(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
       }
       // mask valid into xbar to prevent triggering assertion
       (wordSelects1h lazyZip outer.uniformPolicyNodes lazyZip outer.uniformNodesIn).foreach { case (ws, pn, ui) =>

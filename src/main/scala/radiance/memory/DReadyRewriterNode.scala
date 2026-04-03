@@ -11,6 +11,7 @@ import org.chipsalliance.diplomacy.lazymodule._
  */
 class DReadyRewriterNode(implicit p: Parameters) extends LazyModule {
   val node = TLIdentityNode()
+
   lazy val module = new LazyModuleImp(this) {
     (node.in.map(_._1) zip node.out.map(_._1)).foreach { case (i, o) =>
       o.a <> i.a
