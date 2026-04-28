@@ -18,6 +18,7 @@ module TracerBlackBox #(
 ) (
   input clock,
   input reset,
+  input logic [63:0] cycle,
 
   input  logic                            inst_valid,
   input  logic [ARCH_LEN-1:0]             inst_pc,
@@ -60,6 +61,7 @@ module TracerBlackBox #(
   import "DPI-C" function cyclotron_trace(
     input int  cluster_id,
     input int  core_id,
+    input longint cycle,
 
     input bit  inst_valid,
     input int  inst_pc,
@@ -172,6 +174,7 @@ module TracerBlackBox #(
       cyclotron_trace(
         CLUSTER_ID,
         CORE_ID,
+        cycle,
         inst_valid,
         inst_pc,
         inst_warpId,

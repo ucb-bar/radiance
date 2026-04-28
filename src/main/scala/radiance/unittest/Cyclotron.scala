@@ -484,8 +484,12 @@ extends CoreModule {
   }
 
   val cbox = Module(new TracerBlackBox()(p))
+  val cycle = RegInit(0.U(64.W))
+  cycle := cycle + 1.U
+
   cbox.io.clock := clock
   cbox.io.reset := reset.asBool
+  cbox.io.cycle := cycle
 
   cbox.io.inst.valid := io.inst.valid
   cbox.io.inst.pc := io.inst.bits.pc
@@ -538,6 +542,7 @@ extends CoreModule {
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
+      val cycle = Input(UInt(64.W))
       val inst = Input(new TraceVerilogIO)
       val dmem_req_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
       val dmem_req_bits_store = Input(UInt(muonParams.lsu.numLsuLanes.W))

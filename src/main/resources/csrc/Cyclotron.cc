@@ -509,6 +509,7 @@ void cyclotron_mem(
 void cyclotron_trace_rs(
     const uint32_t  cluster_id,
     const uint32_t  core_id,
+    const uint64_t  cycle,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -547,6 +548,7 @@ void cyclotron_trace_rs(
 void cyclotron_trace(
     const uint32_t  cluster_id,
     const uint32_t  core_id,
+    const uint64_t  cycle,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
@@ -584,6 +586,7 @@ void cyclotron_trace(
   cyclotron_trace_rs(
     cluster_id,
     core_id,
+    cycle,
     trace_valid,
     trace_pc,
     trace_warpId,
