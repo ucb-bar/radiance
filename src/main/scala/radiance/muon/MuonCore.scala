@@ -73,11 +73,6 @@ case class MuonCoreParams(
     println("l0i tag bits", warpIdBits + log2Ceil(ibufDepth))
     log2Ceil(ibufDepth) + warpIdBits
   }
-  def l1ReqTagBits: Int = {
-    val instVsData = 1
-    val coreBits = log2Ceil(numCores)
-    instVsData + coreBits + 5
-  }
 }
 
 object Isa {

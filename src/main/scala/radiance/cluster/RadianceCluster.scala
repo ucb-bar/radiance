@@ -137,7 +137,7 @@ class RadianceCluster (
   val l1cache = LazyModule(new TLNBDCache(TLNBDCacheParams(
     id = clusterId,
     cache = thisClusterParams.l1Config,
-    cacheTagBits = muonTiles.head.muonParams.core.l1ReqTagBits,
+    cacheTagBits = muonTiles.head.muonParams.l1ReqTagBits,
     overrideDChannelSize = Some(log2Ceil(thisClusterParams.l1Config.blockBytes)),
     makeLandingPads = true
   ))(

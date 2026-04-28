@@ -35,6 +35,31 @@ case class MuonTileParams(
   boundaryBuffers: Option[RocketTileBoundaryBufferParams] = None,
   l1CacheLineBytes: Int = 32,
 ) extends InstantiableTileParams[MuonTile] {
+  private def nbdCacheSourceIds(cache: DCacheParams): Int =
+    (1 max cache.nMSHRs) + cache.nMMIOs
+
+  private def xbarRangeSize(sourceIds: Int): Int =
+    if (sourceIds == 0) 0 else 1 << log2Ceil(sourceIds)
+
+  def l1ReqTagBits: Int = {
+    val coalescedReqWidth = core.numLanes * core.archLen / 8
+    require(coalescedReqWidth >= l1CacheLineBytes)
+    require(coalescedReqWidth % l1CacheLineBytes == 0)
+    require(isPow2(coalescedReqWidth / l1CacheLineBytes))
+
+    val fragmenterAddedBits =
+      if (coalescedReqWidth == l1CacheLineBytes) 0
+      else log2Ceil(coalescedReqWidth / l1CacheLineBytes) + 1
+
+    require(icacheUsingD.isDefined)
+    val l0iSrcIds = nbdCacheSourceIds(icacheUsingD.get)
+    val l0dSrcIds = dcache
+      .map(c => nbdCacheSourceIds(c) << fragmenterAddedBits)
+      .getOrElse(1 << core.l0dReqTagBits)
+
+    log2Ceil(core.numCores * (xbarRangeSize(l0iSrcIds) + xbarRangeSize(l0dSrcIds)))
+  }
+
   def instantiate(
     crossing: HierarchicalElementCrossingParamsLike,
     lookup: LookupByHartIdImpl

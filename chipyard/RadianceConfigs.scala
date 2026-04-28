@@ -80,6 +80,7 @@ object L0iCacheHugeConfig extends DCacheParams(
 )
 
 object L0dCacheConfig extends DCacheParams(
+  // 4KiB
   nSets = 64,
   nWays = 1,
   rowBits = 64 * 8,
@@ -87,12 +88,31 @@ object L0dCacheConfig extends DCacheParams(
   nMSHRs = 4,
 )
 
+object L0dCacheHugeConfig extends DCacheParams(
+  // 32KiB
+  nSets = 512,
+  nWays = 1,
+  rowBits = 64 * 8,
+  blockBytes = 64,
+  nMSHRs = 8,
+)
+
 object L1CacheConfig extends DCacheParams(
+  // 64KiB
   nSets = 512,
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
   nMSHRs = 8, // maybe be able to decrease this
+)
+
+object L1CacheHugeConfig extends DCacheParams(
+  // 128KiB
+  nSets = 1024,
+  nWays = 4,
+  rowBits = 32 * 8, // physical (sram) size
+  blockBytes = 32, // logical size
+  nMSHRs = 16,
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
@@ -223,6 +243,16 @@ class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterLargeDCacheConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheHugeConfig), trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheHugeConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++
   new WithGPUResetAggregator(defaultReset = false) ++
