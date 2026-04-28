@@ -278,16 +278,61 @@ the CPU fails to schedule work on the SIMT cores.
 
 ![SBus Block Diagram](./fig/sbus.svg)
 
-<!--
-### Area Estimation
+### Global Memory Request Path
 
-TODO
--->
+The global memory request path is ordered below from core-side allocation to
+downstream memory.  Each stage can bound outstanding work independently of cache
+capacity.
+
+* **LSU queue entries.**  Per-warp global load/store queues are sized by
+  `numGlobalLdqEntries` and `numGlobalStqEntries`; shared address, store-data,
+  and load-data staging storage is sized by `addressEntries`,
+  `storeDataEntries`, and `loadDataEntries`
+  ([LSU.scala](../src/main/scala/radiance/muon/LSU.scala)).
+* **LSU request generation.**  `MemRequestGen` stages LSQ requests and
+  serializes their packets.  It only accepts a load/atomic request when the
+  load-data allocator has a free entry
+  ([LSU.scala](../src/main/scala/radiance/muon/LSU.scala)).
+* **LSU lane adapter.**  `LSUCoreAdapter` presents a warp request as per-lane
+  memory requests and only accepts it when every lane interface is ready
+  ([LSU.scala](../src/main/scala/radiance/muon/LSU.scala)).
+* **Per-lane global source IDs.**  Each LSU lane is capped by
+  `logGMEMInFlights` through a `TLSourceShrinker`
+  ([MuonCore.scala](../src/main/scala/radiance/muon/MuonCore.scala),
+  [MuonTile.scala](../src/main/scala/radiance/muon/MuonTile.scala)).
+  `TLSourceShrinker` blocks A-channel requests when its source ID pool is full
+  ([SourceShrinker.scala](../../rocket-chip/src/main/scala/tilelink/SourceShrinker.scala)).
+* **Coalescer request queues.**  The coalescer stages per-lane requests before
+  matching, stages generated coalesced requests before the downstream TL port,
+  and queues split responses per lane.  Response queue depth is controlled by
+  `respQueueDepth`; coalesced request generation is described by `numCoalReqs`
+  ([Coalescing.scala](../src/main/scala/radiance/memory/Coalescing.scala)).
+* **Coalesced outstanding requests.**  Coalesced requests use a source ID pool
+  sized from `logCoalGMEMInFlights` and represented as `numNewSrcIds` in the
+  coalescer config; source allocation backpressures coalesced request
+  generation when all IDs are in use
+  ([MuonCore.scala](../src/main/scala/radiance/muon/MuonCore.scala),
+  [MuonTile.scala](../src/main/scala/radiance/muon/MuonTile.scala),
+  [Coalescing.scala](../src/main/scala/radiance/memory/Coalescing.scala)).
+* **Non-coalesced outstanding requests.**  Non-coalesced traffic is merged
+  through another source shrinker controlled by `logNonCoalGMEMInFlights`
+  ([MuonCore.scala](../src/main/scala/radiance/muon/MuonCore.scala),
+  [MuonTile.scala](../src/main/scala/radiance/muon/MuonTile.scala)).
+* **L0 D-cache MSHRs.**  L0D outstanding misses are bounded by the selected
+  `DCacheParams.nMSHRs`
+  ([RadianceConfigs.scala](../chipyard/RadianceConfigs.scala)).
+* **L1 cache landing pads.**  Cluster L1 uses `TLNBDCache` with landing pads;
+  its input accepts new A-channel requests while the local inflight counter is
+  below the landing-pad capacity derived from `DCacheParams.nMSHRs`
+  ([RadianceCluster.scala](../src/main/scala/radiance/cluster/RadianceCluster.scala),
+  [TLNBDCache.scala](../src/main/scala/radiance/memory/TLNBDCache.scala)).
+* **L1 and L2 cache parameters.**  `L1CacheConfig` and `L1CacheHugeConfig`
+  select L1 `nMSHRs`; the SoC L2 inclusive cache is configured separately by
+  `WithInclusiveCache`
+  ([RadianceConfigs.scala](../chipyard/RadianceConfigs.scala)).
 
 ## Other Stuff
 
 * Fencing support: drain LSU, invalidate L0/L1, wait for L2 coherency traffic
 * Atomics: L2 only, bypassed in LSU
 * Sectoring, banking in depth dim implementation
-
-

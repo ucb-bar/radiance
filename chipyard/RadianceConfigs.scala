@@ -89,12 +89,12 @@ object L0dCacheConfig extends DCacheParams(
 )
 
 object L0dCacheHugeConfig extends DCacheParams(
-  // 32KiB
+  // 64KiB
   nSets = 512,
   nWays = 1,
   rowBits = 64 * 8,
   blockBytes = 64,
-  nMSHRs = 8,
+  nMSHRs = 32,
 )
 
 object L1CacheConfig extends DCacheParams(
@@ -112,7 +112,7 @@ object L1CacheHugeConfig extends DCacheParams(
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
-  nMSHRs = 16,
+  nMSHRs = 32,
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {
