@@ -239,6 +239,31 @@ class RadianceSingleClusterConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(
+    2,
+    location = InCluster(0),
+    noILP = false,
+    l0i = Some(L0iCacheConfig),
+    l0d = Some(L0dCacheConfig),
+    trace = true,
+    numIssueQueueEntries = issueQueueEntries
+  ) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterIssueDepth1Config extends RadianceSingleClusterIssueDepthConfig(1)
+class RadianceSingleClusterIssueDepth2Config extends RadianceSingleClusterIssueDepthConfig(2)
+class RadianceSingleClusterIssueDepth4Config extends RadianceSingleClusterIssueDepthConfig(4)
+class RadianceSingleClusterIssueDepth8Config extends RadianceSingleClusterIssueDepthConfig(8)
+class RadianceSingleClusterIssueDepth16Config extends RadianceSingleClusterIssueDepthConfig(16)
+class RadianceSingleClusterIssueDepth32Config extends RadianceSingleClusterIssueDepthConfig(32)
+
 class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++

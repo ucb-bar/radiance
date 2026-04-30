@@ -71,6 +71,7 @@ class WithMuonCores(
   cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
+  numIssueQueueEntries: Int,
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
@@ -86,6 +87,7 @@ class WithMuonCores(
       numCores = n,
       numClusters = 2, // TODO: magic number
       noILP = noILP,
+      numIssueQueueEntries = numIssueQueueEntries,
       // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
       // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
       // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
@@ -140,6 +142,7 @@ class WithMuonCores(
     standalone: Boolean = false, noILP: Boolean = false,
     trace: Boolean = false, cyclotron: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
+    numIssueQueueEntries: Int = 8,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -148,7 +151,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, cyclotron, difftest, disabled, l0i, l0d)
+  ), standalone, noILP, trace, cyclotron, difftest, disabled, numIssueQueueEntries, l0i, l0d)
 }
 
 class WithCyclotronCores(
