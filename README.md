@@ -1,6 +1,11 @@
 # Radiance
 
-A Chisel-based heterogeneous GPU architecture for neural graphics applications.
+Radiance is a Chisel-based, SoC-integrated GPU that provides a platform for
+scalable integration of specialized AI accelerators.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ucb-bar/radiance/refs/heads/main/docs/fig/radiance.svg" alt="Radiance GPU microarchitecture" width="600">
+</p>
 
 ## Muon SIMT Core
 
