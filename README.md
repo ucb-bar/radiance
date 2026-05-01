@@ -1,19 +1,27 @@
 # Radiance
 
-Radiance is a Chisel-based, SoC-integrated GPU that provides a platform for
-scalable integration of specialized AI accelerators.
+Radiance is a Chisel-based, Chipyard SoC-integrated GPU that provides a
+platform for scalable integration of specialized AI accelerators.
+
+Radiance is under active development.  Please refer to these resources for more
+information:
+
+* [Radiance GPU architecture](docs/pdf/radiance-slice-retreat-2025.pdf)
+* [Muon SIMT core and command processor architecture](docs/pdf/radiance-muon-slice-retreat-2026.pdf)
+* [Neutrino orchestration unit architecture](docs/pdf/neutrino-slice-retreat-2025.key)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ucb-bar/radiance/refs/heads/main/docs/fig/radiance.svg" alt="Radiance GPU microarchitecture" width="600">
+  <img src="https://raw.githubusercontent.com/ucb-bar/radiance/refs/heads/main/docs/fig/radiance.svg" alt="Radiance GPU microarchitecture" width="400">
 </p>
 
 ## Muon SIMT Core
 
 Muon, the SIMT core design for the Radiance GPU, is currently under active development.
 
-See documentations:
+See spec documents:
 * [ISA specification](docs/isa.md)
 * [Muon microarchitecture specification](docs/muon.md)
+* [Memory system specification](docs/memory.md)
 
 ### Run simulations
 
