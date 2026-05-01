@@ -1,10 +1,20 @@
 # Radiance
 
-Radiance is a Chisel-based, Chipyard SoC-integrated GPU that provides a
-platform for scalable integration of specialized AI accelerators.
+Radiance is an open-source GPU platform developed at UC Berkeley. It is
+designed to help researchers and developers build and evaluate full-stack
+heterogeneous GPU systems targeting AI and neural graphics workloads.
 
-Radiance is under active development.  Please refer to these resources for more
-information:
+Radiance provides:
+
+* **A scalable integration platform for heterogeneous accelerators**, with clear
+  interfaces for decoupled orchestration and data delivery.
+* **A clean-slate SIMT core** designed for modern, register-heavy GPU
+  kernels and optimized for ASIC implementation.
+* **Chipyard-based SoC integration**, enabling tight host-device coordination
+  for memory system behavior and kernel execution.
+
+Radiance is under active development. Please refer to the following resources
+for more information:
 
 * [Radiance GPU architecture](docs/pdf/radiance-slice-retreat-2025.pdf)
 * [Muon SIMT core and command processor architecture](docs/pdf/radiance-muon-slice-retreat-2026.pdf)
