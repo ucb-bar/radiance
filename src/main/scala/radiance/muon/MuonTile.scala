@@ -42,7 +42,7 @@ case class MuonTileParams(
     if (sourceIds == 0) 0 else 1 << log2Ceil(sourceIds)
 
   def l1ReqTagBits: Int = {
-    val coalescedReqWidth = core.numLanes * core.archLen / 8
+    val coalescedReqWidth = dcache.map(_.blockBytes).getOrElse(core.numLanes * core.archLen / 8)
     require(coalescedReqWidth >= l1CacheLineBytes)
     require(coalescedReqWidth % l1CacheLineBytes == 0)
     require(isPow2(coalescedReqWidth / l1CacheLineBytes))
@@ -259,10 +259,12 @@ class MuonTile(
   })
 
   
-  val coalescedReqWidth = muonParams.core.numLanes * muonParams.core.archLen / 8
+  val warpBytes = muonParams.core.numLanes * muonParams.core.archLen / 8
+  val coalescedReqWidth = muonParams.dcache.map(_.blockBytes).getOrElse(warpBytes)
 
   val (l0dOut, l0dIn, l0dFlushRegNode) = muonParams.dcache.map { l0dParams =>
-    require(muonParams.dcache.map(_.blockBytes).getOrElse(coalescedReqWidth) == coalescedReqWidth)
+    require(l0dParams.blockBytes == coalescedReqWidth)
+    require(l0dParams.blockBytes >= warpBytes)
     println(f"l0d flush address is ${muonParams.peripheralAddr}%x")
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,

@@ -264,6 +264,45 @@ class RadianceSingleClusterIssueDepth8Config extends RadianceSingleClusterIssueD
 class RadianceSingleClusterIssueDepth16Config extends RadianceSingleClusterIssueDepthConfig(16)
 class RadianceSingleClusterIssueDepth32Config extends RadianceSingleClusterIssueDepthConfig(32)
 
+object RadianceWarpLenConfig {
+  private val minL0dLineBytes = 64
+  private val wordBytes = 32 / 8
+  private def warpBytes(warpLen: Int): Int = warpLen * wordBytes
+  private def withBlockBytes(cache: DCacheParams, blockBytes: Int): DCacheParams =
+    cache.copy(rowBits = blockBytes * 8, blockBytes = blockBytes)
+
+  def l0i(warpLen: Int): DCacheParams =
+    L0iCacheConfig
+  def l0d(warpLen: Int): DCacheParams =
+    withBlockBytes(L0dCacheConfig, minL0dLineBytes max warpBytes(warpLen))
+  def l1(warpLen: Int): DCacheParams =
+    L1CacheConfig
+}
+
+class RadianceSingleClusterWarpLenConfig(warpLen: Int) extends Config(
+  new WithMuonCores(
+    2,
+    location = InCluster(0),
+    noILP = false,
+    l0i = Some(RadianceWarpLenConfig.l0i(warpLen)),
+    l0d = Some(RadianceWarpLenConfig.l0d(warpLen)),
+    trace = true,
+    numLanes = Some(warpLen)
+  ) ++
+  new WithSIMTConfig(numWarps = 8, numLanes = warpLen, numLsuLanes = warpLen, numSMEMInFlights = 8) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = RadianceWarpLenConfig.l1(warpLen)) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterWarpLen4Config extends RadianceSingleClusterWarpLenConfig(4)
+class RadianceSingleClusterWarpLen8Config extends RadianceSingleClusterWarpLenConfig(8)
+class RadianceSingleClusterWarpLen16Config extends RadianceSingleClusterWarpLenConfig(16)
+class RadianceSingleClusterWarpLen32Config extends RadianceSingleClusterWarpLenConfig(32)
+class RadianceSingleClusterWarpLen64Config extends RadianceSingleClusterWarpLenConfig(64)
+
 class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++

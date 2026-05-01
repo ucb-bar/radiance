@@ -18,6 +18,8 @@ import testchipip.soc.SubsystemInjectorKey
 import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
+import radiance.muon.backend.fp.FPPipeParams
+import radiance.muon.backend.int.IntPipeParams
 import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
 import radiance.muon.LoadStoreUnitParams
 import radiance.unittest.CyclotronLinked
@@ -71,6 +73,7 @@ class WithMuonCores(
   cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
+  numLanes: Option[Int],
   numIssueQueueEntries: Int,
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
@@ -81,18 +84,32 @@ class WithMuonCores(
       assert(up(RadianceSimArgs),
              "WithMuonCores: difftest cannot be enabled in non-sim mode!")
     }
+    val simt = up(SIMTCoreKey).get
+    val resolvedNumLanes = numLanes.getOrElse(simt.numLanes)
+    val intPipe = numLanes.map { lanes =>
+      IntPipeParams(numALULanes = lanes, numMulDivLanes = lanes)
+    }
+    val fpPipe = numLanes.map { lanes =>
+      FPPipeParams(
+        numFP32Lanes = (lanes / 2).max(1),
+        numFP32DivLanes = (lanes / 8).max(1),
+        numFP16ExpLanes = (lanes / 4).max(1)
+      )
+    }
     MuonCoreParams(
-      numWarps = up(SIMTCoreKey).get.numWarps,
-      numLanes = up(SIMTCoreKey).get.numLanes,
+      numWarps = simt.numWarps,
+      numLanes = resolvedNumLanes,
       numCores = n,
       numClusters = 2, // TODO: magic number
       noILP = noILP,
       numIssueQueueEntries = numIssueQueueEntries,
+      intPipe = intPipe.getOrElse(MuonCoreParams().intPipe),
+      fpPipe = fpPipe.getOrElse(MuonCoreParams().fpPipe),
       // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
       // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
       // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
       lsu = LoadStoreUnitParams(
-        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
+        numLsuLanes = numLanes.getOrElse(simt.numLsuLanes)
       ),
       trace = trace || difftest,
       difftest = difftest,
@@ -142,6 +159,7 @@ class WithMuonCores(
     standalone: Boolean = false, noILP: Boolean = false,
     trace: Boolean = false, cyclotron: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
+    numLanes: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
@@ -151,7 +169,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, cyclotron, difftest, disabled, numIssueQueueEntries, l0i, l0d)
+  ), standalone, noILP, trace, cyclotron, difftest, disabled, numLanes, numIssueQueueEntries, l0i, l0d)
 }
 
 class WithCyclotronCores(
