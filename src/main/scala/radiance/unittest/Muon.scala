@@ -234,12 +234,14 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     }
 
     // performance counters
-    val cperf = Module(new Profiler (
-      clusterId = 0,
-      coreId = 0,
-    ))
-    cperf.io.perf <> core.io.perf
-    cperf.io.finished := core.io.finished
+    if (core.muonParams.profiler) {
+      val cperf = Module(new Profiler (
+        clusterId = 0,
+        coreId = 0,
+      ))
+      cperf.io.perf <> core.io.perf
+      cperf.io.finished := core.io.finished
+    }
 
     // RTL-model difftest
     if (core.muonParams.difftest) {

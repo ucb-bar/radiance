@@ -55,6 +55,7 @@ case class MuonCoreParams(
   barrierBits: Int = 4,
   debug: Boolean = false, // enable extra IOs for debug (ex: PC)
   trace: Boolean = false,   // enable instruction trace generation
+  profiler: Boolean = true, // enable performance profiling report generation
   difftest: Boolean = false // enable arch-state differential testing
                             // against cyclotron
 ) extends PhysicalCoreParams {

@@ -69,6 +69,7 @@ class WithMuonCores(
   standalone: Boolean,
   noILP: Boolean,
   trace: Boolean,
+  profiler: Boolean,
   /** cyclotron-as-a-tile: use golden core model */
   cyclotron: Boolean,
   difftest: Boolean,
@@ -80,9 +81,9 @@ class WithMuonCores(
 ) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
-    if (difftest) {
+    if (difftest || trace || profiler) {
       assert(up(RadianceSimArgs),
-             "WithMuonCores: difftest cannot be enabled in non-sim mode!")
+             "cyclotron features cannot be enabled in non-sim mode!")
     }
     val simt = up(SIMTCoreKey).get
     val resolvedNumLanes = numLanes.getOrElse(simt.numLanes)
@@ -112,11 +113,12 @@ class WithMuonCores(
         numLsuLanes = numLanes.getOrElse(simt.numLsuLanes)
       ),
       trace = trace || difftest,
+      profiler = profiler,
       difftest = difftest,
     )
   }
   case CyclotronLinked => {
-    up(CyclotronLinked) || site(RadianceSimArgs) || trace || difftest || cyclotron
+    up(CyclotronLinked) || trace || difftest || cyclotron || profiler
   }
   case TilesLocated(`location`) => {
     if (standalone) {
@@ -157,7 +159,7 @@ class WithMuonCores(
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
     standalone: Boolean = false, noILP: Boolean = false,
-    trace: Boolean = false, cyclotron: Boolean = false,
+    trace: Boolean = false, profiler: Boolean = true, cyclotron: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
     numLanes: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
@@ -169,7 +171,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, cyclotron, difftest, disabled, numLanes, numIssueQueueEntries, l0i, l0d)
+  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numLanes, numIssueQueueEntries, l0i, l0d)
 }
 
 class WithCyclotronCores(

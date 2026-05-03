@@ -247,6 +247,7 @@ class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Conf
     noILP = false,
     l0i = Some(L0iCacheConfig),
     l0d = Some(L0dCacheConfig),
+    profiler = false,
     numIssueQueueEntries = issueQueueEntries
   ) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
@@ -285,6 +286,7 @@ class RadianceSingleClusterWarpLenConfig(warpLen: Int) extends Config(
     noILP = false,
     l0i = Some(RadianceWarpLenConfig.l0i(warpLen)),
     l0d = Some(RadianceWarpLenConfig.l0d(warpLen)),
+    profiler = false,
     numLanes = Some(warpLen)
   ) ++
   new WithSIMTConfig(numWarps = 8, numLanes = warpLen, numLsuLanes = warpLen, numSMEMInFlights = 8) ++
