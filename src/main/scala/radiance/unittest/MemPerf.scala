@@ -148,7 +148,7 @@ class MemPerfMuonTile(
       val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
         id = tileId,
         cache = l0dParams,
-        cacheTagBits = muonParams.core.l0dReqTagBits,
+        cacheTagBits = muonParams.core.l0dReqTagBits(coalescedReqWidth),
         flushAddr = None, // Disable flush register to avoid unconnected node
       ))(
         p.alterMap(Map(

@@ -55,7 +55,7 @@ case class MuonTileParams(
     val l0iSrcIds = nbdCacheSourceIds(icacheUsingD.get)
     val l0dSrcIds = dcache
       .map(c => nbdCacheSourceIds(c) << fragmenterAddedBits)
-      .getOrElse(1 << core.l0dReqTagBits)
+      .getOrElse(1 << core.l0dReqTagBits(coalescedReqWidth))
 
     log2Ceil(core.numCores * (xbarRangeSize(l0iSrcIds) + xbarRangeSize(l0dSrcIds)))
   }
@@ -269,7 +269,7 @@ class MuonTile(
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0dParams,
-      cacheTagBits = muonParams.core.l0dReqTagBits,
+      cacheTagBits = muonParams.core.l0dReqTagBits(coalescedReqWidth),
       flushAddr = Some(muonParams.peripheralAddr + 0x100),
     )))
     l0d.flushNode.get := dFlushMaster

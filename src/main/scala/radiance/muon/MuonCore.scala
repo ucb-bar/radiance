@@ -62,10 +62,14 @@ case class MuonCoreParams(
   val coreIdBits: Int = log2Ceil(numCores)
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
-  def l0dReqTagBits: Int = {
+  def l0dReqSourceBits: Int = {
     val coalVsNonCoal = 1
-    val sizeTagBits = 3 // store the size in the cache tag
-    val totalBits = (logCoalGMEMInFlights max logNonCoalGMEMInFlights) + coalVsNonCoal + sizeTagBits
+    (logCoalGMEMInFlights max logNonCoalGMEMInFlights) + coalVsNonCoal
+  }
+  def l0dReqTagBits(maxTransferBytes: Int): Int = {
+    require(isPow2(maxTransferBytes), s"maxTransferBytes must be a power of two, got $maxTransferBytes")
+    val sizeTagBits = log2Ceil(log2Ceil(maxTransferBytes) + 1) // store the size in the cache tag
+    val totalBits = l0dReqSourceBits + sizeTagBits
     println("l0d tag bits", totalBits)
     totalBits
   }
