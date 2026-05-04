@@ -76,6 +76,7 @@ class WithMuonCores(
   disabled: Boolean,
   numWarps: Option[Int],
   numLanes: Option[Int],
+  numPhysRegs: Option[Int],
   numIssueQueueEntries: Int,
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
@@ -89,6 +90,7 @@ class WithMuonCores(
     val simt = up(SIMTCoreKey).get
     val resolvedNumWarps = numWarps.getOrElse(simt.numWarps)
     val resolvedNumLanes = numLanes.getOrElse(simt.numLanes)
+    val resolvedNumPhysRegs = numPhysRegs.getOrElse(MuonCoreParams().numPhysRegs)
     val intPipe = numLanes.map { lanes =>
       IntPipeParams(numALULanes = lanes, numMulDivLanes = lanes)
     }
@@ -102,6 +104,8 @@ class WithMuonCores(
     MuonCoreParams(
       numWarps = resolvedNumWarps,
       numLanes = resolvedNumLanes,
+      numPhysRegs = resolvedNumPhysRegs,
+      numArchRegs = (resolvedNumPhysRegs / 2).min(128),
       numCores = n,
       numClusters = 2, // TODO: magic number
       noILP = noILP,
@@ -165,6 +169,7 @@ class WithMuonCores(
     difftest: Boolean = false, disabled: Boolean = false,
     numWarps: Option[Int] = None,
     numLanes: Option[Int] = None,
+    numPhysRegs: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
@@ -174,7 +179,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numIssueQueueEntries, l0i, l0d)
+  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numPhysRegs, numIssueQueueEntries, l0i, l0d)
 }
 
 class WithCyclotronCores(

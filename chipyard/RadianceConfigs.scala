@@ -240,7 +240,6 @@ class RadianceSingleClusterConfig extends Config(
 )
 
 class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Config(
-  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(
     2,
     location = InCluster(0),
@@ -310,7 +309,10 @@ class RadianceSingleClusterWarpDepthConfig(warpDepth: Int) extends Config(
     noILP = false,
     l0i = Some(L0iCacheConfig),
     l0d = Some(L0dCacheConfig),
+    trace = false,
     profiler = false,
+    cyclotron = false,
+    difftest = false,
     numWarps = Some(warpDepth)
   ) ++
   new WithSIMTConfig(numWarps = warpDepth, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
@@ -326,6 +328,32 @@ class RadianceSingleClusterWarpDepth4Config extends RadianceSingleClusterWarpDep
 class RadianceSingleClusterWarpDepth8Config extends RadianceSingleClusterWarpDepthConfig(8)
 class RadianceSingleClusterWarpDepth16Config extends RadianceSingleClusterWarpDepthConfig(16)
 class RadianceSingleClusterWarpDepth32Config extends RadianceSingleClusterWarpDepthConfig(32)
+
+class RadianceSingleClusterPhysRegConfig(numPhysRegs: Int) extends Config(
+  new WithMuonCores(
+    2,
+    location = InCluster(0),
+    noILP = false,
+    l0i = Some(L0iCacheConfig),
+    l0d = Some(L0dCacheConfig),
+    trace = false,
+    profiler = false,
+    cyclotron = false,
+    difftest = false,
+    numPhysRegs = Some(numPhysRegs)
+  ) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterPhysReg64Config extends RadianceSingleClusterPhysRegConfig(64)
+class RadianceSingleClusterPhysReg128Config extends RadianceSingleClusterPhysRegConfig(128)
+class RadianceSingleClusterPhysReg256Config extends RadianceSingleClusterPhysRegConfig(256)
+class RadianceSingleClusterPhysReg512Config extends RadianceSingleClusterPhysRegConfig(512)
+class RadianceSingleClusterPhysReg1024Config extends RadianceSingleClusterPhysRegConfig(1024)
 
 class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
