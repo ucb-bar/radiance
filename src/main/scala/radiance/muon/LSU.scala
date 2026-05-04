@@ -12,17 +12,17 @@ case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
 
     // metadata queue depths
-    val numGlobalLdqEntries: Int = 32, // limited to 16 decoded global load insts per warp
-    val numGlobalStqEntries: Int = 32, // limited to 16 decoded global store insts per warp
-    val numSharedLdqEntries: Int = 32, // limited to 16 decoded shared load insts per warp
-    val numSharedStqEntries: Int = 32, // limited to 16 decoded shared store insts per warp
+    val numGlobalLdqEntries: Int = 16, // limited to 16 decoded global load insts per warp
+    val numGlobalStqEntries: Int = 16, // limited to 16 decoded global store insts per warp
+    val numSharedLdqEntries: Int = 16, // limited to 16 decoded shared load insts per warp
+    val numSharedStqEntries: Int = 16, // limited to 16 decoded shared store insts per warp
 
     // data queue depths
-    val loadDataEntries: Int = 32, // limited to 16 in-flight / waiting to writeback load requests
+    val loadDataEntries: Int = 16, // limited to 16 in-flight / waiting to writeback load requests
                                    // shared across num{Global,Shared}LdqEntries
-    val storeDataEntries: Int = 32, // limited to 8 unissued store requests
+    val storeDataEntries: Int = 8, // limited to 8 unissued store requests
                                    // shared across num{Global,Shared}StqEntries
-    val addressEntries: Int = 32,  // limited to 16 unissued memory requests
+    val addressEntries: Int = 16,  // limited to 16 unissued memory requests
                                    // shared across all metadata queues
 
     // implementation details
