@@ -246,7 +246,8 @@ class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Conf
     noILP = false,
     l0i = Some(L0iCacheConfig),
     l0d = Some(L0dCacheConfig),
-    profiler = false,
+    trace = true,
+    profiler = true,
     numIssueQueueEntries = issueQueueEntries
   ) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
@@ -262,6 +263,30 @@ class RadianceSingleClusterIssueDepth4Config extends RadianceSingleClusterIssueD
 class RadianceSingleClusterIssueDepth8Config extends RadianceSingleClusterIssueDepthConfig(8)
 class RadianceSingleClusterIssueDepth16Config extends RadianceSingleClusterIssueDepthConfig(16)
 class RadianceSingleClusterIssueDepth32Config extends RadianceSingleClusterIssueDepthConfig(32)
+
+class RadianceSingleClusterLSQDepthConfig(lsqDepth: Int) extends Config(
+  new WithMuonCores(
+    2,
+    location = InCluster(0),
+    noILP = false,
+    l0i = Some(L0iCacheConfig),
+    l0d = Some(L0dCacheConfig),
+    profiler = false,
+    lsqDepth = Some(lsqDepth)
+  ) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterLSQDepth1Config extends RadianceSingleClusterLSQDepthConfig(1)
+class RadianceSingleClusterLSQDepth2Config extends RadianceSingleClusterLSQDepthConfig(2)
+class RadianceSingleClusterLSQDepth4Config extends RadianceSingleClusterLSQDepthConfig(4)
+class RadianceSingleClusterLSQDepth8Config extends RadianceSingleClusterLSQDepthConfig(8)
+class RadianceSingleClusterLSQDepth16Config extends RadianceSingleClusterLSQDepthConfig(16)
+class RadianceSingleClusterLSQDepth32Config extends RadianceSingleClusterLSQDepthConfig(32)
 
 object RadianceWarpLenConfig {
   private val minL0dLineBytes = 64

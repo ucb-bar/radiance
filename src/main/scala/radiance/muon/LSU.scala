@@ -32,6 +32,18 @@ case class LoadStoreUnitParams(
     val smemDoesntReorder: Boolean = true, // see comment above LSQMemUpdate
     val fastHeadUpdate: Boolean = true,    // allow logical head to update on same cycle as memUpdate / memResponse
 ) {
+    private val depths = Seq(
+        numGlobalLdqEntries,
+        numGlobalStqEntries,
+        numSharedLdqEntries,
+        numSharedStqEntries,
+        loadDataEntries,
+        storeDataEntries,
+        addressEntries,
+    )
+    require(depths.forall(_ > 0), "LSU queue depths must be positive")
+    require(depths.forall(isPow2(_)), "LSU queue depths must be powers of two")
+
     val globalLdqIndexBits = log2Up(numGlobalLdqEntries)
     val globalStqIndexBits = log2Up(numGlobalStqEntries)
     val globalLdqCircIndexBits = globalLdqIndexBits + 1
@@ -47,6 +59,38 @@ case class LoadStoreUnitParams(
     val loadDataIdxBits = log2Up(loadDataEntries)
     val storeDataIdxBits = log2Up(storeDataEntries)
     val addressIdxBits = log2Up(addressEntries)
+}
+
+case class LoadStoreUnitDepthOverrides(
+    numGlobalLdqEntries: Option[Int] = None,
+    numGlobalStqEntries: Option[Int] = None,
+    numSharedLdqEntries: Option[Int] = None,
+    numSharedStqEntries: Option[Int] = None,
+    loadDataEntries: Option[Int] = None,
+    storeDataEntries: Option[Int] = None,
+    addressEntries: Option[Int] = None,
+) {
+    def applyTo(lsu: LoadStoreUnitParams): LoadStoreUnitParams = lsu.copy(
+        numGlobalLdqEntries = numGlobalLdqEntries.getOrElse(lsu.numGlobalLdqEntries),
+        numGlobalStqEntries = numGlobalStqEntries.getOrElse(lsu.numGlobalStqEntries),
+        numSharedLdqEntries = numSharedLdqEntries.getOrElse(lsu.numSharedLdqEntries),
+        numSharedStqEntries = numSharedStqEntries.getOrElse(lsu.numSharedStqEntries),
+        loadDataEntries = loadDataEntries.getOrElse(lsu.loadDataEntries),
+        storeDataEntries = storeDataEntries.getOrElse(lsu.storeDataEntries),
+        addressEntries = addressEntries.getOrElse(lsu.addressEntries),
+    )
+}
+
+object LoadStoreUnitDepthOverrides {
+    def all(depth: Int): LoadStoreUnitDepthOverrides = LoadStoreUnitDepthOverrides(
+        numGlobalLdqEntries = Some(depth),
+        numGlobalStqEntries = Some(depth),
+        numSharedLdqEntries = Some(depth),
+        numSharedStqEntries = Some(depth),
+        loadDataEntries = Some(depth),
+        storeDataEntries = Some(depth),
+        addressEntries = Some(depth),
+    )
 }
 
 case object MuonLoadStoreUnitDebugIdKey extends Field[Option[Int]](None)

@@ -21,7 +21,6 @@ import radiance.muon._
 import radiance.muon.backend.fp.FPPipeParams
 import radiance.muon.backend.int.IntPipeParams
 import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
-import radiance.muon.LoadStoreUnitParams
 import radiance.unittest.CyclotronLinked
 
 sealed trait RadianceSmemSerialization
@@ -78,6 +77,7 @@ class WithMuonCores(
   numLanes: Option[Int],
   numPhysRegs: Option[Int],
   numIssueQueueEntries: Int,
+  lsqDepth: Option[Int],
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
@@ -101,6 +101,12 @@ class WithMuonCores(
         numFP16ExpLanes = (lanes / 4).max(1)
       )
     }
+    val lsu = MuonCoreParams().lsu.copy(
+      numLsuLanes = numLanes.getOrElse(simt.numLsuLanes)
+    )
+    val resolvedLsu = lsqDepth
+      .map(depth => LoadStoreUnitDepthOverrides.all(depth).applyTo(lsu))
+      .getOrElse(lsu)
     MuonCoreParams(
       numWarps = resolvedNumWarps,
       numLanes = resolvedNumLanes,
@@ -115,9 +121,7 @@ class WithMuonCores(
       // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
       // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
       // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
-      lsu = LoadStoreUnitParams(
-        numLsuLanes = numLanes.getOrElse(simt.numLsuLanes)
-      ),
+      lsu = resolvedLsu,
       trace = trace || difftest,
       profiler = profiler,
       difftest = difftest,
@@ -171,6 +175,7 @@ class WithMuonCores(
     numLanes: Option[Int] = None,
     numPhysRegs: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
+    lsqDepth: Option[Int] = None,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -179,7 +184,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numPhysRegs, numIssueQueueEntries, l0i, l0d)
+  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numPhysRegs, numIssueQueueEntries, lsqDepth, l0i, l0d)
 }
 
 class WithCyclotronCores(
