@@ -135,6 +135,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.beCSR.cyclesDispatched := cyclesDispatched
   execute.io.beCSR.cyclesEligible := cyclesEligible
   execute.io.beCSR.cyclesIssued := cyclesIssued
+  execute.io.beCSR.perWarp := 0.U.asTypeOf(execute.io.beCSR.perWarp)
   execute.io.beCSR.perWarp.zip(io.perf.perWarp.take(4)).foreach { case (dst, src) =>
     dst.stallsWAW := src.stallsWAW
     dst.stallsWAR := src.stallsWAR

@@ -74,6 +74,7 @@ class WithMuonCores(
   cyclotron: Boolean,
   difftest: Boolean,
   disabled: Boolean,
+  numWarps: Option[Int],
   numLanes: Option[Int],
   numIssueQueueEntries: Int,
   l0i: Option[DCacheParams],
@@ -86,6 +87,7 @@ class WithMuonCores(
              "cyclotron features cannot be enabled in non-sim mode!")
     }
     val simt = up(SIMTCoreKey).get
+    val resolvedNumWarps = numWarps.getOrElse(simt.numWarps)
     val resolvedNumLanes = numLanes.getOrElse(simt.numLanes)
     val intPipe = numLanes.map { lanes =>
       IntPipeParams(numALULanes = lanes, numMulDivLanes = lanes)
@@ -98,7 +100,7 @@ class WithMuonCores(
       )
     }
     MuonCoreParams(
-      numWarps = simt.numWarps,
+      numWarps = resolvedNumWarps,
       numLanes = resolvedNumLanes,
       numCores = n,
       numClusters = 2, // TODO: magic number
@@ -161,6 +163,7 @@ class WithMuonCores(
     standalone: Boolean = false, noILP: Boolean = false,
     trace: Boolean = false, profiler: Boolean = true, cyclotron: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
+    numWarps: Option[Int] = None,
     numLanes: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
@@ -171,7 +174,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numLanes, numIssueQueueEntries, l0i, l0d)
+  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numIssueQueueEntries, l0i, l0d)
 }
 
 class WithCyclotronCores(

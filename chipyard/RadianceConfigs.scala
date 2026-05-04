@@ -303,6 +303,30 @@ class RadianceSingleClusterWarpLen16Config extends RadianceSingleClusterWarpLenC
 class RadianceSingleClusterWarpLen32Config extends RadianceSingleClusterWarpLenConfig(32)
 class RadianceSingleClusterWarpLen64Config extends RadianceSingleClusterWarpLenConfig(64)
 
+class RadianceSingleClusterWarpDepthConfig(warpDepth: Int) extends Config(
+  new WithMuonCores(
+    2,
+    location = InCluster(0),
+    noILP = false,
+    l0i = Some(L0iCacheConfig),
+    l0d = Some(L0dCacheConfig),
+    profiler = false,
+    numWarps = Some(warpDepth)
+  ) ++
+  new WithSIMTConfig(numWarps = warpDepth, numLanes = 16, numLsuLanes = 16, numSMEMInFlights = 8) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceSingleClusterWarpDepth2Config extends RadianceSingleClusterWarpDepthConfig(2)
+class RadianceSingleClusterWarpDepth4Config extends RadianceSingleClusterWarpDepthConfig(4)
+class RadianceSingleClusterWarpDepth8Config extends RadianceSingleClusterWarpDepthConfig(8)
+class RadianceSingleClusterWarpDepth16Config extends RadianceSingleClusterWarpDepthConfig(16)
+class RadianceSingleClusterWarpDepth32Config extends RadianceSingleClusterWarpDepthConfig(32)
+
 class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheHugeConfig), l0d = Some(L0dCacheConfig), trace = true) ++
