@@ -258,7 +258,8 @@ class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Conf
     l0d = Some(L0dCacheConfig),
     trace = true,
     profiler = true,
-    numIssueQueueEntries = issueQueueEntries
+    numIssueQueueEntries = issueQueueEntries,
+    lsqDepth = Some(32) // ensure LSU doesn't bottleneck RS entry
   ) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
