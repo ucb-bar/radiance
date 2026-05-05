@@ -371,7 +371,7 @@ class CyclotronDiffTest(clusterId: Int = 0, coreId: Int = 0, tick: Boolean = tru
         "ARCH_LEN"     -> p(MuonKey).archLen,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
-        "REG_BITS"     -> Isa.regBits,
+        "REG_BITS"     -> p(MuonKey).pRegBits,
         "SIM_TICK"     -> (if (tick) 1 else 0),
   )) with HasBlackBoxResource with HasCoreParameters {
     val io = IO(new Bundle {
@@ -530,7 +530,7 @@ extends CoreModule {
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
         "LSU_LANES"    -> p(MuonKey).lsu.numLsuLanes,
-        "REG_BITS"     -> Isa.regBits,
+        "REG_BITS"     -> p(MuonKey).pRegBits,
         "DMEM_TAG_BITS" -> dmemTagBits,
         "DMEM_DATA_BITS" -> dmemDataBits,
         "SMEM_TAG_BITS" -> smemTagBits,

@@ -46,13 +46,13 @@ module CyclotronDiffTestBlackBox #(
     input int  trace_warpId,
     input int  trace_tmask,
     input bit  trace_regs_0_enable,
-    input byte trace_regs_0_address,
+    input int  trace_regs_0_address,
     input int  trace_regs_0_data[NUM_LANES],
     input bit  trace_regs_1_enable,
-    input byte trace_regs_1_address,
+    input int  trace_regs_1_address,
     input int  trace_regs_1_data[NUM_LANES],
     input bit  trace_regs_2_enable,
-    input byte trace_regs_2_address,
+    input int  trace_regs_2_address,
     input int  trace_regs_2_data[NUM_LANES]
   );
 

@@ -371,8 +371,8 @@ class RadianceSingleClusterPhysRegConfig(numPhysRegs: Int) extends Config(
     noILP = false,
     l0i = Some(L0iCacheConfig),
     l0d = Some(L0dCacheConfig),
-    trace = false,
-    profiler = false,
+    trace = true,
+    profiler = true,
     cyclotron = false,
     difftest = false,
     numPhysRegs = Some(numPhysRegs)
