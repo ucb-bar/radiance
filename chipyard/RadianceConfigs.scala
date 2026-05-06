@@ -245,7 +245,7 @@ class RadianceSingleClusterSynConfig extends Config(
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++
-  new WithGPUResetAggregator(defaultReset = false) ++
+  new WithGPUResetAggregator(defaultReset = true) ++
   new RadianceBaseConfig
 )
 
