@@ -3,9 +3,12 @@ package radiance.memory
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
+import freechips.rocketchip.regmapper.RegField
+import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import org.chipsalliance.diplomacy.lazymodule.{LazyModule, LazyModuleImp}
+import radiance.cluster.CacheFlushNode
 import radiance.muon.{LoadStoreUnitDerivedParams, MuonKey}
 import radiance.subsystem.GPUMemory
 import radiance.unittest.{CyclotronDataMem, CyclotronInstMem}
@@ -13,16 +16,49 @@ import radiance.unittest.{CyclotronDataMem, CyclotronInstMem}
 case class CyclotronTLInstMemParams(
   name: String = "cyclotron_tl_inst_mem",
   respQueueDepth: Int = 4,
+  flushAddr: Option[BigInt] = None,
 )
 
 case class CyclotronTLDataMemParams(
   name: String = "cyclotron_tl_data_mem",
   respQueueDepth: Int = 4,
+  flushAddr: Option[BigInt] = None,
 )
 
 private object CyclotronTLMem {
   def gmemAddress(implicit p: Parameters): Seq[AddressSet] =
     Seq(AddressSet(0, p(GPUMemory).get.size - 1))
+
+  def flushRegNode(name: String, flushAddr: Option[BigInt]): Option[TLRegisterNode] =
+    flushAddr.map { addr =>
+      TLRegisterNode(
+        address = Seq(AddressSet(addr, 0xff)),
+        device = new SimpleDevice(name, Seq(name)),
+        beatBytes = 8,
+        concurrency = 1,
+      )
+    }
+
+  def flushNode(flushAddr: Option[BigInt]): Option[CacheFlushNode.Slave] =
+    flushAddr.map(_ => CacheFlushNode.Slave())
+}
+
+private object CyclotronTLNoOpFlush {
+  def apply(
+    flushRegNode: Option[TLRegisterNode],
+    flushNode: Option[CacheFlushNode.Slave],
+  ): Unit = {
+    flushRegNode.foreach { node =>
+      node.regmap(
+        0x0 -> Seq(RegField.w(32, (_: Bool, _: UInt) => true.B)),
+      )
+    }
+
+    flushNode.map(_.in.head._1).foreach { node =>
+      // one-cycle delay from start to done
+      node.done := RegNext(node.start, false.B)
+    }
+  }
 }
 
 class CyclotronTLResp(
@@ -58,11 +94,16 @@ class CyclotronTLInstMem(val params: CyclotronTLInstMemParams = CyclotronTLInstM
         fifoId = Some(0),
         supports = TLMasterToSlaveTransferSizes(
           get = TransferSizes(1, beatBytes),
+          putFull = TransferSizes(1, beatBytes),
+          putPartial = TransferSizes(1, beatBytes),
         ),
       )),
       beatBytes = beatBytes,
     )
   ))
+
+  val flushRegNode = CyclotronTLMem.flushRegNode(s"${params.name}_flush", params.flushAddr)
+  val flushNode = CyclotronTLMem.flushNode(params.flushAddr)
 
   lazy val module = new CyclotronTLInstMemImp(this)
 }
@@ -77,6 +118,8 @@ class CyclotronTLInstMemImp(outer: CyclotronTLInstMem)
     s"TL sourceBits (${tl.params.sourceBits}) exceed Cyclotron IMem tag bits (${p(MuonKey).l0iReqTagBits})"
   )
 
+  // decoupling queue to safely stall Cyclotron mem when d.ready is blocked;
+  // not essential
   val respQueue = Module(new Queue(
     new CyclotronTLResp(tl.params.sourceBits, tl.params.sizeBits, outer.beatBytes * 8),
     outer.params.respQueueDepth,
@@ -123,6 +166,8 @@ class CyclotronTLInstMemImp(outer: CyclotronTLInstMem)
   }.elsewhen (!tl.a.fire && tl.d.fire) {
     outstanding := outstanding - 1.U
   }
+
+  CyclotronTLNoOpFlush(outer.flushRegNode, outer.flushNode)
 }
 
 class CyclotronTLDataMem(val params: CyclotronTLDataMemParams = CyclotronTLDataMemParams())
@@ -154,6 +199,9 @@ class CyclotronTLDataMem(val params: CyclotronTLDataMemParams = CyclotronTLDataM
       )
     ))
   }
+
+  val flushRegNode = CyclotronTLMem.flushRegNode(s"${params.name}_flush", params.flushAddr)
+  val flushNode = CyclotronTLMem.flushNode(params.flushAddr)
 
   lazy val module = new CyclotronTLDataMemImp(this)
 }
@@ -234,4 +282,6 @@ class CyclotronTLDataMemImp(outer: CyclotronTLDataMem)
       outstanding := outstanding - 1.U
     }
   }
+
+  CyclotronTLNoOpFlush(outer.flushRegNode, outer.flushNode)
 }

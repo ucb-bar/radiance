@@ -6,7 +6,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket.{DCacheParams, HellaCacheResp, NonBlockingDCache, PRV, SimpleHellaCacheIF}
+import freechips.rocketchip.rocket.{DCacheParams, HellaCacheResp, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
@@ -86,7 +86,7 @@ class TLNBDCache(val params: TLNBDCacheParams)
 
   val flushNode = params.flushAddr.map(_ => CacheFlushNode.Slave())
 
-  implicit val q = p.alterMap(Map(
+  implicit val q: Parameters = p.alterMap(Map(
     TileKey -> DummyCacheTileParams(params),
     CacheBlockBytes -> params.cache.blockBytes,
     // TileVisibilityNodeKey -> visibilityNode,
