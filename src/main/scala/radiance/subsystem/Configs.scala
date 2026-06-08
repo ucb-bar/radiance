@@ -69,8 +69,8 @@ class WithMuonCores(
   noILP: Boolean,
   trace: Boolean,
   profiler: Boolean,
-  /** cyclotron-as-a-tile: use golden core model */
-  cyclotron: Boolean,
+  cyclotronCore: Boolean,
+  cyclotronMem: Boolean,
   difftest: Boolean,
   disabled: Boolean,
   numWarps: Option[Int],
@@ -128,7 +128,7 @@ class WithMuonCores(
     )
   }
   case CyclotronLinked => {
-    up(CyclotronLinked) || trace || difftest || cyclotron || profiler
+    up(CyclotronLinked) || trace || difftest || cyclotronCore || cyclotronMem || profiler
   }
   case TilesLocated(`location`) => {
     if (standalone) {
@@ -150,7 +150,8 @@ class WithMuonCores(
         dcache = l0d,
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
         peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset,
-        cyclotron = cyclotron,
+        cyclotronCore = cyclotronCore,
+        cyclotronMem = cyclotronMem,
         disabled = disabled,
       )
       List.tabulate(n)(i => MuonTileAttachParams(
@@ -169,7 +170,8 @@ class WithMuonCores(
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
     standalone: Boolean = false, noILP: Boolean = false,
-    trace: Boolean = false, profiler: Boolean = true, cyclotron: Boolean = false,
+    trace: Boolean = false, profiler: Boolean = true,
+    cyclotronCore: Boolean = false, cyclotronMem: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
     numWarps: Option[Int] = None,
     numLanes: Option[Int] = None,
@@ -184,7 +186,9 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, profiler, cyclotron, difftest, disabled, numWarps, numLanes, numPhysRegs, numIssueQueueEntries, lsqDepth, l0i, l0d)
+    ), standalone, noILP, trace, profiler, cyclotronCore, cyclotronMem,
+    difftest, disabled, numWarps, numLanes, numPhysRegs,
+    numIssueQueueEntries, lsqDepth, l0i, l0d)
 }
 
 class WithCyclotronCores(

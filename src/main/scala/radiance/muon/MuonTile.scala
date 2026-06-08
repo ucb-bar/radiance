@@ -26,7 +26,8 @@ case class MuonTileParams(
   icacheUsingD: Option[DCacheParams] = None,
   dcache: Option[DCacheParams] = None,
   peripheralAddr: BigInt = 0,
-  cyclotron: Boolean = false,
+  cyclotronCore: Boolean = false,
+  cyclotronMem: Boolean = false,
   disabled: Boolean = false,
   btb: Option[BTBParams] = None,
   beuAddr: Option[BigInt] = None,
@@ -152,9 +153,6 @@ class MuonTile(
   val lsuDerived = new LoadStoreUnitDerivedParams(q, muonParams.core)
   val lsuSourceIdBits = lsuDerived.sourceIdBits
 
-  // TODO; parameterize
-  private val useCyclotronTLMem = true
-
   private def cacheMissSourceIds(cache: DCacheParams): Int =
     (1 max cache.nMSHRs) + cache.nMMIOs
 
@@ -219,7 +217,7 @@ class MuonTile(
   }
 
   val (l0iOut, l0iIn, l0iFlushRegNode): (TLNode, TLNode, Option[TLRegisterNode]) =
-    if (useCyclotronTLMem) {
+    if (muonParams.cyclotronMem) {
       val l0i = LazyModule(new CyclotronTLInstMem(CyclotronTLInstMemParams(
         name = s"muon_${muonParams.clusterId}_${muonParams.coreId}_cyclotron_l0i",
         flushAddr = Some(muonParams.peripheralAddr),
@@ -291,8 +289,8 @@ class MuonTile(
   // icacheNode is also exposed with dcacheNode
   val dcacheNode = visibilityNode
 
-  val l0dFlushRegNode: Option[TLRegisterNode] = if (useCyclotronTLMem) {
-    // When useCyclotronTLMem, we replace both coalescer+L0D with the cyclotron
+  val l0dFlushRegNode: Option[TLRegisterNode] = if (muonParams.cyclotronMem) {
+    // When using cyclotron mem, we replace both coalescer+L0D with the cyclotron
     // mem.  This is because the Cyclotron memory has per-lane DataMemIO
     // interface, and supports full throughput regardless of coalesce-ability
 
@@ -415,7 +413,7 @@ class MuonTile(
     Resource(cpuDevice, "reg").bind(ResourceAddress(tileId))
   }
 
-  override lazy val module = if (muonParams.cyclotron) {
+  override lazy val module = if (muonParams.cyclotronCore) {
     new CyclotronTileModuleImp(this)
   } else {
     new MuonTileModuleImp(this)
