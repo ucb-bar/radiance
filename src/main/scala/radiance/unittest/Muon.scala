@@ -17,7 +17,7 @@ import radiance.muon._
 import radiance.subsystem.DummyTileParams
 import scala.collection.mutable.ArrayBuffer
 
-/** Testbench for Muon with the test signals */
+/** Testbench for Muon with the test signals. */
 class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
   val coreTop = LazyModule(new MuonCoreTop()(p.alterMap(Map(
     // @cleanup: this should be unnecessary with WithMuonCores(headless = true)
@@ -178,7 +178,9 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
 
 /** DUT module for core-standalone testbench.
  *  Hooks up a MuonCore with a Rust instruction memory model, and exposes a TL
- *  node for its global memory interface. */
+ *  node for its global memory interface.
+ *  NOTE: MuonCoreTop is a single-core testbench, and does not support
+ *  cluster-wide barriers. */
 class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
 
@@ -207,7 +209,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.imem <> imem.io.imem
     core.io.dmem <> dmem.io.dmem
 
-    // tie off shared mem
+    // tie off shared mem; TODO
     core.io.smem.req.foreach(_.ready := false.B)
     core.io.smem.resp.foreach(_.valid := false.B)
     core.io.smem.resp.foreach(_.bits := DontCare)

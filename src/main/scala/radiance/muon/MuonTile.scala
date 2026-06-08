@@ -241,8 +241,9 @@ class MuonTile(
 
   val dFlushMaster = CacheFlushNode.Master()
   
-  // LSU expects all-lanes-at-once requests, so request valid is dependent on whether all lanes are ready
-  // This interacts poorly with downstream request arbitration (e.g. XBar), so we need buffer to decouple
+  // LSU expects all-lanes-at-once requests, so request valid is dependent on
+  // whether all lanes are ready.  This interacts poorly with downstream request
+  // arbitration (e.g. XBar), so we need a TLbuffer to decouple
   val innerLsuNodes = Seq.tabulate(muonParams.core.numLanes) { lid =>
     TLClientNode(Seq(TLMasterPortParameters.v2(
       Seq(TLMasterParameters.v1(
