@@ -592,6 +592,7 @@ extends CoreModule {
   bbox.io.cyclesDispatched := io.perf.backend.cyclesDispatched
   bbox.io.cyclesEligible := io.perf.backend.cyclesEligible
   bbox.io.cyclesIssued := io.perf.backend.cyclesIssued
+  bbox.io.accRsOccupancy := io.perf.backend.accRsOccupancy
   bbox.io.perWarp_cyclesDecoded := VecInit(io.perf.frontend.perWarp.map(_.cyclesDecoded)).asUInt
   bbox.io.perWarp_cyclesDispatched := VecInit(io.perf.backend.perWarp.map(_.cyclesDispatched)).asUInt
   bbox.io.perWarp_cyclesEligible := VecInit(io.perf.backend.perWarp.map(_.cyclesEligible)).asUInt
@@ -620,6 +621,7 @@ extends CoreModule {
       val cyclesDispatched = Input(Perf.T)
       val cyclesEligible = Input(Perf.T)
       val cyclesIssued = Input(Perf.T)
+      val accRsOccupancy = Input(Perf.T)
       val perWarp_cyclesDecoded = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_cyclesDispatched = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_cyclesEligible = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))

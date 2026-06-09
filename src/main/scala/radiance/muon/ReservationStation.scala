@@ -44,6 +44,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
         val cyclesEligible = Perf.T
         val stallsRSFull = Perf.T
       })
+      val accRsOccupancy = Perf.T
     })
   })
 
@@ -129,10 +130,17 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     printTable
   }
 
-  val rsOccupancy = WireDefault(PopCount(validTable))
-  dontTouch(rsOccupancy)
+  val instsInRs = WireDefault(PopCount(validTable))
+  val accRsOccupancy = RegInit(0.U.asTypeOf(Perf.T))
+  when (io.softReset) {
+    accRsOccupancy := 0.U
+  }.otherwise {
+    accRsOccupancy := (accRsOccupancy + instsInRs)(Perf.counterWidth - 1, 0)
+  }
+  io.perf.accRsOccupancy := accRsOccupancy
+  dontTouch(instsInRs)
 
-  io.perf.cyclesDispatched := PerfCounter(io.softReset, rsOccupancy =/= 0.U)
+  io.perf.cyclesDispatched := PerfCounter(io.softReset, instsInRs =/= 0.U)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val validThisWarp = (0 until numEntries).map { i =>
       validTable(i) && (instTable(i).uop.wid === wid.U)

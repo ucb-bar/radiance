@@ -62,13 +62,15 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   io.perf.cyclesDispatched := cyclesDispatched
   io.perf.cyclesEligible := reservStation.io.perf.cyclesEligible
   io.perf.cyclesIssued := cyclesIssued
+  (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
+    p.stallsWAW := h.stallsWAW
+    p.stallsWAR := h.stallsWAR
+    p.stallsScoreboard := h.stallsScoreboard
+  }
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
-    p.cyclesDispatched :=
-      PerfCounter(io.softReset,
-                  reservStation.io.admit.fire &&
-                  (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
     p.stallsRSFull := reservStation.io.perf.perWarp(wid).stallsRSFull
 
+    p.cyclesDispatched := reservStation.io.perf.perWarp(wid).cyclesDispatched
     p.cyclesEligible := reservStation.io.perf.perWarp(wid).cyclesEligible
     p.cyclesIssued := PerfCounter(io.softReset, issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
@@ -78,11 +80,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
                                    !issued.ready)
     p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
   }
-  (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
-    p.stallsWAW := h.stallsWAW
-    p.stallsWAR := h.stallsWAR
-    p.stallsScoreboard := h.stallsScoreboard
-  }
+  io.perf.accRsOccupancy := reservStation.io.perf.accRsOccupancy
 
   // -----------------
   // operand collector
@@ -353,4 +351,6 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
     val stallsBusy = Perf.T
     val stallsBusyLSU = Perf.T
   })
+  /** accumulated number of insts in RS; dividing by cycles gives inst window occupancy */
+  val accRsOccupancy = Perf.T
 }

@@ -689,6 +689,7 @@ void profile_perf_counters_rs(
     uint64_t cycles_dispatched,
     uint64_t cycles_eligible,
     uint64_t cycles_issued,
+    uint64_t acc_rs_occupancy,
     const uint64_t* per_warp_cycles_decoded,
     const uint64_t* per_warp_cycles_dispatched,
     const uint64_t* per_warp_cycles_eligible,
@@ -711,6 +712,7 @@ void profile_perf_counters(
     uint64_t cycles_dispatched,
     uint64_t cycles_eligible,
     uint64_t cycles_issued,
+    uint64_t acc_rs_occupancy,
     const uint64_t* per_warp_cycles_decoded,
     const uint64_t* per_warp_cycles_dispatched,
     const uint64_t* per_warp_cycles_eligible,
@@ -725,7 +727,7 @@ void profile_perf_counters(
 ) {
   profile_perf_counters_rs(
       cluster_id, core_id, inst_retired, cycle, cycles_decoded, cycles_dispatched,
-      cycles_eligible, cycles_issued, per_warp_cycles_decoded, per_warp_cycles_dispatched, per_warp_cycles_eligible, per_warp_cycles_issued,
+      cycles_eligible, cycles_issued, acc_rs_occupancy, per_warp_cycles_decoded, per_warp_cycles_dispatched, per_warp_cycles_eligible, per_warp_cycles_issued,
       per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_scoreboard, per_warp_stalls_rs_full,
       per_warp_stalls_busy,
       per_warp_stalls_busy_lsu, finished);
