@@ -42,15 +42,11 @@ class Frontend(implicit p: Parameters)
     req.bits.tag := Cat(i$.in.bits.wid, tagCounters(i$.in.bits.wid))
     req.bits.data := DontCare // i$ is read only
     req.bits.mask := ((1 << muonParams.instBytes) - 1).U
-//    req.bits.metadata.pc := i$.in.bits.pc
-//    req.bits.metadata.wid := i$.in.bits.wid
     i$.in.ready := req.ready
 
     resp.ready := true.B
     i$.out.valid := resp.valid
     i$.out.bits.inst := resp.bits.data
-//    i$.out.bits.wid := resp.bits.metadata.wid
-//    i$.out.bits.pc := resp.bits.metadata.pc
 
     io.commit <> warpScheduler.io.commit
     io.csr.wmask := warpScheduler.io.csrWmask
@@ -89,7 +85,7 @@ class Frontend(implicit p: Parameters)
     ibuffer.io.enq <> renamer.io.ibuf
     renamer.io.softReset := io.softReset
     (io.perf.perWarp zip renamer.io.ibuf).foreach { case (p, ren) =>
-      p.instDecoded := PerfCounter(ren.uop.valid)
+      p.instDecoded := PerfCounter(io.softReset, ren.uop.valid)
     }
   }
 
@@ -100,21 +96,16 @@ class Frontend(implicit p: Parameters)
 
     io.lsuReserve <> ibuffer.io.lsuReserve
 
-    val cyclesDecoded = PerfCounter(ibuffer.io.empty.reduce(!_ || !_))
+    val cyclesDecoded = PerfCounter(io.softReset, ibuffer.io.empty.reduce(!_ || !_))
     io.csr.cyclesDecoded := cyclesDecoded
     io.perf.cyclesDecoded := cyclesDecoded
     val perWarpCyclesDecoded = Seq.fill(numWarps)(new PerfCounter)
     (io.perf.perWarp lazyZip perWarpCyclesDecoded lazyZip ibuffer.io.empty)
       .foreach { case (p, counter, empty) =>
+        counter.reset(io.softReset)
         counter.cond(!empty)
         p.cyclesDecoded := counter.value
       }
-    
-    // io.ibuf.bits := Mux1H(winner, ibuffer.io.deq.map(_.bits))
-    // io.ibuf.valid := eligible.orR
-    // (ibuffer.io.deq zip winner.asBools).foreach { case (warpBuf, w) =>
-    //   warpBuf.ready := io.ibuf.ready && w
-    // }
   }
 }
 

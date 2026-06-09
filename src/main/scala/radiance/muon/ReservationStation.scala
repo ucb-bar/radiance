@@ -18,6 +18,7 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
 
 class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
+    val softReset = Input(Bool())
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
     /** instruction issued to the downstream EX pipe */
@@ -108,8 +109,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   io.admit.ready := hasEmptyRow
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.stallsRSFull :=
-      PerfCounter(io.admit.valid && !hasEmptyRow &&
-                  io.admit.bits.ibufEntry.uop.wid === wid.U)
+    PerfCounter(io.softReset,
+      io.admit.valid && !hasEmptyRow &&
+      io.admit.bits.ibufEntry.uop.wid === wid.U)
   }
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
@@ -130,13 +132,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   val rsOccupancy = WireDefault(PopCount(validTable))
   dontTouch(rsOccupancy)
 
-  io.perf.cyclesDispatched := PerfCounter(rsOccupancy =/= 0.U)
+  io.perf.cyclesDispatched := PerfCounter(io.softReset, rsOccupancy =/= 0.U)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val validThisWarp = (0 until numEntries).map { i =>
       validTable(i) && (instTable(i).uop.wid === wid.U)
     }
     val hasThisWarp = validThisWarp.reduce(_ || _)
-    p.cyclesDispatched := PerfCounter(hasThisWarp)
+    p.cyclesDispatched := PerfCounter(io.softReset, hasThisWarp)
   }
 
   // -----------------
@@ -368,13 +370,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   // connect per-warp eligible perf counters
   val hasEligible = eligibles.map(_.valid).reduce(_ || _)
-  io.perf.cyclesEligible := PerfCounter(hasEligible)
+  io.perf.cyclesEligible := PerfCounter(io.softReset, hasEligible)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val eligiblesThisWarp = eligibles.map { row =>
       row.valid && (row.bits.entry.uop.wid === wid.U)
     }
     val hasEligibleThisWarp = eligiblesThisWarp.reduce(_ || _)
-    p.cyclesEligible := PerfCounter(hasEligibleThisWarp)
+    p.cyclesEligible := PerfCounter(io.softReset, hasEligibleThisWarp)
   }
 
   // if not using collector, RS only directly uses the readData port and never

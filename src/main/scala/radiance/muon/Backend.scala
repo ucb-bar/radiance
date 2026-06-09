@@ -28,12 +28,14 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
 
   val hazard = Module(new Hazard)
   hazard.io.ibuf <> io.ibuf
+  hazard.io.softReset := io.softReset
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.hazard <> hazard.io.scb
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
+  reservStation.io.softReset := io.softReset
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   scoreboard.io.updateWB <> reservStation.io.scb.updateWB
@@ -53,8 +55,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.io.issue
   }
 
-  val cyclesEligible = PerfCounter(issued.valid)
-  val cyclesIssued = PerfCounter(issued.fire)
+  val cyclesEligible = PerfCounter(io.softReset, issued.valid)
+  val cyclesIssued = PerfCounter(io.softReset, issued.fire)
 
   val cyclesDispatched = reservStation.io.perf.cyclesDispatched
   io.perf.cyclesDispatched := cyclesDispatched
@@ -62,16 +64,18 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   io.perf.cyclesIssued := cyclesIssued
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.cyclesDispatched :=
-      PerfCounter(reservStation.io.admit.fire &&
+      PerfCounter(io.softReset,
+                  reservStation.io.admit.fire &&
                   (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
     p.stallsRSFull := reservStation.io.perf.perWarp(wid).stallsRSFull
 
     p.cyclesEligible := reservStation.io.perf.perWarp(wid).cyclesEligible
-    p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
+    p.cyclesIssued := PerfCounter(io.softReset, issued.fire && (issued.bits.uop.wid === wid.U))
     // LSU business is accounted for at the IBUF, not at the EX stage; it needs
     // to be added separately
-    val stallsBusyEX = PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
-                                  !issued.ready)
+    val stallsBusyEX = PerfCounter(io.softReset,
+                                   issued.valid && (issued.bits.uop.wid === wid.U) &&
+                                   !issued.ready)
     p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
   }
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
@@ -157,7 +161,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
       // ideally reserv.req.valid should directly reflect needsLsuReserve
       val ibufIsLSU = io.ibuf(wid).valid && io.ibuf(wid).bits.uop.inst.b(UseLSUPipe)
       val lsuStalled = (ibufIsLSU || reserv.req.valid) && !reserv.req.ready
-      p.stallsBusyLSU := PerfCounter(lsuStalled)
+      p.stallsBusyLSU := PerfCounter(io.softReset, lsuStalled)
   }
 
   if (noILP) {
@@ -305,17 +309,22 @@ object Perf {
 }
 
 class PerfCounter(width: Int = Perf.counterWidth) {
+  private val reset_ = WireInit(false.B)
   private val cond_ = WireInit(false.B)
   val value = RegInit(0.U(width.W))
-  when (cond_) {
+  when (reset_) {
+    value := 0.U
+  }.elsewhen (cond_) {
     value := value + 1.U
   }
+  def reset(r: Bool) = { reset_ := r }
   def cond(c: Bool) = { cond_ := c }
 }
 
 object PerfCounter {
-  def apply(cond: Bool): UInt = {
+  def apply(reset: Bool, cond: Bool): UInt = {
     val c = new PerfCounter
+    c.reset(reset)
     c.cond(cond)
     c.value
   }

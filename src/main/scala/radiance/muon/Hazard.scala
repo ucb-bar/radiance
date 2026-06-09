@@ -11,6 +11,7 @@ import org.chipsalliance.cde.config.Parameters
  */
 class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   val io = IO(new Bundle {
+    val softReset = Input(Bool())
     /** per-warp IBUF interface */
     val ibuf = Flipped(Vec(muonParams.numWarps, Decoupled(ibufDeqIO)))
     /** scoreboard interface */
@@ -27,6 +28,8 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
   val stallsWAW = Seq.fill(numWarps)(new PerfCounter)
   val stallsWAR = Seq.fill(numWarps)(new PerfCounter)
   io.perf.zipWithIndex.foreach { case (p, wid) =>
+    stallsWAW(wid).reset(io.softReset)
+    stallsWAR(wid).reset(io.softReset)
     p.stallsWAW := stallsWAW(wid).value
     p.stallsWAR := stallsWAR(wid).value
   }
@@ -150,6 +153,7 @@ class Hazard(implicit p: Parameters) extends CoreModule()(p) {
 
   val stallsScoreboard = Seq.fill(numWarps)(new PerfCounter)
   stallsScoreboard.zipWithIndex.foreach { case (p, wid) =>
+    p.reset(io.softReset)
     p.cond((wid.U === chosenWarpId) && rsAdmitChosen.valid && !io.scb.updateRS.success)
   }
   io.perf.zipWithIndex.foreach { case (p, wid) =>
