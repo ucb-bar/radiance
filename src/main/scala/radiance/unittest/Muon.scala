@@ -304,6 +304,8 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParamete
       val cycle = RegInit(0.U(64.W))
       cycle := cycle + 1.U
       debugContext.cycle := cycle
+      debugContext.clusterId := 0.U
+      debugContext.coreId := 0.U
       lsu.debug.get := debugContext
       lsuAdapter.debug.get := debugContext
     }

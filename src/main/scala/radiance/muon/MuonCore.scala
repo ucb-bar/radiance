@@ -258,17 +258,23 @@ trait HasCoreParameters {
   ))
 }
 
-class DebugContext extends Bundle {
+class DebugContext(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreParameters {
   val cycle = UInt(64.W)
+  val clusterId = UInt(muonParams.clusterIdBits.W)
+  val coreId = UInt(muonParams.coreIdBits.W)
 }
 
 trait HasDebugPrint extends HasCoreParameters {
   protected def debugContext: Option[DebugContext] = None
 
+  private def printPrefix(ctx: DebugContext): Unit = {
+    printf("[Muon c%d.%d @%d] ", ctx.clusterId, ctx.coreId, ctx.cycle)
+  }
+
   def debugf(pable: Printable): Unit = {
     if (muonParams.debug) {
       debugContext match {
-        case Some(ctx) => printf(cf"[@${ctx.cycle}%0d] ")
+        case Some(ctx) => printPrefix(ctx)
         case None      => printf("[@?] ")
       }
       printf(pable)
@@ -385,6 +391,8 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val cycle = RegInit(0.U(64.W))
     cycle := cycle + 1.U
     ctx.cycle := cycle
+    ctx.clusterId := io.clusterId
+    ctx.coreId := io.coreId
     ctx
   }
 
