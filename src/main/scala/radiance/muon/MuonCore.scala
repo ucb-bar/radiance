@@ -256,10 +256,42 @@ trait HasCoreParameters {
     barrierBits = m.barrierBits,
     wantBits = m.warpIdBits + m.coreIdBits,
   ))
+}
 
-  def debugf(pable: Printable) = {
+class DebugContext extends Bundle {
+  val cycle = UInt(64.W)
+}
+
+trait HasDebugPrint extends HasCoreParameters {
+  protected def debugContext: Option[DebugContext] = None
+
+  def debugf(pable: Printable): Unit = {
+    if (muonParams.debug) {
+      debugContext match {
+        case Some(ctx) => printf(cf"[@${ctx.cycle}%d] ")
+        case None      => printf("[@?] ")
+      }
+      printf(pable)
+    }
+  }
+
+  def debugfAppend(pable: Printable): Unit = {
     if (muonParams.debug) {
       printf(pable)
+    }
+  }
+}
+
+trait HasDebugContext extends HasDebugPrint { this: Module =>
+  val debug = Option.when(muonParams.debug) {
+    IO(Input(new DebugContext))
+  }
+
+  override protected def debugContext: Option[DebugContext] = debug
+
+  protected def connectDebug(child: HasDebugContext): Unit = {
+    if (muonParams.debug) {
+      child.debug.get := debug.get
     }
   }
 }
@@ -348,6 +380,20 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   })
   dontTouch(io)
 
+  private val rootDebug = Option.when(muonParams.debug) {
+    val ctx = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    ctx.cycle := cycle
+    ctx
+  }
+
+  private def connectDebug(child: HasDebugContext) = {
+    if (muonParams.debug) {
+      child.debug.get := rootDebug.get
+    }
+  }
+
   val fe = Module(new Frontend)
   fe.idIO.clusterId := io.clusterId
   fe.idIO.coreId := io.coreId
@@ -368,6 +414,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.trace.foreach(_ <> io.trace.get)
   io.perf.frontend <> fe.io.perf
   io.perf.backend <> be.io.perf
+  connectDebug(be)
 
   fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb

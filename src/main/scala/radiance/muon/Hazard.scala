@@ -9,7 +9,7 @@ import org.chipsalliance.cde.config.Parameters
  *  resolves WAW/WAR hazards by stalling.  RAW hazards are handled at the
  *  reservation station.
  */
-class Hazard(implicit p: Parameters) extends CoreModule()(p) {
+class Hazard(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     val softReset = Input(Bool())
     /** per-warp IBUF interface */

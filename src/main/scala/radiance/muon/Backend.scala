@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int.LsuOpDecoder
 
-class Backend(implicit p: Parameters) extends CoreModule()(p) {
+class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     val lsuReserve = reservationIO
     val dmem = new DataMemIO
@@ -27,14 +27,17 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   // -----
 
   val hazard = Module(new Hazard)
+  connectDebug(hazard)
   hazard.io.ibuf <> io.ibuf
   hazard.io.softReset := io.softReset
 
   val scoreboard = Module(new Scoreboard)
+  connectDebug(scoreboard)
   scoreboard.io.hazard <> hazard.io.scb
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
+  connectDebug(reservStation)
   reservStation.io.softReset := io.softReset
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
@@ -89,6 +92,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   val haves = Seq(HasRs1, HasRs2, HasRs3)
   val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
+  connectDebug(collector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
   if (noILP) {
     // on noILP, manage collector entirely after issue

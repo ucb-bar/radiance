@@ -45,7 +45,7 @@ class ScoreboardHazardIO(implicit p: Parameters) extends CoreBundle()(p) {
  *  the reservation station whether an instruction has unresolved RAW/WAR/WAW
  *  hazards at the time of access.
  */
-class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
+class Scoreboard(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   // asynchronous-read, synchronous-write
   val io = IO(new Bundle {
     /** scoreboard pending-read decrements on collector response */
@@ -338,26 +338,26 @@ class Scoreboard(implicit p: Parameters) extends CoreModule()(p) {
 
   def printUpdate(upd: ScoreboardUpdate) = {
     def printReg(reg: ScoreboardRegUpdate) = {
-      debugf(cf"{pReg:${reg.pReg}, incr:")
+      debugfAppend(cf"{pReg:${reg.pReg}, incr:")
        when (reg.incr) {
-        debugf("1")
+        debugfAppend("1")
       }.elsewhen (reg.decr) {
-        debugf("-1")
+        debugfAppend("-1")
       }.otherwise {
-        debugf("0")
+        debugfAppend("0")
       }
-      debugf("}")
+      debugfAppend("}")
     }
 
-    debugf("{rs1: ")
+    debugfAppend("{rs1: ")
     printReg(upd.reads(0))
-    debugf(", rs2: ")
+    debugfAppend(", rs2: ")
     printReg(upd.reads(1))
-    debugf(", rs3: ")
+    debugfAppend(", rs3: ")
     printReg(upd.reads(2))
-    debugf(", rd: ")
+    debugfAppend(", rd: ")
     printReg(upd.write)
-    debugf("}\n")
+    debugfAppend("}\n")
   }
 
   def printTable = {

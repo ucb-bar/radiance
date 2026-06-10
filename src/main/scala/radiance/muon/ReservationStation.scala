@@ -16,7 +16,7 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
+class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     val softReset = Input(Bool())
     /** uop admitted to reservation station */

@@ -72,7 +72,7 @@ class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
  *  Guarantees no bank conflicts and 1-cycle read/write accesses, at the
  *  expense of large area.
  */
-class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
+class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     /** Request collection of a single uop with full rs1/2/3 combination. */
     val readReq  = CollectorRequest(Isa.maxNumRegs, isWrite = false)
@@ -117,7 +117,7 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
   val collBanksMux = collBanks.map(VecInit(_))
 
   // collector allocation table
-  val allocTable = new CollectorAllocTable(numCollEntries)(p)
+  val allocTable = new CollectorAllocTable(numCollEntries, debugContext)(p)
   val nextAllocId = RegInit(0.U(allocTable.idWidth.W))
   // TODO: skip allocation when noen of readReq.regs.enable is set
   when (io.readReq.fire) {
@@ -232,8 +232,13 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) {
                 io.readData.req.bits.regs.map(_.enable).reduce(_ || _)
 }
 
-class CollectorAllocTable(numEntries: Int)(implicit val p: Parameters)
-extends HasCoreParameters {
+class CollectorAllocTable(
+  numEntries: Int,
+  debugCtx: Option[DebugContext] = None
+)(implicit val p: Parameters)
+extends HasCoreParameters with HasDebugPrint {
+  override protected def debugContext: Option[DebugContext] = debugCtx
+
   val idWidth = log2Up(numEntries)
   val table = RegInit(VecInit.fill(numEntries){
     val r = Wire(new CollectorAllocTableEntry)
@@ -272,11 +277,11 @@ extends HasCoreParameters {
   }
 
   def print = {
-    debugf("table content: ")
+    debugfAppend("table content: ")
     (0 until numEntries).foreach { i =>
-      debugf(cf"${table(i).valid}")
+      debugfAppend(cf"${table(i).valid}")
     }
-    debugf("\n")
+    debugfAppend("\n")
   }
 }
 
