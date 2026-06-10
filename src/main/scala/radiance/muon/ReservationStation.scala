@@ -101,6 +101,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
                               uop.inst.rs3))
   }
 
+  val rsDebugLevel = 1
+
   // ---------
   // admission
   // ---------
@@ -125,7 +127,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
     collPtrTable(emptyRow) := 0.U
 
-    debugf(cf"RS: admitted: warp=${io.admit.bits.ibufEntry.uop.wid}, " +
+    debugf(rsDebugLevel,
+           cf"RS: admitted: warp=${io.admit.bits.ibufEntry.uop.wid}, " +
            cf"PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
     printTable
   }
@@ -221,7 +224,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                    .map { case (a,b) => a || b }
     collFiredTable(collRow) := newFired
-    debugf(cf"RS: collector request fired at row:${collRow}, warp:${collUop.wid}, pc:${collUop.pc}%x\n")
+    debugf(rsDebugLevel,
+           cf"RS: collector request fired at row:${collRow}, warp:${collUop.wid}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:
@@ -266,7 +270,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with Ha
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          debugf(cf"RS: collector response handled at row:${i}, " +
+          debugf(rsDebugLevel,
+                 cf"RS: collector response handled at row:${i}, " +
                  cf"warp:${instTable(i).uop.wid}, pc:${instTable(i).uop.pc}%x, " +
                  cf"collEntry:${io.collector.readResp.bits.collEntry}, " +
                  cf"rs:${rs}, rsi:${rsi}\n")

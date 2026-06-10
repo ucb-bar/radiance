@@ -55,6 +55,7 @@ case class MuonCoreParams(
   barrierBits: Int = 4,
   // dev
   debug: Boolean = true,    // enable debug-only printfs and hardware constructs
+  debugLevel: Int = 1,      // max debug level to print
   trace: Boolean = false,   // enable instruction trace generation
   profiler: Boolean = true, // enable performance profiling report generation
   difftest: Boolean = false // enable arch-state differential testing
@@ -269,11 +270,12 @@ trait HasDebugPrint extends HasCoreParameters {
   protected def debugContext: Option[DebugContext] = None
 
   private def printPrefix(ctx: DebugContext): Unit = {
-    printf("[Muon c%d.%d @%d] ", ctx.clusterId, ctx.coreId, ctx.cycle)
+    // 64-bit gives too much whitespace
+    printf("[Muon c%d.%d @%d] ", ctx.clusterId, ctx.coreId, ctx.cycle(31, 0))
   }
 
-  def debugf(pable: Printable): Unit = {
-    if (muonParams.debug) {
+  def debugf(level: Int, pable: Printable): Unit = {
+    if (muonParams.debug && level <= muonParams.debugLevel) {
       debugContext match {
         case Some(ctx) => printPrefix(ctx)
         case None      => printf("[@?] ")
@@ -282,11 +284,15 @@ trait HasDebugPrint extends HasCoreParameters {
     }
   }
 
-  def debugfAppend(pable: Printable): Unit = {
-    if (muonParams.debug) {
+  def debugf(pable: Printable): Unit = debugf(1, pable)
+
+  def debugfAppend(level: Int, pable: Printable): Unit = {
+    if (muonParams.debug && level <= muonParams.debugLevel) {
       printf(pable)
     }
   }
+
+  def debugfAppend(pable: Printable): Unit = debugfAppend(1, pable)
 }
 
 trait HasDebugContext extends HasDebugPrint { this: Module =>

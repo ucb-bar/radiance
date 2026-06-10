@@ -49,6 +49,11 @@ object CollectorResponse {
   }
 }
 
+object CollectorDebug {
+    val collDebugLevel = 2
+}
+import CollectorDebug.collDebugLevel
+
 class CollectorOperandRead(implicit p: Parameters) extends CoreBundle()(p) {
   val collEntryWidth = log2Up(muonParams.numCollectorEntries)
   val hasPReg = !muonParams.useCollector
@@ -123,20 +128,20 @@ class DuplicatedCollector(implicit p: Parameters) extends CoreModule()(p) with H
   when (io.readReq.fire) {
     when (freeNow) {
       // concurrent alloc/free; reuse id being freed
-      debugf(cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
+      debugf(collDebugLevel, cf"collector: concurrently alloc/freeing id=${rdCollEntry}. before: ")
       allocTable.print
 
       nextAllocId := rdCollEntry
     }.otherwise {
       val (succ, allocId) = allocTable.alloc
-      debugf(cf"collector: allocating id=${allocId}. before: ")
+      debugf(collDebugLevel, cf"collector: allocating id=${allocId}. before: ")
       allocTable.print
 
       assert(succ, "unexpected collector alloc fail")
       nextAllocId := allocId
     }
   }.elsewhen (freeNow) {
-    debugf(cf"collector: freeing id=${rdCollEntry}. before: ")
+    debugf(collDebugLevel, cf"collector: freeing id=${rdCollEntry}. before: ")
     allocTable.print
 
     allocTable.free(rdCollEntry)
@@ -277,11 +282,11 @@ extends HasCoreParameters with HasDebugPrint {
   }
 
   def print = {
-    debugfAppend("table content: ")
+    debugfAppend(collDebugLevel, "table content: ")
     (0 until numEntries).foreach { i =>
-      debugfAppend(cf"${table(i).valid}")
+      debugfAppend(collDebugLevel, cf"${table(i).valid}")
     }
-    debugfAppend("\n")
+    debugfAppend(collDebugLevel, "\n")
   }
 }
 

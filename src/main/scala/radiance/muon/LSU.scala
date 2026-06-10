@@ -8,6 +8,11 @@ import radiance.muon.AddressSpaceCfg._
 import radiance.memory.MultiReadOneWriteSRAM
 import org.chipsalliance.cde.config.Field
 
+object LSUDebug {
+    val lsuDebugLevel = 2
+}
+import LSUDebug.lsuDebugLevel
+
 case class LoadStoreUnitParams(
     val numLsuLanes: Int = 16, // width of downstream memory interface and writeback; width of execute fixed to # of lanes
 
@@ -464,7 +469,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) with HasDeb
 
 
             val debugIdMsg = io.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
-            debugf(
+            debugf(lsuDebugLevel,
                 cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Enqueue (LDQ: ${loadQueue}): " +
                 cf"warp = ${warpId}, index = ${idxBits(tail)}, " +
                 cf"op = ${io.op}, otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
@@ -1216,7 +1221,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
         metadataMemW.data := metadata
         metadataMemW.enable := true.B
 
-        debugf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Operands / metadata update: " +
+        debugf(lsuDebugLevel, cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Operands / metadata update: " +
           cf"token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), " +
           cf"address = ${address}, " +
           cf"destReg = ${io.coreReq.bits.destReg}, " +
@@ -1362,7 +1367,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
         io.addressSpace := token.addressSpace
 
         when (io.memRequest.fire) {
-            debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem request sent: " +
+            debugf(lsuDebugLevel, p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem request sent: " +
               p"tag=0x${Hexadecimal(tag.asUInt)}, " +
               p"packet=${packet}, " +
               p"tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, " +
@@ -1466,7 +1471,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
         loadDataMemW.enable := false.B
 
         when (receivedResp) {
-            debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem response received: " +
+            debugf(lsuDebugLevel, p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem response received: " +
               p"tag=0x${Hexadecimal(respTag.token.asUInt)}, " +
               p"packet=${respTag.packet}, " +
               p"resp valids=${Binary(respValidsVec.asUInt)}, " +
@@ -1474,7 +1479,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
             )
             
             when (shouldWriteLoadData) {
-                debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
+                debugf(lsuDebugLevel, p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
 
                 loadDataMemW.address := loadDataWriteIdx
                 loadDataMemW.data := loadDataWriteVal
@@ -1546,7 +1551,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
                 completionWrite := newCompletion
             }
             
-            debugf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] completion updated: " +
+            debugf(lsuDebugLevel, cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] completion updated: " +
               cf"packet=${respTag_d1.packet}, " +
               cf"new valids=${newCompletion}, " +
               cf"prev valids=${completion_d1}, " +
@@ -1657,7 +1662,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
         if (lsuDerived.debugIdBits.isDefined) {
             io.coreResp.bits.debugId.get := s2_req.debugId.get
             when (io.coreResp.fire) {
-                debugf(cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
+                debugf(lsuDebugLevel, cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
             }
         }
 
@@ -1676,7 +1681,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebu
 
         when (io.coreResp.fire) {
             val debugIdMsg = io.coreResp.bits.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
-            debugf(
+            debugf(lsuDebugLevel,
                 cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
                 cf"writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, " +
                 cf"destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n"
@@ -1734,7 +1739,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) with HasDeb
         lsuReq.ready := allReady
         
         when (lsuReq.fire) {
-            debugf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core request sent: " +
+            debugf(lsuDebugLevel, p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core request sent: " +
               p"tag=0x${Hexadecimal(lsuReq.bits.tag)}, " +
               p"tmask=${Binary(lsuReq.bits.tmask.asUInt)}, " +
               p"lane valids=${Binary(Cat(laneValids.reverse))}, " +
@@ -1763,7 +1768,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) with HasDeb
         lsuResp.bits.data := respData
         
         when (respValids.orR) {
-            debugf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core responses: " +
+            debugf(lsuDebugLevel, p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core responses: " +
               p"valids=${Binary(Cat(respValids.reverse))}, " +
               p"leader=${leader}, " +
               p"leaderTag=0x${Hexadecimal(leaderLsuTag)}, " +
