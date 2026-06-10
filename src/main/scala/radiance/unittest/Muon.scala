@@ -96,6 +96,16 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
     TileKey -> DummyTileParams
   ))))
 
+  if (muonParams.debug) {
+    val debugContext = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    debugContext.cycle := cycle
+    debugContext.clusterId := 0.U
+    debugContext.coreId := 0.U
+    be.debug.get := debugContext
+  }
+
   ibuf.idIO.coreId := 0.U
   ibuf.idIO.clusterId := 0.U
 
