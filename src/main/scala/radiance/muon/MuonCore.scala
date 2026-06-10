@@ -53,7 +53,8 @@ case class MuonCoreParams(
   logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
-  debug: Boolean = false, // enable extra IOs for debug (ex: PC)
+  // dev
+  debug: Boolean = true,    // enable debug-only printfs and hardware constructs
   trace: Boolean = false,   // enable instruction trace generation
   profiler: Boolean = true, // enable performance profiling report generation
   difftest: Boolean = false // enable arch-state differential testing
