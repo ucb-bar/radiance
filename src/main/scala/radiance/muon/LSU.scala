@@ -277,7 +277,7 @@ class LSQWritebackReq(implicit p: Parameters) extends CoreBundle {
 
 // TODO: create versions or parameterizations where the LDQ/STQ are shared between warps, 
 // between shared/global, or both
-class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
+class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
     val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val queueReservations = Vec(muonParams.numWarps, new Bundle {
@@ -322,7 +322,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
         val warpId: Int,
         val addressSpace: AddressSpaceCfg,
         val loadQueue: Boolean
-    ) extends Module {
+    ) extends CoreModule()(p) with HasDebugContext {
         // parameterization as load queue or store queue, global or shared memory
         val (entries, circIndexBits, otherCircIndexBits, indexBits) = addressSpace match {
             case Global => {
@@ -464,7 +464,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
 
 
             val debugIdMsg = io.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
-            printf(
+            debugf(
                 cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Enqueue (LDQ: ${loadQueue}): " +
                 cf"warp = ${warpId}, index = ${idxBits(tail)}, " +
                 cf"op = ${io.op}, otherTail = ${io.otherTail}, debugId = ${debugIdMsg}\n"
@@ -660,6 +660,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) {
     val shmemLoadQueues = Seq.tabulate(muonParams.numWarps)(w => Module(new PerWarpLoadQueue(w, AddressSpaceCfg.Shared)))
     val shmemStoreQueues = Seq.tabulate(muonParams.numWarps)(w => Module(new PerWarpStoreQueue(w, AddressSpaceCfg.Shared)))
     val allQueues = globalLoadQueues ++ globalStoreQueues ++ shmemLoadQueues ++ shmemStoreQueues
+    allQueues.foreach(connectDebug)
 
     for (warp <- 0 until muonParams.numWarps) {
         // connect heads/tails
@@ -945,7 +946,7 @@ object Utils {
     }
 }
 
-class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
+class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
     val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val coreReservations = Vec(muonParams.numWarps, new Bundle {
@@ -967,6 +968,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // instantiate lsu queues
     val loadStoreQueues = Module(new LoadStoreQueue)
+    connectDebug(loadStoreQueues)
     loadStoreQueues.idIO := idIO
 
     io.sharedQueuesEmpty := loadStoreQueues.io.sharedQueuesEmpty
@@ -1214,7 +1216,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         metadataMemW.data := metadata
         metadataMemW.enable := true.B
 
-        printf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Operands / metadata update: " +
+        debugf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Operands / metadata update: " +
           cf"token = ${io.coreReq.bits.token}, (hex value = 0x${Hexadecimal(io.coreReq.bits.token.asUInt)}), " +
           cf"address = ${address}, " +
           cf"destReg = ${io.coreReq.bits.destReg}, " +
@@ -1238,7 +1240,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     storeDataMemR.enable := true.B
     val storeData = storeDataMemR.data
     
-    class MemRequestGen extends CoreModule {
+    class MemRequestGen extends CoreModule with HasDebugContext {
         val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val queueRequest = Flipped(Decoupled(new LSQReq))
@@ -1360,7 +1362,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         io.addressSpace := token.addressSpace
 
         when (io.memRequest.fire) {
-            printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem request sent: " +
+            debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem request sent: " +
               p"tag=0x${Hexadecimal(tag.asUInt)}, " +
               p"packet=${packet}, " +
               p"tmask=${Binary(io.memRequest.bits.tmask.asUInt)}, " +
@@ -1373,6 +1375,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
     // TODO: utilize both memory interfaces in parallel?
     val reqGen = Module(new MemRequestGen)
+    connectDebug(reqGen)
     reqGen.idIO := idIO
 
     reqGen.io.queueRequest :<>= loadStoreQueues.io.sendMemRequest.req
@@ -1463,7 +1466,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         loadDataMemW.enable := false.B
 
         when (receivedResp) {
-            printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem response received: " +
+            debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Mem response received: " +
               p"tag=0x${Hexadecimal(respTag.token.asUInt)}, " +
               p"packet=${respTag.packet}, " +
               p"resp valids=${Binary(respValidsVec.asUInt)}, " +
@@ -1471,7 +1474,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
             )
             
             when (shouldWriteLoadData) {
-                printf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
+                debugf(p"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] Load Data updated: idx=${loadDataWriteIdx}, val=${loadDataWriteVal}\n")
 
                 loadDataMemW.address := loadDataWriteIdx
                 loadDataMemW.data := loadDataWriteVal
@@ -1543,7 +1546,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
                 completionWrite := newCompletion
             }
             
-            printf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] completion updated: " +
+            debugf(cf"[LSU clid=${idIO.clusterId} cid=${idIO.coreId}] completion updated: " +
               cf"packet=${respTag_d1.packet}, " +
               cf"new valids=${newCompletion}, " +
               cf"prev valids=${completion_d1}, " +
@@ -1558,7 +1561,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     }
     
     // -- Writeback --
-    class Writeback extends CoreModule {
+    class Writeback extends CoreModule with HasDebugContext {
         val idIO = IO(clusterCoreIdT)
         val io = IO(new Bundle {
             val writebackReq = Flipped(Decoupled(new LSQWritebackReq))
@@ -1654,7 +1657,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
         if (lsuDerived.debugIdBits.isDefined) {
             io.coreResp.bits.debugId.get := s2_req.debugId.get
             when (io.coreResp.fire) {
-                printf(cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
+                debugf(cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp debugId = ${io.coreResp.bits.debugId.get}\n")
             }
         }
 
@@ -1673,7 +1676,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 
         when (io.coreResp.fire) {
             val debugIdMsg = io.coreResp.bits.debugId.map(x => cf"${x}").getOrElse(cf"n/a")
-            printf(
+            debugf(
                 cf"[LsuWriteback clid=${idIO.clusterId} cid=${idIO.coreId}] coreResp fire: debugId = ${debugIdMsg}, tmask = ${io.coreResp.bits.tmask}, " +
                 cf"writebackData = ${io.coreResp.bits.writebackData}, warpId = ${io.coreResp.bits.warpId}, " +
                 cf"destReg = ${io.coreResp.bits.destReg}, packet = ${io.coreResp.bits.packet} (metadata = ${s2_metadata})\n"
@@ -1682,6 +1685,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
     }
 
     val writeback = Module(new Writeback)
+    connectDebug(writeback)
     writeback.idIO := idIO
 
     io.coreResp :<>= writeback.io.coreResp
@@ -1695,7 +1699,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) {
 }
 
 // See [Downstream memory interface]
-class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
+class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
     val idIO = IO(clusterCoreIdT)
     val io = IO(new Bundle {
         val lsu = new Bundle {
@@ -1730,7 +1734,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         lsuReq.ready := allReady
         
         when (lsuReq.fire) {
-            printf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core request sent: " +
+            debugf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core request sent: " +
               p"tag=0x${Hexadecimal(lsuReq.bits.tag)}, " +
               p"tmask=${Binary(lsuReq.bits.tmask.asUInt)}, " +
               p"lane valids=${Binary(Cat(laneValids.reverse))}, " +
@@ -1759,7 +1763,7 @@ class LSUCoreAdapter(implicit p: Parameters) extends CoreModule()(p) {
         lsuResp.bits.data := respData
         
         when (respValids.orR) {
-            printf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core responses: " +
+            debugf(p"[LSUCoreAdapter clid=${idIO.clusterId} cid=${idIO.coreId}] Core responses: " +
               p"valids=${Binary(Cat(respValids.reverse))}, " +
               p"leader=${leader}, " +
               p"leaderTag=0x${Hexadecimal(leaderLsuTag)}, " +

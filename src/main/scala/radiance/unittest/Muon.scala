@@ -299,6 +299,14 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParamete
 
     val lsu = Module(new LoadStoreUnit()(p))
     val lsuAdapter = Module(new LSUCoreAdapter)
+    if (muonParams.debug) {
+      val debugContext = Wire(new DebugContext)
+      val cycle = RegInit(0.U(64.W))
+      cycle := cycle + 1.U
+      debugContext.cycle := cycle
+      lsu.debug.get := debugContext
+      lsuAdapter.debug.get := debugContext
+    }
 
     // lsu <> pipeline
     (io.coreReservations zip lsu.io.coreReservations).foreach {

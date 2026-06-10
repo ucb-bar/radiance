@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int._
 import radiance.muon.backend.fp._
 
-class Execute(implicit p: Parameters) extends CoreModule()(p) {
+class Execute(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(fuInT(hasRs1 = true, hasRs2 = true, hasRs3 = true)))
     val resp = Decoupled(writebackT())
@@ -43,6 +43,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   val fpExPipe = Module(new FPExPipe(FPFormat.BF16))
   val mulDivPipe = Module(new MulDivPipe())
   val lsuPipe = Module(new LSUPipe())
+  connectDebug(lsuPipe)
   val sfuPipe = Module(new SFUPipe())
 
   val inst = io.req.bits.uop.inst

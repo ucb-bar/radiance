@@ -27,21 +27,21 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugConte
   // -----
 
   val hazard = Module(new Hazard)
-  connectDebug(hazard)
   hazard.io.ibuf <> io.ibuf
   hazard.io.softReset := io.softReset
+  connectDebug(hazard)
 
   val scoreboard = Module(new Scoreboard)
-  connectDebug(scoreboard)
   scoreboard.io.hazard <> hazard.io.scb
+  connectDebug(scoreboard)
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
-  connectDebug(reservStation)
   reservStation.io.softReset := io.softReset
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   scoreboard.io.updateWB <> reservStation.io.scb.updateWB
+  connectDebug(reservStation)
 
   val noILP = muonParams.noILP
   assert(!noILP, "noILP == true is not currently supported; TODO")
@@ -92,8 +92,8 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugConte
   val haves = Seq(HasRs1, HasRs2, HasRs3)
   val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
-  connectDebug(collector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
+  connectDebug(collector)
   if (noILP) {
     // on noILP, manage collector entirely after issue
     // (haves lazyZip regs lazyZip collector.io.readData.resp lazyZip collector.io.readReq.bits.regs)
@@ -134,6 +134,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugConte
   // -------
 
   val execute = Module(new Execute())
+  connectDebug(execute)
   execute.io.id.clusterId := io.clusterId
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset

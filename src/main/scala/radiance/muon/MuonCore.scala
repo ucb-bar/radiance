@@ -268,7 +268,7 @@ trait HasDebugPrint extends HasCoreParameters {
   def debugf(pable: Printable): Unit = {
     if (muonParams.debug) {
       debugContext match {
-        case Some(ctx) => printf(cf"[@${ctx.cycle}%d] ")
+        case Some(ctx) => printf(cf"[@${ctx.cycle}%0d] ")
         case None      => printf("[@?] ")
       }
       printf(pable)

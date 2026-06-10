@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.ExPipe
 import radiance.muon.LoadStoreUnit
 import radiance.muon.LSUCoreAdapter
+import radiance.muon.HasDebugContext
 import radiance.muon.MuOpcode
 import chisel3.util.experimental.decode.decoder
 import chisel3.util.experimental.decode.TruthTable
@@ -14,7 +15,7 @@ import radiance.muon.Imm32
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
 
-class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) {
+class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) with HasDebugContext {
     val idIO = IO(clusterCoreIdT) // only for debugging
 
     val reserveIO = IO(reservationIO)
@@ -26,6 +27,7 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     val flushIO = IO(lsuFenceIO)
 
     val lsu = Module(new LoadStoreUnit)
+    connectDebug(lsu)
     lsu.idIO := idIO
 
     flushIO.globalQueuesEmpty := lsu.io.globalQueuesEmpty
@@ -77,6 +79,7 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     wb.bits.data := VecInit(allData)
 
     val lsuAdapter = Module(new LSUCoreAdapter)
+    connectDebug(lsuAdapter)
     lsuAdapter.idIO := idIO
 
     lsuAdapter.io.lsu.globalMemReq :<>= lsu.io.globalMemReq
@@ -108,4 +111,3 @@ object LsuOpDecoder {
     MemOp(memOpUint)
   }
 }
-
