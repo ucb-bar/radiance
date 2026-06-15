@@ -5,6 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.ExPipe
 import radiance.muon.LoadStoreUnit
+import radiance.muon.HasLoadStoreUnitIO
 import radiance.muon.LSUCoreAdapter
 import radiance.muon.HasDebugContext
 import radiance.muon.MuOpcode
@@ -14,6 +15,7 @@ import radiance.muon.MemOp
 import radiance.muon.Imm32
 import radiance.muon.backend.LaneRecomposer
 import radiance.muon.LsuResponse
+import radiance.unittest.CyclotronLoadStoreUnit
 
 class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writebackSched = false) with HasDebugContext {
     val idIO = IO(clusterCoreIdT) // only for debugging
@@ -26,7 +28,11 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
     
     val flushIO = IO(lsuFenceIO)
 
-    val lsu = Module(new LoadStoreUnit)
+    val lsu: HasLoadStoreUnitIO = if (muonParams.lsuUseModel) {
+        Module(new CyclotronLoadStoreUnit)
+    } else {
+        Module(new LoadStoreUnit)
+    }
     connectDebug(lsu)
     lsu.idIO := idIO
 

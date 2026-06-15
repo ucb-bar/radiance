@@ -897,12 +897,36 @@ class LsuMemResponse(implicit p: Parameters) extends CoreBundle {
     val data = Vec(muonParams.lsu.numLsuLanes, UInt(muonParams.archLen.W))
 }
 
+class LoadStoreUnitIO(implicit p: Parameters) extends CoreBundle()(p) {
+    val coreReservations = Vec(muonParams.numWarps, new Bundle {
+        val req = Flipped(Decoupled(new LsuReservationReq))
+        val resp = Valid(new LsuReservationResp)
+    })
+    val coreReq = Flipped(Decoupled(new LsuRequest))
+    val coreResp = Decoupled(new LsuResponse)
+
+    val globalMemReq = Decoupled(new LsuMemRequest)
+    val globalMemResp = Flipped(Decoupled(new LsuMemResponse))
+
+    val shmemReq = Decoupled(new LsuMemRequest)
+    val shmemResp = Flipped(Decoupled(new LsuMemResponse))
+
+    val sharedQueuesEmpty = Output(Bool())
+    val globalQueuesEmpty = Output(Bool())
+}
+
+trait HasLoadStoreUnitIO extends HasDebugContext { this: CoreModule =>
+    val idIO: Data
+    val io: LoadStoreUnitIO
+}
+
 // free list allocator
 class FreeListAllocator(entries: Int) extends Module {
     val io = IO(new Bundle {
         val allocate = Input(Bool())
         val deallocate = Input(Bool())
-        val deallocateIndex = Input(UInt(log2Up(entries).W))
+      val deallocateIndex
+        = Input(UInt(log2Up(entries).W))
         
         val hasFree = Output(Bool())
         val allocatedIndex = Output(UInt(log2Up(entries).W))
@@ -951,25 +975,9 @@ object Utils {
     }
 }
 
-class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
+class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasLoadStoreUnitIO {
     val idIO = IO(clusterCoreIdT)
-    val io = IO(new Bundle {
-        val coreReservations = Vec(muonParams.numWarps, new Bundle {
-            val req = Flipped(Decoupled(new LsuReservationReq))
-            val resp = Valid(new LsuReservationResp)
-        })
-        val coreReq = Flipped(Decoupled(new LsuRequest))
-        val coreResp = Decoupled(new LsuResponse)
-
-        val globalMemReq = Decoupled(new LsuMemRequest)
-        val globalMemResp = Flipped(Decoupled(new LsuMemResponse))
-
-        val shmemReq = Decoupled(new LsuMemRequest)
-        val shmemResp = Flipped(Decoupled(new LsuMemResponse))
-
-        val sharedQueuesEmpty = Output(Bool())
-        val globalQueuesEmpty = Output(Bool())
-    })
+    val io = IO(new LoadStoreUnitIO)
 
     // instantiate lsu queues
     val loadStoreQueues = Module(new LoadStoreQueue)

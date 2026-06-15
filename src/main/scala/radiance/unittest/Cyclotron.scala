@@ -341,25 +341,9 @@ class CyclotronDataMemBlackBox(outer: CyclotronDataMem)(implicit val p: Paramete
   }
 }
 
-class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
+class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasLoadStoreUnitIO {
   val idIO = IO(clusterCoreIdT)
-  val io = IO(new Bundle {
-    val coreReservations = Vec(muonParams.numWarps, new Bundle {
-      val req = Flipped(Decoupled(new LsuReservationReq))
-      val resp = Valid(new LsuReservationResp)
-    })
-    val coreReq = Flipped(Decoupled(new LsuRequest))
-    val coreResp = Decoupled(new LsuResponse)
-
-    val globalMemReq = Decoupled(new LsuMemRequest)
-    val globalMemResp = Flipped(Decoupled(new LsuMemResponse))
-
-    val shmemReq = Decoupled(new LsuMemRequest)
-    val shmemResp = Flipped(Decoupled(new LsuMemResponse))
-
-    val sharedQueuesEmpty = Output(Bool())
-    val globalQueuesEmpty = Output(Bool())
-  })
+  val io = IO(new LoadStoreUnitIO)
 
   val debugIdBits = lsuDerived.debugIdBits.getOrElse(0)
   val debugIdPortBits = math.max(1, debugIdBits)
@@ -465,11 +449,11 @@ class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) wit
     validMask: UInt,
     data: UInt
   ): Unit = {
-    ready := resp.ready
-    resp.valid := valid
-    resp.bits.tag := tag
-    resp.bits.valid.zipWithIndex.foreach { case (lane, i) => lane := validMask(i) }
-    resp.bits.data.zipWithIndex.foreach { case (lane, i) => unflatten(lane, data, i) }
+    resp.ready := ready
+    valid := resp.valid
+    tag := resp.bits.tag
+    validMask := resp.bits.valid.asUInt
+    data := resp.bits.data.asUInt
   }
 
   private def lsuTokenBits: Int = LsuQueueToken.width(muonParams)
