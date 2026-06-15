@@ -276,7 +276,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugConte
   when (execute.io.req.fire) {
     val e = execute.io.req.bits
 
-    printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
+    debugf(1, cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
       cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
       cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} " +
       cf"rs1=${e.uop.inst(Rs1)} rs1.data=[" +
@@ -291,14 +291,13 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugConte
   when (execute.io.resp.fire) {
     val r = execute.io.resp.bits.reg.get.bits
     val s = execute.io.resp.bits.sched.get.bits
-    printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} sched.pc=${s.pc}%x " +
+    debugf(1, cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} sched.pc=${s.pc}%x " +
       cf"sched.wb=${execute.io.resp.bits.sched.get.valid} " +
       cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
       cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
       cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
-      cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} " +
-      cf"\n")
-    printf(cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
+      cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} ")
+    debugfAppend(1, cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
       cf"rd=${r.rd} data=[" +
       r.data.map(x => cf"$x%x ").reduce(_ + _) +
       cf"] mask=${r.tmask}%b" +

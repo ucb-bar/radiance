@@ -55,7 +55,7 @@ case class MuonCoreParams(
   barrierBits: Int = 4,
   // dev
   debug: Boolean = true,    // enable debug-only printfs and hardware constructs
-  debugLevel: Int = 1,      // max debug level to print
+  debugLevel: Int = 2,      // max debug level to print
   trace: Boolean = false,   // enable instruction trace generation
   profiler: Boolean = true, // enable performance profiling report generation
   difftest: Boolean = false // enable arch-state differential testing
