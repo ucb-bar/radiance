@@ -411,6 +411,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   }
 
   val fe = Module(new Frontend)
+  connectDebug(fe)
   fe.idIO.clusterId := io.clusterId
   fe.idIO.coreId := io.coreId
   fe.io.imem <> io.imem

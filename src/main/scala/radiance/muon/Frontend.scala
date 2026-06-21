@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class Frontend(implicit p: Parameters)
-  extends CoreModule()(p) {
+  extends CoreModule()(p) with HasDebugContext {
 
   val idIO = IO(clusterCoreIdT)
   val io = IO(new Bundle {
@@ -23,6 +23,8 @@ class Frontend(implicit p: Parameters)
   val warpScheduler = Module(new WarpScheduler)
   val renamer = Module(new Rename())
   val ibuffer = Module(new InstBuffer)
+  connectDebug(warpScheduler)
+  connectDebug(ibuffer)
   ibuffer.idIO := idIO
 
   { // scheduler & fetch

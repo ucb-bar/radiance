@@ -89,7 +89,7 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
   }
 }
 
-class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
+class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val idIO = IO(clusterCoreIdT) // only for debugging
 
   val io = IO(new Bundle {
@@ -139,8 +139,8 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
         acquiredToken := reserve.resp.bits.token
         acquiredTokenValid := true.B
 
-        printf(
-          cf"[IBUF clid=${idIO.clusterId} cid=${idIO.coreId}] warp ${wid} @ pc=0x${Hexadecimal(b.io.deq.bits.pc)} " +
+        debugf(
+          cf"[IBUF] warp ${wid} @ pc=0x${Hexadecimal(b.io.deq.bits.pc)} " +
           cf"acquired token 0x${Hexadecimal(reserve.resp.bits.token.asUInt)}\n"
         )
       }

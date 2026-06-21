@@ -45,6 +45,16 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
   val fe = Module(new Frontend()(p))
   val cbe = Module(new CyclotronBackendBlackBox)
 
+  if (m.debug) {
+    val debugContext = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    debugContext.cycle := cycle
+    debugContext.clusterId := 0.U
+    debugContext.coreId := 0.U
+    fe.debug.get := debugContext
+  }
+
   fe.idIO.clusterId := 0.U
   fe.idIO.coreId := 0.U
 
@@ -103,6 +113,7 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
     debugContext.cycle := cycle
     debugContext.clusterId := 0.U
     debugContext.coreId := 0.U
+    ibuf.debug.get := debugContext
     be.debug.get := debugContext
   }
 
