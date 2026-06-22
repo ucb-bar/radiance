@@ -48,7 +48,7 @@ case class MuonCoreParams(
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
-  lsuUseModel: Boolean = false, // use Cyclotron functional model for LSU
+  lsuUseModel: Boolean = false,  // use Cyclotron functional model for LSU
   logGMEMInFlights: Int = 5,        // per lane
   logCoalGMEMInFlights: Int = 5,    // all lanes
   logNonCoalGMEMInFlights: Int = 5, // all lanes

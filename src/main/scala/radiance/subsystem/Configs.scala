@@ -71,6 +71,7 @@ class WithMuonCores(
   profiler: Boolean,
   cyclotronCore: Boolean,
   cyclotronMem: Boolean,
+  cyclotronLSU: Boolean,
   difftest: Boolean,
   disabled: Boolean,
   numWarps: Option[Int],
@@ -122,13 +123,14 @@ class WithMuonCores(
       // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
       // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
       lsu = resolvedLsu,
+      lsuUseModel = cyclotronLSU,
       trace = trace || difftest,
       profiler = profiler,
       difftest = difftest,
     )
   }
   case CyclotronLinked => {
-    up(CyclotronLinked) || trace || difftest || cyclotronCore || cyclotronMem || profiler
+    up(CyclotronLinked) || trace || difftest || cyclotronCore || cyclotronMem || cyclotronLSU || profiler
   }
   case TilesLocated(`location`) => {
     if (standalone) {
@@ -172,6 +174,7 @@ class WithMuonCores(
     standalone: Boolean = false, noILP: Boolean = false,
     trace: Boolean = false, profiler: Boolean = true,
     cyclotronCore: Boolean = false, cyclotronMem: Boolean = false,
+    cyclotronLSU: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
     numWarps: Option[Int] = None,
     numLanes: Option[Int] = None,
@@ -186,7 +189,7 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-    ), standalone, noILP, trace, profiler, cyclotronCore, cyclotronMem,
+    ), standalone, noILP, trace, profiler, cyclotronCore, cyclotronMem, cyclotronLSU,
     difftest, disabled, numWarps, numLanes, numPhysRegs,
     numIssueQueueEntries, lsqDepth, l0i, l0d)
 }
