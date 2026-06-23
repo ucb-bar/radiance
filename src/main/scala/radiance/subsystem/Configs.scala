@@ -78,6 +78,7 @@ class WithMuonCores(
   numLanes: Option[Int],
   numPhysRegs: Option[Int],
   numIssueQueueEntries: Int,
+  inOrderPerWarp: Boolean,
   lsqDepth: Option[Int],
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
@@ -117,6 +118,7 @@ class WithMuonCores(
       numClusters = 2, // TODO: magic number
       noILP = noILP,
       numIssueQueueEntries = numIssueQueueEntries,
+      inOrderPerWarp = inOrderPerWarp,
       intPipe = intPipe.getOrElse(MuonCoreParams().intPipe),
       fpPipe = fpPipe.getOrElse(MuonCoreParams().fpPipe),
       // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
@@ -180,6 +182,7 @@ class WithMuonCores(
     numLanes: Option[Int] = None,
     numPhysRegs: Option[Int] = None,
     numIssueQueueEntries: Int = 8,
+    inOrderPerWarp: Boolean = false,
     lsqDepth: Option[Int] = None,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
@@ -191,7 +194,7 @@ class WithMuonCores(
     },
     ), standalone, noILP, trace, profiler, cyclotronCore, cyclotronMem, cyclotronLSU,
     difftest, disabled, numWarps, numLanes, numPhysRegs,
-    numIssueQueueEntries, lsqDepth, l0i, l0d)
+    numIssueQueueEntries, inOrderPerWarp, lsqDepth, l0i, l0d)
 }
 
 class WithCyclotronCores(

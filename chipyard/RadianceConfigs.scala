@@ -267,6 +267,15 @@ class RadianceSingleClusterSynConfig extends Config(
   new RadianceBaseConfig
 )
 
+class RadianceSingleClusterInOrderIssueConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), inOrderPerWarp = true, trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
 class RadianceSingleClusterIssueDepthConfig(issueQueueEntries: Int) extends Config(
   new WithMuonCores(
     2,

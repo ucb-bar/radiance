@@ -30,6 +30,10 @@ case class MuonCoreParams(
   startAddress: BigInt = x"1000_0000",
   // issue
   numIssueQueueEntries: Int = 8, // RS
+  inOrderPerWarp: Boolean = false, // model in-order issue: each warp issues its
+                                   // instructions in program order (oldest-first)
+                                   // while warps still interleave every cycle.
+                                   // requires numIssueQueueEntries >= numWarps
   maxPendingReads: Int = 7,      // scoreboard
   noILP: Boolean = false, // fallback to single-in-flight instruction issue
                           // logic ("bypass")
