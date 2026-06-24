@@ -247,8 +247,6 @@ class RadianceCyclotronLSUConfig extends Config(
   new RadianceBaseConfig
 )
 
-// reverse of the Mem+LSU combo: model LSU (cyclotronLSU) + real SMEM/memory,
-// in-order-per-warp issue. Variant of RadianceCyclotronLSUConfig.
 class RadianceCyclotronLSUInOrderIssueConfig extends Config(
   new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronLSU = true, inOrderPerWarp = true, trace = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
@@ -287,8 +285,6 @@ class RadianceCyclotronMemInOrderIssueConfig extends Config(
   new RadianceBaseConfig
 )
 
-// CyclotronMem configs with the Cyclotron "ideal" LSU model layered on
-// (cyclotronLSU=true) to remove the store/LSU bottleneck seen at high k.
 class RadianceCyclotronMemLSUConfig extends Config(
   new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronMem = true, cyclotronLSU = true, trace = true) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
@@ -452,6 +448,15 @@ class RadianceSingleClusterPhysReg128Config extends RadianceSingleClusterPhysReg
 class RadianceSingleClusterPhysReg256Config extends RadianceSingleClusterPhysRegConfig(256)
 class RadianceSingleClusterPhysReg512Config extends RadianceSingleClusterPhysRegConfig(512)
 class RadianceSingleClusterPhysReg1024Config extends RadianceSingleClusterPhysRegConfig(1024)
+
+class RadianceSingleClusterPhysReg1024InOrderIssueConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), inOrderPerWarp = true, numPhysRegs = Some(1024), trace = true, profiler = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
 
 class RadianceSingleClusterLargeICacheConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
