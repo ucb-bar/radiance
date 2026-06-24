@@ -330,6 +330,7 @@ class MuonTile(
         cache = l0dParams,
         cacheTagBits = muonParams.core.l0dReqTagBits(coalescedReqWidth),
         flushAddr = Some(muonParams.peripheralAddr + 0x100),
+        makeLandingPads = true,
       )))
       l0d.flushNode.get := dFlushMaster
       (l0d.outNode, l0d.inNode, l0d.flushRegNode)

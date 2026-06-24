@@ -194,7 +194,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
       }
       respBufReady := inFlights < mshrs.U
 
-      assert(respBufReady || !tlIn.a.valid, "this assertion can be safely commented but lmk")
+      // assert(respBufReady || !tlIn.a.valid, "this assertion can be safely commented but lmk")
 
       (respBuf.io.deq.bits, respBuf.io.deq.valid)
     } else {
