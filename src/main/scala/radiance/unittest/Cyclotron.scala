@@ -405,17 +405,26 @@ class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) wit
     debugId := bbox.io.coreResp_bits_debugId(debugIdBits - 1, 0)
   }
 
-  connectMemReq(io.globalMemReq, bbox.io.globalMemReq_valid, bbox.io.globalMemReq_ready,
+  // Interpose source-ID dedup (see dedupSourceId) on both mem ports so the model
+  // cannot re-issue a TL source ID while a prior request with that ID is still
+  // outstanding. The blackbox req/resp are connected to raw wires, then gated.
+  val rawGlobalReq = Wire(Decoupled(new LsuMemRequest))
+  val rawGlobalResp = Wire(Decoupled(new LsuMemResponse))
+  connectMemReq(rawGlobalReq, bbox.io.globalMemReq_valid, bbox.io.globalMemReq_ready,
     bbox.io.globalMemReq_bits_tag, bbox.io.globalMemReq_bits_op, bbox.io.globalMemReq_bits_address,
     bbox.io.globalMemReq_bits_data, bbox.io.globalMemReq_bits_mask, bbox.io.globalMemReq_bits_tmask)
-  connectMemResp(io.globalMemResp, bbox.io.globalMemResp_ready, bbox.io.globalMemResp_valid,
+  connectMemResp(rawGlobalResp, bbox.io.globalMemResp_ready, bbox.io.globalMemResp_valid,
     bbox.io.globalMemResp_bits_tag, bbox.io.globalMemResp_bits_valid, bbox.io.globalMemResp_bits_data)
+  dedupSourceId(rawGlobalReq, rawGlobalResp, io.globalMemReq, io.globalMemResp)
 
-  connectMemReq(io.shmemReq, bbox.io.shmemReq_valid, bbox.io.shmemReq_ready,
+  val rawShmemReq = Wire(Decoupled(new LsuMemRequest))
+  val rawShmemResp = Wire(Decoupled(new LsuMemResponse))
+  connectMemReq(rawShmemReq, bbox.io.shmemReq_valid, bbox.io.shmemReq_ready,
     bbox.io.shmemReq_bits_tag, bbox.io.shmemReq_bits_op, bbox.io.shmemReq_bits_address,
     bbox.io.shmemReq_bits_data, bbox.io.shmemReq_bits_mask, bbox.io.shmemReq_bits_tmask)
-  connectMemResp(io.shmemResp, bbox.io.shmemResp_ready, bbox.io.shmemResp_valid,
+  connectMemResp(rawShmemResp, bbox.io.shmemResp_ready, bbox.io.shmemResp_valid,
     bbox.io.shmemResp_bits_tag, bbox.io.shmemResp_bits_valid, bbox.io.shmemResp_bits_data)
+  dedupSourceId(rawShmemReq, rawShmemResp, io.shmemReq, io.shmemResp)
 
   io.sharedQueuesEmpty := bbox.io.sharedQueuesEmpty
   io.globalQueuesEmpty := bbox.io.globalQueuesEmpty
@@ -454,6 +463,31 @@ class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) wit
     tag := resp.bits.tag
     validMask := resp.bits.valid.asUInt
     data := resp.bits.data.asUInt
+  }
+
+  // Gate requests so a TL source ID is never re-issued while a prior request
+  // with that ID is still in flight. The Cyclotron model recycles source IDs on
+  // a fixed-latency assumption, which is illegal on the real, variable-latency
+  // TL ports (esp. SMEM under bank-conflict latency) and trips the TL monitor
+  // ("'A' channel re-used a source ID"). Tags pass through unchanged, so the
+  // model's own response matching is unaffected; a request whose source ID is
+  // still outstanding simply stalls until that ID's response returns.
+  private def dedupSourceId(
+    modelReq: DecoupledIO[LsuMemRequest], modelResp: DecoupledIO[LsuMemResponse],
+    tlReq: DecoupledIO[LsuMemRequest], tlResp: DecoupledIO[LsuMemResponse]
+  ): Unit = {
+    val outstanding = RegInit(VecInit.fill(1 << lsuDerived.sourceIdBits)(false.B))
+    val reqId = modelReq.bits.tag
+    val idFree = !outstanding(reqId)
+    tlReq.valid := modelReq.valid && idFree
+    modelReq.ready := tlReq.ready && idFree
+    tlReq.bits := modelReq.bits
+    val respId = tlResp.bits.tag
+    modelResp.valid := tlResp.valid
+    tlResp.ready := modelResp.ready
+    modelResp.bits := tlResp.bits
+    when (tlReq.fire) { outstanding(reqId) := true.B }
+    when (tlResp.fire) { outstanding(respId) := false.B }
   }
 
   private def lsuTokenBits: Int = LsuQueueToken.width(muonParams)
