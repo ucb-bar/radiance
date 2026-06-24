@@ -380,7 +380,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 }
 
 object Predecoder {
-  def decode(inst: UInt) = {
+  def decode(inst: UInt)(implicit p: Parameters) = {
     val d = Decoder.decode(inst)
     val stall = WireInit(d.b(HasControlHazard))
     val join = WireInit(d.b(IsJoin))

@@ -72,7 +72,7 @@ abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Ma
       "NUM_WARPS"    -> p(MuonKey).numWarps,
       "NUM_LANES"    -> p(MuonKey).numLanes,
       "OP_BITS"      -> Isa.opcodeBits,
-      "REG_BITS"     -> Isa.regBits,
+      "REG_BITS"     -> p(MuonKey).pRegBits,
       "IMM_BITS"     -> 32,
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
@@ -85,7 +85,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       "NUM_WARPS"     -> p(MuonKey).numWarps,
       "NUM_LANES"     -> p(MuonKey).numLanes,
       "OP_BITS"       -> Isa.opcodeBits,
-      "REG_BITS"      -> Isa.regBits,
+      "REG_BITS"      -> p(MuonKey).pRegBits,
       "IMM_BITS"      -> 32,
       "CSR_IMM_BITS"  -> Isa.csrImmBits,
       "PRED_BITS"     -> Isa.predBits,
@@ -103,10 +103,10 @@ with HasBlackBoxResource with HasCoreParameters {
       val pc = Output(UInt((numWarps * addressBits).W))
       val wid = Output(UInt((numWarps * log2Ceil(muonParams.numWarps)).W))
       val op = Output(UInt((numWarps * Isa.opcodeBits).W))
-      val rd = Output(UInt((numWarps * Isa.regBits).W))
-      val rs1 = Output(UInt((numWarps * Isa.regBits).W))
-      val rs2 = Output(UInt((numWarps * Isa.regBits).W))
-      val rs3 = Output(UInt((numWarps * Isa.regBits).W))
+      val rd = Output(UInt((numWarps * physRegBits).W))
+      val rs1 = Output(UInt((numWarps * physRegBits).W))
+      val rs2 = Output(UInt((numWarps * physRegBits).W))
+      val rs3 = Output(UInt((numWarps * physRegBits).W))
       val imm32 = Output(UInt((numWarps * 32).W))
       val imm24 = Output(UInt((numWarps * 24).W))
       val csrImm = Output(UInt((numWarps * Isa.csrImmBits).W))

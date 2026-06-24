@@ -16,7 +16,7 @@ class MulDivPipe(implicit p: Parameters)
     writebackSched = false, writebackReg = true) with HasIntPipeParams {
 
   val vecMulDiv = Seq.fill(numMulDivLanes)(Module(
-    new MulDiv(mulDivParams, archLen, Isa.regBits))
+    new MulDiv(mulDivParams, archLen, physRegBits))
   )
 
   val ioReqOp = IntOpDecoder.decode(inst(Opcode), inst(F3), inst(F7))

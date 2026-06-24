@@ -3,6 +3,7 @@ package radiance.muon
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
+import org.chipsalliance.cde.config.Parameters
 
 object MuOpcode {
   val LOAD = "b000000011"
@@ -46,10 +47,10 @@ abstract class DecodeField(
 case object Opcode           extends DecodeField(9, true)
 case object F3               extends DecodeField(3, true)
 case object F7               extends DecodeField(7, true)
-case object Rd               extends DecodeField(8, true)
-case object Rs1              extends DecodeField(8, true)
-case object Rs2              extends DecodeField(8, true)
-case object Rs3              extends DecodeField(8, true)
+case object Rd               extends DecodeField(Isa.regBits, true)
+case object Rs1              extends DecodeField(Isa.regBits, true)
+case object Rs2              extends DecodeField(Isa.regBits, true)
+case object Rs3              extends DecodeField(Isa.regBits, true)
 case object Pred             extends DecodeField(4)
 case object IsTMC            extends DecodeField
 case object IsWSpawn         extends DecodeField
@@ -104,10 +105,17 @@ case object IsNuInvoke       extends DecodeField
 case object NuNumElems       extends DecodeField(6)
 case object Raw              extends DecodeField(64)
 
-class Decoded(full: Boolean = true) extends Bundle {
+class Decoded(full: Boolean = true)(implicit p: Parameters) extends CoreBundle {
 
-  val essentials = MixedVec(Decoder.essentialFields.map(f => UInt(f.width.W)))
-  val optionals = Option.when(full)(MixedVec(Decoder.optionalFields.map(f => UInt(f.width.W))))
+  // rd/rs fields hold a physical reg id after rename, so they are widened to
+  // physRegBits; all other fields keep their decode width.
+  private def fieldWidth(f: DecodeField): Int = f match {
+    case Rd | Rs1 | Rs2 | Rs3 => physRegBits
+    case _ => f.width
+  }
+
+  val essentials = MixedVec(Decoder.essentialFields.map(f => UInt(fieldWidth(f).W)))
+  val optionals = Option.when(full)(MixedVec(Decoder.optionalFields.map(f => UInt(fieldWidth(f).W))))
 
   def decode(field: DecodeField, signalIdx: Option[Int] = None)
             (implicit inst: UInt): UInt = {
@@ -147,7 +155,8 @@ class Decoded(full: Boolean = true) extends Bundle {
           decode(F7)(inst)(6, 2) =/= "b11000".U &&
           decode(F7)(inst)(6, 2) =/= "b11010".U &&
           decode(F7)(inst)(6, 2) =/= "b01000".U
-        case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2), decode(CsrImm), decode(F3), decode(Rd), decode(Opcode))
+        // mask rd/rs to the arch encoding width so Raw stays a valid instruction
+        case Raw   => Cat(decode(Pred), decode(Imm24), decode(Rs2).asUInt(Isa.regBits - 1, 0), decode(CsrImm), decode(F3), decode(Rd).asUInt(Isa.regBits - 1, 0), decode(Opcode))
         case _ =>
           chisel3.util.experimental.decode.decoder(
             Cat(decode(Opcode), decode(F3), decode(F7)),
@@ -484,7 +493,7 @@ object Decoder {
     default = BitPat.dontCare(tableIndices.size)
   )
 
-  def decode(inst: UInt): Decoded = {
+  def decode(inst: UInt)(implicit p: Parameters): Decoded = {
     val dec = Wire(new Decoded(full = true))
     (essentialFields.zipWithIndex ++ optionalFields.zipWithIndex).foreach { case (f, i) =>
       dec.decode(f, Some(i))(inst)

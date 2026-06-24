@@ -42,10 +42,10 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
   val pc = pcT
   val wid = widT
   val op = UInt(Isa.opcodeBits.W)
-  val rd = UInt(Isa.regBits.W)
-  val rs1 = UInt(Isa.regBits.W)
-  val rs2 = UInt(Isa.regBits.W)
-  val rs3 = UInt(Isa.regBits.W)
+  val rd = UInt(physRegBits.W)
+  val rs1 = UInt(physRegBits.W)
+  val rs2 = UInt(physRegBits.W)
+  val rs3 = UInt(physRegBits.W)
   val imm32 = UInt(32.W)
   val imm24 = UInt(24.W)
   val csrImm = UInt(Isa.csrImmBits.W)

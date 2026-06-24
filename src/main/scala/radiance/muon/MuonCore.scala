@@ -242,6 +242,8 @@ trait HasCoreParameters {
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
   def aRegT = UInt(log2Ceil(m.numArchRegs).W)
+  // Width of a physical register id carried in a uop after rename.
+  def physRegBits = log2Up(m.numPhysRegs)
   def regDataT = UInt(m.archLen.W)
 
   def aluOpT = UInt(ALU.SZ_ALU_FN.W)
