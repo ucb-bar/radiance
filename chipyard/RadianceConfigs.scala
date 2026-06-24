@@ -247,6 +247,17 @@ class RadianceCyclotronLSUConfig extends Config(
   new RadianceBaseConfig
 )
 
+// reverse of the Mem+LSU combo: model LSU (cyclotronLSU) + real SMEM/memory,
+// in-order-per-warp issue. Variant of RadianceCyclotronLSUConfig.
+class RadianceCyclotronLSUInOrderIssueConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronLSU = true, inOrderPerWarp = true, trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
 class RadianceSingleClusterConfig extends Config(
   new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), trace = true) ++
@@ -264,6 +275,35 @@ class RadianceSingleClusterSynConfig extends Config(
   new WithExtGPUMem() ++
   new WithRadianceRocket ++
   new WithGPUResetAggregator(defaultReset = true) ++
+  new RadianceBaseConfig
+)
+
+class RadianceCyclotronMemInOrderIssueConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronMem = true, inOrderPerWarp = true, trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+// CyclotronMem configs with the Cyclotron "ideal" LSU model layered on
+// (cyclotronLSU=true) to remove the store/LSU bottleneck seen at high k.
+class RadianceCyclotronMemLSUConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronMem = true, cyclotronLSU = true, trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
+class RadianceCyclotronMemLSUInOrderIssueConfig extends Config(
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig), cyclotronMem = true, cyclotronLSU = true, inOrderPerWarp = true, trace = true) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
   new RadianceBaseConfig
 )
 
