@@ -331,6 +331,8 @@ class MuonTile(
         cacheTagBits = muonParams.core.l0dReqTagBits(coalescedReqWidth),
         flushAddr = Some(muonParams.peripheralAddr + 0x100),
         makeLandingPads = true,
+        // let nMSHRs set the outstanding-request budget rather than rocket's hardcoded 3
+        maxInFlight = Some(l0dParams.nMSHRs + 1),
       )))
       l0d.flushNode.get := dFlushMaster
       (l0d.outNode, l0d.inNode, l0d.flushRegNode)

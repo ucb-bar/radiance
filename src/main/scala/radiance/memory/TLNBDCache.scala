@@ -22,7 +22,14 @@ case class TLNBDCacheParams(
   overrideDChannelSize: Option[Int] = None,
   flushAddr: Option[BigInt] = None,
   makeLandingPads: Boolean = false,
-)
+  // Max outstanding requests through the HellaCache shim. None keeps rocket's
+  // hardcoded replay depth of 3, which is the MLP cap for a streaming workload.
+  maxInFlight: Option[Int] = None,
+) {
+  def replayDepth: Int = maxInFlight.getOrElse(3)
+  // the response landing pad must be able to absorb every outstanding request
+  def landingPadDepth: Int = math.max(cache.nMSHRs + 1, replayDepth)
+}
 
 case class DummyCacheCoreParams(
   cacheLineBytes: Int = 32,
@@ -102,7 +109,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   with MemoryOpConstants {
 
   val (tlIn, _) = outer.inNode.in.head
-  val inIF = Module(new SimpleHellaCacheIF())
+  val inIF = Module(new MuonHellaCacheIF(outer.params.replayDepth))
 
 //  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
 //    "only cache line size accesses supported")
@@ -179,7 +186,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
 
     // D
     val (deqBits: HellaCacheResp, deqValid) = if (outer.params.makeLandingPads) {
-      val mshrs = outer.params.cache.nMSHRs + 1
+      val mshrs = outer.params.landingPadDepth
       val respBuf = Module(new Queue(resp.bits.cloneType, mshrs))
       respBuf.io.enq.valid := resp.valid
       respBuf.io.enq.bits := resp.bits

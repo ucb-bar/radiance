@@ -139,7 +139,9 @@ class RadianceCluster (
     cache = thisClusterParams.l1Config,
     cacheTagBits = muonTiles.head.muonParams.l1ReqTagBits,
     overrideDChannelSize = Some(log2Ceil(thisClusterParams.l1Config.blockBytes)),
-    makeLandingPads = true
+    makeLandingPads = true,
+    // let nMSHRs set the outstanding-request budget rather than rocket's hardcoded 3
+    maxInFlight = Some(thisClusterParams.l1Config.nMSHRs + 1)
   ))(
     p.alterMap(Map(
       TileVisibilityNodeKey -> visibilityNode,
