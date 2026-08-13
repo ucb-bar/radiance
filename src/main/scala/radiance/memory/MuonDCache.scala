@@ -57,18 +57,29 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val meta_resp = Input(Vec(nWays, new L1Metadata))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
     val wb_resp_fire = Input(Bool())
+    // Which source the returning ReleaseAck carries.  A balance counter cannot tell WHICH
+    // release came back, which is the whole bug; a free-list has to know.
+    val wb_resp_source = Input(UInt(edge.bundle.sourceBits.W))
   })
 
   val flushing = RegInit(false.B)
   val flushCounter = Counter(nSets * nWays)
   val srcWidth = io.wb_req.bits.source.getWidth - 1
-  val inFlights = RegInit(0.U((srcWidth + 1).W))
+  val nSrc = 1 << srcWidth
+  // BITMAP FREE-LIST, replacing a bare request/response balance counter.
+  // bit i set == release source i is outstanding.  The old `inFlights` counted HOW MANY were
+  // outstanding but never WHICH, while the source itself came from a free-running Counter -- so on
+  // out-of-order ReleaseAck return the count could sit below the cap while a specific ID was still
+  // live, and the counter would hand that same ID out again.  Two releases then shared a source,
+  // one ack matched the wrong entry, and the balance never returned to zero: `busy` stuck high
+  // forever and the dirty lines behind the lost ack were never written back.
+  val srcBusy = RegInit(0.U(nSrc.W))
 
   when (io.flush) {
     assert(!flushing, "already flushing")
     flushing := true.B
   }
-  io.busy := flushing || (inFlights > 0.U)
+  io.busy := flushing || srcBusy.orR
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -135,15 +146,17 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
 
-  // count and pray (voluntary releases do not require a response, reused src id probably ok)
-  // the first half of the source space is mapped to releases, we have to avoid the second half
-  io.wb_req.bits.source := Counter(wbAndSrcFire, 1 << srcWidth)._1
-  when (wbAndSrcFire && !io.wb_resp_fire) {
-    inFlights := inFlights + 1.U
-  }.elsewhen (!wbAndSrcFire && io.wb_resp_fire) {
-    inFlights := inFlights - 1.U
-  }
-  wbStall := inFlights >= (1 << srcWidth).U
+  // Allocate the lowest free source; stall only when none is free.  The first half of the source
+  // space is mapped to releases (top bit 0), which is why the list is 2^srcWidth wide.
+  val freeOH = PriorityEncoderOH(~srcBusy)
+  io.wb_req.bits.source := OHToUInt(freeOH)
+  val ackOH = Mux(io.wb_resp_fire,
+                  UIntToOH(io.wb_resp_source(srcWidth - 1, 0), nSrc),
+                  0.U(nSrc.W))
+  srcBusy := (srcBusy | Mux(wbAndSrcFire, freeOH, 0.U(nSrc.W))) & (~ackOH).asUInt
+  wbStall := !(~srcBusy).asUInt.orR
+  // A retiring ack must correspond to a live entry; otherwise we just lost track of one.
+  assert(!io.wb_resp_fire || (srcBusy & ackOH).orR, "ReleaseAck for a source that is not outstanding")
 
   // assert(io.wb_req.fire === wb_and_src_fire)
   assert(!wbAndSrcFire || io.meta_write.fire)
@@ -562,7 +575,15 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
-    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire
+    // Gate on the response ACTUALLY being a ReleaseAck in the release half of the source space.
+    // Previously any d.fire during a flush decremented the balance -- including a Grant for an
+    // unrelated refill.  Since the counter was unsigned, a spurious decrement at zero wrapped to
+    // max and latched wbStall permanently: a second, independent hang in the same path.
+    val dSrcTop = tl_out.d.bits.source.getWidth - 1
+    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire &&
+                             (tl_out.d.bits.opcode === TLMessages.ReleaseAck) &&
+                             !tl_out.d.bits.source(dSrcTop)
+    flush.io.wb_resp_source := tl_out.d.bits.source
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }
