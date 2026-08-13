@@ -365,7 +365,18 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
     s2_data(w) := regs.asUInt
   }
-  val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
+  // A writeback reads one specific way, which CacheFlushUnit may already have
+  // invalidated in the same cycle it issued the request. The flush preserves the
+  // tag and clears only coh, so s1_tag_eq_way still latches the line into s2_data,
+  // but s2_tag_match_way (which ands in coh.isValid) is all-zero and would mux out
+  // zeros. Select by the way the read actually asked for instead. At nWays == 1
+  // Mux1H discards its select entirely, which is why this only ever bit multi-way
+  // configs; for a still-valid line the two selects are identical.
+  val s1_wb_way_en = Reg(UInt(nWays.W))
+  when (wb.io.data_req.valid) { s1_wb_way_en := wb.io.data_req.bits.way_en }
+  val s2_wb_way_en = RegEnable(s1_wb_way_en, s1_clk_en)
+  val s2_writeback = RegEnable(s1_writeback, s1_clk_en)
+  val s2_data_muxed = Mux1H(Mux(s2_writeback, s2_wb_way_en, s2_tag_match_way), s2_data)
   val s2_data_decoded = (0 until rowWords).map(i => dECC.decode(s2_data_muxed(encDataBits*(i+1)-1,encDataBits*i)))
   val s2_data_corrected = s2_data_decoded.map(_.corrected).asUInt
   val s2_data_uncorrected = s2_data_decoded.map(_.uncorrected).asUInt
