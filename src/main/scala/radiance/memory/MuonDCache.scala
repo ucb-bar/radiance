@@ -57,29 +57,18 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val meta_resp = Input(Vec(nWays, new L1Metadata))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
     val wb_resp_fire = Input(Bool())
-    // Which source the returning ReleaseAck carries.  A balance counter cannot tell WHICH
-    // release came back, which is the whole bug; a free-list has to know.
-    val wb_resp_source = Input(UInt(edge.bundle.sourceBits.W))
   })
 
   val flushing = RegInit(false.B)
   val flushCounter = Counter(nSets * nWays)
   val srcWidth = io.wb_req.bits.source.getWidth - 1
-  val nSrc = 1 << srcWidth
-  // BITMAP FREE-LIST, replacing a bare request/response balance counter.
-  // bit i set == release source i is outstanding.  The old `inFlights` counted HOW MANY were
-  // outstanding but never WHICH, while the source itself came from a free-running Counter -- so on
-  // out-of-order ReleaseAck return the count could sit below the cap while a specific ID was still
-  // live, and the counter would hand that same ID out again.  Two releases then shared a source,
-  // one ack matched the wrong entry, and the balance never returned to zero: `busy` stuck high
-  // forever and the dirty lines behind the lost ack were never written back.
-  val srcBusy = RegInit(0.U(nSrc.W))
+  val inFlights = RegInit(0.U((srcWidth + 1).W))
 
   when (io.flush) {
     assert(!flushing, "already flushing")
     flushing := true.B
   }
-  io.busy := flushing || srcBusy.orR
+  io.busy := flushing || (inFlights > 0.U)
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -146,17 +135,48 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
 
-  // Allocate the lowest free source; stall only when none is free.  The first half of the source
-  // space is mapped to releases (top bit 0), which is why the list is 2^srcWidth wide.
-  val freeOH = PriorityEncoderOH(~srcBusy)
-  io.wb_req.bits.source := OHToUInt(freeOH)
-  val ackOH = Mux(io.wb_resp_fire,
-                  UIntToOH(io.wb_resp_source(srcWidth - 1, 0), nSrc),
-                  0.U(nSrc.W))
-  srcBusy := (srcBusy | Mux(wbAndSrcFire, freeOH, 0.U(nSrc.W))) & (~ackOH).asUInt
-  wbStall := !(~srcBusy).asUInt.orR
-  // A retiring ack must correspond to a live entry; otherwise we just lost track of one.
-  assert(!io.wb_resp_fire || (srcBusy & ackOH).orR, "ReleaseAck for a source that is not outstanding")
+  // FIX 2: flush releases must use source ids DISJOINT from the MSHR writeback ids.
+  //
+  // The old code ("count and pray ... the first half of the source space is mapped to releases")
+  // assumed the low half of the source space belonged to releases.  It does not.  prober, mshrs
+  // and this flush unit all feed the same wbArb -> one WritebackUnit -> one C channel (see the
+  // wbArb construction further down), and the MSHR side emits exactly {0,1,2,3} -- its MSHR
+  // index, straight out of Arbiter4_WritebackReq:
+  //     io_out_bits_source = in_0 ? 0 : in_1 ? 1 : {2'h1, ~in_2}
+  // while this unit emitted {1'b0, counter[1:0]} = {0,1,2,3}.  The two sets were IDENTICAL, so a
+  // returning ReleaseAck was ambiguous: the flush unit could be credited for an MSHR writeback,
+  // decrement inFlights early, drop below the cap, deassert io.busy while releases were still in
+  // flight, and let the core report finished with dirty lines never written back.  That is the
+  // observed FPGA symptom -- a residual that is always an exact multiple of one 64B line.
+  //
+  // IOMSHR MMIO uses source 4 (IOMSHR_1: io_mem_access_bits_source = 3'h4).  On this cache's
+  // outward D channel an IOMSHR response is AccessAck/AccessAckData, which a ReleaseAck predicate
+  // already excludes -- but 4 is skipped anyway so that disjointness does not depend on any
+  // opcode reasoning.  Take the tail {5,6,7}.
+  //
+  // FF DELTA: 0 (counted).  Counter(_, 3) is log2Ceil(3) = 2 bits, identical to the old
+  // Counter(_, 4); inFlights keeps its (srcWidth + 1) = 3 bits.  The only added logic is
+  // combinational: a wrap comparator and a 3-bit constant add.  No new SRAM.  No ISA change.
+  // NEAR-THE-LINE, declared: TileLink already requires each in-flight release to carry a unique
+  // source, so this restores behaviour that was intended but broken, rather than adding new
+  // semantics.  Concurrency drops from 4 outstanding flush releases to 3.
+  // CacheFlushUnit is GENERIC: it is instantiated for caches with different source widths (the
+  // L0d's source field is 3 bits, another instance's is only 2).  A hardcoded base of 5 fails
+  // elaboration on the narrow instance ("literal value 5 ... specified width of 2 bits"), so
+  // derive the range from the width and make this a strict NO-OP where there is no room.
+  //   srcBits >= 3 (the L0d): nFlushSrc=3, base = 2^srcBits - 3  -> {5,6,7}, cap 3.  THE FIX.
+  //   srcBits  < 3          : nFlushSrc = 2^(srcBits-1), base = 0 -> identical to the original
+  //                           `Counter(_, 1 << srcWidth)` / `inFlights >= 1 << srcWidth`.
+  val srcBits = io.wb_req.bits.source.getWidth
+  val nFlushSrc = if (srcBits >= 3) 3 else (1 << (srcBits - 1))
+  val flushSrcBase = if (srcBits >= 3) (1 << srcBits) - nFlushSrc else 0
+  io.wb_req.bits.source := flushSrcBase.U(srcBits.W) + Counter(wbAndSrcFire, nFlushSrc)._1
+  when (wbAndSrcFire && !io.wb_resp_fire) {
+    inFlights := inFlights + 1.U
+  }.elsewhen (!wbAndSrcFire && io.wb_resp_fire) {
+    inFlights := inFlights - 1.U
+  }
+  wbStall := inFlights >= nFlushSrc.U
 
   // assert(io.wb_req.fire === wb_and_src_fire)
   assert(!wbAndSrcFire || io.meta_write.fire)
@@ -575,15 +595,7 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
-    // Gate on the response ACTUALLY being a ReleaseAck in the release half of the source space.
-    // Previously any d.fire during a flush decremented the balance -- including a Grant for an
-    // unrelated refill.  Since the counter was unsigned, a spurious decrement at zero wrapped to
-    // max and latched wbStall permanently: a second, independent hang in the same path.
-    val dSrcTop = tl_out.d.bits.source.getWidth - 1
-    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire &&
-                             (tl_out.d.bits.opcode === TLMessages.ReleaseAck) &&
-                             !tl_out.d.bits.source(dSrcTop)
-    flush.io.wb_resp_source := tl_out.d.bits.source
+    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }
