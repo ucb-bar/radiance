@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
+import radiance.cluster.CacheFlushBundle
 
 class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val idIO = IO(clusterCoreIdT)
@@ -88,19 +89,54 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     )
   }
 
-  val fences = Seq(
-    new StallFields(
-      start = WireInit(io.req.fire && inst.b(IsFenceI)),
-      done = (_: UInt) => flushIO.i.done,
-      reqT = UInt(0.W)
-    ),
-    new StallFields(
-      start = WireInit(io.req.fire && inst.b(IsFenceD)),
-      done = (_: UInt) => flushIO.d.done,
-      reqT = UInt(0.W)
-    ),
+  // FIX 7: i/d fences from several warps.  The original trackers were single instances shared by all
+  // warps: a second fence re-armed the tracker (`assert(!reqSent)`, or a lost writeback without the
+  // assertion), and holding the SFU input instead (first attempt) deadlocked -- the held fence blocks
+  // the shared issue port, other warps' stores never receive operands, the LSU queues never empty,
+  // and the flush never becomes eligible (measured: runs/fix4_xcore4w_fence_n64_dbg).  Now every fence
+  // is accepted and tracked per warp; one flush runs at a time and covers every warp whose fence was
+  // waiting when it started (their stores are all older than the flush).  Warps that fence while a
+  // flush is running get the next one.  Only the pc is stored for the writeback (a fence writeback
+  // carries pc and wid and nothing else): 3 flags + pc per warp per kind.
+  class FenceKind(kind: DecodeField, flush: CacheFlushBundle) {
+    val waiting = RegInit(VecInit.fill(m.numWarps)(false.B))   // accepted, writeback not yet sent
+    val inFlush = RegInit(VecInit.fill(m.numWarps)(false.B))   // covered by the running flush
+    val flushed = RegInit(VecInit.fill(m.numWarps)(false.B))   // flush finished, writeback pending
+    val pcs     = Reg(Vec(m.numWarps, chiselTypeOf(uop.pc)))
+    val active  = RegInit(false.B)                              // a flush request is outstanding
 
-  )
+    when (io.req.fire && inst.b(kind)) {
+      val w = io.req.bits.uop.wid
+      assert(!waiting(w), "fence accepted for a warp that already has one in progress")
+      waiting(w) := true.B
+      pcs(w) := uop.pc
+    }
+    val pending = VecInit(Seq.tabulate(m.numWarps)(w => waiting(w) && !inFlush(w) && !flushed(w)))
+    // start a flush when lsu is clear and no flush is outstanding
+    // for now: fence fences both dmem and smem. we should have separate fences though TODO
+    flush.start := !active && pending.asUInt.orR && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
+    when (flush.start) {
+      active := true.B
+      pending.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
+    }
+    when (flush.done && active) {
+      active := false.B
+      inFlush.zip(flushed).foreach { case (f, d) => when (f) { d := true.B; f := false.B } }
+    }
+    def wbValid(w: Int): Bool = flushed(w)
+    def wbBits(w: Int) = {
+      val wb = Wire(schedWritebackT)
+      wb := 0.U.asTypeOf(schedWritebackT)
+      wb.valid := true.B
+      wb.bits.pc := pcs(w)
+      wb.bits.wid := w.U
+      wb
+    }
+    def retire(w: Int): Unit = { waiting(w) := false.B; flushed(w) := false.B }
+  }
+  val fenceI = new FenceKind(IsFenceI, flushIO.i)
+  val fenceD = new FenceKind(IsFenceD, flushIO.d)
+  val fenceWbs = Seq(fenceI, fenceD).flatMap(k => Seq.tabulate(m.numWarps)(w => (k, w)))
 
   val fences_smem = Seq.tabulate(m.numWarps) { wid =>
     new StallFields(
@@ -110,7 +146,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     )
   }
 
-  val stalls = barriers ++ fences ++ fences_smem
+  val stalls = barriers ++ fences_smem
 
   writeback.valid := true.B
 
@@ -292,19 +328,12 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   // fences
   // ========
 
-  (fences zip Seq(flushIO.i, flushIO.d)).foreach { case (fence, flush) =>
-    // start a flush when lsu is clear, and we havent sent out the request yet
-    // for now: fence fences both dmem and smem. we should have separate fences though TODO
-    flush.start := fence.inProgress.valid && !fence.reqSent && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
-    when (flush.start) {
-      fence.reqSent := true.B
-    }
-  }
+  // (fence flush requests are driven inside FenceKind above)
 
 
   // arbitrate writeback port for both barriers and fences
-  val stallRespArbiter = Module(new RRArbiter(schedWritebackT, stalls.length))
-  (stallRespArbiter.io.in zip stalls).foreach { case (arbIn, s) =>
+  val stallRespArbiter = Module(new RRArbiter(schedWritebackT, stalls.length + fenceWbs.length))
+  (stallRespArbiter.io.in.take(stalls.length) zip stalls).foreach { case (arbIn, s) =>
     arbIn.valid := s.respReceived && s.inProgress.valid
     arbIn.bits := s.storedWriteback
     when (arbIn.fire) {
@@ -312,6 +341,11 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       s.reqSent := false.B
       s.respReceived := false.B
     }
+  }
+  (stallRespArbiter.io.in.drop(stalls.length) zip fenceWbs).foreach { case (arbIn, (k, w)) =>
+    arbIn.valid := k.wbValid(w)
+    arbIn.bits := k.wbBits(w)
+    when (arbIn.fire) { k.retire(w) }
   }
 
   // writeback priority is: everything else > barriers/fences
