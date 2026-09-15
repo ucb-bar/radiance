@@ -188,7 +188,9 @@ class RadianceClusterModuleImp(outer: RadianceCluster) extends ClusterModuleImp(
   if (outer.softResetFinishMasters.nonEmpty) {
     val finished = VecInit(outer.softResetFinishMasters.map(_.out.head._1.finished)).andR
     val (_, stopSim) = Counter(0 until 8192, finished, !finished)
-    when (stopSim) {
+    val keepSim = freechips.rocketchip.util.PlusArg("gpu_finish_keeps_sim", 0,
+      "1: do not stop the simulation when every GPU core is idle")
+    when (stopSim && keepSim === 0.U) {
       stop("no more active warps for 8k cycles\n")
     }
 
