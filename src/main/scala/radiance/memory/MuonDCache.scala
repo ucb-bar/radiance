@@ -73,10 +73,10 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   // live ids over the MSHR id range {0 .. nMSHRs-1}:
   //   * those ids are inside the client IdRange this cache declares (HellaCache.scala:
   //     sourceId = IdRange(0, nMSHRs)), so every downstream node can carry and route them;
-  //   * no MSHR can hold a release in flight while the flush runs -- the flush starts only when
-  //     mshrs.io.fence_rdy (every MSHR in s_invalid, i.e. its own ReleaseAck already returned)
-  //     and the cpu request port is held not-ready for the whole flush -- so the two agents
-  //     never share an id concurrently;
+  //   * no MSHR can hold a release in flight while the flush runs -- the cache waits for its
+  //     outstanding-release count to reach zero before starting a sweep (FIX 10; mshrs.io.fence_rdy
+  //     alone is NOT enough, an eviction's release outlives the MSHR that raised it) and holds the
+  //     cpu request port not-ready for the whole flush -- so the two agents never share an id;
   //   * an id is reissued only after the ReleaseAck that names it has returned, whatever order
   //     the acks arrive in.
   // FF delta: nMSHRs bits of srcBusy (4) replace inFlights (3) + the Counter (2): -1 FF.
@@ -584,10 +584,36 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.flush := false.B
+
+    // FIX 10: count voluntary releases that have left the cache but not been acknowledged.
+    //
+    // A release raised by an MSHR eviction outlives the MSHR: rocket's MSHR hands the WritebackReq
+    // to the WritebackUnit and returns to s_invalid without waiting for the ReleaseAck, so
+    // `mshrs.io.fence_rdy` goes high while that release is still on the wire.  The flush unit draws
+    // its release sources from the same id space (Fix 3), and `TLCToTLULNode` turns every release
+    // into an A-channel PutFullData carrying that source, so starting a sweep in that window puts
+    // two live A transactions on one source id.  This is the source-id reuse this branch set out to
+    // fix; it is reproduced by a GMEM store stress kernel that fences from every warp, which trips
+    // the TileLink monitor on the L0d's output link with "'A' channel re-used a source ID", source 0
+    // (runs/ms_fix/g_seq_2K_w8, cluster 1 tile 1, 331k cycles).
+    //
+    // Waiting for the count to reach zero closes the window: no MSHR can start a new eviction once
+    // the flush holds `io.cpu.req.ready` low, and the prober is tied off on this path, so from the
+    // start of a sweep to its last ack the flush unit is the only agent issuing releases.
+    // FF cost: one counter, 4 bits.
+    val releaseOutstanding = RegInit(0.U(4.W))
+    val releaseSent = edge.done(tl_out.c)
+    val releaseAcked = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck)
+    releaseOutstanding := releaseOutstanding + releaseSent.asUInt - releaseAcked.asUInt
+    assert(releaseOutstanding =/= 0.U || !releaseAcked || releaseSent,
+      "ReleaseAck arrived with no release outstanding")
+    assert(releaseOutstanding =/= ((1 << 4) - 1).U || !releaseSent || releaseAcked,
+      "outstanding release counter would overflow")
+
     // a second start (e.g. the finish-triggered flush landing on a software MMIO flush) must wait
     // for the running flush to complete instead of tripping the unit's "already flushing" assert
     val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid &&
-                         !flush.io.busy
+                         !flush.io.busy && (releaseOutstanding === 0.U)
     when (preflushing && ready_to_flush) {
       preflushing := false.B
       flush.io.flush := true.B
@@ -602,7 +628,7 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
 
     flush.io.meta_resp := meta.io.resp
     // FIX 3 (ack side): only a ReleaseAck naming an id in the flush range credits the unit.  While
-    // the unit is busy no MSHR can have a release outstanding (see CacheFlushUnit), so such an ack
+    // the unit is busy no MSHR can have a release outstanding (Fix 10 establishes this), so such an ack
     // is necessarily one of the flush unit's; the unit asserts that the id is live.
     val flushAck = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck) &&
                    (tl_out.d.bits.source < cfg.nMSHRs.U)
