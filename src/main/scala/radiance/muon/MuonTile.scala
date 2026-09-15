@@ -358,8 +358,26 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   barrier.req <> core.io.barrier.req
   barrier.resp <> core.io.barrier.resp
 
-  outer.iFlushMaster.out.head._1 <> core.io.flush.i
-  outer.dFlushMaster.out.head._1 <> core.io.flush.d
+  // FIX 4 (tile side): count requests in flight on the lane links (one D beat answers each A beat on
+  // these TL-UL links) and tell the L0d when the memory path above it is quiescent, i.e. nothing that
+  // could still dirty a line is on its way.  The L0d defers every flush start until then.
+  // FF cost: log2(16 lanes x 2^lsuSourceIdBits) + 1 bits for the counter.
+  val laneLinks = outer.innerLsuNodes.map(_.out.head._1)
+  val laneAFires = PopCount(laneLinks.map(_.a.fire))
+  val laneDFires = PopCount(laneLinks.map(_.d.fire))
+  val memOutstanding = RegInit(0.U((log2Ceil(laneLinks.length << outer.lsuSourceIdBits) + 1).W))
+  memOutstanding := memOutstanding + laneAFires - laneDFires
+  assert(memOutstanding + laneAFires >= laneDFires, "more lane D beats than outstanding A beats")
+  val memQuiescent = core.io.lsuQueuesEmpty.globalQueuesEmpty && (memOutstanding === 0.U)
+
+  val iFlush = outer.iFlushMaster.out.head._1
+  val dFlush = outer.dFlushMaster.out.head._1
+  iFlush.start := core.io.flush.i.start
+  dFlush.start := core.io.flush.d.start
+  core.io.flush.i.done := iFlush.done
+  core.io.flush.d.done := dFlush.done
+  iFlush.quiescent := true.B      // the instruction cache holds nothing dirty
+  dFlush.quiescent := memQuiescent
 
   core.io.coreId := outer.muonParams.coreId.U
   core.io.clusterId := outer.muonParams.clusterId.U
@@ -368,10 +386,11 @@ class MuonTileModuleImp(outer: MuonTile) extends BaseTileModuleImp(outer) {
   core.io.softReset := softReset
   outer.softResetFinishSlave.in.head._1.finished := core.io.finished
 
+  // finish-triggered flush: the L0d latches the request and starts it once the tile is quiescent
   val justFinished = core.io.finished && !RegNext(core.io.finished)
   when (justFinished && !softReset) { // override only when finish not caused by reset
-    outer.iFlushMaster.out.head._1.start := true.B
-    outer.dFlushMaster.out.head._1.start := true.B
+    iFlush.start := true.B
+    dFlush.start := true.B
   }
 
   outer.reportCease(None)

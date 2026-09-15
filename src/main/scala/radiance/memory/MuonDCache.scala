@@ -56,19 +56,40 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val meta_write = Decoupled(new L1MetaWriteReq)
     val meta_resp = Input(Vec(nWays, new L1Metadata))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
+    // ReleaseAck for one of THIS unit's releases: fire + the source it names.  The cache filters
+    // the D channel on opcode and source range before asserting this (see the flush wiring).
     val wb_resp_fire = Input(Bool())
+    val wb_resp_source = Input(UInt(edge.bundle.sourceBits.W))
   })
 
   val flushing = RegInit(false.B)
   val flushCounter = Counter(nSets * nWays)
-  val srcWidth = io.wb_req.bits.source.getWidth - 1
-  val inFlights = RegInit(0.U((srcWidth + 1).W))
+
+  // FIX 3: voluntary-release source ids.
+  //
+  // The original code allocated the release source from a free-running Counter and tracked only
+  // HOW MANY releases were outstanding (inFlights), never WHICH ids -- "count and pray".  It also
+  // credited itself for any D-channel fire while busy.  Replace both with an exact bitmap of
+  // live ids over the MSHR id range {0 .. nMSHRs-1}:
+  //   * those ids are inside the client IdRange this cache declares (HellaCache.scala:
+  //     sourceId = IdRange(0, nMSHRs)), so every downstream node can carry and route them;
+  //   * no MSHR can hold a release in flight while the flush runs -- the cache waits for its
+  //     outstanding-release count to reach zero before starting a sweep (FIX 10; mshrs.io.fence_rdy
+  //     alone is NOT enough, an eviction's release outlives the MSHR that raised it) and holds the
+  //     cpu request port not-ready for the whole flush -- so the two agents never share an id;
+  //   * an id is reissued only after the ReleaseAck that names it has returned, whatever order
+  //     the acks arrive in.
+  // FF delta: nMSHRs bits of srcBusy (4) replace inFlights (3) + the Counter (2): -1 FF.
+  val nFlushSrc = cfg.nMSHRs
+  require(nFlushSrc >= 1 && nFlushSrc <= (1 << edge.bundle.sourceBits))
+  val srcBusy = RegInit(0.U(nFlushSrc.W))
+  val srcAllocOH = PriorityEncoderOH(~srcBusy)
 
   when (io.flush) {
     assert(!flushing, "already flushing")
     flushing := true.B
   }
-  io.busy := flushing || (inFlights > 0.U)
+  io.busy := flushing || srcBusy.orR
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -102,7 +123,14 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   val clearDirty = io.wb_req.fire
   val anyClear = clearInvalid || clearClean || clearDirty // TODO: response counter
 
-  val readyForMeta = anyClear || (!metaValid)
+  // FIX 5: sweep one set at a time.  The original `readyForMeta = anyClear || !metaValid` issued the
+  // next meta read in the same cycle the current line was cleared, while `metaValid` is set from
+  // RegNext(meta_read.fire) with priority over the clear and `meta` is only refreshed by the read
+  // response.  With consecutive dirty lines the unit then re-evaluated a stale `meta` and skipped the
+  // set behind it: measured on the tapeout RTL (runs/fix_xcore_fence_n32_dbg), a 32-line flush wrote
+  // back lines 0, 1, 3, 5, 7, ... and never lines 2, 4, 6, ...  Waiting for the held line to clear
+  // and for the read response to land costs ~3 cycles per set (64 sets) and no flip-flops.
+  val readyForMeta = !metaValid && !metaReadFired
   io.meta_read.valid := flushing && readyForMeta
 
   when (RegNext(io.meta_read.fire)) {
@@ -135,49 +163,17 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
 
-  // FIX 2: flush releases must use source ids DISJOINT from the MSHR writeback ids.
-  //
-  // The old code ("count and pray ... the first half of the source space is mapped to releases")
-  // assumed the low half of the source space belonged to releases.  It does not.  prober, mshrs
-  // and this flush unit all feed the same wbArb -> one WritebackUnit -> one C channel (see the
-  // wbArb construction further down), and the MSHR side emits exactly {0,1,2,3} -- its MSHR
-  // index, straight out of Arbiter4_WritebackReq:
-  //     io_out_bits_source = in_0 ? 0 : in_1 ? 1 : {2'h1, ~in_2}
-  // while this unit emitted {1'b0, counter[1:0]} = {0,1,2,3}.  The two sets were IDENTICAL, so a
-  // returning ReleaseAck was ambiguous: the flush unit could be credited for an MSHR writeback,
-  // decrement inFlights early, drop below the cap, deassert io.busy while releases were still in
-  // flight, and let the core report finished with dirty lines never written back.  That is the
-  // observed FPGA symptom -- a residual that is always an exact multiple of one 64B line.
-  //
-  // IOMSHR MMIO uses source 4 (IOMSHR_1: io_mem_access_bits_source = 3'h4).  NOTE: an earlier
-  // version of this comment claimed a "ReleaseAck predicate already excludes" IOMSHR responses.
-  // NO SUCH PREDICATE EXISTED -- see Fix 2b at the wb_resp_fire assignment, which adds the source
-  // filter that makes this range meaningful.  4 is skipped anyway so disjointness depends on no
-  // opcode reasoning.  Take the tail {5,6,7}.
-  //
-  // FF DELTA: 0 (counted).  Counter(_, 3) is log2Ceil(3) = 2 bits, identical to the old
-  // Counter(_, 4); inFlights keeps its (srcWidth + 1) = 3 bits.  The only added logic is
-  // combinational: a wrap comparator and a 3-bit constant add.  No new SRAM.  No ISA change.
-  // NEAR-THE-LINE, declared: TileLink already requires each in-flight release to carry a unique
-  // source, so this restores behaviour that was intended but broken, rather than adding new
-  // semantics.  Concurrency drops from 4 outstanding flush releases to 3.
-  // CacheFlushUnit is GENERIC: it is instantiated for caches with different source widths (the
-  // L0d's source field is 3 bits, another instance's is only 2).  A hardcoded base of 5 fails
-  // elaboration on the narrow instance ("literal value 5 ... specified width of 2 bits"), so
-  // derive the range from the width and make this a strict NO-OP where there is no room.
-  //   srcBits >= 3 (the L0d): nFlushSrc=3, base = 2^srcBits - 3  -> {5,6,7}, cap 3.  THE FIX.
-  //   srcBits  < 3          : nFlushSrc = 2^(srcBits-1), base = 0 -> identical to the original
-  //                           `Counter(_, 1 << srcWidth)` / `inFlights >= 1 << srcWidth`.
-  val srcBits = io.wb_req.bits.source.getWidth
-  val nFlushSrc = if (srcBits >= 3) 3 else (1 << (srcBits - 1))
-  val flushSrcBase = if (srcBits >= 3) (1 << srcBits) - nFlushSrc else 0
-  io.wb_req.bits.source := flushSrcBase.U(srcBits.W) + Counter(wbAndSrcFire, nFlushSrc)._1
-  when (wbAndSrcFire && !io.wb_resp_fire) {
-    inFlights := inFlights + 1.U
-  }.elsewhen (!wbAndSrcFire && io.wb_resp_fire) {
-    inFlights := inFlights - 1.U
-  }
-  wbStall := inFlights >= nFlushSrc.U
+  // allocate the lowest free id; stall when every id is live; free the id the ack names
+  io.wb_req.bits.source := OHToUInt(srcAllocOH)
+  wbStall := srcBusy.andR
+  val srcAckOH = Mux(io.wb_resp_fire, UIntToOH(io.wb_resp_source, nFlushSrc), 0.U(nFlushSrc.W))
+  srcBusy := (srcBusy | Mux(wbAndSrcFire, srcAllocOH, 0.U(nFlushSrc.W))) & ~srcAckOH
+  assert(!io.wb_resp_fire || (io.wb_resp_source < nFlushSrc.U),
+    "flush ReleaseAck names a source outside the flush id range")
+  assert(!io.wb_resp_fire || (srcBusy & UIntToOH(io.wb_resp_source, nFlushSrc)).orR,
+    "flush ReleaseAck names a source that is not live")
+  assert(!(wbAndSrcFire && io.wb_resp_fire) || (io.wb_resp_source =/= OHToUInt(srcAllocOH)),
+    "flush allocated a source in the same cycle its ack returned")
 
   // assert(io.wb_req.fire === wb_and_src_fire)
   assert(!wbAndSrcFire || io.meta_write.fire)
@@ -335,7 +331,13 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   data.io.write.bits.data := wdata_encoded.asUInt
 
   // tag read for new requests
-  metaReadArb.io.in(4).valid := io.cpu.req.valid
+  // FIX 6: while a flush runs, a request parked on io.cpu.req (held valid by the SimpleHellaCacheIF
+  // replay queue upstream) must not occupy the meta-read arbiter: the request cannot be accepted
+  // (io.cpu.req.ready is forced low while flushing) but its higher-priority arbiter input starves
+  // the flush unit's meta reads, and the two wait on each other forever.  Measured on the tapeout
+  // RTL (runs/base_xcore_mmio_n32_dbg): flushCounter stuck at 3, flush_unit.io_meta_read_valid=1,
+  // io_meta_read_ready=0, io_cpu_req_valid=1, for the rest of the run.
+  metaReadArb.io.in(4).valid := io.cpu.req.valid && !flushing
   metaReadArb.io.in(4).bits.idx := io.cpu.req.bits.addr >> blockOffBits
   metaReadArb.io.in(4).bits.tag := io.cpu.req.bits.addr >> untagBits
   metaReadArb.io.in(4).bits.way_en := ~0.U(nWays.W)
@@ -582,7 +584,36 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.flush := false.B
-    val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid
+
+    // FIX 10: count voluntary releases that have left the cache but not been acknowledged.
+    //
+    // A release raised by an MSHR eviction outlives the MSHR: rocket's MSHR hands the WritebackReq
+    // to the WritebackUnit and returns to s_invalid without waiting for the ReleaseAck, so
+    // `mshrs.io.fence_rdy` goes high while that release is still on the wire.  The flush unit draws
+    // its release sources from the same id space (Fix 3), and `TLCToTLULNode` turns every release
+    // into an A-channel PutFullData carrying that source, so starting a sweep in that window puts
+    // two live A transactions on one source id.  This is the source-id reuse this branch set out to
+    // fix; it is reproduced by a GMEM store stress kernel that fences from every warp, which trips
+    // the TileLink monitor on the L0d's output link with "'A' channel re-used a source ID", source 0
+    // (runs/ms_fix/g_seq_2K_w8, cluster 1 tile 1, 331k cycles).
+    //
+    // Waiting for the count to reach zero closes the window: no MSHR can start a new eviction once
+    // the flush holds `io.cpu.req.ready` low, and the prober is tied off on this path, so from the
+    // start of a sweep to its last ack the flush unit is the only agent issuing releases.
+    // FF cost: one counter, 4 bits.
+    val releaseOutstanding = RegInit(0.U(4.W))
+    val releaseSent = edge.done(tl_out.c)
+    val releaseAcked = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck)
+    releaseOutstanding := releaseOutstanding + releaseSent.asUInt - releaseAcked.asUInt
+    assert(releaseOutstanding =/= 0.U || !releaseAcked || releaseSent,
+      "ReleaseAck arrived with no release outstanding")
+    assert(releaseOutstanding =/= ((1 << 4) - 1).U || !releaseSent || releaseAcked,
+      "outstanding release counter would overflow")
+
+    // a second start (e.g. the finish-triggered flush landing on a software MMIO flush) must wait
+    // for the running flush to complete instead of tripping the unit's "already flushing" assert
+    val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid &&
+                         !flush.io.busy && (releaseOutstanding === 0.U)
     when (preflushing && ready_to_flush) {
       preflushing := false.B
       flush.io.flush := true.B
@@ -596,22 +627,15 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
-    // FIX 2b.  Disjoint sources are INERT unless something FILTERS on them, and nothing did:
-    // this assignment credited the flush unit for ANY D-channel fire while busy -- including MSHR
-    // grants and refills.  inFlights then decremented early, dropped below the cap, io.busy
-    // deasserted while releases were still outstanding, and the core reported finished with dirty
-    // lines never written back.  That is the observed FPGA symptom: a residual that is always an
-    // exact multiple of one 64B line (measured 48 words = exactly 3 lines, deterministic 3/3).
-    // Fix 2 placed flush releases in the TOP 3 sources, so this predicate is DERIVED from that
-    // encoding, not guessed:
-    //   w >= 3: source >= 2^w - 3 selects exactly {5,6,7}, with nothing above it.
-    //   w <  3: bound is 0, so the term is always true -- a strict no-op on the narrow instance,
-    //           matching the width fallback already built into CacheFlushUnit.
-    // Same idiom as line 467 (`tl_out.d.bits.source < cfg.nMSHRs.U`), which keeps IOMSHR
-    // responses out of the data array.  FF delta 0: a pure combinational compare.
-    val flushSrcLo = { val w = tl_out.d.bits.source.getWidth; if (w >= 3) (1 << w) - 3 else 0 }
-    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire &&
-                             (tl_out.d.bits.source >= flushSrcLo.U)
+    // FIX 3 (ack side): only a ReleaseAck naming an id in the flush range credits the unit.  While
+    // the unit is busy no MSHR can have a release outstanding (Fix 10 establishes this), so such an ack
+    // is necessarily one of the flush unit's; the unit asserts that the id is live.
+    val flushAck = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck) &&
+                   (tl_out.d.bits.source < cfg.nMSHRs.U)
+    flush.io.wb_resp_fire := flush.io.busy && flushAck
+    flush.io.wb_resp_source := tl_out.d.bits.source
+    assert(!(flush.io.busy && tl_out.d.fire) || flushAck,
+      "D-channel traffic other than a flush ReleaseAck while the flush unit is busy")
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }

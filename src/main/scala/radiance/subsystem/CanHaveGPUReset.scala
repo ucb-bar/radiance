@@ -103,7 +103,11 @@ class GPUResetAggregator(params: GPUResetParams, slaves: Seq[SoftResetFinishNode
 
       val haltTrigger = allFinished && !coreResets.head
       val (_, stopSim) = Counter(0 until 1024, haltTrigger, !haltTrigger)
-      when (stopSim) {
+      // simulation only: +gpu_finish_keeps_sim=1 lets the rv64 host keep running after the GPU is idle
+      // (needed for host-side read-back checks; the default keeps the old behaviour)
+      val keepSim = freechips.rocketchip.util.PlusArg("gpu_finish_keeps_sim", 0,
+        "1: do not stop the simulation when every GPU core is idle")
+      when (stopSim && keepSim === 0.U) {
         stop("no more active warps for 1k cycles\n")
       }
     }

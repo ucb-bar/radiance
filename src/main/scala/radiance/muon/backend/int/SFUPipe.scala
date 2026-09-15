@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import radiance.muon._
 import radiance.muon.backend._
 import radiance.muon.backend.int._
+import radiance.cluster.CacheFlushBundle
 
 class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val idIO = IO(clusterCoreIdT)
@@ -88,19 +89,95 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     )
   }
 
-  val fences = Seq(
-    new StallFields(
-      start = WireInit(io.req.fire && inst.b(IsFenceI)),
-      done = (_: UInt) => flushIO.i.done,
-      reqT = UInt(0.W)
-    ),
-    new StallFields(
-      start = WireInit(io.req.fire && inst.b(IsFenceD)),
-      done = (_: UInt) => flushIO.d.done,
-      reqT = UInt(0.W)
-    ),
+  // FIX 7: i/d fences from several warps.  The original trackers were single instances shared by all
+  // warps: a second fence re-armed the tracker (`assert(!reqSent)`, or a lost writeback without the
+  // assertion), and holding the SFU input instead (first attempt) deadlocked -- the held fence blocks
+  // the shared issue port, other warps' stores never receive operands, the LSU queues never empty,
+  // and the flush never becomes eligible (measured: runs/fix4_xcore4w_fence_n64_dbg).  Now every fence
+  // is accepted and tracked per warp; one flush runs at a time and covers every warp whose fence was
+  // waiting when it started (their stores are all older than the flush).  Warps that fence while a
+  // flush is running get the next one.
+  //
+  // FIX 8: `fence.i` writes the L0d back BEFORE invalidating the L0i.  The two L0 caches are siblings
+  // under one L1; a store to instruction memory lands in the L0d, so invalidating the L0i alone
+  // refills the stale copy from L1 and self-modifying code still executes the old instruction
+  // (measured on the tapeout RTL and on Fix 3..7: rv32ui-p-fence_i fails its first case, tohost=5;
+  // the same test with an explicit `fence` in front of each `fence.i` passes, runs/fence_i_dfirst).
+  // So a fence.i is a two-phase request: d flush, then i flush, then the writeback.
+  //
+  // Per warp: needD, needI, inFlush, wbPending and the pc (a fence writeback carries pc and wid and
+  // nothing else).  That is 4 flags + pc per warp, replacing 3 flags + pc per warp per kind.
+  class FenceUnit {
+    val needD   = RegInit(VecInit.fill(m.numWarps)(false.B))  // L0d writeback still owed
+    val needI   = RegInit(VecInit.fill(m.numWarps)(false.B))  // L0i invalidate still owed (fence.i)
+    val inFlush = RegInit(VecInit.fill(m.numWarps)(false.B))  // covered by the running flush
+    val wbPend  = RegInit(VecInit.fill(m.numWarps)(false.B))  // both phases done, writeback pending
+    val pcs     = Reg(Vec(m.numWarps, chiselTypeOf(uop.pc)))
+    val activeD = RegInit(false.B)
+    val activeI = RegInit(false.B)
 
-  )
+    // a warp is eligible for the d phase until its d flush has run, and for the i phase only after it
+    val pendD = VecInit(Seq.tabulate(m.numWarps)(w => needD(w) && !inFlush(w)))
+    val pendI = VecInit(Seq.tabulate(m.numWarps)(w => needI(w) && !needD(w) && !inFlush(w)))
+    val idle = !activeD && !activeI
+    // the d flush waits for the LSU queues; the i flush follows it and needs no further condition
+    val startD = idle && pendD.asUInt.orR && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
+    val startI = idle && !startD && pendI.asUInt.orR
+    flushIO.d.start := startD
+    flushIO.i.start := startI
+
+    when (startD) {
+      activeD := true.B
+      pendD.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
+    }
+    when (startI) {
+      activeI := true.B
+      pendI.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
+    }
+    when (activeD && flushIO.d.done) {
+      activeD := false.B
+      (0 until m.numWarps).foreach { w =>
+        when (inFlush(w)) {
+          inFlush(w) := false.B
+          needD(w) := false.B
+          when (!needI(w)) { wbPend(w) := true.B }
+        }
+      }
+    }
+    when (activeI && flushIO.i.done) {
+      activeI := false.B
+      (0 until m.numWarps).foreach { w =>
+        when (inFlush(w)) {
+          inFlush(w) := false.B
+          needI(w) := false.B
+          wbPend(w) := true.B
+        }
+      }
+    }
+
+    // accept last so a fence issued in the same cycle a flush completes is not swallowed by it
+    val accepted = io.req.fire && (inst.b(IsFenceI) || inst.b(IsFenceD))
+    when (accepted) {
+      val w = io.req.bits.uop.wid
+      assert(!needD(w) && !needI(w) && !wbPend(w), "fence accepted for a warp that already has one in progress")
+      needD(w) := true.B          // both kinds write the L0d back
+      needI(w) := inst.b(IsFenceI)
+      pcs(w) := uop.pc
+    }
+
+    def wbValid(w: Int): Bool = wbPend(w)
+    def wbBits(w: Int) = {
+      val wb = Wire(schedWritebackT)
+      wb := 0.U.asTypeOf(schedWritebackT)
+      wb.valid := true.B
+      wb.bits.pc := pcs(w)
+      wb.bits.wid := w.U
+      wb
+    }
+    def retire(w: Int): Unit = { wbPend(w) := false.B }
+  }
+  val fence = new FenceUnit
+  val fenceWbs = Seq.tabulate(m.numWarps)(w => w)
 
   val fences_smem = Seq.tabulate(m.numWarps) { wid =>
     new StallFields(
@@ -110,7 +187,7 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
     )
   }
 
-  val stalls = barriers ++ fences ++ fences_smem
+  val stalls = barriers ++ fences_smem
 
   writeback.valid := true.B
 
@@ -292,19 +369,12 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   // fences
   // ========
 
-  (fences zip Seq(flushIO.i, flushIO.d)).foreach { case (fence, flush) =>
-    // start a flush when lsu is clear, and we havent sent out the request yet
-    // for now: fence fences both dmem and smem. we should have separate fences though TODO
-    flush.start := fence.inProgress.valid && !fence.reqSent && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
-    when (flush.start) {
-      fence.reqSent := true.B
-    }
-  }
+  // (fence flush requests are driven inside FenceKind above)
 
 
   // arbitrate writeback port for both barriers and fences
-  val stallRespArbiter = Module(new RRArbiter(schedWritebackT, stalls.length))
-  (stallRespArbiter.io.in zip stalls).foreach { case (arbIn, s) =>
+  val stallRespArbiter = Module(new RRArbiter(schedWritebackT, stalls.length + fenceWbs.length))
+  (stallRespArbiter.io.in.take(stalls.length) zip stalls).foreach { case (arbIn, s) =>
     arbIn.valid := s.respReceived && s.inProgress.valid
     arbIn.bits := s.storedWriteback
     when (arbIn.fire) {
@@ -313,11 +383,29 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       s.respReceived := false.B
     }
   }
+  (stallRespArbiter.io.in.drop(stalls.length) zip fenceWbs).foreach { case (arbIn, w) =>
+    arbIn.valid := fence.wbValid(w)
+    arbIn.bits := fence.wbBits(w)
+    when (arbIn.fire) { fence.retire(w) }
+  }
 
   // writeback priority is: everything else > barriers/fences
   stallRespArbiter.io.out.ready := io.resp.ready && !busy
 
-  io.req.ready := !busy || io.resp.fire // TODO: might be able to unset ready if bar wb pending
+  // FIX 11: `fflags` is architecturally sticky (Fix 9) and no scoreboard covers a CSR, so a read
+  // issued in the instruction after an FP operation could observe the register before that
+  // operation's exception flags reached it.  Measured: rv32uzfh-p-fcvt_w reads the flags in the very
+  // next instruction and fails, and passes unchanged with 32 nops inserted (runs/nd_fcvt_w); once
+  // the flags accumulate, the stale read also leaks into the following test case (rv32uzfh-p-fcvt).
+  // Refusing the request is safe here, unlike for a fence (Fix 7): the FP pipes drain on their own,
+  // they do not need the SFU's issue port, so the wait is bounded by the FP latency.
+  val fpBusy = IO(Input(Bool()))
+  val csrAddrIn = inst(Imm32)
+  val isFCsrAccess = inst.b(IsCSR) && ((csrAddrIn === CSRs.fflags.U) ||
+                                       (csrAddrIn === CSRs.frm.U) ||
+                                       (csrAddrIn === CSRs.fcsr.U))
+  val fpCsrStall = isFCsrAccess && fpBusy
+  io.req.ready := (!busy || io.resp.fire) && !fpCsrStall // TODO: might be able to unset ready if bar wb pending
   io.resp.valid := busy || stallRespArbiter.io.out.valid
   io.resp.bits.sched.get := Mux(busy,
     RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire),

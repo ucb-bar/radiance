@@ -47,6 +47,14 @@ class FPExPipe(fmt: FPFormat.Type)
     val regData = Input(csrDataT)
   })
 
+  // FIX 11: see FPPipe.  This pipe raises no exception flags today, but a CSR access must still not
+  // overtake a result it is about to write back.
+  val fpExInFlight = RegInit(0.U(4.W))
+  fpExInFlight := fpExInFlight + io.req.fire.asUInt - io.resp.fire.asUInt
+  assert(fpExInFlight =/= 0.U || !io.resp.fire || io.req.fire, "FPExPipe answered with nothing in flight")
+  val occupied = IO(Output(Bool()))
+  occupied := (fpExInFlight =/= 0.U) || io.req.fire
+
   val ioFpExOp = FpExOpDecoder.decode(inst(Opcode), inst(F3), inst(F7), inst(Rs2))
   val req = RegEnable(ioFpExOp, 0.U.asTypeOf(new FpExOpBundle), io.req.fire)
   val fpExReq = Mux(io.req.fire, ioFpExOp, req)

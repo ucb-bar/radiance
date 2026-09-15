@@ -76,7 +76,9 @@ case class MuonCoreParams(
   def l1ReqTagBits: Int = {
     val instVsData = 1
     val coreBits = log2Ceil(numCores)
-    instVsData + coreBits + 5
+    // 6, not 5: FIX 12 gives the L0 caches' voluntary releases their own half of the source space,
+    // which costs one source bit on every L0 outward path and so one more bit of L1 request tag.
+    instVsData + coreBits + 6
   }
 }
 
@@ -339,6 +341,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val smem = new SharedMemIO
     val barrier = barrierIO
     val flush = cacheFlushIO
+    val lsuQueuesEmpty = lsuFenceIO
     val softReset = Input(Bool())
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
@@ -361,6 +364,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.feCSR := fe.io.csr
   be.io.barrier <> io.barrier
   be.io.flush <> io.flush
+  io.lsuQueuesEmpty := be.io.lsuQueuesEmpty
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset

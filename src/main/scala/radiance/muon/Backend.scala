@@ -17,6 +17,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val flush = cacheFlushIO
+    val lsuQueuesEmpty = lsuFenceIO
     val softReset = Input(Bool())
     val perf = Output(new BackendPerfIO)
     val trace = Option.when(muonParams.trace)(Valid(new InstTraceIO))
@@ -145,6 +146,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   }
   execute.io.barrier <> io.barrier
   execute.io.flush <> io.flush
+  io.lsuQueuesEmpty := execute.io.lsuQueuesEmpty
   execute.io.req.bits := executeIn
 
   execute.io.mem.dmem <> io.dmem

@@ -248,26 +248,42 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   val fio = outer.nbdCache.module.flush_io
   fio.foreach(_.start := false.B)
 
-  // flush mmio
-  outer.flushRegNode.foreach { node =>
-    node.regmap(
-      0x0 -> Seq(RegField.w(32, (valid: Bool, _: UInt) => {
-        when (valid) {
-          fio.get.start := true.B
-        }
-        true.B
-        // !fio.busy
-      })),
-    )
-  }
-
-  // we assume the core flush doesn't collide with mmio flush
-  outer.flushNode.map(_.in.head._1).foreach { node =>
-    when (node.start) {
-      fio.get.start := true.B
+  // FIX 4: a flush request (MMIO write, core fence, or core finish) is latched here and started only
+  // once the tile reports that no memory request is in flight above this cache and the cache is not
+  // already flushing.  The old code started the sweep immediately: stores still travelling through
+  // the LSU / coalescer landed after the sweep and stayed dirty until the next flush -- which for the
+  // finish-triggered flush never comes.  The cache's own `ready_to_flush` only covers its MSHRs.
+  // FF cost: 1 (flushPending).
+  fio.foreach { f =>
+    val flushPending = RegInit(false.B)
+    val flushReq = WireInit(false.B)
+    val quiescent = outer.flushNode.map(_.in.head._1.quiescent).getOrElse(true.B)
+    when (flushReq) { flushPending := true.B }
+    when (flushPending && quiescent && !f.busy) {
+      f.start := true.B
+      flushPending := false.B
     }
-    // done on falling edge of busy
-    node.done := RegNext(fio.get.busy) && !fio.get.busy
+
+    // flush mmio
+    outer.flushRegNode.foreach { node =>
+      node.regmap(
+        0x0 -> Seq(RegField.w(32, (valid: Bool, _: UInt) => {
+          when (valid) {
+            flushReq := true.B
+          }
+          true.B
+        })),
+      )
+    }
+
+    outer.flushNode.map(_.in.head._1).foreach { node =>
+      when (node.start) {
+        flushReq := true.B
+      }
+      // done on the falling edge of busy, and only when no further flush is waiting behind it, so a
+      // fence that queued behind a running flush is released by its own sweep and not the earlier one
+      node.done := RegNext(f.busy) && !f.busy && !flushPending
+    }
   }
 
 }

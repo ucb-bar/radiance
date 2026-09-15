@@ -43,4 +43,12 @@ class CacheFlushBundle extends Bundle {
   val done = Input(Bool())
 }
 
-object CacheFlushNode extends NoParamNode(new CacheFlushBundle)
+/** Tile -> cache flush request port.  `quiescent` is asserted by the tile while it has no memory
+  * request in flight on its lane links and no store waiting in the LSU; the cache defers every
+  * flush start (fence, MMIO write, finish) until then, so a sweep never runs ahead of stores that
+  * are still on their way down to it. */
+class CacheFlushNodeBundle extends CacheFlushBundle {
+  val quiescent = Output(Bool())
+}
+
+object CacheFlushNode extends NoParamNode(new CacheFlushNodeBundle)
