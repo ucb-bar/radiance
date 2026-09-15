@@ -241,6 +241,14 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   }
   fCSRIO.regData := fCSR
 
+  // FIX 11: how many requests this pipe has accepted but not yet answered.  The SFU reads it to
+  // interlock a CSR access to the fcsr family against FP results that have not landed yet.
+  val fpInFlight = RegInit(0.U(4.W))
+  fpInFlight := fpInFlight + io.req.fire.asUInt - io.resp.fire.asUInt
+  assert(fpInFlight =/= 0.U || !io.resp.fire || io.req.fire, "FPPipe answered with nothing in flight")
+  val occupied = IO(Output(Bool()))
+  occupied := (fpInFlight =/= 0.U) || io.req.fire
+
   // ordered priority ready
   val respValids = pipes.map(_.io.resp.valid)
   pipes.zipWithIndex.foreach { case (pipe, i) =>

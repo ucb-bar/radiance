@@ -392,7 +392,20 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   // writeback priority is: everything else > barriers/fences
   stallRespArbiter.io.out.ready := io.resp.ready && !busy
 
-  io.req.ready := !busy || io.resp.fire // TODO: might be able to unset ready if bar wb pending
+  // FIX 11: `fflags` is architecturally sticky (Fix 9) and no scoreboard covers a CSR, so a read
+  // issued in the instruction after an FP operation could observe the register before that
+  // operation's exception flags reached it.  Measured: rv32uzfh-p-fcvt_w reads the flags in the very
+  // next instruction and fails, and passes unchanged with 32 nops inserted (runs/nd_fcvt_w); once
+  // the flags accumulate, the stale read also leaks into the following test case (rv32uzfh-p-fcvt).
+  // Refusing the request is safe here, unlike for a fence (Fix 7): the FP pipes drain on their own,
+  // they do not need the SFU's issue port, so the wait is bounded by the FP latency.
+  val fpBusy = IO(Input(Bool()))
+  val csrAddrIn = inst(Imm32)
+  val isFCsrAccess = inst.b(IsCSR) && ((csrAddrIn === CSRs.fflags.U) ||
+                                       (csrAddrIn === CSRs.frm.U) ||
+                                       (csrAddrIn === CSRs.fcsr.U))
+  val fpCsrStall = isFCsrAccess && fpBusy
+  io.req.ready := (!busy || io.resp.fire) && !fpCsrStall // TODO: might be able to unset ready if bar wb pending
   io.resp.valid := busy || stallRespArbiter.io.out.valid
   io.resp.bits.sched.get := Mux(busy,
     RegEnable(writeback, 0.U.asTypeOf(schedWritebackT), io.req.fire),

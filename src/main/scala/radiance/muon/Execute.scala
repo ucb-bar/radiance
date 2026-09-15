@@ -59,6 +59,8 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   fpDivSqrtPipe.fStatusIn.valid := false.B
   fpDivSqrtPipe.fStatusIn.bits := 0.U
   fpAddMulPipe.fStatusIn := fpDivSqrtPipe.fStatusOut
+  // FIX 11: hold a CSR access to the fcsr family until every FP pipe has retired what it holds
+  sfuPipe.fpBusy := fpAddMulPipe.occupied || fpDivSqrtPipe.occupied || fpExPipe.occupied
   sfuPipe.idIO := io.id
   sfuPipe.barIO <> io.barrier
   sfuPipe.flushIO <> io.flush
