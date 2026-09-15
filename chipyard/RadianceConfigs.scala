@@ -292,6 +292,19 @@ class RadianceTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
+// Single-cluster variant of RadianceTapeoutSimConfig (cluster 0 only), for fitting on
+// one FPGA. Identical fragments to RadianceTapeoutSimConfig minus the second cluster;
+// crucially NO trace/difftest (which would set CyclotronLinked and pull in the DPI model).
+class RadianceSingleClusterTapeoutSimConfig extends Config(
+  new WithRadianceMxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
+  new WithMuonCores(2, location = InCluster(0), noILP = false, l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
+  new WithExtGPUMem() ++
+  new WithRadianceRocket ++
+  new WithGPUResetAggregator(defaultReset = false) ++
+  new RadianceBaseConfig
+)
+
 class RadianceTapeoutNDAFreeConfig extends Config(
   new chipyard.clocking.WithClockTapIOCells ++
   new WithRadianceTapeoutPeripheralsNoClockGate ++

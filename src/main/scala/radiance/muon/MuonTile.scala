@@ -302,7 +302,11 @@ class MuonTile(
   override protected def visibleManagers = Seq()
   // this overrides the reset vector nexus node to be consistent with the other tiles (gemmini tile)
   // otherwise it results in a really obscure diplomacy error
-  override protected def visiblePhysAddrBits = if (p(RadianceSimArgs)) 33 else 34
+  // NOTE (FireSim/FPGA): the non-sim branch (else 34) is for OBUS/multi-chip configs. For the
+  // non-OBUS RadianceTapeoutSimConfig built on FireSim (RadianceSimArgs=false, no Cyclotron DPI),
+  // 34 conflicts with the 33-bit reset-vector nexus of the other tiles -> BundleBridgeNexus
+  // UInt<34> vs UInt<33> elaboration error. 33 bits covers this config's memory map (top 0x1_FFFF_FFFF).
+  override protected def visiblePhysAddrBits = if (p(RadianceSimArgs)) 33 else 33
 
   org.chipsalliance.diplomacy.DisableMonitors { implicit p => tlSlaveXbar.node :*= slaveNode }
   val dtimProperty = Nil
