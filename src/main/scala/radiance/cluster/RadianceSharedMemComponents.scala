@@ -11,7 +11,6 @@ import org.chipsalliance.diplomacy.lazymodule._
 import radiance.memory._
 import radiance.subsystem._
 
-// virgo-specific tilelink nodes
 // generic smem implementation is in RadianceSharedMem.scala
 class RadianceSharedMemComponents(
   clusterParams: RadianceClusterParams,
@@ -129,14 +128,15 @@ class RadianceSharedMemComponents(
         val buf = TLBuffer(BufferParams.pipe, BufferParams(0))
         buf := dist
         val fanoutSource = if (ordered) {
-          // first 2 bits are xbar artifacts
+          // ensure in-order response that gemmini DMA expects
           val fifoFixer = ResponseFIFOFixer()
+          // first 2 bits are xbar artifacts
           fifoFixer := TLSourceShrinker(8) := buf
           fifoFixer
         } else {
           buf
         }
-        connectXbarName(fanoutSource, Some(s"dist_fanout_$suffix${i}w${w}"), TLArbiter.lowestIndexFirst)
+        connectXbarName(fanoutSource, Some(s"dist_fanout_$suffix${i}_w${w}"), TLArbiter.lowestIndexFirst)
       }
       Seq.fill(smemWidth / width)(fanout).flatten // smem wider than spad, duplicate masters
     }
@@ -151,13 +151,14 @@ class RadianceSharedMemComponents(
   gemminis.foreach(g => require(g.spad.spad_writer.isDefined))
 
   // (banks, subbanks, gemminis)
-  val spadReadNodes = Seq.fill(smemBanks) {
+  val spadReadNodes = Seq.tabulate(smemBanks) { b =>
     distAndDuplicate(gemminis.map(g => (g.spad_read_nodes, g.config.sp_width_projected / 8)),
-      "gemmini_r", ordered = true)
+      s"gemmini_r_b${b}_", ordered = true)
   }
   // TODO: these nodes probably dont do anything, eliminate?
-  val spadWriteNodes = Seq.fill(smemBanks) {
-    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)), "gemmini_w")
+  val spadWriteNodes = Seq.tabulate(smemBanks) { b =>
+    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)),
+      s"gemmini_w_b${b}_")
   }
   val spadSpWriteNodesSingleBank = distAndDuplicate(
     gemminis.map { g =>
@@ -170,7 +171,22 @@ class RadianceSharedMemComponents(
   val preSplitterNodes = Seq.fill(smemSubbanks)(connectIdentity(alignmentXbar))
   val muonSplitterNodes = preSplitterNodes
     .map(connectOne(_, () => RWSplitterNode(f"muon_aligned_splitter")))
-  val muonAligned = Seq.fill(2)(muonSplitterNodes.map(connectXbarName(_, Some("muon_aligned_fanout"))))
+  // first map connects 1st edge (reads) from muonSplitterNodes;
+  // second map connects 2nd edge (writes)
+  val muonAlignedReads = muonSplitterNodes.map { w =>
+    // the fanout TLXbar here de-asserts d.ready even for banks that don't hold
+    // d.valid as a result of arbitration. That d.ready is coupled to a.ready
+    // of the SMEM banks, asserting backpressure to Gemmini accessing *any*
+    // bank. Fix that by re-asserting the pessimistic d.ready after the xbar
+    val r = DReadyRewriterNode()
+    r :*= connectXbarName(w, Some("muon_aligned_fanout_read"))
+    r
+  }
+  val muonAlignedWrites = muonSplitterNodes.map { w =>
+    val r = DReadyRewriterNode()
+    r :*= connectXbarName(w, Some("muon_aligned_fanout_write"))
+    r
+  }
 
   val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
     .map(q => q.numOutputLanes * q.maxOutputBits / 8))
@@ -199,13 +215,14 @@ class RadianceSharedMemComponents(
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
   // these nodes access an entire line simultaneously
-  override val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]] = spadReadNodes.map(grb => {
-    (grb zip muonAligned.head).map { case (grw, mrw) => Seq(mrw) ++ grw }
+  // (banks, subbanks, (gemminis + muon))
+  override val uniformRNodes: Seq[Seq[Seq[TLNode]]] = spadReadNodes.map(grb => {
+    (grb zip muonAlignedReads).map { case (grw, mrw) => grw ++ Seq(mrw) }
   })
-  override val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]] =
+  override val uniformWNodes: Seq[Seq[Seq[TLNode]]] =
     (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
-      (gwb lazyZip gwsb lazyZip muonAligned.last lazyZip qb).map { case (gww, gwsw, mww, qw) =>
-        Seq(mww) ++ gww ++ gwsw ++ qw
+      (gwb lazyZip gwsb lazyZip muonAlignedWrites lazyZip qb).map { case (gww, gwsw, mww, qw) =>
+        gww ++ gwsw ++ qw ++ Seq(mww)
       }
     }
 
@@ -242,6 +259,7 @@ class RadianceSharedMemComponentsImp[T <: RadianceSharedMemComponents]
       require(anyLaneValidInCore.length == outer.numCores)
       require(laneOutFire.length == outer.numLanes)
 
+      // round-robin scheduling across cores
       // we consider any lane fire as arbiter fire (at least one lane of the chosen core fired)
       val coreSelect = TLArbiter.roundRobin(
         outer.numCores,

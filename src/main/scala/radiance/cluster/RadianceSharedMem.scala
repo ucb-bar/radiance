@@ -14,8 +14,8 @@ import radiance.subsystem.{RadianceSharedMemKey, TwoPort, TwoReadOneWrite}
 import scala.collection.mutable.ArrayBuffer
 
 abstract class RadianceSmemNodeProvider {
-  val uniformRNodes: Seq[Seq[Seq[TLNexusNode]]]
-  val uniformWNodes: Seq[Seq[Seq[TLNexusNode]]]
+  val uniformRNodes: Seq[Seq[Seq[TLNode]]]
+  val uniformWNodes: Seq[Seq[Seq[TLNode]]]
   val nonuniformRNodes: Seq[TLNode]
   val nonuniformWNodes: Seq[TLNode]
   val clcbusClients: Seq[TLNode] = Seq()
@@ -44,7 +44,7 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
   val (uniformRNodes, uniformWNodes, nonuniformRNodes, nonuniformWNodes) =
     (smNodes.uniformRNodes, smNodes.uniformWNodes, smNodes.nonuniformRNodes, smNodes.nonuniformWNodes)
 
-  implicit val disableMonitors = config.disableMonitors // otherwise it generate 1k+ different tl monitors
+  implicit val disableMonitors: Boolean = config.disableMonitors // otherwise it generate 1k+ different tl monitors
 
   val smemDevice = new SimpleDevice(f"rad-smem", Seq(s"rad-smem"))
   // collection of read and write managers for each sram (sub)bank
@@ -177,8 +177,10 @@ class RadianceSharedMem[T <: RadianceSmemNodeProvider](
             }
           }
 
-          val subbankWXbar = LazyModule(new TLXbar(TLArbiter.lowestIndexFirst))
-            .suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
+          val subbankWXbar = LazyModule(new TLXbar(
+            // prioritize uniform over nonuniform
+            TLArbiter.lowestIndexFirst
+          )).suggestName(s"smem_b${bid}_w${wid}_w_xbar").node
           writePort := subbankWXbar
           subbankWXbar := uniformNodesOut.last(bid)(wid)
           nonuniformWNodes.foreach( subbankWXbar :=* _ )
@@ -222,6 +224,10 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
   def makeReadBuffer[U <: Data](port: ReadPort[U], rNode: TLBundle, rEdge: TLEdgeIn): Unit = {
     port.ren := rNode.a.fire
 
+    // although d.ready may be true at the ren time of SRAM, it may not be one
+    // cycle later when SRAM returns data. for this, we need to stage the
+    // result somewhere so that there's always a landing pad for the read
+    // port's data.
     val dataPipeIn = Wire(DecoupledIO(port.data.cloneType))
     dataPipeIn.valid := RegNext(port.ren)
     dataPipeIn.bits := port.data
@@ -268,7 +274,8 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
       Mux(rNode.d.valid, metadataPipe.bits.size, 0.U),
       Mux(!dataPipe.valid, sramReadBackupReg.bits, dataPipe.bits).asUInt)
     rNode.d.valid := dataPipe.valid || sramReadBackupReg.valid
-    // r node A is not ready only if D is not ready and both slots filled
+    // shut off A ready when both dataPipe and backup reg is valid; otherwise,
+    // backup reg may become stale and out-of-order
     rNode.a.ready := rNode.d.ready && !(dataPipe.valid && sramReadBackupReg.valid)
     dataPipe.ready := rNode.d.ready
     metadataPipe.ready := rNode.d.ready
@@ -369,9 +376,9 @@ class RadianceSharedMemImp[T <: RadianceSmemNodeProvider](outer: RadianceSharedM
           VecInit(wordsInIdx.toSeq).asUInt.orR
         }.toSeq).asUInt.suggestName(s"valid_sources_rw${rw}_b${bid}")
       }
-      // use round robin to decide uniform select
+      // prioritize lower-index nodes (i.e. Gemmini)
       (wordSelects1h zip Seq(validRSources, validWSources)).zipWithIndex.foreach { case ((ws, vs), rw) =>
-        ws := TLArbiter.roundRobin(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
+        ws := TLArbiter.lowestIndexFirst(vs.getWidth, vs, uniformFires(rw)(bid).asUInt.orR)
       }
       // mask valid into xbar to prevent triggering assertion
       (wordSelects1h lazyZip outer.uniformPolicyNodes lazyZip outer.uniformNodesIn).foreach { case (ws, pn, ui) =>
