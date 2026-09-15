@@ -305,6 +305,44 @@ class RadianceSingleClusterTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
+// Split the L2 into `nSlices` address-partitioned slices, dividing its capacity over them.
+// The capacity fragment must stay below the topology fragment so that its up() sees the
+// nBanks that WithInclusiveCache used to compute `sets`.
+class WithL2Slices(nSlices: Int, stripeBytes: Option[BigInt] = None) extends Config(
+  new WithL2SliceTopology(nSlices, stripeBytes) ++
+  new Config((site, here, up) => {
+    case freechips.rocketchip.subsystem.InclusiveCacheKey => {
+      val prev = up(freechips.rocketchip.subsystem.InclusiveCacheKey)
+      val aggregateSets = prev.sets * up(freechips.rocketchip.subsystem.SubsystemBankedCoherenceKey).nBanks
+      require(aggregateSets % nSlices == 0, s"L2 sets ($aggregateSets) not divisible by nSlices ($nSlices)")
+      prev.copy(sets = aggregateSets / nSlices)
+    }
+  })
+)
+
+// 4 slices of 512 MiB and 128 KiB each.
+class RadianceTapeoutSim4SliceConfig extends Config(
+  new WithL2Slices(4) ++
+  new RadianceTapeoutSimConfig
+)
+
+class RadianceSingleClusterTapeoutSim4SliceConfig extends Config(
+  new WithL2Slices(4) ++
+  new RadianceSingleClusterTapeoutSimConfig
+)
+
+// Block-interleaved variant: every kernel spreads over all slices (cross-slice coherence test).
+class RadianceTapeoutSim4SliceFineConfig extends Config(
+  new WithL2Slices(4, stripeBytes = Some(32)) ++
+  new RadianceTapeoutSimConfig
+)
+
+// Unsliced baseline without the contingent spad, for cycle-count comparisons.
+class RadianceTapeoutSimNoSpadConfig extends Config(
+  new Config((site, here, up) => { case ContingentSpadKey => None }) ++
+  new RadianceTapeoutSimConfig
+)
+
 class RadianceTapeoutNDAFreeConfig extends Config(
   new chipyard.clocking.WithClockTapIOCells ++
   new WithRadianceTapeoutPeripheralsNoClockGate ++
