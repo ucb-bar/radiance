@@ -76,7 +76,9 @@ case class MuonCoreParams(
   def l1ReqTagBits: Int = {
     val instVsData = 1
     val coreBits = log2Ceil(numCores)
-    instVsData + coreBits + 5
+    // 6, not 5: FIX 12 gives the L0 caches' voluntary releases their own half of the source space,
+    // which costs one source bit on every L0 outward path and so one more bit of L1 request tag.
+    instVsData + coreBits + 6
   }
 }
 
