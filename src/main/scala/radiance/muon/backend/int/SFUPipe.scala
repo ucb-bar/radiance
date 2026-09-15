@@ -96,34 +96,76 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   // and the flush never becomes eligible (measured: runs/fix4_xcore4w_fence_n64_dbg).  Now every fence
   // is accepted and tracked per warp; one flush runs at a time and covers every warp whose fence was
   // waiting when it started (their stores are all older than the flush).  Warps that fence while a
-  // flush is running get the next one.  Only the pc is stored for the writeback (a fence writeback
-  // carries pc and wid and nothing else): 3 flags + pc per warp per kind.
-  class FenceKind(kind: DecodeField, flush: CacheFlushBundle) {
-    val waiting = RegInit(VecInit.fill(m.numWarps)(false.B))   // accepted, writeback not yet sent
-    val inFlush = RegInit(VecInit.fill(m.numWarps)(false.B))   // covered by the running flush
-    val flushed = RegInit(VecInit.fill(m.numWarps)(false.B))   // flush finished, writeback pending
+  // flush is running get the next one.
+  //
+  // FIX 8: `fence.i` writes the L0d back BEFORE invalidating the L0i.  The two L0 caches are siblings
+  // under one L1; a store to instruction memory lands in the L0d, so invalidating the L0i alone
+  // refills the stale copy from L1 and self-modifying code still executes the old instruction
+  // (measured on the tapeout RTL and on Fix 3..7: rv32ui-p-fence_i fails its first case, tohost=5;
+  // the same test with an explicit `fence` in front of each `fence.i` passes, runs/fence_i_dfirst).
+  // So a fence.i is a two-phase request: d flush, then i flush, then the writeback.
+  //
+  // Per warp: needD, needI, inFlush, wbPending and the pc (a fence writeback carries pc and wid and
+  // nothing else).  That is 4 flags + pc per warp, replacing 3 flags + pc per warp per kind.
+  class FenceUnit {
+    val needD   = RegInit(VecInit.fill(m.numWarps)(false.B))  // L0d writeback still owed
+    val needI   = RegInit(VecInit.fill(m.numWarps)(false.B))  // L0i invalidate still owed (fence.i)
+    val inFlush = RegInit(VecInit.fill(m.numWarps)(false.B))  // covered by the running flush
+    val wbPend  = RegInit(VecInit.fill(m.numWarps)(false.B))  // both phases done, writeback pending
     val pcs     = Reg(Vec(m.numWarps, chiselTypeOf(uop.pc)))
-    val active  = RegInit(false.B)                              // a flush request is outstanding
+    val activeD = RegInit(false.B)
+    val activeI = RegInit(false.B)
 
-    when (io.req.fire && inst.b(kind)) {
+    // a warp is eligible for the d phase until its d flush has run, and for the i phase only after it
+    val pendD = VecInit(Seq.tabulate(m.numWarps)(w => needD(w) && !inFlush(w)))
+    val pendI = VecInit(Seq.tabulate(m.numWarps)(w => needI(w) && !needD(w) && !inFlush(w)))
+    val idle = !activeD && !activeI
+    // the d flush waits for the LSU queues; the i flush follows it and needs no further condition
+    val startD = idle && pendD.asUInt.orR && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
+    val startI = idle && !startD && pendI.asUInt.orR
+    flushIO.d.start := startD
+    flushIO.i.start := startI
+
+    when (startD) {
+      activeD := true.B
+      pendD.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
+    }
+    when (startI) {
+      activeI := true.B
+      pendI.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
+    }
+    when (activeD && flushIO.d.done) {
+      activeD := false.B
+      (0 until m.numWarps).foreach { w =>
+        when (inFlush(w)) {
+          inFlush(w) := false.B
+          needD(w) := false.B
+          when (!needI(w)) { wbPend(w) := true.B }
+        }
+      }
+    }
+    when (activeI && flushIO.i.done) {
+      activeI := false.B
+      (0 until m.numWarps).foreach { w =>
+        when (inFlush(w)) {
+          inFlush(w) := false.B
+          needI(w) := false.B
+          wbPend(w) := true.B
+        }
+      }
+    }
+
+    // accept last so a fence issued in the same cycle a flush completes is not swallowed by it
+    val accepted = io.req.fire && (inst.b(IsFenceI) || inst.b(IsFenceD))
+    when (accepted) {
       val w = io.req.bits.uop.wid
-      assert(!waiting(w), "fence accepted for a warp that already has one in progress")
-      waiting(w) := true.B
+      assert(!needD(w) && !needI(w) && !wbPend(w), "fence accepted for a warp that already has one in progress")
+      needD(w) := true.B          // both kinds write the L0d back
+      needI(w) := inst.b(IsFenceI)
       pcs(w) := uop.pc
     }
-    val pending = VecInit(Seq.tabulate(m.numWarps)(w => waiting(w) && !inFlush(w) && !flushed(w)))
-    // start a flush when lsu is clear and no flush is outstanding
-    // for now: fence fences both dmem and smem. we should have separate fences though TODO
-    flush.start := !active && pending.asUInt.orR && fenceIO.globalQueuesEmpty && fenceIO.sharedQueuesEmpty
-    when (flush.start) {
-      active := true.B
-      pending.zip(inFlush).foreach { case (p, f) => when (p) { f := true.B } }
-    }
-    when (flush.done && active) {
-      active := false.B
-      inFlush.zip(flushed).foreach { case (f, d) => when (f) { d := true.B; f := false.B } }
-    }
-    def wbValid(w: Int): Bool = flushed(w)
+
+    def wbValid(w: Int): Bool = wbPend(w)
     def wbBits(w: Int) = {
       val wb = Wire(schedWritebackT)
       wb := 0.U.asTypeOf(schedWritebackT)
@@ -132,11 +174,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       wb.bits.wid := w.U
       wb
     }
-    def retire(w: Int): Unit = { waiting(w) := false.B; flushed(w) := false.B }
+    def retire(w: Int): Unit = { wbPend(w) := false.B }
   }
-  val fenceI = new FenceKind(IsFenceI, flushIO.i)
-  val fenceD = new FenceKind(IsFenceD, flushIO.d)
-  val fenceWbs = Seq(fenceI, fenceD).flatMap(k => Seq.tabulate(m.numWarps)(w => (k, w)))
+  val fence = new FenceUnit
+  val fenceWbs = Seq.tabulate(m.numWarps)(w => w)
 
   val fences_smem = Seq.tabulate(m.numWarps) { wid =>
     new StallFields(
@@ -342,10 +383,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
       s.respReceived := false.B
     }
   }
-  (stallRespArbiter.io.in.drop(stalls.length) zip fenceWbs).foreach { case (arbIn, (k, w)) =>
-    arbIn.valid := k.wbValid(w)
-    arbIn.bits := k.wbBits(w)
-    when (arbIn.fire) { k.retire(w) }
+  (stallRespArbiter.io.in.drop(stalls.length) zip fenceWbs).foreach { case (arbIn, w) =>
+    arbIn.valid := fence.wbValid(w)
+    arbIn.bits := fence.wbBits(w)
+    when (arbIn.fire) { fence.retire(w) }
   }
 
   // writeback priority is: everything else > barriers/fences
