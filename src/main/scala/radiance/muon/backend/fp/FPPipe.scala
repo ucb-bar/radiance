@@ -193,6 +193,11 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
     val regData = Output(csrDataT)
     val regWrite = Flipped(Valid(csrDataT))
   })
+  // FIX 9: exception flags of the OTHER FP pipe.  Only one FPPipe's fCSRIO reaches the CSR file
+  // (Execute.scala), so the second instance needs a path in and out: fStatusOut publishes the flags
+  // this instance's sub-pipes raised, fStatusIn accepts another instance's.
+  val fStatusOut = IO(Output(Valid(UInt(fStatusBits.W))))
+  val fStatusIn = IO(Input(Valid(UInt(fStatusBits.W))))
   val fCSR = RegInit(0.U.asTypeOf(csrDataT))
 
   val numFP16Lanes = if (isDivSqrt) numFP16DivLanes else numFP16ALULanes
@@ -219,11 +224,21 @@ class FPPipe(isDivSqrt: Boolean = false)(implicit p: Parameters)
   CVFPU.io.req <> rr.io.out
   CVFPU.io.resp.ready := VecInit(pipes.map(_.cvFPUIF.resp.ready)).asUInt.orR
 
-  fCSR := MuxCase(fCSR, Seq(fCSRIO.regWrite.valid -> fCSRIO.regWrite.bits) ++
-      pipes.map(pipe => pipe.fCSRIO.setFStatus.valid ->
-          Cat(fCSR(archLen, fStatusBits), pipe.fCSRIO.setFStatus.bits)
-      )
-  )
+  // FIX 9: accumulate the flags of every sub-pipe and of the other FPPipe instance, and make them
+  // sticky.  The old update took the first sub-pipe whose setFStatus fired and REPLACED the flag
+  // field with it, so a later FP instruction cleared the flags an earlier one had raised; RISC-V
+  // requires fflags to accumulate until software clears it (which it does through regWrite).
+  val localStatusValid = VecInit(pipes.map(_.fCSRIO.setFStatus.valid)).asUInt.orR
+  val localStatus = pipes.map(pipe =>
+    Mux(pipe.fCSRIO.setFStatus.valid, pipe.fCSRIO.setFStatus.bits, 0.U(fStatusBits.W))).reduce(_ | _)
+  fStatusOut.valid := localStatusValid
+  fStatusOut.bits := localStatus
+  val newStatus = localStatus | Mux(fStatusIn.valid, fStatusIn.bits, 0.U(fStatusBits.W))
+  when (fCSRIO.regWrite.valid) {
+    fCSR := fCSRIO.regWrite.bits
+  }.elsewhen (localStatusValid || fStatusIn.valid) {
+    fCSR := Cat(fCSR(archLen - 1, fStatusBits), fCSR(fStatusBits - 1, 0) | newStatus).asTypeOf(csrDataT)
+  }
   fCSRIO.regData := fCSR
 
   // ordered priority ready

@@ -50,9 +50,15 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
 
   sfuPipe.csrIO.fcsr <> fpAddMulPipe.fCSRIO
   fpExPipe.fCSRIO.regData := fpAddMulPipe.fCSRIO.regData
-  // TODO: connect
-  fpDivSqrtPipe.fCSRIO.regWrite.valid := false.B
-  fpDivSqrtPipe.fCSRIO.regWrite.bits := DontCare
+  // FIX 9: the div/sqrt pipe keeps its own copy of the fcsr and nothing was connected to it, so its
+  // exception flags never reached the architectural fflags (rv32uzfh-p-fdiv still fails with the flag
+  // check even after a long delay, runs/nd_fdiv) and a `fsrm` never changed its dynamic rounding mode.
+  // Mirror the architectural register into it and route its flags back out.
+  fpDivSqrtPipe.fCSRIO.regWrite.valid := true.B
+  fpDivSqrtPipe.fCSRIO.regWrite.bits := fpAddMulPipe.fCSRIO.regData
+  fpDivSqrtPipe.fStatusIn.valid := false.B
+  fpDivSqrtPipe.fStatusIn.bits := 0.U
+  fpAddMulPipe.fStatusIn := fpDivSqrtPipe.fStatusOut
   sfuPipe.idIO := io.id
   sfuPipe.barIO <> io.barrier
   sfuPipe.flushIO <> io.flush
