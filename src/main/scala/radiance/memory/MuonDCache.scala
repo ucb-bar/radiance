@@ -149,9 +149,10 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   // flight, and let the core report finished with dirty lines never written back.  That is the
   // observed FPGA symptom -- a residual that is always an exact multiple of one 64B line.
   //
-  // IOMSHR MMIO uses source 4 (IOMSHR_1: io_mem_access_bits_source = 3'h4).  On this cache's
-  // outward D channel an IOMSHR response is AccessAck/AccessAckData, which a ReleaseAck predicate
-  // already excludes -- but 4 is skipped anyway so that disjointness does not depend on any
+  // IOMSHR MMIO uses source 4 (IOMSHR_1: io_mem_access_bits_source = 3'h4).  NOTE: an earlier
+  // version of this comment claimed a "ReleaseAck predicate already excludes" IOMSHR responses.
+  // NO SUCH PREDICATE EXISTED -- see Fix 2b at the wb_resp_fire assignment, which adds the source
+  // filter that makes this range meaningful.  4 is skipped anyway so disjointness depends on no
   // opcode reasoning.  Take the tail {5,6,7}.
   //
   // FF DELTA: 0 (counted).  Counter(_, 3) is log2Ceil(3) = 2 bits, identical to the old
@@ -595,7 +596,22 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
-    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire
+    // FIX 2b.  Disjoint sources are INERT unless something FILTERS on them, and nothing did:
+    // this assignment credited the flush unit for ANY D-channel fire while busy -- including MSHR
+    // grants and refills.  inFlights then decremented early, dropped below the cap, io.busy
+    // deasserted while releases were still outstanding, and the core reported finished with dirty
+    // lines never written back.  That is the observed FPGA symptom: a residual that is always an
+    // exact multiple of one 64B line (measured 48 words = exactly 3 lines, deterministic 3/3).
+    // Fix 2 placed flush releases in the TOP 3 sources, so this predicate is DERIVED from that
+    // encoding, not guessed:
+    //   w >= 3: source >= 2^w - 3 selects exactly {5,6,7}, with nothing above it.
+    //   w <  3: bound is 0, so the term is always true -- a strict no-op on the narrow instance,
+    //           matching the width fallback already built into CacheFlushUnit.
+    // Same idiom as line 467 (`tl_out.d.bits.source < cfg.nMSHRs.U`), which keeps IOMSHR
+    // responses out of the data array.  FF delta 0: a pure combinational compare.
+    val flushSrcLo = { val w = tl_out.d.bits.source.getWidth; if (w >= 3) (1 << w) - 3 else 0 }
+    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire &&
+                             (tl_out.d.bits.source >= flushSrcLo.U)
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }
