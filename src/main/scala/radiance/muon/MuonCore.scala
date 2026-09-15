@@ -339,6 +339,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
     val smem = new SharedMemIO
     val barrier = barrierIO
     val flush = cacheFlushIO
+    val lsuQueuesEmpty = lsuFenceIO
     val softReset = Input(Bool())
     val coreId = Input(UInt(muonParams.coreIdBits.W))
     val clusterId = Input(UInt(muonParams.clusterIdBits.W))
@@ -361,6 +362,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.feCSR := fe.io.csr
   be.io.barrier <> io.barrier
   be.io.flush <> io.flush
+  io.lsuQueuesEmpty := be.io.lsuQueuesEmpty
   be.io.coreId := io.coreId
   be.io.clusterId := io.clusterId
   be.io.softReset := io.softReset

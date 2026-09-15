@@ -17,6 +17,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
     val feCSR = Flipped(feCSRIO)
     val barrier = barrierIO
     val flush = cacheFlushIO
+    val lsuQueuesEmpty = lsuFenceIO
     val softReset = Input(Bool())
     val beCSR = new Bundle {
       val cyclesDispatched = Input(Perf.T)
@@ -56,6 +57,7 @@ class Execute(implicit p: Parameters) extends CoreModule()(p) {
   sfuPipe.barIO <> io.barrier
   sfuPipe.flushIO <> io.flush
   sfuPipe.fenceIO := lsuPipe.flushIO
+  io.lsuQueuesEmpty := lsuPipe.flushIO
 
   lsuPipe.idIO := io.id
   lsuPipe.memIO <> io.mem
