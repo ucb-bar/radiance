@@ -56,19 +56,40 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     val meta_write = Decoupled(new L1MetaWriteReq)
     val meta_resp = Input(Vec(nWays, new L1Metadata))
     val wb_req = Decoupled(new WritebackReq(edge.bundle))
+    // ReleaseAck for one of THIS unit's releases: fire + the source it names.  The cache filters
+    // the D channel on opcode and source range before asserting this (see the flush wiring).
     val wb_resp_fire = Input(Bool())
+    val wb_resp_source = Input(UInt(edge.bundle.sourceBits.W))
   })
 
   val flushing = RegInit(false.B)
   val flushCounter = Counter(nSets * nWays)
-  val srcWidth = io.wb_req.bits.source.getWidth - 1
-  val inFlights = RegInit(0.U((srcWidth + 1).W))
+
+  // FIX 3: voluntary-release source ids.
+  //
+  // The original code allocated the release source from a free-running Counter and tracked only
+  // HOW MANY releases were outstanding (inFlights), never WHICH ids -- "count and pray".  It also
+  // credited itself for any D-channel fire while busy.  Replace both with an exact bitmap of
+  // live ids over the MSHR id range {0 .. nMSHRs-1}:
+  //   * those ids are inside the client IdRange this cache declares (HellaCache.scala:
+  //     sourceId = IdRange(0, nMSHRs)), so every downstream node can carry and route them;
+  //   * no MSHR can hold a release in flight while the flush runs -- the flush starts only when
+  //     mshrs.io.fence_rdy (every MSHR in s_invalid, i.e. its own ReleaseAck already returned)
+  //     and the cpu request port is held not-ready for the whole flush -- so the two agents
+  //     never share an id concurrently;
+  //   * an id is reissued only after the ReleaseAck that names it has returned, whatever order
+  //     the acks arrive in.
+  // FF delta: nMSHRs bits of srcBusy (4) replace inFlights (3) + the Counter (2): -1 FF.
+  val nFlushSrc = cfg.nMSHRs
+  require(nFlushSrc >= 1 && nFlushSrc <= (1 << edge.bundle.sourceBits))
+  val srcBusy = RegInit(0.U(nFlushSrc.W))
+  val srcAllocOH = PriorityEncoderOH(~srcBusy)
 
   when (io.flush) {
     assert(!flushing, "already flushing")
     flushing := true.B
   }
-  io.busy := flushing || (inFlights > 0.U)
+  io.busy := flushing || srcBusy.orR
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -102,7 +123,14 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   val clearDirty = io.wb_req.fire
   val anyClear = clearInvalid || clearClean || clearDirty // TODO: response counter
 
-  val readyForMeta = anyClear || (!metaValid)
+  // FIX 5: sweep one set at a time.  The original `readyForMeta = anyClear || !metaValid` issued the
+  // next meta read in the same cycle the current line was cleared, while `metaValid` is set from
+  // RegNext(meta_read.fire) with priority over the clear and `meta` is only refreshed by the read
+  // response.  With consecutive dirty lines the unit then re-evaluated a stale `meta` and skipped the
+  // set behind it: measured on the tapeout RTL (runs/fix_xcore_fence_n32_dbg), a 32-line flush wrote
+  // back lines 0, 1, 3, 5, 7, ... and never lines 2, 4, 6, ...  Waiting for the held line to clear
+  // and for the read response to land costs ~3 cycles per set (64 sets) and no flip-flops.
+  val readyForMeta = !metaValid && !metaReadFired
   io.meta_read.valid := flushing && readyForMeta
 
   when (RegNext(io.meta_read.fire)) {
@@ -135,15 +163,17 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
   io.wb_req.bits.way_en := metaReq.way_en
   io.wb_req.bits.voluntary := true.B
 
-  // count and pray (voluntary releases do not require a response, reused src id probably ok)
-  // the first half of the source space is mapped to releases, we have to avoid the second half
-  io.wb_req.bits.source := Counter(wbAndSrcFire, 1 << srcWidth)._1
-  when (wbAndSrcFire && !io.wb_resp_fire) {
-    inFlights := inFlights + 1.U
-  }.elsewhen (!wbAndSrcFire && io.wb_resp_fire) {
-    inFlights := inFlights - 1.U
-  }
-  wbStall := inFlights >= (1 << srcWidth).U
+  // allocate the lowest free id; stall when every id is live; free the id the ack names
+  io.wb_req.bits.source := OHToUInt(srcAllocOH)
+  wbStall := srcBusy.andR
+  val srcAckOH = Mux(io.wb_resp_fire, UIntToOH(io.wb_resp_source, nFlushSrc), 0.U(nFlushSrc.W))
+  srcBusy := (srcBusy | Mux(wbAndSrcFire, srcAllocOH, 0.U(nFlushSrc.W))) & ~srcAckOH
+  assert(!io.wb_resp_fire || (io.wb_resp_source < nFlushSrc.U),
+    "flush ReleaseAck names a source outside the flush id range")
+  assert(!io.wb_resp_fire || (srcBusy & UIntToOH(io.wb_resp_source, nFlushSrc)).orR,
+    "flush ReleaseAck names a source that is not live")
+  assert(!(wbAndSrcFire && io.wb_resp_fire) || (io.wb_resp_source =/= OHToUInt(srcAllocOH)),
+    "flush allocated a source in the same cycle its ack returned")
 
   // assert(io.wb_req.fire === wb_and_src_fire)
   assert(!wbAndSrcFire || io.meta_write.fire)
@@ -301,7 +331,13 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   data.io.write.bits.data := wdata_encoded.asUInt
 
   // tag read for new requests
-  metaReadArb.io.in(4).valid := io.cpu.req.valid
+  // FIX 6: while a flush runs, a request parked on io.cpu.req (held valid by the SimpleHellaCacheIF
+  // replay queue upstream) must not occupy the meta-read arbiter: the request cannot be accepted
+  // (io.cpu.req.ready is forced low while flushing) but its higher-priority arbiter input starves
+  // the flush unit's meta reads, and the two wait on each other forever.  Measured on the tapeout
+  // RTL (runs/base_xcore_mmio_n32_dbg): flushCounter stuck at 3, flush_unit.io_meta_read_valid=1,
+  // io_meta_read_ready=0, io_cpu_req_valid=1, for the rest of the run.
+  metaReadArb.io.in(4).valid := io.cpu.req.valid && !flushing
   metaReadArb.io.in(4).bits.idx := io.cpu.req.bits.addr >> blockOffBits
   metaReadArb.io.in(4).bits.tag := io.cpu.req.bits.addr >> untagBits
   metaReadArb.io.in(4).bits.way_en := ~0.U(nWays.W)
@@ -548,7 +584,10 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.flush := false.B
-    val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid
+    // a second start (e.g. the finish-triggered flush landing on a software MMIO flush) must wait
+    // for the running flush to complete instead of tripping the unit's "already flushing" assert
+    val ready_to_flush = mshrs.io.fence_rdy && !io.cpu.store_pending && !s1_valid && !s2_valid &&
+                         !flush.io.busy
     when (preflushing && ready_to_flush) {
       preflushing := false.B
       flush.io.flush := true.B
@@ -562,7 +601,15 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     }
 
     flush.io.meta_resp := meta.io.resp
-    flush.io.wb_resp_fire := flush.io.busy && tl_out.d.fire
+    // FIX 3 (ack side): only a ReleaseAck naming an id in the flush range credits the unit.  While
+    // the unit is busy no MSHR can have a release outstanding (see CacheFlushUnit), so such an ack
+    // is necessarily one of the flush unit's; the unit asserts that the id is live.
+    val flushAck = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck) &&
+                   (tl_out.d.bits.source < cfg.nMSHRs.U)
+    flush.io.wb_resp_fire := flush.io.busy && flushAck
+    flush.io.wb_resp_source := tl_out.d.bits.source
+    assert(!(flush.io.busy && tl_out.d.fire) || flushAck,
+      "D-channel traffic other than a flush ReleaseAck while the flush unit is busy")
     metaReadArb.io.in(5) <> flush.io.meta_read
     metaWriteArb.io.in(2) <> flush.io.meta_write
   }
