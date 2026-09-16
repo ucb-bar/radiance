@@ -343,6 +343,13 @@ class RadianceTapeoutSimNoSpadConfig extends Config(
   new RadianceTapeoutSimConfig
 )
 
+// 4 L2 slices and 4 DRAM channels. Channels are split by rocket-chip's own filter, which
+// interleaves at blockBytes, so each slice's traffic spreads over all four channels.
+class RadianceTapeoutSim4Slice4ChanConfig extends Config(
+  new freechips.rocketchip.subsystem.WithNMemoryChannels(4) ++
+  new RadianceTapeoutSim4SliceConfig
+)
+
 class RadianceTapeoutNDAFreeConfig extends Config(
   new chipyard.clocking.WithClockTapIOCells ++
   new WithRadianceTapeoutPeripheralsNoClockGate ++
