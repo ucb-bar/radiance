@@ -268,7 +268,12 @@ class MuonTile(
     wordSizeInBytes = muonParams.core.archLen / 8,
     numOldSrcIds = 1 << lsuSourceIdBits,
     numNewSrcIds = 1 << muonParams.core.logCoalGMEMInFlights,
-    respQueueDepth = 2,
+    // FIX 13: how many coalesced responses the core can have outstanding.  Uncoalescing one 64-byte
+    // response puts an entry in every lane's queue, so this depth IS the core's memory-level
+    // parallelism for coalesced traffic.  At 2 a fully occupied core sustained only 1.7 loads in
+    // flight and retired one every 69 cycles whatever the working set (runs/mlp2_*, runs/ms_fix_v2).
+    // Affordable now that an entry is 41 bits instead of 521.
+    respQueueDepth = 8,
     numCoalReqs = 1,
   )))
 

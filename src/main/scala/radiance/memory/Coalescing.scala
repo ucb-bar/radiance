@@ -493,10 +493,17 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   tlCoal.e.valid := false.B
 
   // Response flow - NO source ID remapping
+  // FIX 13: one lane's response is one word, not a whole coalesced line.
+  //
+  // These queues were declared with the COALESCED data width, 512 bits, on every lane, but nothing
+  // ever puts more than a word in them: the passthrough path enqueues a response from a per-lane
+  // link, which is 32 bits wide, and the coalesced path enqueues what the uncoalescer produces,
+  // which is a NonCoalescedResponse and also 32 bits.  The other 480 bits per entry were dead.
+  // At 16 lanes and two entries each that is 15,360 flip-flops per core, 61,440 across the GPU.
   val respQueueEntryT = new Response(
     oldSourceWidth,
     log2Ceil(config.maxCoalLogSize),
-    (1 << config.maxCoalLogSize) * 8
+    config.wordSizeInBytes * 8
   )
   
   val respQueues = Seq.tabulate(config.numLanes) { _ =>
