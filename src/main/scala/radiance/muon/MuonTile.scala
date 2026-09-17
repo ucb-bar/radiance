@@ -194,6 +194,28 @@ class MuonTile(
       cacheTagBits = muonParams.core.l0iReqTagBits,
       overrideDChannelSize = Some(3),
       flushAddr = Some(muonParams.peripheralAddr),
+      // DO NOT RAISE THIS WITHOUT FIXING THE FRONTEND FIRST.
+      //
+      // The fetch port's round trip is 2 cycles on a hit and 5.50 on the mean, the mean pulled up by
+      // a 6.4% miss rate whose tail reaches 72 cycles, so 3 in-flight requests caps fetch at 0.39
+      // instructions per cycle while the L0i sits ready 95% of cycles and nacks zero times, and the
+      // instruction buffers starve 92% of the time.  Raising it to 8 does fix that -- measured 0.39
+      // to 0.90 instructions per cycle, instruction buffers non-empty 8% to 84% -- and it breaks the
+      // machine, because Frontend.scala:64-77 pairs each fetch response with the HEAD OF A FIFO of
+      // issued requests and never looks at `resp.bits.tag`:
+      //
+      //     userQueueDeq.ready := resp.fire
+      //     i$.out.bits.pc  := userQueueDeq.bits.pc
+      //     i$.out.bits.wid := userQueueDeq.bits.wid
+      //
+      // That is only correct if the L0i answers in order, and the L0i is non-blocking: a hit behind
+      // a miss returns first.  At 3 in flight the overtaking window is narrow enough to mostly hide
+      // it; at 8 the hits pass the misses, a warp is handed another warp's instruction, and
+      // rv32uzfh-p-{fadd,fdiv,fmadd} go from PASS to FAIL with wrong results (runs/isa9_fix15).
+      //
+      // The fix is to route the response by its tag, which already carries {wid, per-warp counter}
+      // and exists for exactly this purpose but is discarded.  Until then, 3.
+      inFlightReqs = 3,
     )))
     l0i.flushNode.get := iFlushMaster
     (connectBuf(l0i.outNode, 4), l0i.inNode, l0i.flushRegNode)
