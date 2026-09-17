@@ -22,13 +22,11 @@
 // Cost is `depth` HellaCacheReq registers plus a `depth`-bit inflight mask, so going from 3 to 8 on
 // one port adds five request registers (measured: +6,712 flop bits across four cores).
 //
-// A WARNING BEFORE YOU RAISE ANY DEPTH.  The depth also controls how many responses can be in flight
-// and therefore how often they return OUT OF ORDER, because these caches are non-blocking and a hit
-// behind a miss answers first.  The Muon frontend cannot tolerate that: Frontend.scala:64-77 pairs
-// each fetch response with the head of a FIFO of issued requests and discards `resp.bits.tag`, so an
-// overtaking response is attributed to the wrong warp and PC.  Raising the L0i from 3 to 8 took
-// fetch from 0.39 to 0.90 instructions per cycle and turned rv32uzfh-p-{fadd,fdiv,fmadd} from PASS
-// into wrong answers.  Any consumer must match responses by tag before its depth goes up.
+// A WARNING BEFORE YOU RAISE ANY DEPTH.  Raising the L0i from 3 to 8 takes fetch from 0.39 to 0.90
+// instructions per cycle and turns rv32uzfh-p-{fadd,fdiv,fmadd} from PASS into FAIL.  The failure is
+// in the fflags check, not the result, and it is not a fetch-ordering problem: a ResponseFIFOFixer
+// already sits on that path and the responses were verified in order and correctly paired.  See the
+// note at the L0i instantiation in MuonTile.scala for what is established and what is not.
 
 package radiance.memory
 
