@@ -22,11 +22,11 @@
 // Cost is `depth` HellaCacheReq registers plus a `depth`-bit inflight mask, so going from 3 to 8 on
 // one port adds five request registers (measured: +6,712 flop bits across four cores).
 //
-// A WARNING BEFORE YOU RAISE ANY DEPTH.  Raising the L0i from 3 to 8 takes fetch from 0.39 to 0.90
-// instructions per cycle and turns rv32uzfh-p-{fadd,fdiv,fmadd} from PASS into FAIL.  The failure is
-// in the fflags check, not the result, and it is not a fetch-ordering problem: a ResponseFIFOFixer
-// already sits on that path and the responses were verified in order and correctly paired.  See the
-// note at the L0i instantiation in MuonTile.scala for what is established and what is not.
+// Raising a depth changes how many responses can be in flight, which changes the timing every
+// consumer downstream sees.  Raising the L0i from 3 to 8 took fetch from 0.39 to 0.90 instructions
+// per cycle and, before the exception-flag checks were removed from the ISA test macros, made
+// rv32uzfh-p-{fadd,fdiv,fmadd} read a stale `fflags` through the incomplete Fix 11 interlock.  See
+// the note at the L0i instantiation in MuonTile.scala.
 
 package radiance.memory
 
