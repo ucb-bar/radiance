@@ -89,7 +89,6 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     assert(!flushing, "already flushing")
     flushing := true.B
   }
-  io.busy := flushing || srcBusy.orR
 
   // when (io.wbReq.fire || io.meta_write.fire) {
   //   val wrap = flushCounter.inc()
@@ -117,6 +116,25 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
     io.meta_resp(RegNext(flushCounter.value(log2Ceil(nWays) - 1, 0))), metaReadFired)
   val metaReq = RegEnable(RegNext(io.meta_read.bits), metaReadFired) // corresponds to resp
   val metaValid = RegInit(false.B)
+
+  // FIX 14: `busy` must cover the tail of a sweep, not just the part that is issuing reads.
+  //
+  // `flushing` clears when the meta-read counter wraps, i.e. when the last read has been SENT.  The
+  // response to that read still has to land, and if the line it names is dirty it still has to
+  // raise a wb_req and take a release source id.  With the old `busy = flushing || srcBusy.orR`,
+  // if every earlier id happened to be acked at the moment the counter wrapped, `busy` fell for the
+  // two cycles between the wrap and that last wb_req, the cache's request port went ready, and a
+  // request accepted in that gap could miss, allocate an MSHR, and have the MSHR issue its own
+  // voluntary release -- into the id space the flush unit was about to use again.
+  //
+  // Observed on runs/w_sst8b (s_st8_w8, cluster 1 tile 1): busy low at 78,301,000 and 78,303,000 ps,
+  // high again at 78,305,000, `fence_rdy` dropping at 78,307,000, then an AcquireBlock and a
+  // C-channel Release from the new MSHR at 78,309,000 while the flush unit held live ids.  It is the
+  // same collision as the one Fix 10 closed on the other side, reached through the end of a sweep.
+  //
+  // `metaValid` and `metaReadFired` are exactly "a read is outstanding or its response is unconsumed",
+  // so holding busy over them closes the gap.  Both registers already exist: 0 added flip-flops.
+  io.busy := flushing || srcBusy.orR || metaValid || metaReadFired
 
   val clearInvalid = metaValid && !meta.coh.isValid()
   val clearClean = io.meta_write.fire

@@ -22,6 +22,10 @@ case class TLNBDCacheParams(
   overrideDChannelSize: Option[Int] = None,
   flushAddr: Option[BigInt] = None,
   makeLandingPads: Boolean = false,
+  // Requests in flight the input adapter may hold.  rocket's SimpleHellaCacheIF hardcodes 3; the
+  // default here keeps that, and a port whose round trip exceeds it should raise it.  See
+  // DepthHellaCacheIF.scala for why the depth is the outstanding-request limit.
+  inFlightReqs: Int = 3,
 )
 
 case class DummyCacheCoreParams(
@@ -102,7 +106,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   with MemoryOpConstants {
 
   val (tlIn, _) = outer.inNode.in.head
-  val inIF = Module(new SimpleHellaCacheIF())
+  val inIF = Module(new DepthHellaCacheIF(outer.params.inFlightReqs))
 
 //  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
 //    "only cache line size accesses supported")
