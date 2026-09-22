@@ -350,6 +350,13 @@ class RadianceTapeoutSim4Slice4ChanConfig extends Config(
   new RadianceTapeoutSim4SliceConfig
 )
 
+// 4 L2 slices, each owning ONE contiguous 1 GiB region of ExtMem (0x8000_0000..0x1_8000_0000).
+// stripeBytes = 1 GiB gives BankBinder mask 0xC000_0000, i.e. slice select on addr[31:30].
+class RadianceHBMConfig extends Config(
+  new WithL2Slices(4, stripeBytes = Some(x"4000_0000")) ++
+  new RadianceTapeoutSimConfig
+)
+
 class RadianceTapeoutNDAFreeConfig extends Config(
   new chipyard.clocking.WithClockTapIOCells ++
   new WithRadianceTapeoutPeripheralsNoClockGate ++
