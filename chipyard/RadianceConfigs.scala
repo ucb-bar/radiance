@@ -320,43 +320,6 @@ class WithL2Slices(nSlices: Int, stripeBytes: Option[BigInt] = None) extends Con
   })
 )
 
-// 4 slices of 512 MiB and 128 KiB each.
-class RadianceTapeoutSim4SliceConfig extends Config(
-  new WithL2Slices(4) ++
-  new RadianceTapeoutSimConfig
-)
-
-class RadianceSingleClusterTapeoutSim4SliceConfig extends Config(
-  new WithL2Slices(4) ++
-  new RadianceSingleClusterTapeoutSimConfig
-)
-
-// Block-interleaved variant: every kernel spreads over all slices (cross-slice coherence test).
-class RadianceTapeoutSim4SliceFineConfig extends Config(
-  new WithL2Slices(4, stripeBytes = Some(32)) ++
-  new RadianceTapeoutSimConfig
-)
-
-// Unsliced baseline without the contingent spad, for cycle-count comparisons.
-class RadianceTapeoutSimNoSpadConfig extends Config(
-  new Config((site, here, up) => { case ContingentSpadKey => None }) ++
-  new RadianceTapeoutSimConfig
-)
-
-// 4 L2 slices and 4 DRAM channels. Channels are split by rocket-chip's own filter, which
-// interleaves at blockBytes, so each slice's traffic spreads over all four channels.
-class RadianceTapeoutSim4Slice4ChanConfig extends Config(
-  new freechips.rocketchip.subsystem.WithNMemoryChannels(4) ++
-  new RadianceTapeoutSim4SliceConfig
-)
-
-// 4 L2 slices, each owning ONE contiguous 1 GiB region of ExtMem (0x8000_0000..0x1_8000_0000).
-// stripeBytes = 1 GiB gives BankBinder mask 0xC000_0000, i.e. slice select on addr[31:30].
-class RadianceHBMConfig extends Config(
-  new WithL2Slices(4, stripeBytes = Some(x"4000_0000")) ++
-  new RadianceTapeoutSimConfig
-)
-
 class RadianceTapeoutNDAFreeConfig extends Config(
   new chipyard.clocking.WithClockTapIOCells ++
   new WithRadianceTapeoutPeripheralsNoClockGate ++

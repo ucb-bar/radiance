@@ -10,7 +10,7 @@ import freechips.rocketchip.resources.BigIntHexContext
 import freechips.rocketchip.prci.{ClockSinkNode, ClockSinkParameters}
 import freechips.rocketchip.subsystem.{ExtMem, HasTileLinkLocations, MBUS, MemoryBusKey}
 import chipyard.iobinders.{AXI4MemPort, GetSystemParameters, OverrideLazyIOBinder}
-import radiance.subsystem.{CanHaveRadianceRegionMemPort, L2SlicesKey, RadianceMemRegionParams, RadianceMemRegions, RadianceMemRegionsKey}
+import radiance.subsystem.{CanHaveRadianceRegionMemPort, L2SlicesKey, SplitL2Key, RadianceMemRegionParams, RadianceMemRegions, RadianceMemRegionsKey}
 import testchipip.util.ClockedIO
 
 /** DigitalTop plus one AXI4 memory port per address region. Subclassing rather than replacing:
@@ -49,21 +49,26 @@ class WithRadianceRegionMemPunchthrough extends OverrideLazyIOBinder({
 class WithRadianceRegionMem extends Config((site, here, up) => {
   case ExtMem => up(ExtMem).map(_.copy(nMemoryChannels = 0)) // silence rocket's interleaved ports
   case RadianceMemRegionsKey => {
-    val slices = site(L2SlicesKey).getOrElse(
-      throw new Exception("WithRadianceRegionMem requires WithL2Slices; regions come from its mask"))
     val ext = up(ExtMem).getOrElse(
       throw new Exception("WithRadianceRegionMem requires ExtMem"))
-    val regions: Seq[AddressSet] =
+    // one channel per L2 slice, from the same description the slices are built from
+    val regions: Seq[AddressSet] = site(SplitL2Key).map(_.regions).getOrElse {
+      val slices = site(L2SlicesKey).getOrElse(throw new Exception(
+        "WithRadianceRegionMem requires WithL2Slices or WithRadianceSplitL2; regions come from the slices"))
       RadianceMemRegions.fromMask(ext.master.base, ext.master.size, slices.mask)
+    }
     Some(RadianceMemRegionParams(regions, ext.master.beatBytes, ext.master.idBits))
   }
   case BuildSystem => (q: Parameters) => new RadianceDigitalTop()(q)
 })
 
-/** 4 L2 slices on contiguous 1 GiB regions of ExtMem, each with its own DRAM channel. */
-class RadianceTapeoutSimRegionMemConfig extends Config(
+/** Split L2 (option 2b of docs/l2-topology-options.md): one 256 KiB host slice over
+  * 0x8000_0000..0x1_0000_0000 and four 64 KiB GPU slices over 512 MiB each of
+  * 0x1_0000_0000..0x1_8000_0000, each slice with its own DRAM channel (5 channels). */
+class RadianceHBMConfig extends Config(
   new WithRadianceRegionMemPunchthrough ++
   new WithRadianceRegionMem ++
-  new WithL2Slices(4, stripeBytes = Some(x"4000_0000")) ++
+  new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
+  new WithSerialTLSinkBits(9) ++
   new RadianceTapeoutSimConfig
 )
