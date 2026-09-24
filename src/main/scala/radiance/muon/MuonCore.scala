@@ -49,7 +49,6 @@ case class MuonCoreParams(
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
   logGMEMInFlights: Int = 4, // per lane
-  logCoalGMEMInFlights: Int = 3, // all lanes
   logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
@@ -62,23 +61,9 @@ case class MuonCoreParams(
   val coreIdBits: Int = log2Ceil(numCores)
   val clusterIdBits: Int = log2Ceil(numClusters)
   val pRegBits = log2Up(numPhysRegs)
-  def l0dReqTagBits: Int = {
-    val coalVsNonCoal = 1
-    val sizeTagBits = 3 // store the size in the cache tag
-    val totalBits = (logCoalGMEMInFlights max logNonCoalGMEMInFlights) + coalVsNonCoal + sizeTagBits
-    println("l0d tag bits", totalBits)
-    totalBits
-  }
   def l0iReqTagBits: Int = {
     println("l0i tag bits", warpIdBits + log2Ceil(ibufDepth))
     log2Ceil(ibufDepth) + warpIdBits
-  }
-  def l1ReqTagBits: Int = {
-    val instVsData = 1
-    val coreBits = log2Ceil(numCores)
-    // 6, not 5: FIX 12 gives the L0 caches' voluntary releases their own half of the source space,
-    // which costs one source bit on every L0 outward path and so one more bit of L1 request tag.
-    instVsData + coreBits + 6
   }
 }
 

@@ -79,20 +79,20 @@ object L0iCacheHugeConfig extends DCacheParams(
   nMSHRs = 4,
 )
 
+// MSHR count: radiance.memory.MemParallelismKey (l0dMSHRs)
 object L0dCacheConfig extends DCacheParams(
   nSets = 64,
   nWays = 1,
   rowBits = 64 * 8,
   blockBytes = 64,
-  nMSHRs = 4,
 )
 
+// MSHR count: radiance.memory.MemParallelismKey (l1MSHRs)
 object L1CacheConfig extends DCacheParams(
   nSets = 256,
   nWays = 4,
   rowBits = 32 * 8, // physical (sram) size
   blockBytes = 32, // logical size
-  nMSHRs = 8, // maybe be able to decrease this
 )
 
 class WithRadianceControlBus extends Config ((site, here, up) => {

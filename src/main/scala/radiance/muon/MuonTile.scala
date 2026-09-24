@@ -191,7 +191,6 @@ class MuonTile(
     val l0i = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0iParams,
-      cacheTagBits = muonParams.core.l0iReqTagBits,
       overrideDChannelSize = Some(3),
       flushAddr = Some(muonParams.peripheralAddr),
       // Requests the fetch adapter may hold in flight.  rocket's SimpleHellaCacheIF hardcodes 3.
@@ -265,8 +264,8 @@ class MuonTile(
     val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
       id = tileId,
       cache = l0dParams,
-      cacheTagBits = muonParams.core.l0dReqTagBits,
       flushAddr = Some(muonParams.peripheralAddr + 0x100),
+      inFlightReqs = p(MemParallelismKey).l0dInFlight,
     )))
     l0d.flushNode.get := dFlushMaster
     (l0d.outNode, l0d.inNode, l0d.flushRegNode)
@@ -290,13 +289,13 @@ class MuonTile(
     coalLogSize = log2Ceil(coalescedReqWidth),
     wordSizeInBytes = muonParams.core.archLen / 8,
     numOldSrcIds = 1 << lsuSourceIdBits,
-    numNewSrcIds = 1 << muonParams.core.logCoalGMEMInFlights,
+    numNewSrcIds = p(MemParallelismKey).coalInFlight,
     // FIX 13: how many coalesced responses the core can have outstanding.  Uncoalescing one 64-byte
     // response puts an entry in every lane's queue, so this depth IS the core's memory-level
     // parallelism for coalesced traffic.  At 2 a fully occupied core sustained only 1.7 loads in
     // flight and retired one every 69 cycles whatever the working set (runs/mlp2_*, runs/ms_fix_v2).
     // Affordable now that an entry is 41 bits instead of 521.
-    respQueueDepth = 8,
+    respQueueDepth = p(MemParallelismKey).coalInFlight,
     numCoalReqs = 1,
   )))
 
