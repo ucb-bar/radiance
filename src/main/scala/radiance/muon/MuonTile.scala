@@ -193,29 +193,7 @@ class MuonTile(
       cache = l0iParams,
       overrideDChannelSize = Some(3),
       flushAddr = Some(muonParams.peripheralAddr),
-      // Requests the fetch adapter may hold in flight.  rocket's SimpleHellaCacheIF hardcodes 3.
-      //
-      // The fetch port's round trip is 2 cycles on a hit and 5.50 on the mean, the mean pulled up by
-      // a 6.4% miss rate whose tail reaches 72 cycles, so 3 caps fetch at 0.39 instructions per
-      // cycle while the L0i sits ready 95% of cycles and nacks zero times, and the instruction
-      // buffers starve 92% of the time.  8 covers the mean with margin for the tail: fetch 0.39 ->
-      // 0.90 instructions per cycle, imem_req_ready 54% -> 100%, instruction buffers non-empty 8% ->
-      // 84%, and the best L0d-resident loop 3.07 -> 2.59 cycles per 64 B line (24.7 B/cyc, 38.6% of
-      // line rate).  Cost: five extra HellaCacheReq registers per port, +6,712 flop bits over four
-      // cores.
-      //
-      // This was reverted once.  At 8 the reads of `fflags` in rv32uzfh-p-{fadd,fdiv,fmadd} began
-      // returning the value from before the preceding FP op, because the Fix 11 interlock (`fpBusy`,
-      // from each FP pipe's `occupied`) releases as soon as the pipe responds and the faster fetch
-      // lets the CSR read arrive in exactly that cycle.  Ledger row 11 already recorded that hole as
-      // the reason rv32uzfh-p-fcvt_w failed.  The exception-flag checks have since been removed from
-      // the test macros (tests/isa_src/macros/scalar/test_macros.h -- this machine does not support
-      // them), so nothing observes the stale read and the suite is 82/83 at depth 3 and at depth 8,
-      // the single failure being vx32-p-wspawn, which is upstream-waived.
-      //
-      // The interlock hole is still there.  If exception flags ever matter, fix `fpBusy` to cover an
-      // FP instruction from issue rather than from FP-pipe entry before relying on fcsr reads.
-      inFlightReqs = 8,
+      inFlightReqs = p(MemParallelismKey).l0iInFlight,
     )))
     l0i.flushNode.get := iFlushMaster
     (connectBuf(l0i.outNode, 4), l0i.inNode, l0i.flushRegNode)
