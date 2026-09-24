@@ -18,33 +18,39 @@ import radiance.subsystem.{DummyTileParams, GPUMemory, PhysicalCoreParams}
 case class TLNBDCacheParams(
   id: Int,
   cache: DCacheParams,
-  cacheTagBits: Int,
   overrideDChannelSize: Option[Int] = None,
   flushAddr: Option[BigInt] = None,
   makeLandingPads: Boolean = false,
   // Requests in flight the input adapter may hold.  rocket's SimpleHellaCacheIF hardcodes 3; the
   // default here keeps that, and a port whose round trip exceeds it should raise it.  See
   // DepthHellaCacheIF.scala for why the depth is the outstanding-request limit.
-  inFlightReqs: Int = 3,
+  inFlightReqs: Int = TLNBDCacheParams.defaultInFlightReqs,
 )
 
+object TLNBDCacheParams {
+  val defaultInFlightReqs = 3
+}
+
+/** `reqTagBits` is read only while the module elaborates, after diplomacy has sized the cache's
+  * input edge; the tag width is that edge's width, never an independent parameter. */
 case class DummyCacheCoreParams(
   cacheLineBytes: Int = 32,
-  overrideCacheTagBits: Int = 0,
+  reqTagBits: () => Int,
 ) extends PhysicalCoreParams {
   override val useVector: Boolean = true // for cache line size
   override val vLen: Int = 32
   override val eLen: Int = 32
   override def vMemDataBits: Int = cacheLineBytes * 8
-  override def dcacheReqTagBits: Int = overrideCacheTagBits
+  override def dcacheReqTagBits: Int = reqTagBits()
 }
 
 case class DummyCacheTileParams(
-  params: TLNBDCacheParams
+  params: TLNBDCacheParams,
+  reqTagBits: () => Int,
 ) extends DummyTileParams {
   val core = DummyCacheCoreParams(
     cacheLineBytes = params.cache.blockBytes,
-    overrideCacheTagBits = params.cacheTagBits
+    reqTagBits = reqTagBits,
   )
   override val tileId = params.id
   override val dcache: Option[DCacheParams] = Some(params.cache)
@@ -79,6 +85,13 @@ class TLNBDCache(val params: TLNBDCacheParams)
     )
   ))
 
+  /** The request tag carries the TileLink source, plus the request size when the D-channel size is
+    * not fixed. Taken from the resolved input edge, so it follows whatever the clients declare. */
+  lazy val reqTagBits: Int = {
+    val bundle = inNode.edges.in.head.bundle
+    bundle.sourceBits + (if (params.overrideDChannelSize.isDefined) 0 else bundle.sizeBits)
+  }
+
   val flushRegNode = params.flushAddr.map { addr =>
     TLRegisterNode(
       address = Seq(AddressSet(addr, 0xff)),
@@ -91,7 +104,7 @@ class TLNBDCache(val params: TLNBDCacheParams)
   val flushNode = params.flushAddr.map(_ => CacheFlushNode.Slave())
 
   implicit val q = p.alterMap(Map(
-    TileKey -> DummyCacheTileParams(params),
+    TileKey -> DummyCacheTileParams(params, () => reqTagBits),
     CacheBlockBytes -> params.cache.blockBytes,
     // TileVisibilityNodeKey -> visibilityNode,
   ))
@@ -183,7 +196,9 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
 
     // D
     val (deqBits: HellaCacheResp, deqValid) = if (outer.params.makeLandingPads) {
-      val mshrs = outer.params.cache.nMSHRs + 1
+      // One slot per request the input adapter can hold in flight, so a stalled D channel never
+      // closes the A gate below while requests are still admissible.
+      val mshrs = (outer.params.cache.nMSHRs max outer.params.inFlightReqs) + 1
       val respBuf = Module(new Queue(resp.bits.cloneType, mshrs))
       respBuf.io.enq.valid := resp.valid
       respBuf.io.enq.bits := resp.bits

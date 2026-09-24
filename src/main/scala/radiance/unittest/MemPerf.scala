@@ -137,7 +137,7 @@ class MemPerfMuonTile(
       coalLogSize = log2Ceil(coalescedReqWidth),
       wordSizeInBytes = muonParams.core.archLen / 8,
       numOldSrcIds = 1 << lsuSourceIdBits,
-      numNewSrcIds = 1 << muonParams.core.logCoalGMEMInFlights,
+      numNewSrcIds = p(MemParallelismKey).coalInFlight,
       respQueueDepth = 4,
       numCoalReqs = 1,
     )))
@@ -148,7 +148,6 @@ class MemPerfMuonTile(
       val l0d = LazyModule(new TLULNBDCache(TLNBDCacheParams(
         id = tileId,
         cache = l0dParams,
-        cacheTagBits = muonParams.core.l0dReqTagBits,
         flushAddr = None, // Disable flush register to avoid unconnected node
       ))(
         p.alterMap(Map(

@@ -116,7 +116,7 @@ class WithMuonCores(
         core = here(MuonKey),
         icache = None,
         icacheUsingD = l0i,
-        dcache = l0d,
+        dcache = l0d.map(_.copy(nMSHRs = site(MemParallelismKey).l0dMSHRs)),
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
         peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset,
         cyclotron = cyclotron,
@@ -459,7 +459,7 @@ class WithRadianceCluster(
         clusterId = clusterId,
         baseAddr = baseAddress,
         smemConfig = smemConfig.copy(address = baseAddress + smemConfig.address),
-        l1Config = l1Config,
+        l1Config = l1Config.copy(nMSHRs = site(MemParallelismKey).l1MSHRs),
       ),
       crossing)
   }
