@@ -57,7 +57,7 @@ class RadianceSharedMemComponents(
       val smemFanoutXbar = LazyModule(new TLXbar())
       smemFanoutXbar.suggestName(f"rad_smem_fanout_cl${clusterParams.clusterId}_c${cid}_l${lid}_xbar")
       smemFanoutXbar.node :=* DisableMonitors { implicit p =>
-        AddressOrNode(clusterParams.baseAddr) :=* m
+        AddressOrNode(clusterParams.baseAddr) :=* AddressAndNode(BigInt(smemKey.size - 1)) :=* m
       }
       smemFanoutXbar.node
     }.toList

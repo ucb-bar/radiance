@@ -18,6 +18,7 @@ module TracerBlackBox #(
 ) (
   input clock,
   input reset,
+  input logic [63:0] cycle,
 
   input  logic                            inst_valid,
   input  logic [ARCH_LEN-1:0]             inst_pc,
@@ -60,19 +61,20 @@ module TracerBlackBox #(
   import "DPI-C" function cyclotron_trace(
     input int  cluster_id,
     input int  core_id,
+    input longint cycle,
 
     input bit  inst_valid,
     input int  inst_pc,
     input int  inst_warpId,
     input int  inst_tmask,
     input bit  inst_regs_0_enable,
-    input byte inst_regs_0_address,
+    input int  inst_regs_0_address,
     input int  inst_regs_0_data[NUM_LANES],
     input bit  inst_regs_1_enable,
-    input byte inst_regs_1_address,
+    input int  inst_regs_1_address,
     input int  inst_regs_1_data[NUM_LANES],
     input bit  inst_regs_2_enable,
-    input byte inst_regs_2_address,
+    input int  inst_regs_2_address,
     input int  inst_regs_2_data[NUM_LANES],
 
     input bit  dmem_req_valid[LSU_LANES],
@@ -172,6 +174,7 @@ module TracerBlackBox #(
       cyclotron_trace(
         CLUSTER_ID,
         CORE_ID,
+        cycle,
         inst_valid,
         inst_pc,
         inst_warpId,

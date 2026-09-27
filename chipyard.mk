@@ -40,12 +40,14 @@ EXT_INCDIRS += \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/common_cells/include \
 
 VCS_NONCC_OPTS := \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/common_cells/src/cf_math_pkg.sv \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpnew_pkg.sv \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv \
 	$(VCS_NONCC_OPTS)
 
 ifeq ($(sim_name),verilator)
 EXTRA_SIM_PREPROC_DEFINES += \
+	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/common_cells/src/cf_math_pkg.sv \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpnew_pkg.sv \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv \
 
@@ -57,3 +59,9 @@ endif
 
 # go brrr
 VCS_NONCC_OPTS += -j$(shell nproc)
+
+# initialize X's for consistent results.
+# NOTE: disable for thorough testing
+# VCS recommends putting +random at the compile flag and +1 at runtime
+VCS_NONCC_OPTS += +vcs+initreg+random
+EXTRA_SIM_FLAGS += +vcs+initreg+1

@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import radiance.muon.backend.int.LsuOpDecoder
 
-class Backend(implicit p: Parameters) extends CoreModule()(p) {
+class Backend(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
     val lsuReserve = reservationIO
     val dmem = new DataMemIO
@@ -29,15 +29,20 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
 
   val hazard = Module(new Hazard)
   hazard.io.ibuf <> io.ibuf
+  hazard.io.softReset := io.softReset
+  connectDebug(hazard)
 
   val scoreboard = Module(new Scoreboard)
   scoreboard.io.hazard <> hazard.io.scb
+  connectDebug(scoreboard)
   dontTouch(scoreboard.io)
 
   val reservStation = Module(new ReservationStation)
+  reservStation.io.softReset := io.softReset
   reservStation.io.admit <> hazard.io.rsAdmit
   scoreboard.io.updateColl <> reservStation.io.scb.updateColl
   scoreboard.io.updateWB <> reservStation.io.scb.updateWB
+  connectDebug(reservStation)
 
   val noILP = muonParams.noILP
   assert(!noILP, "noILP == true is not currently supported; TODO")
@@ -54,32 +59,32 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
     reservStation.io.issue
   }
 
-  val cyclesEligible = PerfCounter(issued.valid)
-  val cyclesIssued = PerfCounter(issued.fire)
+  val cyclesEligible = PerfCounter(io.softReset, issued.valid)
+  val cyclesIssued = PerfCounter(io.softReset, issued.fire)
 
   val cyclesDispatched = reservStation.io.perf.cyclesDispatched
   io.perf.cyclesDispatched := cyclesDispatched
   io.perf.cyclesEligible := reservStation.io.perf.cyclesEligible
   io.perf.cyclesIssued := cyclesIssued
-  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
-    p.cyclesDispatched :=
-      PerfCounter(reservStation.io.admit.fire &&
-                  (reservStation.io.admit.bits.ibufEntry.uop.wid === wid.U))
-    p.stallsRSFull := reservStation.io.perf.perWarp(wid).stallsRSFull
-
-    p.cyclesEligible := reservStation.io.perf.perWarp(wid).cyclesEligible
-    p.cyclesIssued := PerfCounter(issued.fire && (issued.bits.uop.wid === wid.U))
-    // LSU business is accounted for at the IBUF, not at the EX stage; it needs
-    // to be added separately
-    val stallsBusyEX = PerfCounter(issued.valid && (issued.bits.uop.wid === wid.U) &&
-                                  !issued.ready)
-    p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
-  }
   (io.perf.perWarp zip hazard.io.perf).foreach { case (p, h) =>
     p.stallsWAW := h.stallsWAW
     p.stallsWAR := h.stallsWAR
     p.stallsScoreboard := h.stallsScoreboard
   }
+  io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
+    p.stallsRSFull := reservStation.io.perf.perWarp(wid).stallsRSFull
+
+    p.cyclesDispatched := reservStation.io.perf.perWarp(wid).cyclesDispatched
+    p.cyclesEligible := reservStation.io.perf.perWarp(wid).cyclesEligible
+    p.cyclesIssued := PerfCounter(io.softReset, issued.fire && (issued.bits.uop.wid === wid.U))
+    // LSU business is accounted for at the IBUF, not at the EX stage; it needs
+    // to be added separately
+    val stallsBusyEX = PerfCounter(io.softReset,
+                                   issued.valid && (issued.bits.uop.wid === wid.U) &&
+                                   !issued.ready)
+    p.stallsBusy := stallsBusyEX + p.stallsBusyLSU
+  }
+  io.perf.accRsOccupancy := reservStation.io.perf.accRsOccupancy
 
   // -----------------
   // operand collector
@@ -89,6 +94,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   val regs = Seq(Rs1, Rs2, Rs3)
   val collector = Module(new DuplicatedCollector)
   collector.io.readReq.valid := collector.io.readReq.bits.anyEnabled()
+  connectDebug(collector)
   if (noILP) {
     // on noILP, manage collector entirely after issue
     // (haves lazyZip regs lazyZip collector.io.readData.resp lazyZip collector.io.readReq.bits.regs)
@@ -129,6 +135,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   // -------
 
   val execute = Module(new Execute())
+  connectDebug(execute)
   execute.io.id.clusterId := io.clusterId
   execute.io.id.coreId := io.coreId
   execute.io.softReset := io.softReset
@@ -136,6 +143,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   execute.io.beCSR.cyclesDispatched := cyclesDispatched
   execute.io.beCSR.cyclesEligible := cyclesEligible
   execute.io.beCSR.cyclesIssued := cyclesIssued
+  execute.io.beCSR.perWarp := 0.U.asTypeOf(execute.io.beCSR.perWarp)
   execute.io.beCSR.perWarp.zip(io.perf.perWarp.take(4)).foreach { case (dst, src) =>
     dst.stallsWAW := src.stallsWAW
     dst.stallsWAR := src.stallsWAR
@@ -158,7 +166,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
       // ideally reserv.req.valid should directly reflect needsLsuReserve
       val ibufIsLSU = io.ibuf(wid).valid && io.ibuf(wid).bits.uop.inst.b(UseLSUPipe)
       val lsuStalled = (ibufIsLSU || reserv.req.valid) && !reserv.req.ready
-      p.stallsBusyLSU := PerfCounter(lsuStalled)
+      p.stallsBusyLSU := PerfCounter(io.softReset, lsuStalled)
   }
 
   if (noILP) {
@@ -270,7 +278,7 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   when (execute.io.req.fire) {
     val e = execute.io.req.bits
 
-    printf(cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
+    debugf(1, cf"[ISSUE]     clid=${io.clusterId} cid=${io.coreId} wid=${e.uop.wid} " +
       cf"pc=${e.uop.pc}%x inst=${e.uop.inst.expand()(Raw)}%x " +
       cf"tmask=${e.uop.tmask}%b rd=${e.uop.inst(Rd)} " +
       cf"rs1=${e.uop.inst(Rs1)} rs1.data=[" +
@@ -285,14 +293,13 @@ class Backend(implicit p: Parameters) extends CoreModule()(p) {
   when (execute.io.resp.fire) {
     val r = execute.io.resp.bits.reg.get.bits
     val s = execute.io.resp.bits.sched.get.bits
-    printf(cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} sched.pc=${s.pc}%x " +
+    debugf(1, cf"[WRITEBACK] clid=${io.clusterId} cid=${io.coreId} wid=${s.wid} sched.pc=${s.pc}%x " +
       cf"sched.wb=${execute.io.resp.bits.sched.get.valid} " +
       cf"setPC=${s.setPC.valid} ${s.setPC.bits}%x " +
       cf"setTmask=${s.setTmask.valid} ${s.setTmask.bits}%b " +
       cf"wspawn=${s.wspawn.valid} pc=${s.wspawn.bits.pc}%x count=${s.wspawn.bits.count} " +
-      cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} " +
-      cf"\n")
-    printf(cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
+      cf"ipdom=${s.ipdomPush.valid} else mask=${s.ipdomPush.bits.elseMask}%x else pc=${s.ipdomPush.bits.elsePC} ")
+    debugfAppend(1, cf"reg wb=${execute.io.resp.bits.reg.get.valid} " +
       cf"rd=${r.rd} data=[" +
       r.data.map(x => cf"$x%x ").reduce(_ + _) +
       cf"] mask=${r.tmask}%b" +
@@ -306,17 +313,22 @@ object Perf {
 }
 
 class PerfCounter(width: Int = Perf.counterWidth) {
+  private val reset_ = WireInit(false.B)
   private val cond_ = WireInit(false.B)
   val value = RegInit(0.U(width.W))
-  when (cond_) {
+  when (reset_) {
+    value := 0.U
+  }.elsewhen (cond_) {
     value := value + 1.U
   }
+  def reset(r: Bool) = { reset_ := r }
   def cond(c: Bool) = { cond_ := c }
 }
 
 object PerfCounter {
-  def apply(cond: Bool): UInt = {
+  def apply(reset: Bool, cond: Bool): UInt = {
     val c = new PerfCounter
+    c.reset(reset)
     c.cond(cond)
     c.value
   }
@@ -345,4 +357,6 @@ class BackendPerfIO(implicit p: Parameters) extends CoreBundle()(p) {
     val stallsBusy = Perf.T
     val stallsBusyLSU = Perf.T
   })
+  /** accumulated number of insts in RS; dividing by cycles gives inst window occupancy */
+  val accRsOccupancy = Perf.T
 }

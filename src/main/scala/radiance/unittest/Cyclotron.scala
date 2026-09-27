@@ -72,7 +72,7 @@ abstract class CyclotronBlackBox(implicit val p: Parameters) extends BlackBox(Ma
       "NUM_WARPS"    -> p(MuonKey).numWarps,
       "NUM_LANES"    -> p(MuonKey).numLanes,
       "OP_BITS"      -> Isa.opcodeBits,
-      "REG_BITS"     -> Isa.regBits,
+      "REG_BITS"     -> p(MuonKey).pRegBits,
       "IMM_BITS"     -> 32,
       "CSR_IMM_BITS" -> Isa.csrImmBits,
       "PRED_BITS"    -> Isa.predBits,
@@ -85,7 +85,7 @@ class CyclotronFrontendBlackBox(implicit val p: Parameters) extends BlackBox(Map
       "NUM_WARPS"     -> p(MuonKey).numWarps,
       "NUM_LANES"     -> p(MuonKey).numLanes,
       "OP_BITS"       -> Isa.opcodeBits,
-      "REG_BITS"      -> Isa.regBits,
+      "REG_BITS"      -> p(MuonKey).pRegBits,
       "IMM_BITS"      -> 32,
       "CSR_IMM_BITS"  -> Isa.csrImmBits,
       "PRED_BITS"     -> Isa.predBits,
@@ -103,10 +103,10 @@ with HasBlackBoxResource with HasCoreParameters {
       val pc = Output(UInt((numWarps * addressBits).W))
       val wid = Output(UInt((numWarps * log2Ceil(muonParams.numWarps)).W))
       val op = Output(UInt((numWarps * Isa.opcodeBits).W))
-      val rd = Output(UInt((numWarps * Isa.regBits).W))
-      val rs1 = Output(UInt((numWarps * Isa.regBits).W))
-      val rs2 = Output(UInt((numWarps * Isa.regBits).W))
-      val rs3 = Output(UInt((numWarps * Isa.regBits).W))
+      val rd = Output(UInt((numWarps * physRegBits).W))
+      val rs1 = Output(UInt((numWarps * physRegBits).W))
+      val rs2 = Output(UInt((numWarps * physRegBits).W))
+      val rs3 = Output(UInt((numWarps * physRegBits).W))
       val imm32 = Output(UInt((numWarps * 32).W))
       val imm24 = Output(UInt((numWarps * 24).W))
       val csrImm = Output(UInt((numWarps * Isa.csrImmBits).W))
@@ -341,6 +341,257 @@ class CyclotronDataMemBlackBox(outer: CyclotronDataMem)(implicit val p: Paramete
   }
 }
 
+class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasLoadStoreUnitIO {
+  val idIO = IO(clusterCoreIdT)
+  val io = IO(new LoadStoreUnitIO)
+
+  val debugIdBits = lsuDerived.debugIdBits.getOrElse(0)
+  val debugIdPortBits = math.max(1, debugIdBits)
+  val packetPortBits = math.max(1, lsuDerived.packetBits)
+  val clusterIdPortBits = math.max(1, muonParams.clusterIdBits)
+  val coreIdPortBits = math.max(1, muonParams.coreIdBits)
+
+  val bbox = Module(new CyclotronLoadStoreUnitBlackBox(this))
+  bbox.io.clock := clock
+  bbox.io.reset := reset.asBool
+
+  import Cyclotron._
+
+  bbox.io.cluster_id := zeroExtend(idIO.clusterId.asUInt, muonParams.clusterIdBits, clusterIdPortBits)
+  bbox.io.core_id := zeroExtend(idIO.coreId.asUInt, muonParams.coreIdBits, coreIdPortBits)
+
+  bbox.io.coreReservations_req_valid := VecInit(io.coreReservations.map(_.req.valid)).asUInt
+  bbox.io.coreReservations_req_bits_addressSpace :=
+    VecInit(io.coreReservations.map(_.req.bits.addressSpace.asUInt)).asUInt
+  bbox.io.coreReservations_req_bits_op :=
+    VecInit(io.coreReservations.map(_.req.bits.op.asUInt)).asUInt
+  bbox.io.coreReservations_req_bits_debugId := {
+    val perWarp = io.coreReservations.map { r =>
+      r.req.bits.debugId.map(_.asUInt).getOrElse(0.U(debugIdPortBits.W))
+    }
+    VecInit(perWarp).asUInt
+  }
+  io.coreReservations.zipWithIndex.foreach { case (reservation, i) =>
+    reservation.req.ready := bbox.io.coreReservations_req_ready(i)
+    reservation.resp.valid := bbox.io.coreReservations_resp_valid(i)
+    reservation.resp.bits.token :=
+      bbox.io.coreReservations_resp_bits_token((i + 1) * lsuTokenBits - 1, i * lsuTokenBits).asTypeOf(new LsuQueueToken)
+  }
+
+  bbox.io.coreReq_valid := io.coreReq.valid
+  io.coreReq.ready := bbox.io.coreReq_ready
+  bbox.io.coreReq_bits_token := io.coreReq.bits.token.asUInt
+  bbox.io.coreReq_bits_op := io.coreReq.bits.op.asUInt
+  bbox.io.coreReq_bits_tmask := io.coreReq.bits.tmask.asUInt
+  bbox.io.coreReq_bits_address := io.coreReq.bits.address.asUInt
+  bbox.io.coreReq_bits_imm := io.coreReq.bits.imm
+  bbox.io.coreReq_bits_destReg := io.coreReq.bits.destReg
+  bbox.io.coreReq_bits_storeData := io.coreReq.bits.storeData.asUInt
+
+  io.coreResp.valid := bbox.io.coreResp_valid
+  bbox.io.coreResp_ready := io.coreResp.ready
+  io.coreResp.bits.warpId := bbox.io.coreResp_bits_warpId
+  if (lsuDerived.packetBits > 0) {
+    io.coreResp.bits.packet := bbox.io.coreResp_bits_packet(lsuDerived.packetBits - 1, 0)
+  } else {
+    io.coreResp.bits.packet := 0.U
+  }
+  io.coreResp.bits.tmask.zipWithIndex.foreach { case (bit, i) => bit := bbox.io.coreResp_bits_tmask(i) }
+  io.coreResp.bits.destReg := bbox.io.coreResp_bits_destReg
+  io.coreResp.bits.writebackData.zipWithIndex.foreach { case (data, i) =>
+    unflatten(data, bbox.io.coreResp_bits_writebackData, i)
+  }
+  io.coreResp.bits.debugId.foreach { debugId =>
+    debugId := bbox.io.coreResp_bits_debugId(debugIdBits - 1, 0)
+  }
+
+  // Interpose source-ID dedup (see dedupSourceId) on both mem ports so the model
+  // cannot re-issue a TL source ID while a prior request with that ID is still
+  // outstanding. The blackbox req/resp are connected to raw wires, then gated.
+  val rawGlobalReq = Wire(Decoupled(new LsuMemRequest))
+  val rawGlobalResp = Wire(Decoupled(new LsuMemResponse))
+  connectMemReq(rawGlobalReq, bbox.io.globalMemReq_valid, bbox.io.globalMemReq_ready,
+    bbox.io.globalMemReq_bits_tag, bbox.io.globalMemReq_bits_op, bbox.io.globalMemReq_bits_address,
+    bbox.io.globalMemReq_bits_data, bbox.io.globalMemReq_bits_mask, bbox.io.globalMemReq_bits_tmask)
+  connectMemResp(rawGlobalResp, bbox.io.globalMemResp_ready, bbox.io.globalMemResp_valid,
+    bbox.io.globalMemResp_bits_tag, bbox.io.globalMemResp_bits_valid, bbox.io.globalMemResp_bits_data)
+  dedupSourceId(rawGlobalReq, rawGlobalResp, io.globalMemReq, io.globalMemResp)
+
+  val rawShmemReq = Wire(Decoupled(new LsuMemRequest))
+  val rawShmemResp = Wire(Decoupled(new LsuMemResponse))
+  connectMemReq(rawShmemReq, bbox.io.shmemReq_valid, bbox.io.shmemReq_ready,
+    bbox.io.shmemReq_bits_tag, bbox.io.shmemReq_bits_op, bbox.io.shmemReq_bits_address,
+    bbox.io.shmemReq_bits_data, bbox.io.shmemReq_bits_mask, bbox.io.shmemReq_bits_tmask)
+  connectMemResp(rawShmemResp, bbox.io.shmemResp_ready, bbox.io.shmemResp_valid,
+    bbox.io.shmemResp_bits_tag, bbox.io.shmemResp_bits_valid, bbox.io.shmemResp_bits_data)
+  dedupSourceId(rawShmemReq, rawShmemResp, io.shmemReq, io.shmemResp)
+
+  io.sharedQueuesEmpty := bbox.io.sharedQueuesEmpty
+  io.globalQueuesEmpty := bbox.io.globalQueuesEmpty
+
+  private def connectMemReq(
+    req: DecoupledIO[LsuMemRequest],
+    valid: Bool,
+    ready: Bool,
+    tag: UInt,
+    op: UInt,
+    address: UInt,
+    data: UInt,
+    mask: UInt,
+    tmask: UInt
+  ): Unit = {
+    req.valid := valid
+    ready := req.ready
+    req.bits.tag := tag
+    req.bits.op := op.asTypeOf(MemOp())
+    req.bits.address.zipWithIndex.foreach { case (lane, i) => unflatten(lane, address, i) }
+    req.bits.data.zipWithIndex.foreach { case (lane, i) => unflatten(lane, data, i) }
+    req.bits.mask.zipWithIndex.foreach { case (lane, i) => unflatten(lane, mask, i) }
+    req.bits.tmask.zipWithIndex.foreach { case (lane, i) => lane := tmask(i) }
+  }
+
+  private def connectMemResp(
+    resp: DecoupledIO[LsuMemResponse],
+    ready: Bool,
+    valid: Bool,
+    tag: UInt,
+    validMask: UInt,
+    data: UInt
+  ): Unit = {
+    resp.ready := ready
+    valid := resp.valid
+    tag := resp.bits.tag
+    validMask := resp.bits.valid.asUInt
+    data := resp.bits.data.asUInt
+  }
+
+  // Gate requests so a TL source ID is never re-issued while a prior request
+  // with that ID is still in flight. The Cyclotron model recycles source IDs on
+  // a fixed-latency assumption, which is illegal on the real, variable-latency
+  // TL ports (esp. SMEM under bank-conflict latency) and trips the TL monitor
+  // ("'A' channel re-used a source ID"). Tags pass through unchanged, so the
+  // model's own response matching is unaffected; a request whose source ID is
+  // still outstanding simply stalls until that ID's response returns.
+  private def dedupSourceId(
+    modelReq: DecoupledIO[LsuMemRequest], modelResp: DecoupledIO[LsuMemResponse],
+    tlReq: DecoupledIO[LsuMemRequest], tlResp: DecoupledIO[LsuMemResponse]
+  ): Unit = {
+    val outstanding = RegInit(VecInit.fill(1 << lsuDerived.sourceIdBits)(false.B))
+    val reqId = modelReq.bits.tag
+    val idFree = !outstanding(reqId)
+    tlReq.valid := modelReq.valid && idFree
+    modelReq.ready := tlReq.ready && idFree
+    tlReq.bits := modelReq.bits
+    val respId = tlResp.bits.tag
+    modelResp.valid := tlResp.valid
+    tlResp.ready := modelResp.ready
+    modelResp.bits := tlResp.bits
+    when (tlReq.fire) { outstanding(reqId) := true.B }
+    when (tlResp.fire) { outstanding(respId) := false.B }
+  }
+
+  private def lsuTokenBits: Int = LsuQueueToken.width(muonParams)
+
+  private def zeroExtend(value: UInt, valueBits: Int, portBits: Int): UInt = {
+    val extended = Wire(UInt(portBits.W))
+    extended := 0.U
+    if (valueBits > 0) {
+      extended := value
+    }
+    extended
+  }
+}
+
+class CyclotronLoadStoreUnitBlackBox(outer: CyclotronLoadStoreUnit)(implicit val p: Parameters)
+  extends BlackBox(Map(
+    "ARCH_LEN"             -> outer.archLen,
+    "NUM_WARPS"            -> outer.muonParams.numWarps,
+    "NUM_LANES"            -> outer.muonParams.numLanes,
+    "NUM_LSU_LANES"        -> outer.muonParams.lsu.numLsuLanes,
+    "CLUSTER_ID_BITS"      -> outer.clusterIdPortBits,
+    "CORE_ID_BITS"         -> outer.coreIdPortBits,
+    "WARP_ID_BITS"         -> outer.muonParams.warpIdBits,
+    "TOKEN_BITS"           -> LsuQueueToken.width(outer.muonParams),
+    "ADDRESS_SPACE_BITS"   -> (new LsuReservationReq).addressSpace.getWidth,
+    "MEM_OP_BITS"          -> (new LsuRequest).op.getWidth,
+    "PREG_BITS"            -> outer.muonParams.pRegBits,
+    "PACKET_BITS"          -> outer.packetPortBits,
+    "SOURCE_ID_BITS"       -> outer.lsuDerived.sourceIdBits,
+    "PER_LANE_MASK_BITS"   -> outer.lsuDerived.perLaneMaskBits,
+    "DEBUG_ID_BITS"        -> outer.debugIdBits,
+    "DEBUG_ID_PORT_BITS"   -> outer.debugIdPortBits,
+  )) with HasBlackBoxResource with HasCoreParameters {
+  val io = IO(new Bundle {
+    val clock = Input(Clock())
+    val reset = Input(Bool())
+
+    val cluster_id = Input(UInt(outer.clusterIdPortBits.W))
+    val core_id = Input(UInt(outer.coreIdPortBits.W))
+
+    val coreReservations_req_valid = Input(UInt(numWarps.W))
+    val coreReservations_req_ready = Output(UInt(numWarps.W))
+    val coreReservations_req_bits_addressSpace = Input(UInt((numWarps * (new LsuReservationReq).addressSpace.getWidth).W))
+    val coreReservations_req_bits_op = Input(UInt((numWarps * (new LsuReservationReq).op.getWidth).W))
+    val coreReservations_req_bits_debugId = Input(UInt((numWarps * outer.debugIdPortBits).W))
+    val coreReservations_resp_valid = Output(UInt(numWarps.W))
+    val coreReservations_resp_bits_token = Output(UInt((numWarps * LsuQueueToken.width(muonParams)).W))
+
+    val coreReq_valid = Input(Bool())
+    val coreReq_ready = Output(Bool())
+    val coreReq_bits_token = Input(UInt(LsuQueueToken.width(muonParams).W))
+    val coreReq_bits_op = Input(UInt((new LsuRequest).op.getWidth.W))
+    val coreReq_bits_tmask = Input(UInt(numLanes.W))
+    val coreReq_bits_address = Input(UInt((numLanes * archLen).W))
+    val coreReq_bits_imm = Input(UInt(archLen.W))
+    val coreReq_bits_destReg = Input(UInt(muonParams.pRegBits.W))
+    val coreReq_bits_storeData = Input(UInt((numLanes * archLen).W))
+
+    val coreResp_ready = Input(Bool())
+    val coreResp_valid = Output(Bool())
+    val coreResp_bits_warpId = Output(UInt(muonParams.warpIdBits.W))
+    val coreResp_bits_packet = Output(UInt(outer.packetPortBits.W))
+    val coreResp_bits_tmask = Output(UInt(numLanes.W))
+    val coreResp_bits_destReg = Output(UInt(muonParams.pRegBits.W))
+    val coreResp_bits_writebackData = Output(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+    val coreResp_bits_debugId = Output(UInt(outer.debugIdPortBits.W))
+
+    val globalMemReq_valid = Output(Bool())
+    val globalMemReq_ready = Input(Bool())
+    val globalMemReq_bits_tag = Output(UInt(lsuDerived.sourceIdBits.W))
+    val globalMemReq_bits_op = Output(UInt((new LsuMemRequest).op.getWidth.W))
+    val globalMemReq_bits_address = Output(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+    val globalMemReq_bits_data = Output(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+    val globalMemReq_bits_mask = Output(UInt((muonParams.lsu.numLsuLanes * lsuDerived.perLaneMaskBits).W))
+    val globalMemReq_bits_tmask = Output(UInt(muonParams.lsu.numLsuLanes.W))
+    val globalMemResp_ready = Output(Bool())
+    val globalMemResp_valid = Input(Bool())
+    val globalMemResp_bits_tag = Input(UInt(lsuDerived.sourceIdBits.W))
+    val globalMemResp_bits_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+    val globalMemResp_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+
+    val shmemReq_valid = Output(Bool())
+    val shmemReq_ready = Input(Bool())
+    val shmemReq_bits_tag = Output(UInt(lsuDerived.sourceIdBits.W))
+    val shmemReq_bits_op = Output(UInt((new LsuMemRequest).op.getWidth.W))
+    val shmemReq_bits_address = Output(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+    val shmemReq_bits_data = Output(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+    val shmemReq_bits_mask = Output(UInt((muonParams.lsu.numLsuLanes * lsuDerived.perLaneMaskBits).W))
+    val shmemReq_bits_tmask = Output(UInt(muonParams.lsu.numLsuLanes.W))
+    val shmemResp_ready = Output(Bool())
+    val shmemResp_valid = Input(Bool())
+    val shmemResp_bits_tag = Input(UInt(lsuDerived.sourceIdBits.W))
+    val shmemResp_bits_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
+    val shmemResp_bits_data = Input(UInt((muonParams.lsu.numLsuLanes * archLen).W))
+
+    val sharedQueuesEmpty = Output(Bool())
+    val globalQueuesEmpty = Output(Bool())
+  })
+
+  addResource("/vsrc/CyclotronLoadStoreUnit.v")
+  addResource("/vsrc/Cyclotron.vh")
+  addResource("/csrc/Cyclotron.cc")
+}
+
 /** If `tick` is true, advance cyclotron sim by one tick inside the difftest
  *  logic.  Set to false when some other module does the tick, e.g.
  *  separate cyclotron frontend */
@@ -371,7 +622,7 @@ class CyclotronDiffTest(clusterId: Int = 0, coreId: Int = 0, tick: Boolean = tru
         "ARCH_LEN"     -> p(MuonKey).archLen,
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
-        "REG_BITS"     -> Isa.regBits,
+        "REG_BITS"     -> p(MuonKey).pRegBits,
         "SIM_TICK"     -> (if (tick) 1 else 0),
   )) with HasBlackBoxResource with HasCoreParameters {
     val io = IO(new Bundle {
@@ -484,8 +735,12 @@ extends CoreModule {
   }
 
   val cbox = Module(new TracerBlackBox()(p))
+  val cycle = RegInit(0.U(64.W))
+  cycle := cycle + 1.U
+
   cbox.io.clock := clock
   cbox.io.reset := reset.asBool
+  cbox.io.cycle := cycle
 
   cbox.io.inst.valid := io.inst.valid
   cbox.io.inst.pc := io.inst.bits.pc
@@ -526,7 +781,7 @@ extends CoreModule {
         "NUM_WARPS"    -> p(MuonKey).numWarps,
         "NUM_LANES"    -> p(MuonKey).numLanes,
         "LSU_LANES"    -> p(MuonKey).lsu.numLsuLanes,
-        "REG_BITS"     -> Isa.regBits,
+        "REG_BITS"     -> p(MuonKey).pRegBits,
         "DMEM_TAG_BITS" -> dmemTagBits,
         "DMEM_DATA_BITS" -> dmemDataBits,
         "SMEM_TAG_BITS" -> smemTagBits,
@@ -538,6 +793,7 @@ extends CoreModule {
     val io = IO(new Bundle {
       val clock = Input(Clock())
       val reset = Input(Bool())
+      val cycle = Input(UInt(64.W))
       val inst = Input(new TraceVerilogIO)
       val dmem_req_valid = Input(UInt(muonParams.lsu.numLsuLanes.W))
       val dmem_req_bits_store = Input(UInt(muonParams.lsu.numLsuLanes.W))
@@ -587,6 +843,7 @@ extends CoreModule {
   bbox.io.cyclesDispatched := io.perf.backend.cyclesDispatched
   bbox.io.cyclesEligible := io.perf.backend.cyclesEligible
   bbox.io.cyclesIssued := io.perf.backend.cyclesIssued
+  bbox.io.accRsOccupancy := io.perf.backend.accRsOccupancy
   bbox.io.perWarp_cyclesDecoded := VecInit(io.perf.frontend.perWarp.map(_.cyclesDecoded)).asUInt
   bbox.io.perWarp_cyclesDispatched := VecInit(io.perf.backend.perWarp.map(_.cyclesDispatched)).asUInt
   bbox.io.perWarp_cyclesEligible := VecInit(io.perf.backend.perWarp.map(_.cyclesEligible)).asUInt
@@ -615,6 +872,7 @@ extends CoreModule {
       val cyclesDispatched = Input(Perf.T)
       val cyclesEligible = Input(Perf.T)
       val cyclesIssued = Input(Perf.T)
+      val accRsOccupancy = Input(Perf.T)
       val perWarp_cyclesDecoded = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_cyclesDispatched = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))
       val perWarp_cyclesEligible = Input(UInt((muonParams.numWarps * Perf.counterWidth).W))

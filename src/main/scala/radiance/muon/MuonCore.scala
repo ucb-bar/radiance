@@ -30,6 +30,10 @@ case class MuonCoreParams(
   startAddress: BigInt = x"1000_0000",
   // issue
   numIssueQueueEntries: Int = 8, // RS
+  inOrderPerWarp: Boolean = false, // model in-order issue: each warp issues its
+                                   // instructions in program order (oldest-first)
+                                   // while warps still interleave every cycle.
+                                   // requires numIssueQueueEntries >= numWarps
   maxPendingReads: Int = 7,      // scoreboard
   noILP: Boolean = false, // fallback to single-in-flight instruction issue
                           // logic ("bypass")
@@ -48,12 +52,16 @@ case class MuonCoreParams(
   csrAddrBits: Int = 32,
   // memory
   lsu: LoadStoreUnitParams = LoadStoreUnitParams(),
-  logGMEMInFlights: Int = 4, // per lane
+  lsuUseModel: Boolean = false,  // use Cyclotron functional model for LSU
+  logGMEMInFlights: Int = 5,        // per lane
   logNonCoalGMEMInFlights: Int = 5, // all lanes
   // misc
   barrierBits: Int = 4,
-  debug: Boolean = false, // enable extra IOs for debug (ex: PC)
+  // dev
+  debug: Boolean = false,   // enable debug-only printfs and hardware constructs
+  debugLevel: Int = 2,      // max debug level to print
   trace: Boolean = false,   // enable instruction trace generation
+  profiler: Boolean = true, // enable performance profiling report generation
   difftest: Boolean = false // enable arch-state differential testing
                             // against cyclotron
 ) extends PhysicalCoreParams {
@@ -222,6 +230,8 @@ trait HasCoreParameters {
 
   def pRegT = UInt(log2Ceil(m.numPhysRegs).W)
   def aRegT = UInt(log2Ceil(m.numArchRegs).W)
+  // Width of a physical register id carried in a uop after rename.
+  def physRegBits = log2Up(m.numPhysRegs)
   def regDataT = UInt(m.archLen.W)
 
   def aluOpT = UInt(ALU.SZ_ALU_FN.W)
@@ -243,10 +253,53 @@ trait HasCoreParameters {
     barrierBits = m.barrierBits,
     wantBits = m.warpIdBits + m.coreIdBits,
   ))
+}
 
-  def debugf(pable: Printable) = {
-    if (muonParams.debug) {
+class DebugContext(implicit val p: Parameters) extends ParameterizedBundle()(p) with HasCoreParameters {
+  val cycle = UInt(64.W)
+  val clusterId = UInt(muonParams.clusterIdBits.W)
+  val coreId = UInt(muonParams.coreIdBits.W)
+}
+
+trait HasDebugPrint extends HasCoreParameters {
+  protected def debugContext: Option[DebugContext] = None
+
+  private def printPrefix(ctx: DebugContext): Unit = {
+    // 64-bit gives too much whitespace
+    printf("[Muon c%d.%d @%d] ", ctx.clusterId, ctx.coreId, ctx.cycle(31, 0))
+  }
+
+  def debugf(level: Int, pable: Printable): Unit = {
+    if (muonParams.debug && level <= muonParams.debugLevel) {
+      debugContext match {
+        case Some(ctx) => printPrefix(ctx)
+        case None      => printf("[@?] ")
+      }
       printf(pable)
+    }
+  }
+
+  def debugf(pable: Printable): Unit = debugf(1, pable)
+
+  def debugfAppend(level: Int, pable: Printable): Unit = {
+    if (muonParams.debug && level <= muonParams.debugLevel) {
+      printf(pable)
+    }
+  }
+
+  def debugfAppend(pable: Printable): Unit = debugfAppend(1, pable)
+}
+
+trait HasDebugContext extends HasDebugPrint { this: Module =>
+  val debug = Option.when(muonParams.debug) {
+    IO(Input(new DebugContext))
+  }
+
+  override protected def debugContext: Option[DebugContext] = debug
+
+  protected def connectDebug(child: HasDebugContext): Unit = {
+    if (muonParams.debug) {
+      child.debug.get := debug.get
     }
   }
 }
@@ -336,7 +389,24 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   })
   dontTouch(io)
 
+  private val rootDebug = Option.when(muonParams.debug) {
+    val ctx = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    ctx.cycle := cycle
+    ctx.clusterId := io.clusterId
+    ctx.coreId := io.coreId
+    ctx
+  }
+
+  private def connectDebug(child: HasDebugContext) = {
+    if (muonParams.debug) {
+      child.debug.get := rootDebug.get
+    }
+  }
+
   val fe = Module(new Frontend)
+  connectDebug(fe)
   fe.idIO.clusterId := io.clusterId
   fe.idIO.coreId := io.coreId
   fe.io.imem <> io.imem
@@ -357,6 +427,7 @@ class MuonCore(implicit p: Parameters) extends CoreModule {
   be.io.trace.foreach(_ <> io.trace.get)
   io.perf.frontend <> fe.io.perf
   io.perf.backend <> be.io.perf
+  connectDebug(be)
 
   fe.io.lsuReserve <> be.io.lsuReserve
   fe.io.commit := be.io.schedWb

@@ -509,18 +509,19 @@ void cyclotron_mem(
 void cyclotron_trace_rs(
     const uint32_t  cluster_id,
     const uint32_t  core_id,
+    const uint64_t  cycle,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
     const uint32_t  trace_tmask,
     const uint8_t   trace_regs_0_enable,
-    const uint8_t   trace_regs_0_address,
+    const uint32_t  trace_regs_0_address,
     const uint32_t *trace_regs_0_data,
     const uint8_t   trace_regs_1_enable,
-    const uint8_t   trace_regs_1_address,
+    const uint32_t  trace_regs_1_address,
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
-    const uint8_t   trace_regs_2_address,
+    const uint32_t  trace_regs_2_address,
     const uint32_t *trace_regs_2_data,
     const uint8_t  *dmem_req_valid,
     const uint8_t  *dmem_req_bits_store,
@@ -547,18 +548,19 @@ void cyclotron_trace_rs(
 void cyclotron_trace(
     const uint32_t  cluster_id,
     const uint32_t  core_id,
+    const uint64_t  cycle,
     const uint8_t   trace_valid,
     const uint32_t  trace_pc,
     const uint32_t  trace_warpId,
     const uint32_t  trace_tmask,
     const uint8_t   trace_regs_0_enable,
-    const uint8_t   trace_regs_0_address,
+    const uint32_t  trace_regs_0_address,
     const uint32_t *trace_regs_0_data,
     const uint8_t   trace_regs_1_enable,
-    const uint8_t   trace_regs_1_address,
+    const uint32_t  trace_regs_1_address,
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
-    const uint8_t   trace_regs_2_address,
+    const uint32_t  trace_regs_2_address,
     const uint32_t *trace_regs_2_data,
     const uint8_t  *dmem_req_valid,
     const uint8_t  *dmem_req_bits_store,
@@ -584,6 +586,7 @@ void cyclotron_trace(
   cyclotron_trace_rs(
     cluster_id,
     core_id,
+    cycle,
     trace_valid,
     trace_pc,
     trace_warpId,
@@ -629,13 +632,13 @@ void cyclotron_difftest_reg_rs(
     const uint32_t  trace_warpId,
     const uint32_t  trace_tmask,
     const uint8_t   trace_regs_0_enable,
-    const uint8_t   trace_regs_0_address,
+    const uint32_t  trace_regs_0_address,
     const uint32_t *trace_regs_0_data,
     const uint8_t   trace_regs_1_enable,
-    const uint8_t   trace_regs_1_address,
+    const uint32_t  trace_regs_1_address,
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
-    const uint8_t   trace_regs_2_address,
+    const uint32_t  trace_regs_2_address,
     const uint32_t *trace_regs_2_data
 );
 
@@ -648,13 +651,13 @@ void cyclotron_difftest_reg(
     const uint32_t  trace_warpId,
     const uint32_t  trace_tmask,
     const uint8_t   trace_regs_0_enable,
-    const uint8_t   trace_regs_0_address,
+    const uint32_t  trace_regs_0_address,
     const uint32_t *trace_regs_0_data,
     const uint8_t   trace_regs_1_enable,
-    const uint8_t   trace_regs_1_address,
+    const uint32_t  trace_regs_1_address,
     const uint32_t *trace_regs_1_data,
     const uint8_t   trace_regs_2_enable,
-    const uint8_t   trace_regs_2_address,
+    const uint32_t  trace_regs_2_address,
     const uint32_t *trace_regs_2_data
 ) {
   cyclotron_difftest_reg_rs(
@@ -686,6 +689,7 @@ void profile_perf_counters_rs(
     uint64_t cycles_dispatched,
     uint64_t cycles_eligible,
     uint64_t cycles_issued,
+    uint64_t acc_rs_occupancy,
     const uint64_t* per_warp_cycles_decoded,
     const uint64_t* per_warp_cycles_dispatched,
     const uint64_t* per_warp_cycles_eligible,
@@ -708,6 +712,7 @@ void profile_perf_counters(
     uint64_t cycles_dispatched,
     uint64_t cycles_eligible,
     uint64_t cycles_issued,
+    uint64_t acc_rs_occupancy,
     const uint64_t* per_warp_cycles_decoded,
     const uint64_t* per_warp_cycles_dispatched,
     const uint64_t* per_warp_cycles_eligible,
@@ -722,10 +727,302 @@ void profile_perf_counters(
 ) {
   profile_perf_counters_rs(
       cluster_id, core_id, inst_retired, cycle, cycles_decoded, cycles_dispatched,
-      cycles_eligible, cycles_issued, per_warp_cycles_decoded, per_warp_cycles_dispatched, per_warp_cycles_eligible, per_warp_cycles_issued,
+      cycles_eligible, cycles_issued, acc_rs_occupancy, per_warp_cycles_decoded, per_warp_cycles_dispatched, per_warp_cycles_eligible, per_warp_cycles_issued,
       per_warp_stalls_waw, per_warp_stalls_war, per_warp_stalls_scoreboard, per_warp_stalls_rs_full,
       per_warp_stalls_busy,
       per_warp_stalls_busy_lsu, finished);
 }
+
+#define CYCLOTRON_LSU_INIT_ARGS \
+    const uint32_t *cluster_id, \
+    const uint32_t *core_id, \
+    int arch_len, \
+    int num_warps, \
+    int num_lanes, \
+    int num_lsu_lanes, \
+    int cluster_id_bits, \
+    int core_id_bits, \
+    int warp_id_bits, \
+    int token_bits, \
+    int address_space_bits, \
+    int mem_op_bits, \
+    int preg_bits, \
+    int packet_bits, \
+    int source_id_bits, \
+    int per_lane_mask_bits, \
+    int debug_id_bits, \
+    int debug_id_port_bits
+
+#define CYCLOTRON_LSU_INIT_PASS \
+    cluster_id, \
+    core_id, \
+    arch_len, \
+    num_warps, \
+    num_lanes, \
+    num_lsu_lanes, \
+    cluster_id_bits, \
+    core_id_bits, \
+    warp_id_bits, \
+    token_bits, \
+    address_space_bits, \
+    mem_op_bits, \
+    preg_bits, \
+    packet_bits, \
+    source_id_bits, \
+    per_lane_mask_bits, \
+    debug_id_bits, \
+    debug_id_port_bits
+
+#define CYCLOTRON_LSU_EVAL_ARGS \
+    const uint32_t *cluster_id, \
+    const uint32_t *core_id, \
+    const uint32_t *coreReservations_req_valid, \
+    const uint32_t *coreReservations_req_bits_addressSpace, \
+    const uint32_t *coreReservations_req_bits_op, \
+    const uint32_t *coreReservations_req_bits_debugId, \
+    uint8_t coreReq_valid, \
+    const uint32_t *coreReq_bits_token, \
+    const uint32_t *coreReq_bits_op, \
+    const uint32_t *coreReq_bits_tmask, \
+    const uint32_t *coreReq_bits_address, \
+    const uint32_t *coreReq_bits_imm, \
+    const uint32_t *coreReq_bits_destReg, \
+    const uint32_t *coreReq_bits_storeData, \
+    uint8_t coreResp_ready, \
+    uint8_t globalMemReq_ready, \
+    uint8_t globalMemResp_valid, \
+    const uint32_t *globalMemResp_bits_tag, \
+    const uint32_t *globalMemResp_bits_valid, \
+    const uint32_t *globalMemResp_bits_data, \
+    uint8_t shmemReq_ready, \
+    uint8_t shmemResp_valid, \
+    const uint32_t *shmemResp_bits_tag, \
+    const uint32_t *shmemResp_bits_valid, \
+    const uint32_t *shmemResp_bits_data, \
+    uint32_t *coreReservations_req_ready, \
+    uint32_t *coreReservations_resp_valid, \
+    uint32_t *coreReservations_resp_bits_token, \
+    uint8_t *coreReq_ready, \
+    uint8_t *coreResp_valid, \
+    uint32_t *coreResp_bits_warpId, \
+    uint32_t *coreResp_bits_packet, \
+    uint32_t *coreResp_bits_tmask, \
+    uint32_t *coreResp_bits_destReg, \
+    uint32_t *coreResp_bits_writebackData, \
+    uint32_t *coreResp_bits_debugId, \
+    uint8_t *globalMemReq_valid, \
+    uint32_t *globalMemReq_bits_tag, \
+    uint32_t *globalMemReq_bits_op, \
+    uint32_t *globalMemReq_bits_address, \
+    uint32_t *globalMemReq_bits_data, \
+    uint32_t *globalMemReq_bits_mask, \
+    uint32_t *globalMemReq_bits_tmask, \
+    uint8_t *globalMemResp_ready, \
+    uint8_t *shmemReq_valid, \
+    uint32_t *shmemReq_bits_tag, \
+    uint32_t *shmemReq_bits_op, \
+    uint32_t *shmemReq_bits_address, \
+    uint32_t *shmemReq_bits_data, \
+    uint32_t *shmemReq_bits_mask, \
+    uint32_t *shmemReq_bits_tmask, \
+    uint8_t *shmemResp_ready, \
+    uint8_t *sharedQueuesEmpty, \
+    uint8_t *globalQueuesEmpty
+
+#define CYCLOTRON_LSU_EVAL_PASS \
+    cluster_id, \
+    core_id, \
+    coreReservations_req_valid, \
+    coreReservations_req_bits_addressSpace, \
+    coreReservations_req_bits_op, \
+    coreReservations_req_bits_debugId, \
+    coreReq_valid, \
+    coreReq_bits_token, \
+    coreReq_bits_op, \
+    coreReq_bits_tmask, \
+    coreReq_bits_address, \
+    coreReq_bits_imm, \
+    coreReq_bits_destReg, \
+    coreReq_bits_storeData, \
+    coreResp_ready, \
+    globalMemReq_ready, \
+    globalMemResp_valid, \
+    globalMemResp_bits_tag, \
+    globalMemResp_bits_valid, \
+    globalMemResp_bits_data, \
+    shmemReq_ready, \
+    shmemResp_valid, \
+    shmemResp_bits_tag, \
+    shmemResp_bits_valid, \
+    shmemResp_bits_data, \
+    coreReservations_req_ready, \
+    coreReservations_resp_valid, \
+    coreReservations_resp_bits_token, \
+    coreReq_ready, \
+    coreResp_valid, \
+    coreResp_bits_warpId, \
+    coreResp_bits_packet, \
+    coreResp_bits_tmask, \
+    coreResp_bits_destReg, \
+    coreResp_bits_writebackData, \
+    coreResp_bits_debugId, \
+    globalMemReq_valid, \
+    globalMemReq_bits_tag, \
+    globalMemReq_bits_op, \
+    globalMemReq_bits_address, \
+    globalMemReq_bits_data, \
+    globalMemReq_bits_mask, \
+    globalMemReq_bits_tmask, \
+    globalMemResp_ready, \
+    shmemReq_valid, \
+    shmemReq_bits_tag, \
+    shmemReq_bits_op, \
+    shmemReq_bits_address, \
+    shmemReq_bits_data, \
+    shmemReq_bits_mask, \
+    shmemReq_bits_tmask, \
+    shmemResp_ready, \
+    sharedQueuesEmpty, \
+    globalQueuesEmpty
+
+#define CYCLOTRON_LSU_COMMIT_ARGS \
+    const uint32_t *cluster_id, \
+    const uint32_t *core_id, \
+    const uint32_t *coreReservations_req_valid, \
+    const uint32_t *coreReservations_req_bits_addressSpace, \
+    const uint32_t *coreReservations_req_bits_op, \
+    const uint32_t *coreReservations_req_bits_debugId, \
+    uint8_t coreReq_valid, \
+    const uint32_t *coreReq_bits_token, \
+    const uint32_t *coreReq_bits_op, \
+    const uint32_t *coreReq_bits_tmask, \
+    const uint32_t *coreReq_bits_address, \
+    const uint32_t *coreReq_bits_imm, \
+    const uint32_t *coreReq_bits_destReg, \
+    const uint32_t *coreReq_bits_storeData, \
+    uint8_t coreResp_ready, \
+    uint8_t globalMemReq_ready, \
+    uint8_t globalMemResp_valid, \
+    const uint32_t *globalMemResp_bits_tag, \
+    const uint32_t *globalMemResp_bits_valid, \
+    const uint32_t *globalMemResp_bits_data, \
+    uint8_t shmemReq_ready, \
+    uint8_t shmemResp_valid, \
+    const uint32_t *shmemResp_bits_tag, \
+    const uint32_t *shmemResp_bits_valid, \
+    const uint32_t *shmemResp_bits_data, \
+    const uint32_t *coreReservations_req_ready, \
+    const uint32_t *coreReservations_resp_valid, \
+    const uint32_t *coreReservations_resp_bits_token, \
+    uint8_t coreReq_ready, \
+    uint8_t coreResp_valid, \
+    const uint32_t *coreResp_bits_warpId, \
+    const uint32_t *coreResp_bits_packet, \
+    const uint32_t *coreResp_bits_tmask, \
+    const uint32_t *coreResp_bits_destReg, \
+    const uint32_t *coreResp_bits_writebackData, \
+    const uint32_t *coreResp_bits_debugId, \
+    uint8_t globalMemReq_valid, \
+    const uint32_t *globalMemReq_bits_tag, \
+    const uint32_t *globalMemReq_bits_op, \
+    const uint32_t *globalMemReq_bits_address, \
+    const uint32_t *globalMemReq_bits_data, \
+    const uint32_t *globalMemReq_bits_mask, \
+    const uint32_t *globalMemReq_bits_tmask, \
+    uint8_t globalMemResp_ready, \
+    uint8_t shmemReq_valid, \
+    const uint32_t *shmemReq_bits_tag, \
+    const uint32_t *shmemReq_bits_op, \
+    const uint32_t *shmemReq_bits_address, \
+    const uint32_t *shmemReq_bits_data, \
+    const uint32_t *shmemReq_bits_mask, \
+    const uint32_t *shmemReq_bits_tmask, \
+    uint8_t shmemResp_ready, \
+    uint8_t sharedQueuesEmpty, \
+    uint8_t globalQueuesEmpty
+
+#define CYCLOTRON_LSU_COMMIT_PASS \
+    cluster_id, \
+    core_id, \
+    coreReservations_req_valid, \
+    coreReservations_req_bits_addressSpace, \
+    coreReservations_req_bits_op, \
+    coreReservations_req_bits_debugId, \
+    coreReq_valid, \
+    coreReq_bits_token, \
+    coreReq_bits_op, \
+    coreReq_bits_tmask, \
+    coreReq_bits_address, \
+    coreReq_bits_imm, \
+    coreReq_bits_destReg, \
+    coreReq_bits_storeData, \
+    coreResp_ready, \
+    globalMemReq_ready, \
+    globalMemResp_valid, \
+    globalMemResp_bits_tag, \
+    globalMemResp_bits_valid, \
+    globalMemResp_bits_data, \
+    shmemReq_ready, \
+    shmemResp_valid, \
+    shmemResp_bits_tag, \
+    shmemResp_bits_valid, \
+    shmemResp_bits_data, \
+    coreReservations_req_ready, \
+    coreReservations_resp_valid, \
+    coreReservations_resp_bits_token, \
+    coreReq_ready, \
+    coreResp_valid, \
+    coreResp_bits_warpId, \
+    coreResp_bits_packet, \
+    coreResp_bits_tmask, \
+    coreResp_bits_destReg, \
+    coreResp_bits_writebackData, \
+    coreResp_bits_debugId, \
+    globalMemReq_valid, \
+    globalMemReq_bits_tag, \
+    globalMemReq_bits_op, \
+    globalMemReq_bits_address, \
+    globalMemReq_bits_data, \
+    globalMemReq_bits_mask, \
+    globalMemReq_bits_tmask, \
+    globalMemResp_ready, \
+    shmemReq_valid, \
+    shmemReq_bits_tag, \
+    shmemReq_bits_op, \
+    shmemReq_bits_address, \
+    shmemReq_bits_data, \
+    shmemReq_bits_mask, \
+    shmemReq_bits_tmask, \
+    shmemResp_ready, \
+    sharedQueuesEmpty, \
+    globalQueuesEmpty
+
+void cyclotron_lsu_init_rs(CYCLOTRON_LSU_INIT_ARGS);
+void cyclotron_lsu_reset_rs(const uint32_t *cluster_id, const uint32_t *core_id);
+void cyclotron_lsu_eval_rs(CYCLOTRON_LSU_EVAL_ARGS);
+void cyclotron_lsu_commit_rs(CYCLOTRON_LSU_COMMIT_ARGS);
+
+void cyclotron_lsu_init(CYCLOTRON_LSU_INIT_ARGS) {
+  cyclotron_lsu_init_rs(CYCLOTRON_LSU_INIT_PASS);
+}
+
+void cyclotron_lsu_reset(const uint32_t *cluster_id, const uint32_t *core_id) {
+  cyclotron_lsu_reset_rs(cluster_id, core_id);
+}
+
+void cyclotron_lsu_eval(CYCLOTRON_LSU_EVAL_ARGS) {
+  cyclotron_lsu_eval_rs(CYCLOTRON_LSU_EVAL_PASS);
+}
+
+void cyclotron_lsu_commit(CYCLOTRON_LSU_COMMIT_ARGS) {
+  cyclotron_lsu_commit_rs(CYCLOTRON_LSU_COMMIT_PASS);
+}
+
+#undef CYCLOTRON_LSU_INIT_ARGS
+#undef CYCLOTRON_LSU_INIT_PASS
+#undef CYCLOTRON_LSU_EVAL_ARGS
+#undef CYCLOTRON_LSU_EVAL_PASS
+#undef CYCLOTRON_LSU_COMMIT_ARGS
+#undef CYCLOTRON_LSU_COMMIT_PASS
 
 } // extern "C"
