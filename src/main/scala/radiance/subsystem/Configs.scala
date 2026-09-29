@@ -355,8 +355,12 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
     this(location, dim, accSizeInKB, Left(tileSize), dataType)
 }
 
+// baseConfig: the MX Gemmini template the radiance fields below are applied to (mesh formats etc.).
+// lookupTable: None builds the requantizer without a QuantLut (only valid for LUT-free meshes).
 class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCrossingParams,
-                            dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int))
+                            dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int),
+                            baseConfig: GemminiArrayConfig[MxFloat, Float, Float] = GemminiMxFPConfigs.defaultMxFPConfig,
+                            lookupTable: Option[GemminiLUTConfig] = Some(GemminiLUTConfig()))
   extends Config((site, _, up) => {
 
   case TilesLocated(`location`) => {
@@ -375,7 +379,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     val smKey = clusterParams.smemConfig
 
     val tileParams = MxGemminiTileParams(
-      mxGemminiConfig = GemminiMxFPConfigs.defaultMxFPConfig.copy(
+      mxGemminiConfig = baseConfig.copy(
         // acc_scale_args = Some(ScaleArguments(
         //   (t: Float, u: Float) => {t},
         //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
@@ -438,9 +442,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         // maxOutputBits = 8,
         // outputIdBits = 3,
       )),
-      lookupTable = Some(GemminiLUTConfig(
-        // numBits = 100
-      )),
+      lookupTable = lookupTable,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -450,15 +452,37 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
   case NumTiles => up(NumTiles) + 1
 }) {
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int)) =
-    this(location, RocketCrossingParams(
-      master = HierarchicalElementMasterPortParams.locationDefault(location),
-      slave = HierarchicalElementSlavePortParams.locationDefault(location),
-      mmioBaseAddressPrefixWhere = location match {
-        case InSubsystem => CBUS
-        case InCluster(clusterId) => CCBUS(clusterId)
-      }
-    ), dim, accSizeInKB, tileSize)
+    this(location, WithRadianceMxGemmini.crossing(location), dim, accSizeInKB, tileSize)
+
+  def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int),
+           baseConfig: GemminiArrayConfig[MxFloat, Float, Float], lookupTable: Option[GemminiLUTConfig]) =
+    this(location, WithRadianceMxGemmini.crossing(location), dim, accSizeInKB, tileSize, baseConfig, lookupTable)
 }
+
+object WithRadianceMxGemmini {
+  def crossing(location: HierarchicalLocation) = RocketCrossingParams(
+    master = HierarchicalElementMasterPortParams.locationDefault(location),
+    slave = HierarchicalElementSlavePortParams.locationDefault(location),
+    mmioBaseAddressPrefixWhere = location match {
+      case InSubsystem => CBUS
+      case InCluster(clusterId) => CCBUS(clusterId)
+    }
+  )
+}
+
+// Radiance MxGemmini with an E4M3 single-throughput-only mesh (mode8) and no QuantLut: the radiance
+// counterpart of gemmini.GemminiMxFPE4M3SingleNoLutStandaloneConfig. The mesh operand types are taken
+// from GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig so both builds stay in sync.
+class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
+                                tileSize: (Int, Int, Int))
+  extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
+    GemminiMxFPConfigs.defaultMxFPConfig.copy(
+      inputType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.inputType,
+      weightType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.weightType,
+      spatialArrayInputType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.spatialArrayInputType,
+      spatialArrayWeightType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.spatialArrayWeightType,
+    ),
+    None)
 
 class WithRadianceSharedMem(address: BigInt,
                             size: Int,
