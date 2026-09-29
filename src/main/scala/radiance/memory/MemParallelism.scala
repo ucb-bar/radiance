@@ -59,7 +59,7 @@ case class MemParallelismParams(
   l0dMSHRs: Int = 4,
   l1InFlight: Int = 3,
   l1MSHRs: Int = 8,
-  coalSrcIds: Int = 32,
+  coalSrcIds: Int = 8,
   coalRespDepth: Int = 8,
 ) {
   require(isPow2(coalSrcIds), s"coalSrcIds must be a power of two, got $coalSrcIds")
