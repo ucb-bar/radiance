@@ -559,11 +559,13 @@ class RadianceTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
-// RadianceTapeoutSimConfig with only cluster 0, and a Gemmini that supports E4M3 single throughput only
-// (no QuantLut), like chipyard.MxGemminiRocketConfig. No trace/difftest, so no Cyclotron DPI model.
+// RadianceTapeoutSimConfig with only cluster 0, and the Gemmini of chipyard.MxE4M3SingleGemminiRocketConfig
+// (E4M3 single throughput only, no QuantLut). Built for FPGA (FireSim): no trace/difftest and
+// profiler = false, since any of them sets CyclotronLinked and pulls in the Cyclotron DPI model.
 class RadianceE4M3MxGemminiSingleClusterConfig extends Config(
   new WithRadianceE4M3MxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
-  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig)) ++
+  new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig),
+    profiler = false) ++
   new WithRadianceCluster(0, smemConfig = TapeoutSmemConfig, l1Config = L1CacheConfig) ++
   new WithExtGPUMem() ++
   new WithRadianceRocket ++

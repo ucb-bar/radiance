@@ -470,18 +470,14 @@ object WithRadianceMxGemmini {
   )
 }
 
-// Radiance MxGemmini with an E4M3 single-throughput-only mesh (mode8) and no QuantLut: the radiance
-// counterpart of gemmini.GemminiMxFPE4M3SingleNoLutStandaloneConfig. The mesh operand types are taken
-// from GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig so both builds stay in sync.
+// Radiance MxGemmini with an E4M3 single-throughput-only mesh (mode8) and no QuantLut: the Gemmini of
+// chipyard.MxE4M3SingleGemminiRocketConfig (GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig), with the
+// radiance fields of WithRadianceMxGemmini applied on top. What carries over from the rocket build
+// besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 32.
 class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
                                 tileSize: (Int, Int, Int))
   extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
-    GemminiMxFPConfigs.defaultMxFPConfig.copy(
-      inputType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.inputType,
-      weightType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.weightType,
-      spatialArrayInputType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.spatialArrayInputType,
-      spatialArrayWeightType = GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.spatialArrayWeightType,
-    ),
+    GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig,
     None)
 
 class WithRadianceSharedMem(address: BigInt,
