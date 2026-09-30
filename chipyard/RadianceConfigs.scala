@@ -559,9 +559,6 @@ class RadianceTapeoutSimConfig extends Config(
   new RadianceBaseConfig
 )
 
-// RadianceTapeoutSimConfig with only cluster 0, and the Gemmini of chipyard.MxE4M3SingleGemminiRocketConfig
-// (E4M3 single throughput only, no QuantLut). Built for FPGA (FireSim): no trace/difftest and
-// profiler = false, since any of them sets CyclotronLinked and pulls in the Cyclotron DPI model.
 class RadianceE4M3MxGemminiSingleClusterConfig extends Config(
   new WithRadianceE4M3MxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig),
@@ -573,8 +570,6 @@ class RadianceE4M3MxGemminiSingleClusterConfig extends Config(
   new RadianceBaseConfig
 )
 
-// VCS/RTL-sim twin of RadianceE4M3MxGemminiSingleClusterConfig: same system and Gemmini, with Muon
-// tracing (+trace-db) and the profiler on, for the bindiff tests. Not for FPGA (pulls in Cyclotron DPI).
 class RadianceE4M3MxGemminiSingleClusterTraceConfig extends Config(
   new WithRadianceE4M3MxGemmini(location = InCluster(0), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(0), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig),
@@ -586,8 +581,6 @@ class RadianceE4M3MxGemminiSingleClusterTraceConfig extends Config(
   new RadianceBaseConfig
 )
 
-// Two-cluster version of RadianceE4M3MxGemminiSingleClusterConfig: RadianceTapeoutSimConfig with the
-// E4M3-single, no-QuantLut Gemmini in both clusters. For FPGA: no trace/difftest, profiler = false.
 class RadianceE4M3MxGemminiTwoClusterConfig extends Config(
   new WithRadianceE4M3MxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig),
@@ -603,8 +596,6 @@ class RadianceE4M3MxGemminiTwoClusterConfig extends Config(
   new RadianceBaseConfig
 )
 
-// VCS/RTL-sim twin of RadianceE4M3MxGemminiTwoClusterConfig, with Muon tracing (+trace-db) and the
-// profiler on, for the bindiff tests. Not for FPGA (pulls in Cyclotron DPI).
 class RadianceE4M3MxGemminiTwoClusterTraceConfig extends Config(
   new WithRadianceE4M3MxGemmini(location = InCluster(1), dim = 16, accSizeInKB = 32, tileSize = (8, 8, 8)) ++
   new WithMuonCores(2, location = InCluster(1), l0i = Some(L0iCacheConfig), l0d = Some(L0dCacheConfig),
