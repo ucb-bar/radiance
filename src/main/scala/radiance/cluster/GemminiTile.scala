@@ -161,33 +161,8 @@ class GemminiTile private (
   // regNode := TLFragmenter(4, 4) := TLWidthWidget(8) := TLFragmenter(8, 8) := slaveNode
   regNode := tlSlaveXbar.node
 
-  val scalingFacManager = gemminiParams.scalingFactorMem.map { sfm =>
-    // since gemmini slave address starts at 0x3000, +0x5000 means
-    // the scaling factor memory starts 0x8000 + shared mem size,
-    // which is usually 0x28000 after cluster base address. this address is
-    // 32K aligned.
-
-    require(isPow2(sfm.sizeInBytes), "scaling fac memory size must be power of 2")
-
-    TLManagerNode(Seq(TLSlavePortParameters.v1(
-      managers = Seq(TLSlaveParameters.v2(
-        address = Seq(AddressSet(sfm.baseAddr, sfm.sizeInBytes - 1)),
-        fifoId = Some(0),
-        supports = TLMasterToSlaveTransferSizes(
-          // there's no real get support because the scaling factor memory is
-          // write-only from the control bus
-          get = TransferSizes(1, 8),
-          putFull = TransferSizes(1, 8),
-          putPartial = TransferSizes(1, 8),
-        )
-      )),
-      beatBytes = 8,
-    )))
-  }
-  scalingFacManager.foreach(_
-    := FlitMergeNode(from = 4, to = 8)
-    := TLWidthWidget(8)
-    := tlSlaveXbar.node)
+  // Scaling factor memory and LUT contents are loaded by gemmini's own MX_LOAD_SCALES /
+  // MX_LOAD_LUT DMA loaders through gemmini.tlNode; there is no MMIO write window for them.
 
   val scalingFacClient = gemminiParams.scalingFactorMem.map { sfm =>
     TLClientNode(Seq(TLMasterPortParameters.v1(
@@ -254,39 +229,6 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     gemmini_io.fpu_resp.valid := false.B
     gemmini_io.fpu_resp.bits := DontCare
     gemmini_io.exception := DontCare
-  }
-
-  // scaling factor
-  outer.scalingFacManager.foreach { scalingFacNode =>
-    val conf = outer.gemminiParams.scalingFactorMem.get
-    val (node, edge) = scalingFacNode.in.head
-
-    val wen = WireInit(node.a.fire)
-    val writeData = WireInit(node.a.bits.data)
-
-    val typeSelect = node.a.bits.address(conf.addrBits - 1)
-    val writeFullAddr = node.a.bits.address(conf.addrBits - 2, 0)
-
-    // weight and activation respectively; weight addresses have highest bit = 0
-    val scalingFacWriteReqs = Seq.fill(2)(Wire(Decoupled(new ScalingFactorWriteReq(
-      conf.addrBits - 1, 8 * 8))))
-    scalingFacWriteReqs.head.valid := wen && !typeSelect
-    scalingFacWriteReqs.last.valid := wen && typeSelect
-    scalingFacWriteReqs.foreach(_.bits.addr := writeFullAddr)
-    scalingFacWriteReqs.foreach(_.bits.data := writeData)
-
-    val typeReady = Mux(typeSelect, scalingFacWriteReqs.last.ready, scalingFacWriteReqs.head.ready)
-
-    node.a.ready := node.d.ready && typeReady
-    node.d.valid := node.a.valid && typeReady
-    node.d.bits := edge.AccessAck(node.a.bits)
-
-    // require(node.params.dataBits == conf.bankWidthBytes * 8)
-    assert(!node.a.valid || node.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
-    assert(!node.a.valid || (node.a.bits.size === 3.U))
-
-    outer.gemmini.module.mx_io.get.scale_mem_write_w <> scalingFacWriteReqs.head
-    outer.gemmini.module.mx_io.get.scale_mem_write_act <> scalingFacWriteReqs.last
   }
 
   outer.scalingFacClient.foreach { scalingFacNode =>
@@ -365,16 +307,6 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     outer.gemmini.module.mx_io.get.requant_out <> out
   }
 
-  // lut
-  val lutIO = outer.gemminiParams.lookupTable.map { c =>
-    val lut = Seq.tabulate(c.numTables) { i =>
-      Wire(Decoupled(new QuantLutWriteBundle(c(i))))
-    }
-    val mxIO = outer.gemmini.module.mx_io.get
-    (lut zip Seq(mxIO.lut0, mxIO.lut1, mxIO.lut2)).foreach { case (a, b) => a <> b }
-    lut
-  }
-
   // cisc
   val cisc = new GemminiCISC(
     accSlave = outer.accSlaveNode,
@@ -438,55 +370,8 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     0x30 -> Seq(RegField.w(32, gemminiCisc(_, _)))
   }.toSeq
 
-  val gemminiLutMMIO = lutIO.map { luts =>
-    val config = outer.gemminiParams.lookupTable.get
-    require(luts.length == config.numTables)
-
-    val tableBase = 0x80
-    val tableSizes = (config.numEntries zip config.numBits).map(x => x._1 * x._2 / 8)
-    val tableOffsets = tableSizes.scanLeft(tableBase)(_ + _)
-
-    val flops = RegInit(MixedVecInit(
-      (config.numEntries zip config.numBits).map { case (numEntries, numBits) =>
-        assert(numBits % 32 == 0)
-        VecInit.fill(numEntries)(VecInit.fill(numBits / 32)(0.U(32.W)))
-      }
-    ))
-
-    val maps = luts.zipWithIndex.flatMap { case (io, i) =>
-      io.valid := false.B
-      io.bits.data := VecInit(flops(i).map(_.asUInt))
-
-      def lutRegFunc(reg: UInt, trigger: Boolean = false): (Bool, UInt) => Bool = {
-        def lut(valid: Bool, bits: UInt): Bool = {
-          when (io.ready && valid) {
-            reg := bits
-          }
-          if (trigger) {
-            // this assumes ready never lowers without a fire first
-            io.valid := RegNext(io.ready && valid)
-          }
-          io.ready
-        }
-        lut
-      }
-
-      Seq.tabulate(config.numEntries(i)) { j =>
-        val wordsPerEntry = config.numBits(i) / 32
-        Seq.tabulate(wordsPerEntry) { k =>
-          val addr = tableOffsets(i) + (wordsPerEntry * j + k) * 4
-          val trigger = (j + 1 == config.numEntries(i)) && (k + 1 == wordsPerEntry) // trigger per table
-
-          addr -> Seq(RegField.w(32, lutRegFunc(flops(i)(j)(k), trigger)))
-        }
-      }.flatten
-    }
-
-    maps
-  }.toSeq.flatten
-
   outer.regNode.regmap(
-    (gemminiBaseMMIO ++ gemminiCiscMMIO ++ gemminiLutMMIO):_*
+    (gemminiBaseMMIO ++ gemminiCiscMMIO):_*
   )
 
   // assert(!regValid || gemminiIO.ready)

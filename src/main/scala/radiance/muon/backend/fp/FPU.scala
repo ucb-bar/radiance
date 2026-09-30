@@ -123,6 +123,9 @@ class CVFPU(
   addResource("/vsrc/cvfpu/src/common_cells/include/common_cells/registers.svh")
   addResource("/vsrc/cvfpu/src/fpnew_pkg.sv")
   addResource("/vsrc/vortex/third_party/fpnew/src/common_cells/src/cf_math_pkg.sv")
+  // Packages must precede their importers: FireSim concatenates blackbox resources in this order into
+  // one file (VCS/Verilator compile them first via chipyard.mk, so they don't care).
+  addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv")
   addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/control_mvp.sv")
 
   addResource("/vsrc/CVFPU.v")
@@ -139,7 +142,6 @@ class CVFPU(
   addResource("/vsrc/cvfpu/src/fpnew_opgroup_multifmt_slice.sv")
   addResource("/vsrc/cvfpu/src/fpnew_rounding.sv")
   addResource("/vsrc/cvfpu/src/fpnew_top.sv")
-  addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv")
   addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/div_sqrt_mvp_wrapper.sv")
   addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/div_sqrt_top_mvp.sv")
   addResource("/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/iteration_div_sqrt_mvp.sv")
