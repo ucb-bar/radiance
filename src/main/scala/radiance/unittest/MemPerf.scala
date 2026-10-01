@@ -137,7 +137,7 @@ class MemPerfMuonTile(
       coalLogSize = log2Ceil(coalescedReqWidth),
       wordSizeInBytes = muonParams.core.archLen / 8,
       numOldSrcIds = 1 << lsuSourceIdBits,
-      numNewSrcIds = p(MemParallelismKey).coalInFlight,
+      numNewSrcIds = p(MemParallelismKey).coalSrcIds,
       respQueueDepth = 4,
       numCoalReqs = 1,
     )))

@@ -16,8 +16,9 @@ class ReservationStationEntry(implicit p: Parameters) extends CoreBundle()(p) {
   val busy = Vec(Isa.maxNumRegs, Bool())
 }
 
-class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
+class ReservationStation(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val io = IO(new Bundle {
+    val softReset = Input(Bool())
     /** uop admitted to reservation station */
     val admit = Flipped(Decoupled(new ReservationStationEntry))
     /** instruction issued to the downstream EX pipe */
@@ -43,6 +44,7 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
         val cyclesEligible = Perf.T
         val stallsRSFull = Perf.T
       })
+      val accRsOccupancy = Perf.T
     })
   })
 
@@ -99,6 +101,54 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
                               uop.inst.rs3))
   }
 
+  // ------------------------------------------------------------------
+  // @in-order-per-warp issue support
+  //
+  // When `inOrderPerWarp` is set, each warp issues its instructions in program
+  // order (oldest-first), while different warps still interleave freely.  We
+  // stamp every admitted entry with a per-warp wrapping sequence number and use
+  // it to (1) gate issue to the oldest un-issued entry of each warp, and (2)
+  // order operand collection so a younger sibling never grabs a scarce collector
+  // entry ahead of an older one (which would deadlock issue).
+  // ------------------------------------------------------------------
+  val inOrderPerWarp = muonParams.inOrderPerWarp
+  if (inOrderPerWarp) {
+    require(numEntries >= numWarps,
+      s"inOrderPerWarp needs numIssueQueueEntries ($numEntries) >= numWarps " +
+      s"($numWarps) so every warp can hold its oldest un-issued instruction")
+  }
+  // width is one bit more than log2(numEntries). This makes the window never
+  // span more than half the modulus and makes the compare below work
+  // unambiguous with rollovers.
+  val seqWidth = log2Ceil(numEntries) + 1
+  val warpSeq  = RegInit(VecInit.fill(numWarps)(0.U(seqWidth.W)))
+  val seqOf    = RegInit(VecInit.fill(numEntries)(0.U(seqWidth.W)))
+
+  def seqOlderThan(a: UInt, b: UInt): Bool = (a =/= b) && !((b - a)(seqWidth - 1))
+  def isWarpHead(i: Int): Bool = {
+    if (!inOrderPerWarp) true.B
+    else validTable(i) && !(0 until numEntries).map { j =>
+      validTable(j) && (instTable(j).uop.wid === instTable(i).uop.wid) &&
+      seqOlderThan(seqOf(j), seqOf(i))
+    }.reduce(_ || _)
+  }
+  def stillOwesCollect(j: Int): Bool =
+    validTable(j) && (opReadyTable(j) zip collFiredTable(j))
+      .map { case (rdy, cf) => !rdy && !cf }.reduce(_ || _)
+  // enforce RS entries allocate collector entries in per-warp age order,
+  // matching in-order issue order, to prevent deadlocks from out-of-order
+  // collected instructions not freeing collector entries
+  def collAgeOk(i: Int): Bool = {
+    if (!inOrderPerWarp) true.B
+    else !(0 until numEntries).map { j =>
+      validTable(j) && (instTable(j).uop.wid === instTable(i).uop.wid) &&
+      seqOlderThan(seqOf(j), seqOf(i)) && stillOwesCollect(j)
+    }.reduce(_ || _)
+  }
+  val collAgeOkTable = VecInit((0 until numEntries).map(collAgeOk(_)))
+
+  val rsDebugLevel = 1
+
   // ---------
   // admission
   // ---------
@@ -108,8 +158,9 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
   io.admit.ready := hasEmptyRow
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     p.stallsRSFull :=
-      PerfCounter(io.admit.valid && !hasEmptyRow &&
-                  io.admit.bits.ibufEntry.uop.wid === wid.U)
+    PerfCounter(io.softReset,
+      io.admit.valid && !hasEmptyRow &&
+      io.admit.bits.ibufEntry.uop.wid === wid.U)
   }
 
   val emptyRow = PriorityEncoder(rowEmptyVec)
@@ -122,21 +173,35 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     collFiredTable(emptyRow) := VecInit.fill(Isa.maxNumRegs)(false.B)
     collPtrTable(emptyRow) := 0.U
 
-    debugf(cf"RS: admitted: warp=${io.admit.bits.ibufEntry.uop.wid}, " +
+    if (inOrderPerWarp) {
+      val admitWid = io.admit.bits.ibufEntry.uop.wid
+      seqOf(emptyRow)   := warpSeq(admitWid)
+      warpSeq(admitWid) := warpSeq(admitWid) + 1.U
+    }
+
+    debugf(rsDebugLevel,
+           cf"RS: admitted: warp=${io.admit.bits.ibufEntry.uop.wid}, " +
            cf"PC=${io.admit.bits.ibufEntry.uop.pc}%x at row ${emptyRow}\n")
     printTable
   }
 
-  val rsOccupancy = WireDefault(PopCount(validTable))
-  dontTouch(rsOccupancy)
+  val instsInRs = WireDefault(PopCount(validTable))
+  val accRsOccupancy = RegInit(0.U.asTypeOf(Perf.T))
+  when (io.softReset) {
+    accRsOccupancy := 0.U
+  }.otherwise {
+    accRsOccupancy := (accRsOccupancy + instsInRs)(Perf.counterWidth - 1, 0)
+  }
+  io.perf.accRsOccupancy := accRsOccupancy
+  dontTouch(instsInRs)
 
-  io.perf.cyclesDispatched := PerfCounter(rsOccupancy =/= 0.U)
+  io.perf.cyclesDispatched := PerfCounter(io.softReset, instsInRs =/= 0.U)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val validThisWarp = (0 until numEntries).map { i =>
       validTable(i) && (instTable(i).uop.wid === wid.U)
     }
     val hasThisWarp = validThisWarp.reduce(_ || _)
-    p.cyclesDispatched := PerfCounter(hasThisWarp)
+    p.cyclesDispatched := PerfCounter(io.softReset, hasThisWarp)
   }
 
   // -----------------
@@ -157,10 +222,14 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     (needCollect, needCollectOps, needCollectAllReady)
   }
   // select a single entry for collection
+  // @in-order-per-warp: mask off entries whose older same-warp siblings still
+  // owe a collect, so collector entries are allocated in per-warp age order
   // TODO: @perf: currently a simple priority encoder; might introduce fairness
   // problem
-  val collNeedTable = WireDefault(VecInit(needCollects.map(_._1)))
-  collNeedAllReadyTable := VecInit(needCollects.map(_._3))
+  val collNeedTable = WireDefault(VecInit(
+    needCollects.map(_._1).zip(collAgeOkTable).map { case (n, ok) => n && ok }))
+  collNeedAllReadyTable := VecInit(
+    needCollects.map(_._3).zip(collAgeOkTable).map { case (n, ok) => n && ok })
   dontTouch(collNeedTable)
   dontTouch(collNeedAllReadyTable)
 
@@ -211,7 +280,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     val newFired = (collFiredTable(collRow) zip io.collector.readReq.bits.regs.map(_.enable))
                    .map { case (a,b) => a || b }
     collFiredTable(collRow) := newFired
-    debugf(cf"RS: collector request fired at row:${collRow}, warp:${collUop.wid}, pc:${collUop.pc}%x\n")
+    debugf(rsDebugLevel,
+           cf"RS: collector request fired at row:${collRow}, warp:${collUop.wid}, pc:${collUop.pc}%x\n")
   }
 
   // upon collector response:
@@ -256,7 +326,8 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
           scbPort.incr := false.B
           scbPort.decr := (rs =/= 0.U)
 
-          debugf(cf"RS: collector response handled at row:${i}, " +
+          debugf(rsDebugLevel,
+                 cf"RS: collector response handled at row:${i}, " +
                  cf"warp:${instTable(i).uop.wid}, pc:${instTable(i).uop.pc}%x, " +
                  cf"collEntry:${io.collector.readResp.bits.collEntry}, " +
                  cf"rs:${rs}, rsi:${rsi}\n")
@@ -318,7 +389,10 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
     eligibleTable(i) := eligible
 
     val candidate = Wire(Decoupled(issueBundleT))
-    candidate.valid := eligible
+    // @in-order-per-warp: only the oldest un-issued entry of each warp may issue;
+    // different warps' heads remain simultaneously eligible, so the arbiter
+    // still interleaves warps every cycle
+    candidate.valid := eligible && isWarpHead(i)
     candidate.bits.entry := instTable(i)
     candidate.bits.entryId := i.U
     candidate.bits.hasOps := hasOpTable(i)
@@ -368,13 +442,13 @@ class ReservationStation(implicit p: Parameters) extends CoreModule()(p) {
 
   // connect per-warp eligible perf counters
   val hasEligible = eligibles.map(_.valid).reduce(_ || _)
-  io.perf.cyclesEligible := PerfCounter(hasEligible)
+  io.perf.cyclesEligible := PerfCounter(io.softReset, hasEligible)
   io.perf.perWarp.zipWithIndex.foreach { case (p, wid) =>
     val eligiblesThisWarp = eligibles.map { row =>
       row.valid && (row.bits.entry.uop.wid === wid.U)
     }
     val hasEligibleThisWarp = eligiblesThisWarp.reduce(_ || _)
-    p.cyclesEligible := PerfCounter(hasEligibleThisWarp)
+    p.cyclesEligible := PerfCounter(io.softReset, hasEligibleThisWarp)
   }
 
   // if not using collector, RS only directly uses the readData port and never

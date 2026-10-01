@@ -18,8 +18,9 @@ import testchipip.soc.SubsystemInjectorKey
 import radiance.cluster._
 import radiance.memory._
 import radiance.muon._
+import radiance.muon.backend.fp.FPPipeParams
+import radiance.muon.backend.int.IntPipeParams
 import radiance.virgo.{NumVortexCores, VirgoClusterParams, VortexCoreParams, VortexL1Key}
-import radiance.muon.LoadStoreUnitParams
 import radiance.unittest.CyclotronLinked
 
 sealed trait RadianceSmemSerialization
@@ -67,37 +68,71 @@ class WithMuonCores(
   standalone: Boolean,
   noILP: Boolean,
   trace: Boolean,
-  /** cyclotron-as-a-tile: use golden core model */
-  cyclotron: Boolean,
+  profiler: Boolean,
+  cyclotronCore: Boolean,
+  cyclotronMem: Boolean,
+  cyclotronLSU: Boolean,
   difftest: Boolean,
   disabled: Boolean,
+  numWarps: Option[Int],
+  numLanes: Option[Int],
+  numPhysRegs: Option[Int],
+  numIssueQueueEntries: Int,
+  inOrderPerWarp: Boolean,
+  lsqDepth: Option[Int],
   l0i: Option[DCacheParams],
   l0d: Option[DCacheParams],
 ) extends Config((site, here, up) => {
   // for use in tile-less standalone instantiation
   case MuonKey => {
-    if (difftest) {
+    if (difftest || trace || profiler) {
       assert(up(RadianceSimArgs),
-             "WithMuonCores: difftest cannot be enabled in non-sim mode!")
+             "cyclotron features cannot be enabled in non-sim mode!")
     }
+    val simt = up(SIMTCoreKey).get
+    val resolvedNumWarps = numWarps.getOrElse(simt.numWarps)
+    val resolvedNumLanes = numLanes.getOrElse(simt.numLanes)
+    val resolvedNumPhysRegs = numPhysRegs.getOrElse(MuonCoreParams().numPhysRegs)
+    val intPipe = numLanes.map { lanes =>
+      IntPipeParams(numALULanes = lanes, numMulDivLanes = lanes)
+    }
+    val fpPipe = numLanes.map { lanes =>
+      FPPipeParams(
+        numFP32Lanes = (lanes / 2).max(1),
+        numFP32DivLanes = (lanes / 8).max(1),
+        numFP16ExpLanes = (lanes / 4).max(1)
+      )
+    }
+    val lsu = MuonCoreParams().lsu.copy(
+      numLsuLanes = numLanes.getOrElse(simt.numLsuLanes)
+    )
+    val resolvedLsu = lsqDepth
+      .map(depth => LoadStoreUnitDepthOverrides.all(depth).applyTo(lsu))
+      .getOrElse(lsu)
     MuonCoreParams(
-      numWarps = up(SIMTCoreKey).get.numWarps,
-      numLanes = up(SIMTCoreKey).get.numLanes,
+      numWarps = resolvedNumWarps,
+      numLanes = resolvedNumLanes,
+      numPhysRegs = resolvedNumPhysRegs,
+      numArchRegs = (resolvedNumPhysRegs / 2).min(128),
       numCores = n,
       numClusters = 2, // TODO: magic number
       noILP = noILP,
+      numIssueQueueEntries = numIssueQueueEntries,
+      inOrderPerWarp = inOrderPerWarp,
+      intPipe = intPipe.getOrElse(MuonCoreParams().intPipe),
+      fpPipe = fpPipe.getOrElse(MuonCoreParams().fpPipe),
       // for muon, numSMEMInFlights controlled by lsu parameters, rather than 
       // from SIMTCoreParams. TODO: use SIMTCoreParams instead?
       // logSMEMInFlights = log2Ceil(up(SIMTCoreKey).get.numSMEMInFlights),
-      lsu = LoadStoreUnitParams(
-        numLsuLanes = up(SIMTCoreKey).get.numLsuLanes
-      ),
+      lsu = resolvedLsu,
+      lsuUseModel = cyclotronLSU,
       trace = trace || difftest,
+      profiler = profiler,
       difftest = difftest,
     )
   }
   case CyclotronLinked => {
-    up(CyclotronLinked) || site(RadianceSimArgs) || trace || difftest || cyclotron
+    up(CyclotronLinked) || trace || difftest || cyclotronCore || cyclotronMem || cyclotronLSU || profiler
   }
   case TilesLocated(`location`) => {
     if (standalone) {
@@ -119,7 +154,8 @@ class WithMuonCores(
         dcache = l0d.map(_.copy(nMSHRs = site(MemParallelismKey).l0dMSHRs)),
         l1CacheLineBytes = clusterParams.l1Config.blockBytes,
         peripheralAddr = clusterParams.baseAddr + clusterParams.peripheralAddrOffset,
-        cyclotron = cyclotron,
+        cyclotronCore = cyclotronCore,
+        cyclotronMem = cyclotronMem,
         disabled = disabled,
       )
       List.tabulate(n)(i => MuonTileAttachParams(
@@ -138,8 +174,16 @@ class WithMuonCores(
   // constructor override that omits `crossing`
   def this(n: Int, location: HierarchicalLocation = InSubsystem,
     standalone: Boolean = false, noILP: Boolean = false,
-    trace: Boolean = false, cyclotron: Boolean = false,
+    trace: Boolean = false, profiler: Boolean = true,
+    cyclotronCore: Boolean = false, cyclotronMem: Boolean = false,
+    cyclotronLSU: Boolean = false,
     difftest: Boolean = false, disabled: Boolean = false,
+    numWarps: Option[Int] = None,
+    numLanes: Option[Int] = None,
+    numPhysRegs: Option[Int] = None,
+    numIssueQueueEntries: Int = 8,
+    inOrderPerWarp: Boolean = false,
+    lsqDepth: Option[Int] = None,
     l0i: Option[DCacheParams] = None, l0d: Option[DCacheParams] = None)
   = this(n, location, RocketCrossingParams(
     master = HierarchicalElementMasterPortParams.locationDefault(location),
@@ -148,7 +192,9 @@ class WithMuonCores(
       case InSubsystem => CBUS
       case InCluster(clusterId) => CCBUS(clusterId)
     },
-  ), standalone, noILP, trace, cyclotron, difftest, disabled, l0i, l0d)
+    ), standalone, noILP, trace, profiler, cyclotronCore, cyclotronMem, cyclotronLSU,
+    difftest, disabled, numWarps, numLanes, numPhysRegs,
+    numIssueQueueEntries, inOrderPerWarp, lsqDepth, l0i, l0d)
 }
 
 class WithCyclotronCores(
@@ -309,8 +355,12 @@ class WithRadianceGemmini(location: HierarchicalLocation, crossing: RocketCrossi
     this(location, dim, accSizeInKB, Left(tileSize), dataType)
 }
 
+// baseConfig: the MX Gemmini template the radiance fields below are applied to (mesh formats etc.).
+// lookupTable: None builds the requantizer without a QuantLut (only valid for LUT-free meshes).
 class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCrossingParams,
-                            dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int))
+                            dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int),
+                            baseConfig: GemminiArrayConfig[MxFloat, Float, Float] = GemminiMxFPConfigs.defaultMxFPConfig,
+                            lookupTable: Option[GemminiLUTConfig] = Some(GemminiLUTConfig()))
   extends Config((site, _, up) => {
 
   case TilesLocated(`location`) => {
@@ -329,7 +379,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
     val smKey = clusterParams.smemConfig
 
     val tileParams = MxGemminiTileParams(
-      mxGemminiConfig = GemminiMxFPConfigs.defaultMxFPConfig.copy(
+      mxGemminiConfig = baseConfig.copy(
         // acc_scale_args = Some(ScaleArguments(
         //   (t: Float, u: Float) => {t},
         //   1, Float(8, 24), -1, identity = "1.0", c_str = "((x))"
@@ -392,9 +442,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         // maxOutputBits = 8,
         // outputIdBits = 3,
       )),
-      lookupTable = Some(GemminiLUTConfig(
-        // numBits = 100
-      )),
+      lookupTable = lookupTable,
     )
     Seq(GemminiTileAttachParams(
       tileParams,
@@ -404,15 +452,33 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
   case NumTiles => up(NumTiles) + 1
 }) {
   def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int)) =
-    this(location, RocketCrossingParams(
-      master = HierarchicalElementMasterPortParams.locationDefault(location),
-      slave = HierarchicalElementSlavePortParams.locationDefault(location),
-      mmioBaseAddressPrefixWhere = location match {
-        case InSubsystem => CBUS
-        case InCluster(clusterId) => CCBUS(clusterId)
-      }
-    ), dim, accSizeInKB, tileSize)
+    this(location, WithRadianceMxGemmini.crossing(location), dim, accSizeInKB, tileSize)
+
+  def this(location: HierarchicalLocation, dim: Int, accSizeInKB: Int, tileSize: (Int, Int, Int),
+           baseConfig: GemminiArrayConfig[MxFloat, Float, Float], lookupTable: Option[GemminiLUTConfig]) =
+    this(location, WithRadianceMxGemmini.crossing(location), dim, accSizeInKB, tileSize, baseConfig, lookupTable)
 }
+
+object WithRadianceMxGemmini {
+  def crossing(location: HierarchicalLocation) = RocketCrossingParams(
+    master = HierarchicalElementMasterPortParams.locationDefault(location),
+    slave = HierarchicalElementSlavePortParams.locationDefault(location),
+    mmioBaseAddressPrefixWhere = location match {
+      case InSubsystem => CBUS
+      case InCluster(clusterId) => CCBUS(clusterId)
+    }
+  )
+}
+
+// Radiance MxGemmini with an E4M3 single-throughput-only mesh (mode8) and no QuantLut: the Gemmini of
+// chipyard.MxE4M3SingleGemminiRocketConfig (GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig), with the
+// radiance fields of WithRadianceMxGemmini applied on top. What carries over from the rocket build
+// besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 32.
+class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
+                                tileSize: (Int, Int, Int))
+  extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
+    GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig,
+    None)
 
 class WithRadianceSharedMem(address: BigInt,
                             size: Int,

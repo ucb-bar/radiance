@@ -17,7 +17,7 @@ import radiance.muon._
 import radiance.subsystem.DummyTileParams
 import scala.collection.mutable.ArrayBuffer
 
-/** Testbench for Muon with the test signals */
+/** Testbench for Muon with the test signals. */
 class MuonCoreTestbench(implicit p: Parameters) extends LazyModule {
   val coreTop = LazyModule(new MuonCoreTop()(p.alterMap(Map(
     // @cleanup: this should be unnecessary with WithMuonCores(headless = true)
@@ -44,6 +44,16 @@ class MuonFrontendTestbench(implicit p: Parameters) extends Module {
 
   val fe = Module(new Frontend()(p))
   val cbe = Module(new CyclotronBackendBlackBox)
+
+  if (m.debug) {
+    val debugContext = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    debugContext.cycle := cycle
+    debugContext.clusterId := 0.U
+    debugContext.coreId := 0.U
+    fe.debug.get := debugContext
+  }
 
   fe.idIO.clusterId := 0.U
   fe.idIO.coreId := 0.U
@@ -95,6 +105,17 @@ class MuonBackendTestbench(implicit val p: Parameters) extends Module with HasCo
   val be = Module(new Backend()(p.alterMap(Map(
     TileKey -> DummyTileParams
   ))))
+
+  if (muonParams.debug) {
+    val debugContext = Wire(new DebugContext)
+    val cycle = RegInit(0.U(64.W))
+    cycle := cycle + 1.U
+    debugContext.cycle := cycle
+    debugContext.clusterId := 0.U
+    debugContext.coreId := 0.U
+    ibuf.debug.get := debugContext
+    be.debug.get := debugContext
+  }
 
   ibuf.idIO.coreId := 0.U
   ibuf.idIO.clusterId := 0.U
@@ -178,7 +199,9 @@ class MuonLSUTestbench(implicit p: Parameters) extends LazyModule {
 
 /** DUT module for core-standalone testbench.
  *  Hooks up a MuonCore with a Rust instruction memory model, and exposes a TL
- *  node for its global memory interface. */
+ *  node for its global memory interface.
+ *  NOTE: MuonCoreTop is a single-core testbench, and does not support
+ *  cluster-wide barriers. */
 class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParameters {
   val sourceIdsPerLane = 1 << lsuDerived.sourceIdBits
 
@@ -207,7 +230,7 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     core.io.imem <> imem.io.imem
     core.io.dmem <> dmem.io.dmem
 
-    // tie off shared mem
+    // tie off shared mem; TODO
     core.io.smem.req.foreach(_.ready := false.B)
     core.io.smem.resp.foreach(_.valid := false.B)
     core.io.smem.resp.foreach(_.bits := DontCare)
@@ -234,12 +257,14 @@ class MuonCoreTop(implicit p: Parameters) extends LazyModule with HasCoreParamet
     }
 
     // performance counters
-    val cperf = Module(new Profiler (
-      clusterId = 0,
-      coreId = 0,
-    ))
-    cperf.io.perf <> core.io.perf
-    cperf.io.finished := core.io.finished
+    if (core.muonParams.profiler) {
+      val cperf = Module(new Profiler (
+        clusterId = 0,
+        coreId = 0,
+      ))
+      cperf.io.perf <> core.io.perf
+      cperf.io.finished := core.io.finished
+    }
 
     // RTL-model difftest
     if (core.muonParams.difftest) {
@@ -295,6 +320,16 @@ class LSUWrapper(implicit p: Parameters) extends LazyModule with HasCoreParamete
 
     val lsu = Module(new LoadStoreUnit()(p))
     val lsuAdapter = Module(new LSUCoreAdapter)
+    if (muonParams.debug) {
+      val debugContext = Wire(new DebugContext)
+      val cycle = RegInit(0.U(64.W))
+      cycle := cycle + 1.U
+      debugContext.cycle := cycle
+      debugContext.clusterId := 0.U
+      debugContext.coreId := 0.U
+      lsu.debug.get := debugContext
+      lsuAdapter.debug.get := debugContext
+    }
 
     // lsu <> pipeline
     (io.coreReservations zip lsu.io.coreReservations).foreach {

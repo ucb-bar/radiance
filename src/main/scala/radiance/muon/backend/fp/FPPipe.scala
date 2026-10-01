@@ -20,8 +20,8 @@ trait HasFPPipeParams extends HasCoreParameters {
   def numFP32ExpLanes = muonParams.fpPipe.numFP16ExpLanes * 2
   def fStatusBits = 5
 
-  def fpEXTagBits = Isa.regBits
-  def cvFPUTagBits(numFP16Lanes: Int) = 1 + numFP16Lanes + Isa.regBits // FP32? + TMask + Rd
+  def fpEXTagBits = physRegBits
+  def cvFPUTagBits(numFP16Lanes: Int) = 1 + numFP16Lanes + physRegBits // FP32? + TMask + Rd
   def signExtendFp16Lanes(numLanes: Int, data: UInt): Vec[UInt] = {
     val lanes = VecInit.tabulate(numLanes) { idx =>
       data(16 * (idx + 1) - 1, 16 * idx)
@@ -116,7 +116,7 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
   val shiftOperands = cvFPUReq.op === FPUOp.ADD || cvFPUReq.op === FPUOp.SUB
   val respIsMine = cvFPUIF.resp.bits.tag(cvFPUTagBits(numFP16Lanes) - 1) === isFP16
   val signExtFP16cvFPURes = signExtendFp16Lanes(outLanes, cvFPUIF.resp.bits.result).asUInt
-  val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(Isa.regBits - 1, 0), 0.U(Isa.regBits.W),
+  val cvFPURespRd = RegEnable(cvFPUIF.resp.bits.tag(physRegBits - 1, 0), 0.U(physRegBits.W),
                               recomposer.get.io.in.fire)
 
   io.req.ready := decomposer.get.io.in.ready
@@ -144,7 +144,7 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
   cvFPUIF.resp.ready := respIsMine && recomposer.get.io.in.ready
 
   recomposer.get.io.in.valid := cvFPUIF.resp.valid && respIsMine
-  recomposer.get.io.in.bits.data(1) := VecInit(cvFPUIF.resp.bits.tag(Isa.regBits + outLanes - 1, Isa.regBits).asBools)
+  recomposer.get.io.in.bits.data(1) := VecInit(cvFPUIF.resp.bits.tag(physRegBits + outLanes - 1, physRegBits).asBools)
   recomposer.get.io.out.ready := io.resp.ready
 
   io.resp.valid := recomposer.get.io.out.valid

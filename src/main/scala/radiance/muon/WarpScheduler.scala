@@ -15,7 +15,7 @@ class SchedWriteback(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 class WarpScheduler(implicit p: Parameters)
-  extends CoreModule {
+  extends CoreModule with HasDebugContext {
 
   val cmdProcOpt = None
 
@@ -334,7 +334,7 @@ class WarpScheduler(implicit p: Parameters)
 
   when (io.rename.fire) {
     val e = io.rename.bits
-    printf(cf"[DISPATCH]  wid=${e.wid} pc=${e.pc}%x tmask=${e.tmask}%b\n")
+    debugf(cf"[DISPATCH]  wid=${e.wid} pc=${e.pc}%x tmask=${e.tmask}%b\n")
   }
 }
 
@@ -355,10 +355,8 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 
   def stall(wid: UInt, pc: UInt) = {
     when(stalls(wid).stallReason(HAZARD)) {
-      printf(cf"============WARNING============\n")
-      printf(cf"stalling stalled warp id $wid for pc=$pc%x\n")
-      printf(cf"this is most likely due to wspawn being called")
-      printf(cf"by multiple warps\n")
+      outer.debugf(cf"WARNING: stalling stalled warp id ${wid} for pc=${pc}%x; " +
+        cf"this is most likely due to wspawn being called by multiple warps\n")
     }
     stalls(wid).pc := pc
     stalls(wid).stallReason(HAZARD) := true.B
@@ -382,7 +380,7 @@ class StallTracker(outer: WarpScheduler)(implicit m: MuonCoreParams) {
 }
 
 object Predecoder {
-  def decode(inst: UInt) = {
+  def decode(inst: UInt)(implicit p: Parameters) = {
     val d = Decoder.decode(inst)
     val stall = WireInit(d.b(HasControlHazard))
     val join = WireInit(d.b(IsJoin))

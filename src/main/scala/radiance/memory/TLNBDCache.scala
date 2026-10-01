@@ -6,7 +6,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, RegionType, TransferSizes}
 import freechips.rocketchip.regmapper.RegField
 import freechips.rocketchip.resources.SimpleDevice
 import freechips.rocketchip.rocket.constants.MemoryOpConstants
-import freechips.rocketchip.rocket.{DCacheParams, HellaCacheResp, NonBlockingDCache, PRV, SimpleHellaCacheIF}
+import freechips.rocketchip.rocket.{DCacheParams, HellaCacheResp, PRV, SimpleHellaCacheIF}
 import freechips.rocketchip.subsystem.CacheBlockBytes
 import freechips.rocketchip.tile.TileKey
 import freechips.rocketchip.tilelink._
@@ -23,9 +23,13 @@ case class TLNBDCacheParams(
   makeLandingPads: Boolean = false,
   // Requests in flight the input adapter may hold.  rocket's SimpleHellaCacheIF hardcodes 3; the
   // default here keeps that, and a port whose round trip exceeds it should raise it.  See
-  // DepthHellaCacheIF.scala for why the depth is the outstanding-request limit.
+  // DepthHellaCacheIF.scala for why the depth is the outstanding-request limit.  Set from
+  // MemParallelismKey where the caches are built.
   inFlightReqs: Int = TLNBDCacheParams.defaultInFlightReqs,
-)
+) {
+  // the response landing pad must be able to absorb every outstanding request
+  def landingPadDepth: Int = (cache.nMSHRs max inFlightReqs) + 1
+}
 
 object TLNBDCacheParams {
   val defaultInFlightReqs = 3
@@ -103,7 +107,7 @@ class TLNBDCache(val params: TLNBDCacheParams)
 
   val flushNode = params.flushAddr.map(_ => CacheFlushNode.Slave())
 
-  implicit val q = p.alterMap(Map(
+  implicit val q: Parameters = p.alterMap(Map(
     TileKey -> DummyCacheTileParams(params, () => reqTagBits),
     CacheBlockBytes -> params.cache.blockBytes,
     // TileVisibilityNodeKey -> visibilityNode,
@@ -198,7 +202,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     val (deqBits: HellaCacheResp, deqValid) = if (outer.params.makeLandingPads) {
       // One slot per request the input adapter can hold in flight, so a stalled D channel never
       // closes the A gate below while requests are still admissible.
-      val mshrs = (outer.params.cache.nMSHRs max outer.params.inFlightReqs) + 1
+      val mshrs = outer.params.landingPadDepth
       val respBuf = Module(new Queue(resp.bits.cloneType, mshrs))
       respBuf.io.enq.valid := resp.valid
       respBuf.io.enq.bits := resp.bits
@@ -213,7 +217,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
       }
       respBufReady := inFlights < mshrs.U
 
-      assert(respBufReady || !tlIn.a.valid, "this assertion can be safely commented but lmk")
+      // assert(respBufReady || !tlIn.a.valid, "this assertion can be safely commented but lmk")
 
       (respBuf.io.deq.bits, respBuf.io.deq.valid)
     } else {

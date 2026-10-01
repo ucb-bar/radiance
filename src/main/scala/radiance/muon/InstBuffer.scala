@@ -42,10 +42,10 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
   val pc = pcT
   val wid = widT
   val op = UInt(Isa.opcodeBits.W)
-  val rd = UInt(Isa.regBits.W)
-  val rs1 = UInt(Isa.regBits.W)
-  val rs2 = UInt(Isa.regBits.W)
-  val rs3 = UInt(Isa.regBits.W)
+  val rd = UInt(physRegBits.W)
+  val rs1 = UInt(physRegBits.W)
+  val rs2 = UInt(physRegBits.W)
+  val rs3 = UInt(physRegBits.W)
   val imm32 = UInt(32.W)
   val imm24 = UInt(24.W)
   val csrImm = UInt(Isa.csrImmBits.W)
@@ -89,7 +89,7 @@ class UOpFlattened(implicit p: Parameters) extends CoreBundle()(p) with HasUOpFi
   }
 }
 
-class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
+class InstBuffer(implicit p: Parameters) extends CoreModule()(p) with HasDebugContext {
   val idIO = IO(clusterCoreIdT) // only for debugging
 
   val io = IO(new Bundle {
@@ -139,8 +139,8 @@ class InstBuffer(implicit p: Parameters) extends CoreModule()(p) {
         acquiredToken := reserve.resp.bits.token
         acquiredTokenValid := true.B
 
-        printf(
-          cf"[IBUF clid=${idIO.clusterId} cid=${idIO.coreId}] warp ${wid} @ pc=0x${Hexadecimal(b.io.deq.bits.pc)} " +
+        debugf(
+          cf"[IBUF] warp ${wid} @ pc=0x${Hexadecimal(b.io.deq.bits.pc)} " +
           cf"acquired token 0x${Hexadecimal(reserve.resp.bits.token.asUInt)}\n"
         )
       }

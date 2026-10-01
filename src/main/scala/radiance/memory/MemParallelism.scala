@@ -43,8 +43,15 @@ import org.chipsalliance.cde.config.{Config, Field}
   * @param l0dMSHRs     L0d MSHRs
   * @param l1InFlight   requests the cluster L1 input adapter holds in flight
   * @param l1MSHRs      cluster L1 MSHRs
-  * @param coalInFlight coalesced requests one core can have outstanding: the coalescer's source
-  *                     ids and its response-queue depth, read by MuonTile. A power of two.
+  * @param coalSrcIds   coalesced requests one core can have outstanding on the TileLink side:
+  *                     the coalescer's source-id space. A power of two.
+  * @param coalRespDepth entries in the coalescer's response queue. Uncoalescing one 64-byte
+  *                     response puts an entry in every lane's queue, so this is the core's
+  *                     memory-level parallelism for coalesced traffic. At 2 a fully occupied core
+  *                     sustained 1.7 loads in flight and retired one every 69 cycles whatever the
+  *                     working set (runs/mlp2_*, runs/ms_fix_v2). Affordable at 8 since Fix 13
+  *                     narrowed an entry from 521 bits to 41. Distinct from coalSrcIds: the source
+  *                     space bounds what TileLink can track, this bounds what the core can absorb.
   */
 case class MemParallelismParams(
   l0iInFlight: Int = 8,
@@ -52,9 +59,10 @@ case class MemParallelismParams(
   l0dMSHRs: Int = 4,
   l1InFlight: Int = 3,
   l1MSHRs: Int = 8,
-  coalInFlight: Int = 8,
+  coalSrcIds: Int = 8,
+  coalRespDepth: Int = 8,
 ) {
-  require(isPow2(coalInFlight), s"coalInFlight must be a power of two, got $coalInFlight")
+  require(isPow2(coalSrcIds), s"coalSrcIds must be a power of two, got $coalSrcIds")
 }
 
 case object MemParallelismKey extends Field[MemParallelismParams](MemParallelismParams())
@@ -66,7 +74,8 @@ class WithMemParallelism(
   l0dMSHRs: Option[Int] = None,
   l1InFlight: Option[Int] = None,
   l1MSHRs: Option[Int] = None,
-  coalInFlight: Option[Int] = None,
+  coalSrcIds: Option[Int] = None,
+  coalRespDepth: Option[Int] = None,
 ) extends Config((site, here, up) => {
   case MemParallelismKey => {
     val prev = up(MemParallelismKey)
@@ -76,6 +85,7 @@ class WithMemParallelism(
       l0dMSHRs = l0dMSHRs.getOrElse(prev.l0dMSHRs),
       l1InFlight = l1InFlight.getOrElse(prev.l1InFlight),
       l1MSHRs = l1MSHRs.getOrElse(prev.l1MSHRs),
-      coalInFlight = coalInFlight.getOrElse(prev.coalInFlight))
+      coalSrcIds = coalSrcIds.getOrElse(prev.coalSrcIds),
+      coalRespDepth = coalRespDepth.getOrElse(prev.coalRespDepth))
   }
 })
