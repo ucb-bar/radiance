@@ -36,9 +36,18 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.util._
 
-/** rocket's SimpleHellaCacheIFReplayQueue, with `depth` meaning "requests in flight". */
-class DepthHellaCacheIFReplayQueue(depth: Int)(implicit val p: Parameters)
-    extends Module with HasL1HellaCacheParameters {
+/** rocket's SimpleHellaCacheIFReplayQueue, with `depth` meaning "requests in flight".
+  *
+  * `nackSet` selects what a pending nack blocks.  None keeps rocket's rule: no new request enters
+  * while any nack waits for its replay, so one nack stalls the whole port until its replay completes,
+  * and replays retry until the conflicting miss is gone.  Some((idxLo, idxBits)) blocks only a new
+  * request whose cache set index, addr(idxLo + idxBits - 1, idxLo), equals that of a pending nack.
+  * Same set is a superset of same address, so a later access still cannot pass a nacked one to the
+  * same address; requests to other sets proceed.  Requests already in the pipeline behind a nack need
+  * nothing here, because the cache nacks s1 whenever s2 nacks.
+  */
+class DepthHellaCacheIFReplayQueue(depth: Int, nackSet: Option[(Int, Int)] = None)
+    (implicit val p: Parameters) extends Module with HasL1HellaCacheParameters {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new HellaCacheReq))
     val nack = Flipped(Valid(Bits(coreParams.dcacheReqTagBits.W)))
@@ -60,13 +69,27 @@ class DepthHellaCacheIFReplayQueue(depth: Int)(implicit val p: Parameters)
 
   io.replay.valid := nackq.io.deq.valid && !replaying
   io.replay.bits := next_replay_req
-  io.req.ready := !inflight.andR && !nackq.io.deq.valid && !io.nack.valid
-
   val nack_onehot = Cat(reqs.map(_.tag === io.nack.bits).reverse) & inflight
   val resp_onehot = Cat(reqs.map(_.tag === io.resp.bits.tag).reverse) & inflight
 
   val replay_complete = io.resp.valid && replaying && io.resp.bits.tag === next_replay_req.tag
   val nack_head = io.nack.valid && nackq.io.deq.valid && io.nack.bits === next_replay_req.tag
+
+  io.req.ready := !inflight.andR && (nackSet match {
+    case None => !nackq.io.deq.valid && !io.nack.valid
+    case Some((idxLo, idxBits)) =>
+      def setOf(addr: UInt): UInt = addr(idxLo + idxBits - 1, idxLo)
+      // entries whose latest attempt was nacked and whose replay has not yet completed
+      val nacked = RegInit(0.U(depth.W))
+      val nackNow = Mux(io.nack.valid, nack_onehot, 0.U)
+      val replayDone = Mux(replay_complete, UIntToOH(next_replay, depth), 0.U)
+      nacked := (nacked | nackNow) & ~replayDone
+      val inSet = setOf(io.req.bits.addr)
+      val conflict = ((nacked | nackNow).asBools zip reqs).map { case (n, r) =>
+        n && setOf(r.addr) === inSet }.reduce(_ || _)
+      assert(nacked === 0.U || nackq.io.deq.valid, "DepthHellaCacheIF: nacked entry with empty nackq")
+      !conflict
+  })
 
   nackq.io.enq.valid := io.nack.valid && !nack_head
   nackq.io.enq.bits := OHToUInt(nack_onehot)
@@ -87,14 +110,15 @@ class DepthHellaCacheIFReplayQueue(depth: Int)(implicit val p: Parameters)
 }
 
 /** rocket's SimpleHellaCacheIF, with the in-flight buffer depth exposed. */
-class DepthHellaCacheIF(depth: Int)(implicit p: Parameters) extends Module {
+class DepthHellaCacheIF(depth: Int, nackSet: Option[(Int, Int)] = None)(implicit p: Parameters)
+    extends Module {
   val io = IO(new Bundle {
     val requestor = Flipped(new HellaCacheIO())
     val cache = new HellaCacheIO
   })
   io <> DontCare
 
-  val replayq = Module(new DepthHellaCacheIFReplayQueue(depth))
+  val replayq = Module(new DepthHellaCacheIFReplayQueue(depth, nackSet))
   val req_arb = Module(new Arbiter(new HellaCacheReq, 2))
 
   val req_helper = DecoupledHelper(

@@ -316,6 +316,7 @@ class MuonTile(
         cache = l0dParams,
         flushAddr = Some(muonParams.peripheralAddr + 0x100),
         inFlightReqs = p(MemParallelismKey).l0dInFlight,
+        nackBlocksSetOnly = true,
       )))
       l0d.flushNode.get := dFlushMaster
       (l0d.outNode, l0d.inNode, l0d.flushRegNode)

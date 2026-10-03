@@ -26,6 +26,9 @@ case class TLNBDCacheParams(
   // DepthHellaCacheIF.scala for why the depth is the outstanding-request limit.  Set from
   // MemParallelismKey where the caches are built.
   inFlightReqs: Int = TLNBDCacheParams.defaultInFlightReqs,
+  // A pending nack blocks only new requests to the nacked cache set, instead of every new request.
+  // See DepthHellaCacheIFReplayQueue for the ordering argument.
+  nackBlocksSetOnly: Boolean = false,
 ) {
   // the response landing pad must be able to absorb every outstanding request
   def landingPadDepth: Int = (cache.nMSHRs max inFlightReqs) + 1
@@ -123,7 +126,9 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   with MemoryOpConstants {
 
   val (tlIn, _) = outer.inNode.in.head
-  val inIF = Module(new DepthHellaCacheIF(outer.params.inFlightReqs))
+  val inIF = Module(new DepthHellaCacheIF(outer.params.inFlightReqs,
+    Option.when(outer.params.nackBlocksSetOnly)(
+      (log2Ceil(outer.params.cache.blockBytes), log2Ceil(outer.params.cache.nSets)))))
 
 //  assert(!tlIn.a.valid || (tlIn.a.bits.size === log2Ceil(outer.beatBytes).U),
 //    "only cache line size accesses supported")
