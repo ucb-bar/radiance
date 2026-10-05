@@ -52,6 +52,11 @@ import org.chipsalliance.cde.config.{Config, Field}
   *                     working set (runs/mlp2_*, runs/ms_fix_v2). Affordable at 8 since Fix 13
   *                     narrowed an entry from 521 bits to 41. Distinct from coalSrcIds: the source
   *                     space bounds what TileLink can track, this bounds what the core can absorb.
+  * @param l0dReorderDepth requests the L0d-to-L1 ResponseFIFOFixer can hold in flight; A waits
+  *                     while all are taken. Indexed by source id instead, that fixer needed one
+  *                     277-bit entry for each of 64 ids per core, while its measured peak occupancy
+  *                     on core 0 is 5 to 6 at the default adapter depths and 15 to 16 with
+  *                     l0dInFlight or l0dMSHRs raised to 8 (memstress sat_8K_w8, loop_w8_long).
   */
 case class MemParallelismParams(
   l0iInFlight: Int = 8,
@@ -61,6 +66,7 @@ case class MemParallelismParams(
   l1MSHRs: Int = 8,
   coalSrcIds: Int = 8,
   coalRespDepth: Int = 8,
+  l0dReorderDepth: Int = 16,
 ) {
   require(isPow2(coalSrcIds), s"coalSrcIds must be a power of two, got $coalSrcIds")
 }
@@ -76,6 +82,7 @@ class WithMemParallelism(
   l1MSHRs: Option[Int] = None,
   coalSrcIds: Option[Int] = None,
   coalRespDepth: Option[Int] = None,
+  l0dReorderDepth: Option[Int] = None,
 ) extends Config((site, here, up) => {
   case MemParallelismKey => {
     val prev = up(MemParallelismKey)
@@ -86,6 +93,7 @@ class WithMemParallelism(
       l1InFlight = l1InFlight.getOrElse(prev.l1InFlight),
       l1MSHRs = l1MSHRs.getOrElse(prev.l1MSHRs),
       coalSrcIds = coalSrcIds.getOrElse(prev.coalSrcIds),
-      coalRespDepth = coalRespDepth.getOrElse(prev.coalRespDepth))
+      coalRespDepth = coalRespDepth.getOrElse(prev.coalRespDepth),
+      l0dReorderDepth = l0dReorderDepth.getOrElse(prev.l0dReorderDepth))
   }
 })

@@ -349,7 +349,7 @@ class MuonTile(
     )))
 
     dcacheNode :=
-      ResponseFIFOFixer() :=
+      ResponseFIFOFixer.bounded(p(MemParallelismKey).l0dReorderDepth) :=
       TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
       TLWidthWidget(coalescedReqWidth) :=
       l0dOut
