@@ -38,6 +38,7 @@ class LSUPipe(implicit p: Parameters) extends ExPipe(writebackReg = true, writeb
 
     flushIO.globalQueuesEmpty := lsu.io.globalQueuesEmpty
     flushIO.sharedQueuesEmpty := lsu.io.sharedQueuesEmpty
+    flushIO.warpSharedQueuesEmpty := lsu.io.warpSharedQueuesEmpty
 
     lsu.io.coreReservations <> reserveIO
 
