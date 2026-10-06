@@ -63,35 +63,31 @@ class CollectorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyModu
     require(ins.length == numManagers)
 
     // A
+    // The lanes are independent TileLink clients: a lane whose path is busy with another warp's
+    // access presents its part of a collected write a cycle or more after the others.  Fire only
+    // when every lane is valid (ready depends on valid, never the reverse), so a late lane is
+    // neither dropped from this write nor merged into the next one.
+    val allValid = VecInit(ins.map(_.a.valid)).asUInt.andR
     ins.zipWithIndex.foreach { case (x, i) =>
-      // lane d valid only if self valid and all other lanes ready
-      // this is because out.d fires only if all lanes are ready, but we cannot
-      // combinationally couple ready -> valid for a given lane
-      x.d.valid := out.d.valid &&
-        VecInit(ins.filter(_ != x).map(_.d.ready)).asUInt.andR
-
-      x.d.bits := out.d.bits // inEdges.head.AccessAck(x.a.bits)
-      x.a.ready := out.a.ready
-
-      // these two assertions may not be necessary due to masking, disable if causing trouble
-      assert(x.a.valid === head.a.valid, "non-full access")
-      assert(x.a.fire === head.a.fire)
+      x.a.ready := out.a.ready && allValid
 
       assert(!x.a.valid || x.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData))
       assert(!x.a.valid || (x.a.bits.size === log2Ceil(from).U), s"collected write size should be $from bytes")
-      assert(!x.a.valid || (x.a.bits.address === head.a.bits.address + (i * from).U),
+      assert(!allValid || (x.a.bits.address === head.a.bits.address + (i * from).U),
         "unexpected address strides")
+      // all lanes of one store use the same source id; the head lane's id answers every lane
+      assert(!allValid || (x.a.bits.source === head.a.bits.source), "collector: lane source ids differ")
     }
-    assert(!head.a.valid || !(head.a.bits.address & (to - 1).U).orR,
+    assert(!allValid || !(head.a.bits.address & (to - 1).U).orR,
       "head address unaligned")
 
-    out.a.valid := head.a.valid
+    out.a.valid := allValid
     out.a.bits := outEdge.Put(
       fromSource = head.a.bits.source,
       toAddress = head.a.bits.address,
       lgSize = log2Ceil(to).U,
       data = VecInit(ins.map(_.a.bits.data)).asUInt,
-      mask = VecInit(ins.map(_.a.valid)).asUInt,
+      mask = VecInit(ins.map(_.a.bits.mask)).asUInt,
     )._2
     // out.a.bits.data := VecInit(ins.map(_.a.bits.data)).asTypeOf(UInt((to * 8).W))
 
@@ -114,6 +110,7 @@ class CollectorNode(from: Int, to: Int)(implicit p: Parameters) extends LazyModu
     (ins zip pendingDResp).foreach { case (in, pending) =>
       in.d.valid := Mux(partialMode, pending, out.d.valid)
       in.d.bits := Mux(partialMode, storedDResp, out.d.bits)
+      in.d.bits.size := log2Ceil(from).U   // the lane's own request size, not the collected size
     }
     // take a new D resp when there's nothing pending
     out.d.ready := pendingDResp.asUInt === 0.U
