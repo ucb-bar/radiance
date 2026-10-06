@@ -125,9 +125,29 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
   decomposer.get.io.in.bits.data(1) := io.req.bits.rs2Data.get
   decomposer.get.io.in.bits.data(2) := io.req.bits.rs3Data.getOrElse(VecInit(Seq.fill(numLanes)(0.U(archLen.W))))
   decomposer.get.io.in.bits.data(3) := VecInit(io.req.bits.uop.tmask.asBools)
-  decomposer.get.io.out.ready := cvFPUIF.req.ready
+  // M2: CVFPU op groups (ADDMUL, DIVSQRT, NONCOMP, CONV) have different latencies and share one
+  // output arbiter, so packets of ops from different groups can come back interleaved.  The
+  // recomposer pairs consecutive packets and the response rd is the last packet's rd: an
+  // interleaved fmul.s / fcvt.h.s pair came back as two halves glued together under the fcvt's
+  // rd, and the fmul's rd was never written (warp hung on the scoreboard).  Only issue packets of
+  // one op group at a time per multi-packet pipe; responses of one group return in order.
+  def opGroup(op: FPUOp.Type): UInt = {
+    val o = op.asUInt(4, 1)
+    Mux(o < 4.U, 0.U(2.W), Mux(o < 6.U, 1.U(2.W), Mux(o < 10.U, 2.U(2.W), 3.U(2.W))))
+  }
+  val groupBlock = WireDefault(false.B)
+  if (numFP16Lanes > outLanes) {
+    val inflight = RegInit(0.U(4.W))
+    val inflightGroup = RegInit(0.U(2.W))
+    val respMine = cvFPUIF.resp.fire && respIsMine
+    inflight := inflight + cvFPUIF.req.fire.asUInt - respMine.asUInt
+    when (cvFPUIF.req.fire) { inflightGroup := opGroup(cvFPUReq.op) }
+    groupBlock := inflight =/= 0.U && opGroup(cvFPUReq.op) =/= inflightGroup
+    assert(!(cvFPUIF.req.fire && inflight.andR), "FPPipe: in-flight packet counter overflow")
+  }
+  decomposer.get.io.out.ready := cvFPUIF.req.ready && !groupBlock
 
-  cvFPUIF.req.valid := decomposer.get.io.out.valid
+  cvFPUIF.req.valid := decomposer.get.io.out.valid && !groupBlock
   cvFPUIF.req.bits.roundingMode := Mux(cvFPUReq.roundingMode === FPRoundingMode.DYN,
                                        fCSRIO.regData(7,5).asTypeOf(FPRoundingMode()),
                                        cvFPUReq.roundingMode)
@@ -135,8 +155,15 @@ class FPPipeBase(fmt: FPFormat.Type, isDivSqrt: Boolean = false, outLanes: Int)
   cvFPUIF.req.bits.srcFormat := cvFPUReq.srcFmt
   cvFPUIF.req.bits.dstFormat := cvFPUReq.dstFmt
   cvFPUIF.req.bits.intFormat := IntFormat.INT32
+  // Per-request flag carried in the tag (spare tmask bit, FP32 pipes only): the response must be
+  // formatted by the op that produced it, not by whichever op this pipe accepted last (CVFPU keeps
+  // several ops in flight).
+  val sendCvtFlag = WireDefault(false.B)
+  val tagPadBits = numFP16Lanes - outLanes
+  val tagPad = if (tagPadBits > 0) Cat(sendCvtFlag, 0.U((tagPadBits - 1).W)) else 0.U(0.W)
+  def respCvtFlag: Bool = cvFPUIF.resp.bits.tag(cvFPUTagBits(numFP16Lanes) - 2)
   cvFPUIF.req.bits.tag := Cat(isFP16,
-                              0.U((numFP16Lanes - outLanes).W), decomposer.get.io.out.bits.data(3).asUInt,
+                              tagPad, decomposer.get.io.out.bits.data(3).asUInt,
                               Mux(io.req.fire, inst(Rd), reqRd))
   cvFPUIF.req.bits.operands(0) := Mux(shiftOperands, 0.U, operands(0).asUInt)
   cvFPUIF.req.bits.operands(1) := Mux(shiftOperands, operands(0).asUInt, operands(1).asUInt)
@@ -169,8 +196,12 @@ class FP32Pipe(isDivSqrt: Boolean)(implicit p: Parameters)
   cvFPUIF.req.bits.simdMask := expandedLaneMask
 
   //dumb hack for cvfpu fp16 conversion
-  val respIsFP16Cvt = (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
-                       cvFPUReq.dstFmt === FPFormat.BF16
+  require(tagPadBits > 0, "FP32Pipe needs a spare tag bit for the fp16-conversion flag")
+  sendCvtFlag := (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
+                 cvFPUReq.dstFmt === FPFormat.BF16
+  // M1: this used cvFPUReq (the op accepted LAST), so an fmul.s still in CVFPU when an fcvt.h.s was
+  // accepted came back boxed as a half (garbage / NaN in the high bf16 of FA's O stores)
+  val respIsFP16Cvt = respCvtFlag
   recomposer.get.io.in.bits.data(0) := Mux(respIsFP16Cvt,
     signExtFP16cvFPURes.asTypeOf(recomposer.get.io.in.bits.data(0)),
     cvFPUIF.resp.bits.result.asTypeOf(recomposer.get.io.in.bits.data(0))
