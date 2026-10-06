@@ -744,11 +744,14 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) with HasDeb
     // arbitrate memory requests between queues. note that load queue / store queue of a given warp can never
     // both be trying to issue a request on same cycle
     
-    // current arbitration: shared > global, then loads > stores, then lower warpId > higher warpId
-    // TODO: better arbitration scheme?
+    // Round-robin over all queues.  The fixed-priority arbiter this replaces (shared > global, loads >
+    // stores, lower warpId > higher warpId) let the low warps run ahead under contention and the high
+    // warps finish last.  Measured together with round-robin reservation below, eight warps per core,
+    // L1-resident 8 KiB working set (memstress sat_8K_w8), six simulator seeds: slowest warp
+    // 14560-14794 -> 6982-7240 cycles.
     val nGlobalReqs = muonParams.numWarps * 2 // 1 global load queue, 1 global store queue per warp 
     val nShmemReqs = muonParams.numWarps * 2
-    val memReqArbiter = Module(new Arbiter(new LSQReq, nGlobalReqs + nShmemReqs))
+    val memReqArbiter = Module(new RRArbiter(new LSQReq, nGlobalReqs + nShmemReqs))
 
     io.sendMemRequest.req :<>= memReqArbiter.io.out
 
@@ -1127,7 +1130,19 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasLoad
 
     val coreReservationValids = Cat(io.coreReservations.map(r => r.req.valid).reverse)
     val queueReservationReadys = Cat(loadStoreQueues.io.queueReservations.map(r => r.req.ready).reverse)
-    val reservationFireOH = PriorityEncoderOH(coreReservationValids & queueReservationReadys)
+    // Round-robin over warps, starting after the warp that reserved last.  One reservation is granted
+    // per cycle, and in a load-dense loop that port is close to saturated; a fixed lowest-warp-first
+    // grant then makes the highest warps lose most cycles and finish last.  The pointer has a reset
+    // value so the arbitration order does not depend on random register initialization.
+    val reservationCandidates = coreReservationValids & queueReservationReadys
+    val lastReservedWarp = RegInit(0.U(log2Ceil(muonParams.numWarps).W))
+    val aboveLast = ~((UIntToOH(lastReservedWarp, muonParams.numWarps) << 1) - 1.U)(muonParams.numWarps - 1, 0)
+    val candidatesAbove = reservationCandidates & aboveLast
+    val reservationFireOH = Mux(candidatesAbove.orR, PriorityEncoderOH(candidatesAbove),
+                                PriorityEncoderOH(reservationCandidates))
+    when (io.coreReservations.map(_.req.fire).reduce(_ || _)) {
+      lastReservedWarp := OHToUInt(reservationFireOH)
+    }
     
     for (warp <- 0 until muonParams.numWarps) {
         val queueReservation = loadStoreQueues.io.queueReservations(warp)
