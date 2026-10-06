@@ -182,7 +182,10 @@ class SFUPipe(implicit p: Parameters) extends ExPipe(true, true) {
   val fences_smem = Seq.tabulate(m.numWarps) { wid =>
     new StallFields(
       start = WireInit(io.req.fire && (wid.U === io.req.bits.uop.wid) && inst.b(IsFenceS)),
-      done = (_: UInt) => fenceIO.sharedQueuesEmpty,
+      // M3: this warp's shared queues only.  The core-wide flag never settles while another warp
+      // polls SMEM, so a fence.s next to a polling warp starved forever (FA v3: re-tile warp 7 in
+      // fence.s, warps 1/3/5 polling O that only arrives after warp 7 passes its barrier).
+      done = (_: UInt) => fenceIO.warpSharedQueuesEmpty(wid),
       reqT = UInt(0.W)
     )
   }

@@ -315,6 +315,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) with HasDeb
         // used to flush LSU
         val sharedQueuesEmpty = Output(Bool())
         val globalQueuesEmpty = Output(Bool())
+        val warpSharedQueuesEmpty = Output(Vec(muonParams.numWarps, Bool()))
     })
 
     // helper functions for circular fifo indices
@@ -657,6 +658,7 @@ class LoadStoreQueue(implicit p: Parameters) extends CoreModule()(p) with HasDeb
     val perWarpGlobalStoreQueueEmpty = Wire(Vec(muonParams.numWarps, Bool()))
 
     io.sharedQueuesEmpty := perWarpSharedLoadQueueEmpty.andR && perWarpSharedStoreQueueEmpty.andR
+    io.warpSharedQueuesEmpty := VecInit(perWarpSharedLoadQueueEmpty.zip(perWarpSharedStoreQueueEmpty).map { case (l, s) => l && s })
     io.globalQueuesEmpty := perWarpGlobalLoadQueueEmpty.andR && perWarpGlobalStoreQueueEmpty.andR
 
     // instantiate queues
@@ -916,6 +918,7 @@ class LoadStoreUnitIO(implicit p: Parameters) extends CoreBundle()(p) {
 
     val sharedQueuesEmpty = Output(Bool())
     val globalQueuesEmpty = Output(Bool())
+    val warpSharedQueuesEmpty = Output(Vec(muonParams.numWarps, Bool()))
 }
 
 trait HasLoadStoreUnitIO extends HasDebugContext { this: CoreModule =>
@@ -988,6 +991,7 @@ class LoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) with HasLoad
     loadStoreQueues.idIO := idIO
 
     io.sharedQueuesEmpty := loadStoreQueues.io.sharedQueuesEmpty
+    io.warpSharedQueuesEmpty := loadStoreQueues.io.warpSharedQueuesEmpty
     io.globalQueuesEmpty := loadStoreQueues.io.globalQueuesEmpty
     dontTouch(io.sharedQueuesEmpty)
     dontTouch(io.globalQueuesEmpty)

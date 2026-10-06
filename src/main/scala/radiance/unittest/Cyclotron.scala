@@ -427,6 +427,7 @@ class CyclotronLoadStoreUnit(implicit p: Parameters) extends CoreModule()(p) wit
   dedupSourceId(rawShmemReq, rawShmemResp, io.shmemReq, io.shmemResp)
 
   io.sharedQueuesEmpty := bbox.io.sharedQueuesEmpty
+  io.warpSharedQueuesEmpty := VecInit(Seq.fill(muonParams.numWarps)(bbox.io.sharedQueuesEmpty))
   io.globalQueuesEmpty := bbox.io.globalQueuesEmpty
 
   private def connectMemReq(

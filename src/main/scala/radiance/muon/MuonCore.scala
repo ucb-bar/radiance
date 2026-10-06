@@ -241,6 +241,8 @@ trait HasCoreParameters {
   def lsuFenceIO = Output(new Bundle {
     val globalQueuesEmpty = Bool()
     val sharedQueuesEmpty = Bool()
+    // M3: per-warp shared-memory queue emptiness; fence.s waits only for its own warp's accesses
+    val warpSharedQueuesEmpty = Vec(m.numWarps, Bool())
   })
 
   def cacheFlushIO = new Bundle {
