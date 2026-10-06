@@ -262,7 +262,12 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
 
       assert(node.a.fire === node.d.fire)
 
-      in.valid := node.a.valid
+      // The requantizer must consume a beat only in the cycle its A fires.  With `in.valid :=
+      // node.a.valid` alone, a cycle with in.ready && !node.d.ready (the upstream collector still
+      // acknowledging its lanes) let the requantizer take the beat while the A stayed pending, so the
+      // same beat entered twice: the requantizer's half-beat toggle slipped and the next block went
+      // out with the previous beat's address (misaligned 32 B Put into SMEM, TLMonitor assert).
+      in.valid := node.a.valid && node.d.ready
       in.bits.dataType := RequantizerDataType.FP8
       in.bits.address := ((node.a.bits.address - q.baseAddr.U) >> 1).asTypeOf(in.bits.address) // hardcoded 16->8
       in.bits.data := node.a.bits.data.asTypeOf(in.bits.data)
@@ -338,8 +343,12 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
   }
 
   val loopStarted = Mux(cisc.startsLoop, 1.U, 0.U)
-  val mmioLoopStarted = Mux(regValid && (regCommand.funct === GemminiISA.LOOP_WS), 1.U, 0.U)
-  val runningLoops = RegInit(0.U(4.W))
+  // Count a LOOP_WS only when its INST write is accepted.  The regmap holds a stalled write valid
+  // for every cycle the command queue is full, so counting `regValid` alone over-counts, and the
+  // 4-bit counter then wrapped and tripped the assert below when a kernel ran ahead of gemmini.
+  val mmioLoopStarted = Mux(regValid && gemminiIO.ready && !cisc.ciscValid &&
+    (regCommand.funct === GemminiISA.LOOP_WS), 1.U, 0.U)
+  val runningLoops = RegInit(0.U(8.W))
   val completionCount = PopCount(outer.gemmini.module.completion_io.completed)
   runningLoops := runningLoops + loopStarted + mmioLoopStarted - completionCount
   assert(runningLoops + loopStarted + mmioLoopStarted >= completionCount)
