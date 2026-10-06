@@ -72,3 +72,13 @@ class RadianceHBMConfig extends Config(
   new WithSerialTLSinkBits(9) ++
   new RadianceTapeoutSimConfig
 )
+
+/** RadianceHBMConfig with one GPU cluster (SM) instead of two: the same split L2 and 5 DRAM
+  * channels on top of RadianceSingleClusterTapeoutSimConfig. */
+class RadianceSingleSMHBMConfig extends Config(
+  new WithRadianceRegionMemPunchthrough ++
+  new WithRadianceRegionMem ++
+  new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
+  new WithSerialTLSinkBits(9) ++
+  new RadianceSingleClusterTapeoutSimConfig
+)
