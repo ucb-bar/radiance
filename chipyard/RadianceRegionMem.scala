@@ -64,8 +64,11 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
 
 /** Split L2 (option 2b of docs/l2-topology-options.md): one 256 KiB host slice over
   * 0x8000_0000..0x1_0000_0000 and four 64 KiB GPU slices over 512 MiB each of
-  * 0x1_0000_0000..0x1_8000_0000, each slice with its own DRAM channel (5 channels). */
+  * 0x1_0000_0000..0x1_8000_0000, each slice with its own DRAM channel (5 channels). GPU memory is
+  * hashed over the GPU slices at 32 B granularity (WithGPUAddressHash), so +loadmem, which writes
+  * DRAM unhashed, does not work on this config; load through TSI (RadianceHBMTSIConfig). */
 class RadianceHBMConfig extends Config(
+  new radiance.subsystem.WithGPUAddressHash ++
   new WithRadianceRegionMemPunchthrough ++
   new WithRadianceRegionMem ++
   new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
@@ -73,12 +76,12 @@ class RadianceHBMConfig extends Config(
   new RadianceTapeoutSimConfig
 )
 
-/** RadianceHBMConfig with one GPU cluster (SM) instead of two: the same split L2 and 5 DRAM
-  * channels on top of RadianceSingleClusterTapeoutSimConfig. */
-class RadianceSingleSMHBMConfig extends Config(
-  new WithRadianceRegionMemPunchthrough ++
-  new WithRadianceRegionMem ++
-  new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
-  new WithSerialTLSinkBits(9) ++
-  new RadianceSingleClusterTapeoutSimConfig
+/** RadianceHBMConfig for loading through TSI (no +loadmem): the GPU is held in reset at power-on,
+  * and the run releases it after fesvr has loaded the ELF by passing +init_write=0x41000000:0x0
+  * (fesvr performs init writes after the load, before starting hart 0). */
+class RadianceHBMTSIConfig extends Config(
+  new Config((site, here, up) => {
+    case radiance.subsystem.GPUResetKey => up(radiance.subsystem.GPUResetKey).map(_.copy(defaultReset = true))
+  }) ++
+  new RadianceHBMConfig
 )
