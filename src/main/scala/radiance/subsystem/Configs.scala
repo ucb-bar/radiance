@@ -474,10 +474,14 @@ object WithRadianceMxGemmini {
 // chipyard.MxE4M3SingleGemminiRocketConfig (GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig), with the
 // radiance fields of WithRadianceMxGemmini applied on top. What carries over from the rocket build
 // besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 32.
+// has_spad_requant: SPAD_REQUANT (funct 34) -- the requantizer reads a BF16 tile straight from the scratchpad (= cluster
+// SMEM) and writes the MX-FP8 codes back (flat or PV-operand tiled) plus its E8M0 scales (DRAM, and resident in act-scale
+// buffer 0), ordered by the reservation station, instead of a Muon warp pushing the tile through the requantizer window.
+// has_loop_retire_counter: MMIO 0x38 counts fully retired LOOP_WS, so a kernel can wait for one loop instead of a fence.
 class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
                                 tileSize: (Int, Int, Int))
   extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
-    GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig,
+    GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.copy(has_spad_requant = true, has_loop_retire_counter = true),
     None)
 
 class WithRadianceSharedMem(address: BigInt,

@@ -379,8 +379,14 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     0x30 -> Seq(RegField.w(32, gemminiCisc(_, _)))
   }.toSeq
 
+  // has_loop_retire_counter: number of LOOP_WS fully retired (computes done, stores landed), in issue order; a kernel
+  // polls it instead of BUSY to wait for one loop's results without draining the loops queued behind it
+  val gemminiRetireMMIO = outer.gemmini.module.retire_io.map { r =>
+    0x38 -> Seq(RegField.r(32, r.loops_retired))
+  }.toSeq
+
   outer.regNode.regmap(
-    (gemminiBaseMMIO ++ gemminiCiscMMIO):_*
+    (gemminiBaseMMIO ++ gemminiCiscMMIO ++ gemminiRetireMMIO):_*
   )
 
   // assert(!regValid || gemminiIO.ready)
