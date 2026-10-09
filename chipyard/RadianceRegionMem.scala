@@ -65,8 +65,10 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
 /** Split L2 (option 2b of docs/l2-topology-options.md): one 256 KiB host slice over
   * 0x8000_0000..0x1_0000_0000 and four 64 KiB GPU slices over 512 MiB each of
   * 0x1_0000_0000..0x1_8000_0000, each slice with its own DRAM channel (5 channels). GPU memory is
-  * hashed over the GPU slices at 32 B granularity (WithGPUAddressHash), so +loadmem, which writes
-  * DRAM unhashed, does not work on this config; load through TSI (RadianceHBMTSIConfig). */
+  * hashed over the GPU slices at 32 B granularity (WithGPUAddressHash). +loadmem writes DRAM
+  * directly, past the hash, so it needs a scrambled ELF: one whose GPU load segments are already
+  * in the hashed layout (radiance-kernels soc/scramble_gpu_elf.py, or make MU_ADDR_HASH=1).
+  * To load an unscrambled ELF, use TSI on RadianceHBMTSIConfig. */
 class RadianceHBMConfig extends Config(
   new radiance.subsystem.WithGPUAddressHash ++
   new WithRadianceRegionMemPunchthrough ++
