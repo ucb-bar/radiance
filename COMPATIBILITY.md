@@ -12,4 +12,5 @@ add a new row at the top.
 
 | Radiance (from) | Gemmini | radiance-kernels | Date | Notes |
 |---|---|---|---|---|
+| `01ddc7f` | `754def1` (branch `firesim-hbm`) | `8b06cfa` (branch `main`) | 2026-10-09 | `RadianceHBMConfig` uses the E4M3 MxGemmini (SPAD_REQUANT, loop retire counter): flash attention is `fa_mxfp8_sr`. MXFP4 kernels no longer run on `RadianceHBMConfig`. |
 | `83461e8` | `754def1` (branch `firesim-hbm`) | `38b3425` (branch `main`) | 2026-10-09 | Split host/GPU L2 and GPU address hash (`RadianceHBMConfig`). For `+loadmem` on `RadianceHBMConfig`, build kernels with `MU_ADDR_HASH=1`. |
