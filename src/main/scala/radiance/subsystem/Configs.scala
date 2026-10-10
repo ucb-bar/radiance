@@ -484,6 +484,15 @@ class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSiz
     GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.copy(has_spad_requant = true, has_loop_retire_counter = true),
     None)
 
+// Radiance MxGemmini with an MXFP4-only mesh: Gemmini's single-format preset GemminiMxFPConfigs.fp4OnlyMxFPConfig
+// (operand lanes MxFloat(2, 2, 2) with MxConfig.fp4Only: the PE elaborates only the FP4 decode and mode0), with the
+// radiance fields of WithRadianceMxGemmini applied on top. Like the default MX Gemmini, it keeps the QuantLut.
+class WithRadianceFP4MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
+                               tileSize: (Int, Int, Int))
+  extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
+    GemminiMxFPConfigs.fp4OnlyMxFPConfig,
+    Some(GemminiLUTConfig()))
+
 class WithRadianceSharedMem(address: BigInt,
                             size: Int,
                             numBanks: Int,

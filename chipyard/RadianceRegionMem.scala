@@ -113,6 +113,13 @@ class RadianceE4M3MxGemminiFourClusterHBMConfig extends Config(
   new RadianceE4M3MxGemminiFourClusterConfig
 )
 
+/** RadianceHBMConfig's memory system with an MXFP4-only Gemmini (WithRadianceFP4MxGemmini) in place of the E4M3
+  * one: for MXFP4 kernels. Loading is the same as on RadianceHBMConfig (+loadmem needs a scrambled ELF). */
+class RadianceFP4HBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceFP4MxGemminiTwoClusterConfig
+)
+
 /** RadianceHBMConfig for loading through TSI (no +loadmem): the GPU is held in reset at power-on,
   * and the run releases it after fesvr has loaded the ELF by passing +init_write=0x41000000:0x0
   * (fesvr performs init writes after the load, before starting hart 0). */
