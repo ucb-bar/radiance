@@ -68,14 +68,16 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
   * hashed over the GPU slices at 32 B granularity (WithGPUAddressHash). +loadmem writes DRAM
   * directly, past the hash, so it needs a scrambled ELF: one whose GPU load segments are already
   * in the hashed layout (radiance-kernels soc/scramble_gpu_elf.py, or make MU_ADDR_HASH=1).
-  * To load an unscrambled ELF, use TSI on RadianceHBMTSIConfig. */
+  * To load an unscrambled ELF, use TSI on RadianceHBMTSIConfig.
+  * Gemmini is the E4M3 MxGemmini (WithRadianceE4M3MxGemmini: E4M3 inputs only, no FP4; SPAD_REQUANT
+  * and the loop retire counter). */
 class RadianceHBMConfig extends Config(
   new radiance.subsystem.WithGPUAddressHash ++
   new WithRadianceRegionMemPunchthrough ++
   new WithRadianceRegionMem ++
   new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
   new WithSerialTLSinkBits(9) ++
-  new RadianceTapeoutSimConfig
+  new RadianceE4M3MxGemminiTwoClusterConfig
 )
 
 /** RadianceHBMConfig for loading through TSI (no +loadmem): the GPU is held in reset at power-on,
