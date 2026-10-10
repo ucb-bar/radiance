@@ -70,12 +70,45 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
   * in the hashed layout (radiance-kernels soc/scramble_gpu_elf.py, or make MU_ADDR_HASH=1).
   * To load an unscrambled ELF, use TSI on RadianceHBMTSIConfig. */
 class RadianceHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceTapeoutSimConfig
+)
+
+/** RadianceHBMConfig's memory system for any Radiance config with GPU memory at the top of ExtMem
+  * (WithExtGPUMem): split L2, one DRAM channel per slice, GPU memory hashed over the GPU slices.
+  * Loading is the same as on RadianceHBMConfig (+loadmem needs a scrambled ELF). */
+class WithRadianceHBM extends Config(
   new radiance.subsystem.WithGPUAddressHash ++
   new WithRadianceRegionMemPunchthrough ++
   new WithRadianceRegionMem ++
   new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
-  new WithSerialTLSinkBits(9) ++
-  new RadianceTapeoutSimConfig
+  new WithSerialTLSinkBits(9)
+)
+
+/** The E4M3-single MxGemmini cluster configs on RadianceHBMConfig's memory system. */
+class RadianceE4M3MxGemminiSingleClusterHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceE4M3MxGemminiSingleClusterConfig
+)
+
+class RadianceE4M3MxGemminiSingleClusterTraceHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceE4M3MxGemminiSingleClusterTraceConfig
+)
+
+class RadianceE4M3MxGemminiTwoClusterHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceE4M3MxGemminiTwoClusterConfig
+)
+
+class RadianceE4M3MxGemminiTwoClusterTraceHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceE4M3MxGemminiTwoClusterTraceConfig
+)
+
+class RadianceE4M3MxGemminiFourClusterHBMConfig extends Config(
+  new WithRadianceHBM ++
+  new RadianceE4M3MxGemminiFourClusterConfig
 )
 
 /** RadianceHBMConfig for loading through TSI (no +loadmem): the GPU is held in reset at power-on,
