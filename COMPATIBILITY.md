@@ -12,6 +12,7 @@ add a new row at the top.
 
 | Radiance (from) | Gemmini | radiance-kernels | Date | Notes |
 |---|---|---|---|---|
+| `7a1e80a` | `754def1` (branch `firesim-hbm`) | `82be2c7` (branch `main`) | 2026-10-11 | Coalescer: a lane that can coalesce waits for its coalesced request (all configs). `RadianceHBMConfig`: L0d 8 in flight / 8 MSHRs, cluster L1 32 / 32 (`f7a2bff`). Nightly regression 12/12 on `RadianceHBMConfig` and `RadianceFP4HBMConfig`. |
 | `d1cbf8b` | `754def1` (branch `firesim-hbm`) | `8b06cfa` (branch `main`) | 2026-10-09 | Adds `RadianceFP4HBMConfig` (`RadianceHBMConfig`'s memory system, MXFP4-only Gemmini): the config for MXFP4 kernels (`gemm_mx FMT=fp4`). |
 | `01ddc7f` | `754def1` (branch `firesim-hbm`) | `8b06cfa` (branch `main`) | 2026-10-09 | `RadianceHBMConfig` uses the E4M3 MxGemmini (SPAD_REQUANT, loop retire counter): flash attention is `fa_mxfp8_sr`. MXFP4 kernels no longer run on `RadianceHBMConfig`. |
 | `83461e8` | `754def1` (branch `firesim-hbm`) | `38b3425` (branch `main`) | 2026-10-09 | Split host/GPU L2 and GPU address hash (`RadianceHBMConfig`). For `+loadmem` on `RadianceHBMConfig`, build kernels with `MU_ADDR_HASH=1`. |
