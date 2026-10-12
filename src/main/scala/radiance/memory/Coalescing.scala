@@ -303,6 +303,8 @@ class Coalescer(config: CoalescerConfig) extends Module {
     val requests = Flipped(Vec(config.numLanes, Valid(new NonCoalescedRequest(config))))
     val coalReq = DecoupledIO(new CoalescedRequest(config))
     val consumed = Output(Vec(config.numLanes, Bool()))
+    // lanes whose request matches another valid lane's: they leave through a coalesced request
+    val coalescable = Output(Vec(config.numLanes, Bool()))
   })
 
   val size = config.coalLogSize
@@ -355,6 +357,7 @@ class Coalescer(config: CoalescerConfig) extends Module {
 
   // Consumed signal: only assert when coalescing actually happens (fires)
   io.consumed := VecInit(chosenMatches.asBools.map(_ && shouldCoalesce && io.coalReq.ready))
+  io.coalescable := VecInit(canCoalesce.map(_ && config.enable.B))
 
   if (!config.enable) {
     io.coalReq.valid := false.B
@@ -450,7 +453,12 @@ class CoalescingUnitImp(outer: CoalescingUnit, config: CoalescerConfig)
   // NO source ID remapping - use local IDs
   (outer.passthroughNodes.flatMap(_.out) zip reqBuffers).zipWithIndex.foreach {
     case (((tlOut, edgeOut), reqBuf), lane) =>
-      val shouldPassthrough = reqBuf.io.deq.valid && !coalescer.io.consumed(lane)
+      // A lane that can coalesce waits for its coalesced request.  Passing it through whenever the
+      // coalesced path is back-pressured (consumed = 0 for every lane) let one lane of each warp
+      // access leak out as its own 4 B request ahead of the other 15 lanes' 64 B request: two
+      // requests per access, each holding one of the L0d adapter's in-flight slots.
+      val shouldPassthrough = reqBuf.io.deq.valid && !coalescer.io.consumed(lane) &&
+        !coalescer.io.coalescable(lane)
       
       tlOut.a.valid := shouldPassthrough
       val (legal, tlBits) = reqBuf.io.deq.bits.toTLA(edgeOut)
