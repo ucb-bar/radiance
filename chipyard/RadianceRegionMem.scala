@@ -70,8 +70,13 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
   * in the hashed layout (radiance-kernels soc/scramble_gpu_elf.py, or make MU_ADDR_HASH=1).
   * To load an unscrambled ELF, use TSI on RadianceHBMTSIConfig.
   * Gemmini is the E4M3 MxGemmini (WithRadianceE4M3MxGemmini: E4M3 inputs only, no FP4; SPAD_REQUANT
-  * and the loop retire counter). */
+  * and the loop retire counter).
+  * The L0d holds 8 requests in flight with 8 MSHRs and the cluster L1 32 with 32 (defaults 3 / 4 and
+  * 3 / 8). At the defaults these depths limit GPU memory bandwidth before the L2 does: a small
+  * rmsnorm on 1 SM takes 202k cycles at the defaults and 120k here. */
 class RadianceHBMConfig extends Config(
+  new radiance.memory.WithMemParallelism(l0dInFlight = Some(8), l0dMSHRs = Some(8),
+    l1InFlight = Some(32), l1MSHRs = Some(32)) ++
   new WithRadianceHBM ++
   new RadianceE4M3MxGemminiTwoClusterConfig
 )
