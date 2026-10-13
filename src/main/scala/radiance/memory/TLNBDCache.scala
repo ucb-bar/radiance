@@ -257,6 +257,9 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
   // ================
   val cacheIO = outer.nbdCache.module.io
 
+  val releaseMask = IO(Output(UInt(outer.beatBytes.W)))
+  releaseMask := outer.nbdCache.module.release_mask
+
   cacheIO.cpu <> inIF.io.cache
   
   inIF.io.cache.resp := cacheIO.cpu.resp
