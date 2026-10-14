@@ -516,6 +516,25 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   wb.io.data_resp := s2_data_corrected
   TLArbiter.lowest(edge, tl_out.c, wb.io.release, prober.io.rep)
 
+  // per-byte dirty mask: releases write back only the bytes this cache stored
+  val release_mask = IO(Output(UInt(cacheBlockBytes.W)))
+  val dirty_mask = Mem(nSets * nWays, UInt(cacheBlockBytes.W))
+  def dirtyIdx(idx: UInt, way_en: UInt): UInt =
+    if (nWays == 1) idx(idxBits - 1, 0) else Cat(idx(idxBits - 1, 0), OHToUInt(way_en))
+  def lineMask(addr: UInt, mask: UInt): UInt =
+    if (blockOffBits > wordOffBits) (mask << (addr(blockOffBits - 1, wordOffBits) << log2Ceil(coreDataBytes)))(cacheBlockBytes - 1, 0)
+    else mask
+  when (writeArb.io.in(1).fire) {
+    dirty_mask(dirtyIdx(mshrs.io.refill.addr >> blockOffBits, mshrs.io.refill.way_en)) := 0.U
+  }
+  val s3_way_en = RegEnable(s2_tag_match_way, (s2_valid || s2_replay) && (isWrite(s2_req.cmd) || s2_data_correctable))
+  when (writeArb.io.in(0).fire) {
+    val i = dirtyIdx(s3_req.addr >> blockOffBits, s3_way_en)
+    dirty_mask(i) := dirty_mask(i) | lineMask(s3_req.addr, s3_req.mask)
+  }
+  val wb_dirty_idx = RegEnable(dirtyIdx(wb.io.req.bits.idx, wb.io.req.bits.way_en), wb.io.req.fire)
+  release_mask := dirty_mask(wb_dirty_idx)
+
   // store->load bypassing
   val s4_valid = RegNext(s3_valid, false.B)
   val s4_req = RegEnable(s3_req, s3_valid && metaReadArb.io.out.valid)
