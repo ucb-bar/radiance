@@ -115,7 +115,9 @@ class WithMuonCores(
       numPhysRegs = resolvedNumPhysRegs,
       numArchRegs = (resolvedNumPhysRegs / 2).min(128),
       numCores = n,
-      numClusters = 2, // TODO: magic number
+      // Cluster IDs are global (mhartid, the cluster ID CSR), so size them for the highest cluster
+      // in the system. At least 2, the old fixed value, so 1- and 2-cluster configs are unchanged.
+      numClusters = (site(ClustersLocated(InSubsystem)).map(_.clusterParams.clusterId + 1) :+ 2).max,
       noILP = noILP,
       numIssueQueueEntries = numIssueQueueEntries,
       inOrderPerWarp = inOrderPerWarp,
