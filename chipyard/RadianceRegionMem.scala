@@ -43,16 +43,17 @@ class WithRadianceRegionMemPunchthrough extends OverrideLazyIOBinder({
   }
 })
 
-/** One DRAM channel per L2 slice, each owning the slice's contiguous region.
-  * Requires WithL2Slices; the regions are derived from the same mask, so the mapping is 1:1 by
-  * construction rather than by convention. */
+/** DRAM channels that each belong to one L2 slice. With WithRadianceSplitL2 they are the split L2's
+  * channels (SplitL2Params.channels: each slice's region in channelsPerSlice contiguous parts); with
+  * WithL2Slices, one channel per slice from the same mask. Either way the mapping comes from the
+  * slice description itself rather than from convention. */
 class WithRadianceRegionMem extends Config((site, here, up) => {
   case ExtMem => up(ExtMem).map(_.copy(nMemoryChannels = 0)) // silence rocket's interleaved ports
   case RadianceMemRegionsKey => {
     val ext = up(ExtMem).getOrElse(
       throw new Exception("WithRadianceRegionMem requires ExtMem"))
     // one channel per L2 slice, from the same description the slices are built from
-    val regions: Seq[AddressSet] = site(SplitL2Key).map(_.regions).getOrElse {
+    val regions: Seq[AddressSet] = site(SplitL2Key).map(_.channels).getOrElse {
       val slices = site(L2SlicesKey).getOrElse(throw new Exception(
         "WithRadianceRegionMem requires WithL2Slices or WithRadianceSplitL2; regions come from the slices"))
       RadianceMemRegions.fromMask(ext.master.base, ext.master.size, slices.mask)
@@ -62,7 +63,21 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
   case BuildSystem => (q: Parameters) => new RadianceDigitalTop()(q)
 })
 
-/** Split L2 (option 2b of docs/l2-topology-options.md): one 256 KiB host slice over
+/** 4 SMs (E4M3 MxGemmini clusters 0..3) on the split L2: one 256 KiB host slice over
+  * 0x8000_0000..0x1_0000_0000 with one DRAM channel, and eight 64 KiB GPU slices over 256 MiB each of
+  * 0x1_0000_0000..0x1_8000_0000 with two DRAM channels each (17 channels). GPU memory is hashed over
+  * the 16 GPU channels at 32 B granularity (WithGPUAddressHash; consecutive lines alternate slices,
+  * and a slice's second channel is offset by half its L2 sets). +loadmem needs an ELF scrambled with
+  * --slices 16 --channels-per-slice 2 --chan-set-stride 128.  The L0d and L1 depths are as on
+  * Radiance2SMHBMConfig. */
+class RadianceHBMConfig extends Config(
+  new radiance.memory.WithMemParallelism(l0dInFlight = Some(8), l0dMSHRs = Some(8),
+    l1InFlight = Some(32), l1MSHRs = Some(32)) ++
+  new WithRadianceHBM(gpuChannelsPerSlice = 2, gpuSlices = 8) ++
+  new RadianceE4M3MxGemminiFourClusterConfig
+)
+
+/** 2 SMs on the split L2 (option 2b of docs/l2-topology-options.md): one 256 KiB host slice over
   * 0x8000_0000..0x1_0000_0000 and four 64 KiB GPU slices over 512 MiB each of
   * 0x1_0000_0000..0x1_8000_0000, each slice with its own DRAM channel (5 channels). GPU memory is
   * hashed over the GPU slices at 32 B granularity (WithGPUAddressHash). +loadmem writes DRAM
@@ -74,7 +89,7 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
   * The L0d holds 8 requests in flight with 8 MSHRs and the cluster L1 32 with 32 (defaults 3 / 4 and
   * 3 / 8). At the defaults these depths limit GPU memory bandwidth before the L2 does: a small
   * rmsnorm on 1 SM takes 202k cycles at the defaults and 120k here. */
-class RadianceHBMConfig extends Config(
+class Radiance2SMHBMConfig extends Config(
   new radiance.memory.WithMemParallelism(l0dInFlight = Some(8), l0dMSHRs = Some(8),
     l1InFlight = Some(32), l1MSHRs = Some(32)) ++
   new WithRadianceHBM ++
@@ -82,17 +97,28 @@ class RadianceHBMConfig extends Config(
 )
 
 /** RadianceHBMConfig's memory system for any Radiance config with GPU memory at the top of ExtMem
-  * (WithExtGPUMem): split L2, one DRAM channel per slice, GPU memory hashed over the GPU slices.
-  * Loading is the same as on RadianceHBMConfig (+loadmem needs a scrambled ELF). */
-class WithRadianceHBM extends Config(
+  * (WithExtGPUMem): split L2, one DRAM channel for the host slice and gpuChannelsPerSlice for each
+  * GPU slice, GPU memory hashed over the GPU channels. Loading is the same as on RadianceHBMConfig
+  * (+loadmem needs an ELF scrambled for gpuSlices * gpuChannelsPerSlice parts). */
+class WithRadianceHBM(gpuChannelsPerSlice: Int = 1, gpuSlices: Int = 4) extends Config(
   new radiance.subsystem.WithGPUAddressHash ++
   new WithRadianceRegionMemPunchthrough ++
   new WithRadianceRegionMem ++
-  new WithRadianceSplitL2(hostKB = 256, gpuSlices = 4, gpuKBPerSlice = 64) ++
-  new WithSerialTLSinkBits(9)
+  new WithRadianceSplitL2(hostKB = 256, gpuSlices = gpuSlices, gpuKBPerSlice = 64,
+                          gpuChannelsPerSlice = gpuChannelsPerSlice) ++
+  // every L2 bank behind the split wrapper's inner crossbar gets 64 sinks: (1 host + gpuSlices) * 64
+  new WithSerialTLSinkBits(WithRadianceHBM.sinkBits(gpuSlices))
 )
 
-/** The E4M3-single MxGemmini cluster configs on RadianceHBMConfig's memory system. */
+object WithRadianceHBM {
+  def sinkBits(gpuSlices: Int): Int = {
+    val sinks = 64 * (1 + gpuSlices)
+    32 - Integer.numberOfLeadingZeros(sinks - 1)   // ceil(log2(sinks)): 4 slices -> 9, 8 -> 10
+  }
+}
+
+/** The E4M3-single MxGemmini cluster configs on Radiance2SMHBMConfig's memory system (4 GPU slices, one
+  * DRAM channel each). */
 class RadianceE4M3MxGemminiSingleClusterHBMConfig extends Config(
   new WithRadianceHBM ++
   new RadianceE4M3MxGemminiSingleClusterConfig
@@ -118,7 +144,7 @@ class RadianceE4M3MxGemminiFourClusterHBMConfig extends Config(
   new RadianceE4M3MxGemminiFourClusterConfig
 )
 
-/** RadianceHBMConfig's memory system with an MXFP4-only Gemmini (WithRadianceFP4MxGemmini) in place of the E4M3
+/** Radiance2SMHBMConfig's memory system with an MXFP4-only Gemmini (WithRadianceFP4MxGemmini) in place of the E4M3
   * one: for MXFP4 kernels. Loading is the same as on RadianceHBMConfig (+loadmem needs a scrambled ELF). */
 class RadianceFP4HBMConfig extends Config(
   new WithRadianceHBM ++
