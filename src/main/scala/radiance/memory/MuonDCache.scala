@@ -42,6 +42,12 @@ class MaskMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends MSHRFile {
   val replay_sdq_addr = RegEnable(replay_arb.io.out.bits.sdq_id, free_sdq)
   io.replay.bits.data := sdq(replay_sdq_addr)
   io.replay.bits.mask := sdqMask(replay_sdq_addr)
+
+  // Any MSHR (not only the meta_write arbiter's winner) with a metadata write pending for a set: the
+  // cache holds a probe of that set until the write fires (see prober.io.mshr_rdy).
+  val probeIdx = IO(Input(UInt(idxBits.W)))
+  val probeMetaPending = IO(Output(Bool()))
+  probeMetaPending := meta_write_arb.io.in.map(r => r.valid && r.bits.idx === probeIdx).reduce(_ || _)
 }
 
 // cache flush is started after all other operations cease
@@ -485,7 +491,17 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   prober.io.block_state := s2_hit_state
   metaReadArb.io.in(2) <> prober.io.meta_read
   metaWriteArb.io.in(1) <> prober.io.meta_write
-  prober.io.mshr_rdy := mshrs.io.probe_rdy
+  // A probe must not act on metadata an MSHR is about to change.  A store that hits a clean Trunk line
+  // allocates an MSHR that goes straight to s_meta_write_req to mark the line Dirty, and rocket's
+  // probe_rdy does not cover that state (only s_wb_req, s_wb_resp, s_meta_clear, and meta_hazard for
+  // the cycles after the write fires).  A prober that read the metadata before that write would answer
+  // ProbeAck without data and write the line to N, losing the store (seen: rmsnorm, 2 SM, one 32 B line).
+  // Hold the prober in s_mshr_req while any MSHR has a metadata write pending for the probe's set (each
+  // MSHR's own request, before the MSHR file's meta_write arbiter, which can show another set's MSHR
+  // instead); it then re-reads the metadata after the write (and its meta_hazard) and sees Dirty.
+  val probe_idx = prober.io.meta_write.bits.idx
+  mshrs.probeIdx := probe_idx
+  prober.io.mshr_rdy := mshrs.io.probe_rdy && !mshrs.probeMetaPending
 
   // refills
   val grant_has_data = edge.hasData(tl_out.d.bits)
@@ -567,10 +583,14 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   val s1_nack = dtlb.io.req.valid && dtlb.io.resp.miss || io.cpu.s2_nack || s1_tlb_req_valid ||
                 s1_req.addr(idxMSB,idxLSB) === prober.io.meta_write.bits.idx && !prober.io.req.ready
   val s2_nack_hit = RegEnable(s1_nack, s1_valid || s1_replay)
-  when (s2_nack_hit) { mshrs.io.req.valid := false.B }
+  // s1_nack catches a request in s1 while a probe of its set is in progress, but not one that was in
+  // s1 in the cycle the probe was accepted (prober.io.req.ready still high then): nack it in s2, so it
+  // allocates no MSHR and writes nothing while the probe works on its set.
+  val s2_probe_conflict = !prober.io.req.ready && s2_req.addr(idxMSB,idxLSB) === probe_idx
+  when (s2_nack_hit || s2_probe_conflict) { mshrs.io.req.valid := false.B }
   val s2_nack_victim = s2_hit && mshrs.io.secondary_miss
   val s2_nack_miss = !s2_hit && !mshrs.io.req.ready
-  val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss
+  val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_probe_conflict
   s2_valid_masked := s2_valid && !s2_nack && !io.cpu.s2_kill
 
   val s2_recycle_ecc = (s2_valid || s2_replay) && s2_hit && s2_data_correctable
