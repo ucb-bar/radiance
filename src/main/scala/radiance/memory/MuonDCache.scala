@@ -540,13 +540,15 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   def lineMask(addr: UInt, mask: UInt): UInt =
     if (blockOffBits > wordOffBits) (mask << (addr(blockOffBits - 1, wordOffBits) << log2Ceil(coreDataBytes)))(cacheBlockBytes - 1, 0)
     else mask
-  when (writeArb.io.in(1).fire) {
-    dirty_mask(dirtyIdx(mshrs.io.refill.addr >> blockOffBits, mshrs.io.refill.way_en)) := 0.U
-  }
+  // One write port: refill clears and store updates are inputs of the same writeArb, so they never fire
+  // together. With two write ports the mask cannot map to FPGA LUTRAM and becomes flip-flops plus wide
+  // read muxes (~16k FFs and ~25k LUTs in a 512-set L0i).
   val s3_way_en = RegEnable(s2_tag_match_way, (s2_valid || s2_replay) && (isWrite(s2_req.cmd) || s2_data_correctable))
-  when (writeArb.io.in(0).fire) {
-    val i = dirtyIdx(s3_req.addr >> blockOffBits, s3_way_en)
-    dirty_mask(i) := dirty_mask(i) | lineMask(s3_req.addr, s3_req.mask)
+  val dirty_refill = writeArb.io.in(1).fire
+  val dirty_store_idx = dirtyIdx(s3_req.addr >> blockOffBits, s3_way_en)
+  when (dirty_refill || writeArb.io.in(0).fire) {
+    dirty_mask(Mux(dirty_refill, dirtyIdx(mshrs.io.refill.addr >> blockOffBits, mshrs.io.refill.way_en), dirty_store_idx)) :=
+      Mux(dirty_refill, 0.U, dirty_mask(dirty_store_idx) | lineMask(s3_req.addr, s3_req.mask))
   }
   val wb_dirty_idx = RegEnable(dirtyIdx(wb.io.req.bits.idx, wb.io.req.bits.way_en), wb.io.req.fire)
   release_mask := dirty_mask(wb_dirty_idx)
