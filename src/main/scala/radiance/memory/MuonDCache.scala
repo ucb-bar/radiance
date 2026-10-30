@@ -33,7 +33,8 @@ import freechips.rocketchip.util._
  * set to 0, since it will be regenerated on use. we however must store the mask alongside
  * the data, which is the purpose of the MaskMSHRFile, and all the additional logic. */
 
-class MaskMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends MSHRFile {
+class MaskMSHRFile(multiMiss: Boolean = false)(implicit edge: TLEdgeOut, p: Parameters)
+    extends MuonMSHRFile(multiMiss) {
   val sdqMask = Mem(cfg.nSDQ, UInt(coreDataBytes.W))
   when (sdq_enq) {
     sdqMask(sdq_alloc_id) := io.req.bits.mask
@@ -48,6 +49,86 @@ class MaskMSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends MSHRFile {
   val probeIdx = IO(Input(UInt(idxBits.W)))
   val probeMetaPending = IO(Output(Bool()))
   probeMetaPending := meta_write_arb.io.in.map(r => r.valid && r.bits.idx === probeIdx).reduce(_ || _)
+
+  // The MSHR a primary miss allocates (valid with io.req.fire on a cacheable, non-idx-matching miss):
+  // its id is the TileLink source of that MSHR's Acquire, reused for its clean Release.
+  val allocId = IO(Output(UInt(log2Up(cfg.nMSHRs).W)))
+  allocId := alloc_arb.io.chosen
+
+  // Refill forwarding (MuonNonBlockingDCacheModule "refill forwarding"). The MSHR at the replay port, the
+  // MSHR a secondary miss joins, which MSHRs are idle, and a way to drain the replay at the port without a
+  // metadata read: rocket's MSHR holds its replay until its own meta_read is granted.
+  val replayId = IO(Output(UInt(log2Up(cfg.nMSHRs).W)))
+  replayId := replay_arb.io.chosen
+  val secondaryId = IO(Output(UInt(log2Up(cfg.nMSHRs).W)))
+  secondaryId := OHToUInt(if (multiMiss) lineMatch else idxMatch)
+  val mshrIdle = IO(Output(UInt(cfg.nMSHRs.W)))
+  mshrIdle := VecInit(mshrs.map(_.io.req_pri_rdy)).asUInt
+  val replayForward = IO(Input(Bool()))
+  val gateMetaRead = IO(Input(Bool()))
+  // Ways of the requested set (io.req.bits.addr) that a live MSHR is filling: its victim way
+  val reservedWays = IO(Output(UInt(nWays.W)))
+  reservedWays := mshrs.zipWithIndex.map { case (m, i) => Mux(idxMatch(i), m.io.refill.way_en, 0.U) }.reduce(_ | _)
+  mshrs.zipWithIndex.foreach { case (m, i) =>
+    m.io.meta_read.ready := meta_read_arb.io.in(i).ready || (replayForward && replay_arb.io.chosen === i.U)
+    // An MSHR in s_drain_rpq asks for a metadata read also in its last cycle, after its replay queue is
+    // empty; with gateMetaRead only an MSHR with a replay competes, so the two arbiters pick the same MSHR.
+    meta_read_arb.io.in(i).valid := m.io.meta_read.valid && (!gateMetaRead || m.io.replay.valid)
+  }
+}
+
+/** rocket's L1MetadataArray with a read port and a write port: a write no longer blocks a read in the same
+  * cycle. A read of the set and way being written returns the written value (write-first), so the pipeline
+  * sees the same metadata as with rocket's array, where the read would have waited one cycle. */
+class TwoPortL1MetadataArray[T <: L1Metadata](onReset: () => T)(implicit p: Parameters) extends L1HellaCacheModule()(p) {
+  val rstVal = onReset()
+  val io = IO(new Bundle {
+    val read = Flipped(Decoupled(new L1MetaReadReq))
+    val write = Flipped(Decoupled(new L1MetaWriteReq))
+    val resp = Output(Vec(nWays, rstVal.cloneType))
+  })
+
+  val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
+  val rst = rst_cnt < nSets.U
+  val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
+  val wdata = Mux(rst, rstVal, io.write.bits.data).asUInt
+  val wmask = Mux(rst || (nWays == 1).B, (-1).S, io.write.bits.way_en.asSInt).asBools
+  when (rst) { rst_cnt := rst_cnt+1.U }
+
+  val metabits = rstVal.getWidth
+  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(metabits.W)))
+  val wen = rst || io.write.valid
+  when (wen) {
+    tag_array.write(waddr, VecInit.fill(nWays)(wdata), wmask)
+  }
+  val raw = tag_array.read(io.read.bits.idx, io.read.fire)
+  val bypass = RegNext(io.read.fire && wen && waddr === io.read.bits.idx(idxBits - 1, 0), false.B)
+  val bypassMask = RegEnable(VecInit(wmask), io.read.fire)
+  val bypassData = RegEnable(wdata, io.read.fire)
+  io.resp := VecInit((0 until nWays).map { w =>
+    Mux(bypass && bypassMask(w), bypassData, raw(w)).asTypeOf(chiselTypeOf(rstVal))
+  })
+
+  io.read.ready := !rst
+  io.write.ready := !rst
+}
+
+/** The cache's metadata array: rocket's single-port L1MetadataArray or TwoPortL1MetadataArray. */
+class MuonMetadataArray[T <: L1Metadata](onReset: () => T, twoPort: Boolean)(implicit p: Parameters)
+    extends L1HellaCacheModule()(p) {
+  val rstVal = onReset()
+  val io = IO(new Bundle {
+    val read = Flipped(Decoupled(new L1MetaReadReq))
+    val write = Flipped(Decoupled(new L1MetaWriteReq))
+    val resp = Output(Vec(nWays, rstVal.cloneType))
+  })
+  if (twoPort) {
+    val m = Module(new TwoPortL1MetadataArray(onReset))
+    m.io.read <> io.read; m.io.write <> io.write; io.resp := m.io.resp
+  } else {
+    val m = Module(new L1MetadataArray(onReset))
+    m.io.read <> io.read; m.io.write <> io.write; io.resp := m.io.resp
+  }
 }
 
 // cache flush is started after all other operations cease
@@ -204,7 +285,14 @@ class CacheFlushUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCac
 }
 
 class MuonNonBlockingDCache(staticIdForMetadataUseOnly: Int,
-                            val canFlush: Boolean)(implicit p: Parameters)
+                            val canFlush: Boolean,
+                            val cleanRelease: Boolean = false,
+                            val incoherent: Boolean = false,
+                            val refillForwardSlots: Int = 0,
+                            val prefetchTrigger: Boolean = false,
+                            val twoPortMeta: Boolean = false,
+                            val preciseVictimNack: Boolean = false,
+                            val multiMissPerSet: Boolean = false)(implicit p: Parameters)
   extends HellaCache(staticIdForMetadataUseOnly) {
 
   override lazy val module = new MuonNonBlockingDCacheModule(this)
@@ -237,7 +325,11 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
 
   val wb = Module(new WritebackUnit)
   val prober = Module(new ProbeUnit)
-  val mshrs = Module(new MaskMSHRFile)
+  require(!outer.multiMissPerSet || (outer.incoherent && outer.preciseVictimNack),
+    "several misses per set need an incoherent cache with precise victim nacks")
+  val mshrs = Module(new MaskMSHRFile(outer.multiMissPerSet))
+  // a replay answered from the refill forwarding buffer this cycle (see "refill forwarding")
+  val replayFwd = WireDefault(false.B)
 
   val flush_unit = Option.when(outer.canFlush)(Module(new CacheFlushUnit))
   val flush_io = Option.when(outer.canFlush)(IO(new Bundle {
@@ -308,7 +400,7 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     s1_req.addr := Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits
     s1_req.phys := true.B
   }
-  when (mshrs.io.replay.valid) {
+  when (mshrs.io.replay.valid && !replayFwd) {
     s1_req := mshrs.io.replay.bits
   }
   when (s2_recycle) {
@@ -338,7 +430,9 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
 
   // tags
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
-  val meta = Module(new L1MetadataArray(() => onReset ))
+  // twoPortMeta (TLNBDCacheParams.twoPortMeta): metadata writes no longer take read cycles. In memstress the
+  // MSHR metadata writes held ~1.5 cycles of the single port per request, at a higher priority than new requests.
+  val meta = Module(new MuonMetadataArray(() => onReset, outer.twoPortMeta))
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, 5 + flushFlag))
   val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 2 + flushFlag))
   meta.io.read <> metaReadArb.io.out
@@ -461,8 +555,17 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   // replacement policy
   val replacer = cacheParams.replacement
   val s1_replaced_way_en = UIntToOH(replacer.way)
-  val s2_replaced_way_en = UIntToOH(RegEnable(replacer.way, s1_clk_en))
-  val s2_repl_meta = Mux1H(s2_replaced_way_en, wayMap((w: Int) => RegEnable(meta.io.resp(w), s1_clk_en && s1_replaced_way_en(w))).toSeq)
+  // victim choice: with multiMissPerSet the victim must not be a way a live MSHR of the set is filling (MuonMSHR.scala);
+  // the replacer's way is used unless reserved, else the lowest unreserved way (none free: the MSHR file nacks)
+  val (s2_replaced_way_en, s2_repl_meta) = if (outer.multiMissPerSet) {
+    val randWay = UIntToOH(RegEnable(replacer.way, s1_clk_en), nWays)
+    val reserved = mshrs.reservedWays
+    val way = Mux((reserved & randWay).orR, PriorityEncoderOH(~reserved), randWay)
+    (way, Mux1H(way, wayMap((w: Int) => RegEnable(meta.io.resp(w), s1_clk_en)).toSeq))
+  } else {
+    val way = UIntToOH(RegEnable(replacer.way, s1_clk_en))
+    (way, Mux1H(way, wayMap((w: Int) => RegEnable(meta.io.resp(w), s1_clk_en && s1_replaced_way_en(w))).toSeq))
+  }
 
   // miss handling
   mshrs.io.req.valid := s2_valid_masked && !s2_hit && (isPrefetch(s2_req.cmd) || isRead(s2_req.cmd) || isWrite(s2_req.cmd))
@@ -475,13 +578,27 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   tl_out.a <> mshrs.io.mem_acquire
 
   // replays
-  readArb.io.in(1).valid := mshrs.io.replay.valid
+  readArb.io.in(1).valid := mshrs.io.replay.valid && !replayFwd
   readArb.io.in(1).bits.addr := mshrs.io.replay.bits.addr
   readArb.io.in(1).bits.way_en := ~0.U(nWays.W)
-  mshrs.io.replay.ready := readArb.io.in(1).ready
-  s1_replay := mshrs.io.replay.valid && readArb.io.in(1).ready
+  mshrs.io.replay.ready := readArb.io.in(1).ready || replayFwd
+  s1_replay := mshrs.io.replay.valid && readArb.io.in(1).ready && !replayFwd
   metaReadArb.io.in(1) <> mshrs.io.meta_read
+  metaReadArb.io.in(1).valid := mshrs.io.meta_read.valid && !replayFwd
+  mshrs.io.meta_read.ready := metaReadArb.io.in(1).ready && !replayFwd
+  mshrs.replayForward := replayFwd
+  mshrs.gateMetaRead := (outer.refillForwardSlots > 0).B
   metaWriteArb.io.in(0) <> mshrs.io.meta_write
+  // incoherent: no probe reaches this cache, so the metadata of the victim need not be invalidated before
+  // the refill. rocket's MSHR writes it invalid (s_meta_clear) on every miss that replaces a line, so that a
+  // probe sees the block gone; requests to the set are already nacked while the MSHR is live (s2_nack_victim,
+  // and a miss to the set waits on idx_match), so nothing else reads the old tag. The clear is the only
+  // MSHR metadata write with an invalid state, so it is acknowledged here without using the array.
+  if (outer.incoherent) {
+    val metaClear = !mshrs.io.meta_write.bits.data.coh.isValid()
+    metaWriteArb.io.in(0).valid := mshrs.io.meta_write.valid && !metaClear
+    mshrs.io.meta_write.ready := metaWriteArb.io.in(0).ready || metaClear
+  }
 
   // probes and releases
   prober.io.req.valid := tl_out.b.valid && !lrsc_valid
@@ -530,7 +647,81 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   metaReadArb.io.in(3) <> wb.io.meta_read
   readArb.io.in(2) <> wb.io.data_req
   wb.io.data_resp := s2_data_corrected
-  TLArbiter.lowest(edge, tl_out.c, wb.io.release, prober.io.rep)
+
+  // clean releases (TLNBDCacheParams.cleanRelease)
+  //
+  // rocket's MSHR drops a clean victim silently (needs_wb only when dirty), so an inclusive outer cache
+  // keeps the block recorded as held here and probes it when it evicts the block. On a streaming read
+  // that is one probe per line; in memstress on 4 SMs the prober was busy on 75 % of the cycles this
+  // cache refused a request. With cleanRelease, a primary miss whose victim is valid and clean also
+  // sends Release (shrink to N, no data) for the victim, on the allocating MSHR's source id. That MSHR's
+  // Acquire is in flight on the same id, which TileLink allows: A and C sources are tracked separately
+  // and the D opcode tells a Grant from a ReleaseAck. At most one clean Release is in flight per MSHR id
+  // (crPending); while one is pending
+  //  * its ReleaseAck is taken here and not shown to the MSHRs;
+  //  * a probe of that block waits, as rocket's probe_rdy makes a probe wait for a dirty writeback, so
+  //    the outer cache sees the Release before the ProbeAck;
+  //  * a miss to that block is nacked (no Acquire of a block whose Release is in flight);
+  //  * that MSHR id's own dirty writeback waits, so two releases never share a C-channel id.
+  // A victim whose id still has a clean Release pending, or a full queue, falls back to the silent drop,
+  // which is always correct (the outer cache then probes later).
+  // FF cost: nMSHRs x (1 + block address bits) + a 4-entry C queue.
+  val crPending = RegInit(0.U(cfg.nMSHRs.W))
+  val crBlock = Reg(Vec(cfg.nMSHRs, UInt((paddrBits - blockOffBits).W)))
+  def blockOf(addr: UInt): UInt = (addr >> blockOffBits)(paddrBits - blockOffBits - 1, 0)
+  val crProbeHit = WireDefault(false.B)
+  val crMissHit = WireDefault(false.B)
+  if (outer.cleanRelease) {
+    val crQueue = Module(new Queue(new TLBundleC(edge.bundle), 4))
+    val victimCoh = s2_repl_meta.coh
+    val (victimDirty, victimShrink, _) = victimCoh.onCacheControl(M_FLUSH)
+    val victimBlock = Cat(s2_repl_meta.tag, s2_req.addr(untagBits - 1, blockOffBits))
+    val crId = mshrs.allocId
+    val cacheable = edge.manager.supportsAcquireBFast(s2_req.addr, lgCacheBlockBytes.U)
+    val crIssue = mshrs.io.req.fire && cacheable && !s2_tag_match && !mshrs.io.secondary_miss &&
+                  victimCoh.isValid() && !victimDirty && !crPending(crId) && crQueue.io.enq.ready
+    crQueue.io.enq.valid := crIssue
+    crQueue.io.enq.bits := edge.Release(fromSource = crId, toAddress = victimBlock << blockOffBits,
+                                        lgSize = lgCacheBlockBytes.U, shrinkPermissions = victimShrink)._2
+    when (crIssue) { crBlock(crId) := victimBlock }
+
+    val dSource = tl_out.d.bits.source
+    val crAck = tl_out.d.fire && tl_out.d.bits.opcode === TLMessages.ReleaseAck &&
+                dSource < cfg.nMSHRs.U && crPending(dSource(log2Up(cfg.nMSHRs) - 1, 0))
+    crPending := (crPending | Mux(crIssue, UIntToOH(crId, cfg.nMSHRs), 0.U)) &
+                 ~Mux(crAck, UIntToOH(dSource(log2Up(cfg.nMSHRs) - 1, 0), cfg.nMSHRs), 0.U)
+    mshrs.io.mem_grant.valid := tl_out.d.fire && !crAck
+
+    val wbHeld = crPending(mshrs.io.wb_req.bits.source(log2Up(cfg.nMSHRs) - 1, 0))
+    wbArb.io.in(1).valid := mshrs.io.wb_req.valid && !wbHeld
+    mshrs.io.wb_req.ready := wbArb.io.in(1).ready && !wbHeld
+
+    val probeBlock = Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx)
+    crProbeHit := (0 until cfg.nMSHRs).map(i => crPending(i) && crBlock(i) === probeBlock).reduce(_ || _)
+    crMissHit := (0 until cfg.nMSHRs).map(i => crPending(i) && crBlock(i) === blockOf(s2_req.addr)).reduce(_ || _)
+    prober.io.mshr_rdy := mshrs.io.probe_rdy && !mshrs.probeMetaPending && !crProbeHit
+
+    TLArbiter.lowest(edge, tl_out.c, wb.io.release, prober.io.rep, crQueue.io.deq)
+  } else {
+    TLArbiter.lowest(edge, tl_out.c, wb.io.release, prober.io.rep)
+  }
+
+  // refill forwarding (TLNBDCacheParams.refillForwardSlots)
+  //
+  // A read that misses waits in its MSHR's replay queue and, after the refill, goes through the pipeline
+  // again: a metadata read and a data read per request, on the same arrays and at a higher priority than
+  // new requests. In memstress on 4 SMs that replay work kept the cache from taking a new request on ~70 %
+  // of cycles. Here the refill of an MSHR whose queue holds only reads is also kept in one of a few line
+  // buffers, and the MSHR's replays are answered from that buffer: the replay leaves the MSHR without a
+  // metadata or data read, and its response waits in a small queue for a cycle in which the pipeline
+  // sends none. Reads only: an MSHR with a store in its queue is not forwarded (a read behind the store must
+  // see it). No store reaches the line while the MSHR is live (s2_nack_victim), and no request joins an MSHR
+  // after its refill (rocket's sec_rdy), so the buffer equals the line for every forwarded read. A buffer is
+  // freed when its MSHR goes idle; with no free buffer the MSHR replays as before.
+  // FF cost: slots x (line + MSHR id) + nMSHRs x (2 + log2(slots)) + a 2-entry response queue.
+  val fwdResp = Wire(Valid(new HellaCacheResp))
+  fwdResp.valid := false.B
+  fwdResp.bits := DontCare
 
   // per-byte dirty mask: releases write back only the bytes this cache stored
   val release_mask = IO(Output(UInt(cacheBlockBytes.W)))
@@ -589,10 +780,18 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   // s1 in the cycle the probe was accepted (prober.io.req.ready still high then): nack it in s2, so it
   // allocates no MSHR and writes nothing while the probe works on its set.
   val s2_probe_conflict = !prober.io.req.ready && s2_req.addr(idxMSB,idxLSB) === probe_idx
-  when (s2_nack_hit || s2_probe_conflict) { mshrs.io.req.valid := false.B }
-  val s2_nack_victim = s2_hit && mshrs.io.secondary_miss
+  // a miss to a block whose clean Release is still in flight (see "clean releases")
+  val s2_cr_conflict = !s2_hit && crMissHit
+  when (s2_nack_hit || s2_probe_conflict || s2_cr_conflict) { mshrs.io.req.valid := false.B }
+  // rocket nacks a hit to any way of a set with a live MSHR. With preciseVictimNack (incoherent only) a hit is
+  // nacked only on the way an MSHR is filling (its victim, whose old tag stays valid until the refill); a hit on
+  // another way touches neither that way's data nor its metadata. In memstress on 4 SMs (S18 trace) all 7036
+  // victim nacks were hits on another way: 64 % of the L1's nacks.
+  val s2_nack_victim =
+    if (outer.preciseVictimNack) s2_hit && (mshrs.reservedWays & s2_tag_match_way).orR
+    else s2_hit && mshrs.io.secondary_miss
   val s2_nack_miss = !s2_hit && !mshrs.io.req.ready
-  val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_probe_conflict
+  val s2_nack = s2_nack_hit || s2_nack_victim || s2_nack_miss || s2_probe_conflict || s2_cr_conflict
   s2_valid_masked := s2_valid && !s2_nack && !io.cpu.s2_kill
 
   val s2_recycle_ecc = (s2_valid || s2_replay) && s2_hit && s2_data_correctable
@@ -628,12 +827,98 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
   val uncache_resp = Wire(Valid(new HellaCacheResp))
   uncache_resp.bits := mshrs.io.resp.bits
   uncache_resp.valid := mshrs.io.resp.valid
-  mshrs.io.resp.ready := RegNext(!(s1_valid || s1_replay))
+  mshrs.io.resp.ready := RegNext(!(s1_valid || s1_replay)) && !fwdResp.valid
 
   io.cpu.s2_nack := s2_valid && s2_nack
   io.cpu.resp := Mux(mshrs.io.resp.ready, uncache_resp, cache_resp)
   io.cpu.resp.bits.data_word_bypass := loadgen.wordData
   io.cpu.resp.bits.data_raw := s2_data_word
+  // a forwarded refill answer goes out in a cycle the pipeline sends nothing (see "refill forwarding")
+  when (fwdResp.valid && !cache_resp.valid) { io.cpu.resp := fwdResp }
+
+  if (outer.refillForwardSlots > 0) {
+    require(refillCycles == 1, "refill forwarding keeps one data beat per line")
+    val nSlots = outer.refillForwardSlots
+    val nM = cfg.nMSHRs
+    val idW = log2Up(nM)
+    val slotData = Reg(Vec(nSlots, UInt(encRowBits.W)))
+    val slotOwner = Reg(Vec(nSlots, UInt(idW.W)))
+    val slotBusy = RegInit(0.U(nSlots.W))
+    val fwdValid = RegInit(0.U(nM.W))
+    val fwdSlot = Reg(Vec(nM, UInt(log2Up(nSlots).W)))
+
+    // which MSHRs hold a store in their replay queue
+    val hasStore = RegInit(0.U(nM.W))
+    val joinId = Mux(mshrs.io.secondary_miss, mshrs.secondaryId, mshrs.allocId)
+    val primary = mshrs.io.req.fire && !mshrs.io.secondary_miss
+    hasStore := (hasStore & ~Mux(primary, UIntToOH(mshrs.allocId, nM), 0.U)) |
+                Mux(mshrs.io.req.fire && isWrite(s2_req.cmd), UIntToOH(joinId, nM), 0.U)
+
+    // capture a refill
+    val grantId = tl_out.d.bits.source(idW - 1, 0)
+    val refill = tl_out.d.fire && grant_has_data && tl_out.d.bits.source < nM.U
+    val freeOH = PriorityEncoderOH(~slotBusy)
+    val capture = refill && !hasStore(grantId) && !slotBusy.andR
+    when (capture) {
+      slotData(OHToUInt(freeOH)) := tl_out.d.bits.data(encRowBits - 1, 0)
+      slotOwner(OHToUInt(freeOH)) := grantId
+      fwdSlot(grantId) := OHToUInt(freeOH)
+    }
+    val slotRelease = VecInit((0 until nSlots).map(k => slotBusy(k) && mshrs.mshrIdle(slotOwner(k)))).asUInt
+    slotBusy := (slotBusy & ~slotRelease) | Mux(capture, freeOH, 0.U)
+    fwdValid := (fwdValid & ~mshrs.mshrIdle) | Mux(capture, UIntToOH(grantId, nM), 0.U)
+    assert(!capture || !fwdValid(grantId), "refill forwarding: refill for an MSHR that already holds a buffer")
+
+    // answer replays
+    val respQ = Module(new Queue(new HellaCacheResp, 2))
+    val rId = mshrs.replayId
+    replayFwd := mshrs.io.replay.valid && fwdValid(rId) && respQ.io.enq.ready
+    val rb = mshrs.io.replay.bits
+    val line = slotData(fwdSlot(rId))
+    assert(!replayFwd || rb.cmd === M_XRD, "refill forwarding: forwarded replay is not a read")
+    respQ.io.enq.valid := replayFwd
+    respQ.io.enq.bits := DontCare
+    respQ.io.enq.bits.addr := rb.addr
+    respQ.io.enq.bits.idx.foreach(_ := rb.idx.get)
+    respQ.io.enq.bits.tag := rb.tag
+    respQ.io.enq.bits.cmd := rb.cmd
+    respQ.io.enq.bits.size := rb.size
+    respQ.io.enq.bits.signed := rb.signed
+    respQ.io.enq.bits.dprv := rb.dprv
+    respQ.io.enq.bits.dv := rb.dv
+    respQ.io.enq.bits.data := line
+    respQ.io.enq.bits.data_word_bypass := line
+    respQ.io.enq.bits.data_raw := line
+    respQ.io.enq.bits.mask := rb.mask
+    respQ.io.enq.bits.has_data := true.B
+    respQ.io.enq.bits.store_data := 0.U
+    respQ.io.enq.bits.replay := true.B
+    respQ.io.deq.ready := !cache_resp.valid
+    fwdResp.valid := respQ.io.deq.valid
+    fwdResp.bits := respQ.io.deq.bits
+  }
+
+  // prefetch triggers (TLNBDCacheParams.prefetchDistance; the prefetcher is in TLNBDCacheModule)
+  //
+  // Tagged sequential prefetch: every demand read that misses (primary or secondary), and every demand read
+  // that hits a line brought in by a prefetch and not yet used, reports its address. A prefetch-filled line
+  // is marked when the prefetch allocates its MSHR, and unmarked by its first demand hit or replacement.
+  // FF cost: nSets x nWays.
+  val pfTrigger = Option.when(outer.prefetchTrigger)(IO(Output(Valid(UInt(paddrBits.W)))))
+  pfTrigger.foreach { t =>
+    val pfBits = RegInit(VecInit(Seq.fill(nSets)(0.U(nWays.W))))
+    val s2_idx = s2_req.addr(untagBits - 1, blockOffBits)
+    val pfHit = s2_valid_masked && s2_hit && isRead(s2_req.cmd) && (pfBits(s2_idx) & s2_tag_match_way).orR
+    val newLine = mshrs.io.req.fire && !s2_tag_match && !mshrs.io.secondary_miss
+    val allocWay = mshrs.io.req.bits.way_en
+    when (newLine) {
+      pfBits(s2_idx) := Mux(isPrefetch(s2_req.cmd), pfBits(s2_idx) | allocWay, pfBits(s2_idx) & ~allocWay)
+    }
+    when (pfHit) { pfBits(s2_idx) := pfBits(s2_idx) & ~s2_tag_match_way }
+    t.valid := pfHit || (mshrs.io.req.fire && isRead(s2_req.cmd))
+    t.bits := s2_req.addr
+  }
+
   io.cpu.ordered := mshrs.io.fence_rdy && !s1_valid && !s2_valid
   io.cpu.store_pending := mshrs.io.store_pending
   io.cpu.replay_next := (s1_replay && s1_read) || mshrs.io.replay_next
@@ -670,14 +955,18 @@ class MuonNonBlockingDCacheModule(outer: MuonNonBlockingDCache) extends HellaCac
     // Waiting for the count to reach zero closes the window: no MSHR can start a new eviction once
     // the flush holds `io.cpu.req.ready` low, and the prober is tied off on this path, so from the
     // start of a sweep to its last ack the flush unit is the only agent issuing releases.
-    // FF cost: one counter, 4 bits.
-    val releaseOutstanding = RegInit(0.U(4.W))
+    // Each release holds its own source id until its ack, and the ids are the MSHRs' (the flush unit's are a
+    // subset of them, Fix 3), so at most nMSHRs + 1 are outstanding. A fixed 4 bits overflowed in the cluster
+    // L1 (64 MSHRs per bank) under dirty evictions (memstress with stores, S25, 2026-10-29).
+    // FF cost: one counter, log2(nMSHRs + 2) + 1 bits.
+    val releaseCountBits = log2Ceil(cfg.nMSHRs + 2) + 1
+    val releaseOutstanding = RegInit(0.U(releaseCountBits.W))
     val releaseSent = edge.done(tl_out.c)
     val releaseAcked = tl_out.d.fire && (tl_out.d.bits.opcode === TLMessages.ReleaseAck)
     releaseOutstanding := releaseOutstanding + releaseSent.asUInt - releaseAcked.asUInt
     assert(releaseOutstanding =/= 0.U || !releaseAcked || releaseSent,
       "ReleaseAck arrived with no release outstanding")
-    assert(releaseOutstanding =/= ((1 << 4) - 1).U || !releaseSent || releaseAcked,
+    assert(releaseOutstanding =/= ((1 << releaseCountBits) - 1).U || !releaseSent || releaseAcked,
       "outstanding release counter would overflow")
 
     // a second start (e.g. the finish-triggered flush landing on a software MMIO flush) must wait

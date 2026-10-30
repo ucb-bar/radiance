@@ -134,19 +134,64 @@ class RadianceCluster (
 
   val visibilityNode = TLEphemeralNode()
   // TODO: inflights should be ibuf depth!
-  val l1cache = LazyModule(new TLNBDCache(TLNBDCacheParams(
+  val l1Incoherent = p(L1IncoherentKey)
+  // L1BanksKey > 1: that many incoherent L1 banks interleaved by line, each with 1/banks of the sets and
+  // MSHRs, its own pipeline and its own flush register (cluster peripheral offset 0x2000 + 0x100 x bank)
+  val l1Banks = p(L1BanksKey)
+  require(l1Banks == 1 || l1Incoherent, "a banked cluster L1 must be incoherent")
+  val l1Config = thisClusterParams.l1Config
+  val l1Params = TLNBDCacheParams(
     id = clusterId,
-    cache = thisClusterParams.l1Config,
+    cache = l1Config.copy(nSets = l1Config.nSets / l1Banks, nMSHRs = l1Config.nMSHRs / l1Banks),
+    interleave = Option.when(l1Banks > 1)(LineInterleave(0, l1Banks, l1Config.blockBytes, p(GPUMemory).get.size)),
     overrideDChannelSize = Some(log2Ceil(thisClusterParams.l1Config.blockBytes)),
     makeLandingPads = true,
     inFlightReqs = p(MemParallelismKey).l1InFlight,
-  ))(
-    p.alterMap(Map(
-      TileVisibilityNodeKey -> visibilityNode,
-    ))
-  ))
+    nackBlocksSetOnly = p(L1NackBlocksSetOnlyKey),
+    cleanRelease = p(L1CleanReleaseKey) && !l1Incoherent,
+    incoherent = l1Incoherent,
+    refillForwardSlots = p(L1RefillForwardKey),
+    // the key counts lines of the address space; a bank sees every l1Banks-th line, so its distance is shorter
+    // (S29: 8 bank lines at 4 banks reached 32 lines ahead and lost 22 % against no prefetch)
+    prefetchDistance = if (p(L1PrefetchDistanceKey) == 0) 0 else (p(L1PrefetchDistanceKey) / l1Banks) max 1,
+    // an incoherent L1 holds dirty lines no one else sees: a kernel writes the flush register to publish them
+    flushAddr = Option.when(l1Incoherent)(
+      thisClusterParams.baseAddr + thisClusterParams.peripheralAddrOffset + 0x2000),
+    coreFlush = false,
+    twoPortMeta = p(L1TwoPortMetaKey),
+    preciseVictimNack = p(L1PreciseVictimNackKey),
+    multiMissPerSet = p(L1MultiMissKey),
+  )
+  val l1Q = p.alterMap(Map(TileVisibilityNodeKey -> visibilityNode))
+  val l1cache: LazyModule =
+    if (l1Incoherent) LazyModule(new TLULNBDCache(l1Params)(l1Q)) else LazyModule(new TLNBDCache(l1Params)(l1Q))
+  val (l1InNode, l1OutNode, l1FlushRegNode) = l1cache match {
+    case c: TLULNBDCache => (c.inNode, c.outNode, c.flushRegNode)
+    case c: TLNBDCache => (c.inNode, c.outNode, c.flushRegNode)
+  }
 
-  clsbus.inwardNode := visibilityNode := l1cache.outNode
+  if (l1Banks > 1) {
+    val expand = LazyModule(new LineInterleaveOutNode(
+      LineInterleave(0, l1Banks, l1Config.blockBytes, p(GPUMemory).get.size))).node
+    clsbus.inwardNode := visibilityNode := expand := l1OutNode
+  } else {
+    clsbus.inwardNode := visibilityNode := l1OutNode
+  }
+  l1FlushRegNode.foreach(_ := HackAtomicNode(8) := clcbus.outwardNode)
+
+  // banks 1 .. l1Banks - 1 (bank 0 is l1cache); each a copy of l1cache over its own lines
+  val l1Interleave = Seq.tabulate(l1Banks)(b =>
+    LineInterleave(b, l1Banks, l1Config.blockBytes, p(GPUMemory).get.size))
+  val l1ExtraBanks = (1 until l1Banks).map { b =>
+    val vis = TLEphemeralNode()
+    val bank = LazyModule(new TLULNBDCache(l1Params.copy(
+      interleave = Some(l1Interleave(b)),
+      flushAddr = l1Params.flushAddr.map(_ + 0x100 * b)))(p.alterMap(Map(TileVisibilityNodeKey -> vis))))
+      .suggestName(s"l1bank$b")
+    clsbus.inwardNode := vis := LazyModule(new LineInterleaveOutNode(l1Interleave(b))).node := bank.outNode
+    bank.flushRegNode.foreach(_ := HackAtomicNode(8) := clcbus.outwardNode)
+    bank
+  }
 
   // connect barriers & flushes
   val realMuons = muonTiles.filter(_.isInstanceOf[MuonTile]).map(_.asInstanceOf[MuonTile])
@@ -165,7 +210,14 @@ class RadianceCluster (
   // deadlocks
   val l1InNodes = muonTiles.flatMap(t => Seq(t.icacheNode, t.dcacheNode))
   val l1InXbar = LazyModule(new TLXbar()).suggestName("radiance_l1_in_xbar").node
-  l1cache.inNode := TLFIFOFixer() := l1InXbar
+  if (l1Banks > 1) {
+    l1InNode := LazyModule(new LineInterleaveInNode(l1Interleave(0))).node := TLFIFOFixer() := l1InXbar
+    l1ExtraBanks.zip(l1Interleave.tail).foreach { case (bank, il) =>
+      bank.inNode := LazyModule(new LineInterleaveInNode(il)).node := TLFIFOFixer() := l1InXbar
+    }
+  } else {
+    l1InNode := TLFIFOFixer() := l1InXbar
+  }
   l1InNodes.foreach(l1InXbar := _)
 
   // connect any scaling factor clients to l2

@@ -317,6 +317,10 @@ class MuonTile(
         flushAddr = Some(muonParams.peripheralAddr + 0x100),
         inFlightReqs = p(MemParallelismKey).l0dInFlight,
         nackBlocksSetOnly = true,
+        // the L0d is a TL-UL client (TLULNBDCache), so it may skip the victim metadata clear like the
+        // incoherent cluster L1; see radiance.memory.L0dFastMissKey
+        incoherent = p(radiance.memory.L0dFastMissKey),
+        refillForwardSlots = if (p(radiance.memory.L0dFastMissKey)) p(radiance.memory.L1RefillForwardKey) else 0,
       )))
       l0d.flushNode.get := dFlushMaster
       (l0d.outNode, l0d.inNode, l0d.flushRegNode)
