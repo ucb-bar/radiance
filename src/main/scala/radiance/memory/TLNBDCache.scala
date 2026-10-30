@@ -371,6 +371,8 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
     }
 
     // flush mmio
+    // 0x0: write starts a flush. 0x8: reads 1 while a flush is requested or running, so software can wait
+    // for its writebacks (an incoherent cluster L1 publishes GPU results this way).
     outer.flushRegNode.foreach { node =>
       node.regmap(
         0x0 -> Seq(RegField.w(32, (valid: Bool, _: UInt) => {
@@ -379,6 +381,7 @@ class TLNBDCacheModule(outer: TLNBDCache)(implicit p: Parameters) extends LazyMo
           }
           true.B
         })),
+        0x8 -> Seq(RegField.r(32, (flushPending || f.busy).asUInt)),
       )
     }
 

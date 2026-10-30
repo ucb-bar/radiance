@@ -235,11 +235,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     val (node, edge) = scalingFacNode.out.head
     val out = outer.gemmini.module.mx_io.get.scale_factor_out
 
+    // One Put per scale-memory bank row (the size the client declares). The bus may be wider than a bank
+    // (a 512-bit system bus with 64 B lines): the data is replicated over the beat so the bytes the
+    // address selects carry it. Sizing the Put by the bus width put 64 B Puts on a client that declares
+    // 32 B (TLMonitor at the cluster crossing on RadianceHBMConfig).
+    val bankBytes = outer.gemminiParams.scalingFactorMem.get.bankWidthBytes
+    require(out.bits.data.getWidth == bankBytes * 8 && node.params.dataBits % (bankBytes * 8) == 0)
     node.a.bits := edge.Put(
       fromSource = 0.U, // overridden
       toAddress = out.bits.addr,
-      lgSize = log2Ceil(node.params.dataBits / 8).U,
-      data = out.bits.data,
+      lgSize = log2Ceil(bankBytes).U,
+      data = Fill(node.params.dataBits / (bankBytes * 8), out.bits.data),
     )._2
 
     val (sourceReady, _) = SourceGenerator(node)
