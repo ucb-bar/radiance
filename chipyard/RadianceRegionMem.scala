@@ -65,14 +65,16 @@ class WithRadianceRegionMem extends Config((site, here, up) => {
 
 /** 4 SMs (E4M3 MxGemmini clusters 0..3) on the split L2: one 256 KiB host slice over
   * 0x8000_0000..0x1_0000_0000 with one DRAM channel, and eight 64 KiB GPU slices over 256 MiB each of
-  * 0x1_0000_0000..0x1_8000_0000 with two DRAM channels each (17 channels). GPU memory is hashed over
-  * the 16 GPU channels at 32 B granularity (WithGPUAddressHash; consecutive lines alternate slices,
-  * and a slice's second channel is offset by half its L2 sets). +loadmem needs an ELF scrambled with
-  * --slices 16 --channels-per-slice 2 --chan-set-stride 128.  The L0d and L1 depths are as on
-  * Radiance2SMHBMConfig. */
+  * 0x1_0000_0000..0x1_8000_0000 with two 8 B DRAM channels each (17 channels). GPU memory is hashed over the
+  * 16 GPU channels at 64 B (the line; WithGPUAddressHash; consecutive lines alternate slices, and a slice's
+  * second channel is offset by half its L2 sets). +loadmem needs an ELF scrambled with --unit 64 --slices 16
+  * --channels-per-slice 2 --chan-set-stride 64.
+  * GPU caches (WithRadianceHBMCaches): 64 B lines; the cluster L1 is incoherent (TL-UL to the GPU L2) in 4
+  * line-interleaved banks with refill forwarding, prefetch, a two-port metadata array and several misses per
+  * set. A kernel must write the L1 flush registers (cluster-local 0x82000, 0x82100, 0x82200, 0x82300) after
+  * its L0d flush to publish results to the host or to other clusters. */
 class RadianceHBMConfig extends Config(
-  new radiance.memory.WithMemParallelism(l0dInFlight = Some(8), l0dMSHRs = Some(8),
-    l1InFlight = Some(32), l1MSHRs = Some(32)) ++
+  new WithRadianceHBMCaches ++
   new WithRadianceHBM(gpuChannelsPerSlice = 2, gpuSlices = 8) ++
   new RadianceE4M3MxGemminiFourClusterConfig
 )
