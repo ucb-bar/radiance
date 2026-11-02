@@ -166,8 +166,10 @@ class WithRadianceHBMCaches extends Config(
   new freechips.rocketchip.subsystem.WithCacheBlockBytes(64) ++
   // a 256-set direct-mapped L0d: fewer same-set miss conflicts between warps' streams
   new WithL0dGeometry(nSets = 256, nWays = 1) ++
-  // each GPU L2 slice feeds two 8 B channels
-  new WithMemoryBusBeatBytes(16) ++
+  // 64 B memory bus: an L2 refill is one beat. At 16 B a refill held TLCacheCork's D arbiter for 4 beats, its
+  // ReleaseAck queue then refused the L2's clean victim Releases, and each L2 miss waited for its victim's
+  // Release before its Acquire (memstress, 4 SMs: L2 outer C stalled 66 %). The DRAM channels stay 8 B.
+  new WithMemoryBusBeatBytes(64) ++
   new WithMemParallelism(coalSrcIds = Some(32), coalRespDepth = Some(32),
     l0dInFlight = Some(32), l0dMSHRs = Some(32), l0dReorderDepth = Some(64),
     l1InFlight = Some(128), l1MSHRs = Some(128))
