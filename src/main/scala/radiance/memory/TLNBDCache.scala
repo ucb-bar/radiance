@@ -431,3 +431,7 @@ case object L1PreciseVictimNackKey extends org.chipsalliance.cde.config.Field[Bo
 
 /** The cluster L1 holds several misses per set (TLNBDCacheParams.multiMissPerSet). */
 case object L1MultiMissKey extends org.chipsalliance.cde.config.Field[Boolean](false)
+
+/** The L0d connects to the cluster L1 without the line fragmenter and the response reorder buffer when the
+  * L0d and L1 lines are equal (MuonTile). */
+case object L0dUnorderedKey extends org.chipsalliance.cde.config.Field[Boolean](false)

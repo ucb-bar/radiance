@@ -138,24 +138,36 @@ class WithL1MultiMiss(enable: Boolean = true) extends Config((site, here, up) =>
   case L1MultiMissKey => enable
 })
 
+/** Cluster L1 replay queue depth per MSHR (rocket's nRPQ, default 16): the requests waiting on one MSHR's
+  * refill. */
+class WithL1RPQ(n: Int) extends Config((site, here, up) => {
+  case ClustersLocated(InSubsystem) =>
+    up(ClustersLocated(InSubsystem)).map {
+      case c: RadianceClusterAttachParams =>
+        c.copy(clusterParams = c.clusterParams.copy(l1Config = c.clusterParams.l1Config.copy(nRPQ = n)))
+      case other => other
+    }
+})
+
 /** The GPU cache hierarchy of RadianceHBMConfig, for 4 SMs on 16 DRAM channels.
   *
-  * In memstress (streaming loads, 4 SMs, 16 x 8 B channels) this reaches 52 B/cycle, 41 % of the channels'
-  * 128 B/cycle, against 12 B/cycle with the earlier RadianceHBMConfig caches. Approximate contributions:
-  * 64 B lines in the L1 / L2 (with the 512-bit system bus they need) ~1.7x; the incoherent L1 with refill
-  * forwarding +18-26 %; several misses per set and precise victim nacks ~+10 %; prefetch 8 lines ~+9 %;
-  * 4 L1 banks, set-only nacks, the L0d fast miss and the two-port metadata array a few % each.
+  * The smallest set of the measured features and queue sizes that keeps the DRAM channels above 80 % busy in
+  * steady state: memstress (streaming loads, 4 SMs, 16 x 8 B channels) reaches 81 % (103 B/cycle of 128) in
+  * steady state and 95 B/cycle over the whole load phase. One feature removed at a time costs (whole load
+  * phase): prefetch -43 %, 64-set L0d -27 %, L0d fast miss -27 %, refill forwarding -18 %, precise victim nacks
+  * -8 %, set-only nacks -8 %, 2 L1 banks instead of 4 -7 %. Several misses per set (WithL1MultiMiss) and the
+  * two-port L1 metadata array (WithL1TwoPortMeta) gain about 1 % here and are left out. With a coherent L1 the
+  * GPU L2 slices' schedulers (one MSHR action per cycle) limit the channels to ~63 %.
   * Kernels: the GPU address hash unit follows the 64 B line (scramble with --unit 64 --chan-set-stride 64),
   * and a kernel must write the L1 flush registers to publish GPU results (the L1 is incoherent). */
 class WithRadianceHBMCaches extends Config(
+  new WithL0dUnordered ++
   new WithL0dFastMiss ++
-  new WithL1MultiMiss ++
   new WithL1PreciseVictimNack ++
   new WithL1NackBlocksSetOnly ++
   new WithL1Banks(4) ++
-  new WithL1TwoPortMeta ++
   new WithL1Prefetch(8) ++
-  new WithL1RefillForward(8) ++
+  new WithL1RefillForward(4) ++
   new WithL1Incoherent ++
   new WithDRAMChannelBeatBytes(8) ++
   new WithL0iBlockBytes(64) ++
@@ -170,7 +182,22 @@ class WithRadianceHBMCaches extends Config(
   // ReleaseAck queue then refused the L2's clean victim Releases, and each L2 miss waited for its victim's
   // Release before its Acquire (memstress, 4 SMs: L2 outer C stalled 66 %). The DRAM channels stay 8 B.
   new WithMemoryBusBeatBytes(64) ++
-  new WithMemParallelism(coalSrcIds = Some(32), coalRespDepth = Some(32),
-    l0dInFlight = Some(32), l0dMSHRs = Some(32), l0dReorderDepth = Some(64),
-    l1InFlight = Some(128), l1MSHRs = Some(128))
+  // queue sizes: halving the coalescer and L0d queues (to 8) or the L1 MSHRs (to 32, 8 per bank) costs 13-15 %;
+  // memstress does not reach the L1 in-flight (32 per bank) or replay queue (4) limits
+  new WithL1RPQ(4) ++
+  new WithMemParallelism(coalSrcIds = Some(16), coalRespDepth = Some(16),
+    l0dInFlight = Some(16), l0dMSHRs = Some(16), l0dReorderDepth = Some(32),
+    l1InFlight = Some(32), l1MSHRs = Some(64))
 )
+
+/** The L0d takes L1 responses in any order (L0dUnorderedKey; needs equal L0d and L1 lines). */
+class WithL0dUnordered(enable: Boolean = true) extends Config((site, here, up) => {
+  case L0dUnorderedKey => enable
+})
+
+/** GPU L2 slice geometry (the "gpu" cache of the split L2): capacity per slice and ways. The inclusive cache
+  * holds one active MSHR per set, so more sets dilute same-set misses. */
+class WithGPUL2Geometry(kBPerSlice: Int, ways: Int) extends Config((site, here, up) => {
+  case radiance.subsystem.SplitL2Key => up(radiance.subsystem.SplitL2Key).map(s => s.copy(caches = s.caches.map(c =>
+    if (c.name == "gpu") c.copy(kBPerSlice = kBPerSlice, ways = ways) else c)))
+})

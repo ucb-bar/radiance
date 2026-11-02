@@ -46,6 +46,9 @@ case class SplitL2Params(caches: Seq[L2CacheSpec]) {
 
 case object SplitL2Key extends Field[Option[SplitL2Params]](None)
 
+/** Each L2 slice takes its own edge from the system bus (SplitCoherenceManagerWrapper). */
+case object SplitL2SliceLinksKey extends Field[Boolean](true)
+
 object SplitL2 {
   /** Builds one cache between an inward and an outward node. The outward node must present one
     * edge per slice of the spec. Supplied from the chipyard package, where InclusiveCache is
@@ -71,25 +74,38 @@ case class SplitCoherenceManagerWrapperParams(
   }
 }
 
-/** The COH location with several independent caches. One TL-C crossbar splits the inner side by
-  * address, so each client reaches each cache over one edge and every address has one home. On the
-  * outer side each slice leaves through a RegionBinder port restricted to its own region, so the
-  * memory-bus crossbar connects it only to that region's DRAM channels. */
+/** The COH location with several independent caches. On the inner side one RegionBinder port per
+  * slice takes its own edge from the system-bus crossbar, which splits by address: every address has
+  * one home, and each slice has its own link. (A single crossbar here gave the system bus one edge to
+  * all slices: one 64 B beat per cycle for every cluster together, 94 % busy at 57 B/cycle in memstress
+  * on RadianceHBMConfig.) On the outer side each slice leaves through a RegionBinder port restricted to
+  * its own region, so the memory-bus crossbar connects it only to that region's DRAM channels. */
 class SplitCoherenceManagerWrapper(params: SplitCoherenceManagerWrapperParams, context: HasTileLinkLocations)(implicit p: Parameters)
   extends TLBusWrapper(params, params.name) {
-  private val inner = LazyModule(new TLXbar)
+  // SplitL2SliceLinksKey = false keeps the single crossbar (for comparison)
+  private val sliceLinks = p(SplitL2SliceLinksKey)
+  private val binder = Option.when(sliceLinks)(LazyModule(new RegionBinder(params.split.regions)))
+  private val xbar = Option.when(!sliceLinks)(LazyModule(new TLXbar))
   private val outer = TLIdentityNode()
 
   params.split.caches.foreach { spec =>
     val (cacheIn, cacheOut) = params.makeCache(context, spec)
-    cacheIn :*= inner.node
-    val binder = RegionBinder(spec.regions)
-    binder :*= cacheOut
-    spec.regions.foreach { _ => outer := binder }
+    if (sliceLinks) {
+      // slice i of this cache takes the inner binder port of regions(i); ports are bound in the order of
+      // params.split.regions (caches in order, each cache's regions in order)
+      val slices = TLIdentityNode()
+      cacheIn :*= slices
+      spec.regions.foreach { _ => slices := binder.get.node }
+    } else {
+      cacheIn :*= xbar.get.node
+    }
+    val outBinder = RegionBinder(spec.regions)
+    outBinder :*= cacheOut
+    spec.regions.foreach { _ => outer := outBinder }
   }
 
-  def busView: TLEdge = inner.node.edges.in.head
-  val inwardNode = inner.node
+  def busView: TLEdge = binder.map(_.node.edges.in.head).getOrElse(xbar.get.node.edges.in.head)
+  val inwardNode: TLInwardNode = binder.map(b => b.node: TLInwardNode).getOrElse(xbar.get.node)
   val outwardNode: TLOutwardNode = outer
   val builtInDevices = BuiltInDevices.none
   val prefixNode = None
