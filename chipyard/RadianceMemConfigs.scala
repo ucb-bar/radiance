@@ -149,6 +149,18 @@ class WithL1RPQ(n: Int) extends Config((site, here, up) => {
     }
 })
 
+/** Cluster L1 associativity at the same capacity. A cluster L1 bank reads all its ways at once, each way a
+  * line-wide (512-bit) array, so on an FPGA its block RAMs scale with ways x line width, not with capacity. */
+class WithL1Ways(ways: Int) extends Config((site, here, up) => {
+  case ClustersLocated(InSubsystem) =>
+    up(ClustersLocated(InSubsystem)).map {
+      case c: RadianceClusterAttachParams =>
+        val l1 = c.clusterParams.l1Config
+        c.copy(clusterParams = c.clusterParams.copy(l1Config = l1.copy(nWays = ways, nSets = l1.nSets * l1.nWays / ways)))
+      case other => other
+    }
+})
+
 /** The GPU cache hierarchy of RadianceHBMConfig, for 4 SMs on 16 DRAM channels.
   *
   * The smallest set of the measured features and queue sizes that keeps the DRAM channels above 80 % busy in
@@ -158,6 +170,8 @@ class WithL1RPQ(n: Int) extends Config((site, here, up) => {
   * -8 %, set-only nacks -8 %, 2 L1 banks instead of 4 -7 %. Several misses per set (WithL1MultiMiss) and the
   * two-port L1 metadata array (WithL1TwoPortMeta) gain about 1 % here and are left out. With a coherent L1 the
   * GPU L2 slices' schedulers (one MSHR action per cycle) limit the channels to ~63 %.
+  * FPGA area: the L1 banks are 2-way (4 ways: +4 % bandwidth, twice the bank's block RAMs) and hold 16 requests in
+  * flight (each entry holds a full 64 B request; 32 entries were ~70 % of a bank's flip-flops, at no gain).
   * Kernels: the GPU address hash unit follows the 64 B line (scramble with --unit 64 --chan-set-stride 64),
   * and a kernel must write the L1 flush registers to publish GPU results (the L1 is incoherent). */
 class WithRadianceHBMCaches extends Config(
@@ -166,6 +180,7 @@ class WithRadianceHBMCaches extends Config(
   new WithL1PreciseVictimNack ++
   new WithL1NackBlocksSetOnly ++
   new WithL1Banks(4) ++
+  new WithL1Ways(2) ++
   new WithL1Prefetch(8) ++
   new WithL1RefillForward(4) ++
   new WithL1Incoherent ++
@@ -183,11 +198,11 @@ class WithRadianceHBMCaches extends Config(
   // Release before its Acquire (memstress, 4 SMs: L2 outer C stalled 66 %). The DRAM channels stay 8 B.
   new WithMemoryBusBeatBytes(64) ++
   // queue sizes: halving the coalescer and L0d queues (to 8) or the L1 MSHRs (to 32, 8 per bank) costs 13-15 %;
-  // memstress does not reach the L1 in-flight (32 per bank) or replay queue (4) limits
+  // memstress does not reach the L1 in-flight (16 per bank) or replay queue (4) limits
   new WithL1RPQ(4) ++
   new WithMemParallelism(coalSrcIds = Some(16), coalRespDepth = Some(16),
     l0dInFlight = Some(16), l0dMSHRs = Some(16), l0dReorderDepth = Some(32),
-    l1InFlight = Some(32), l1MSHRs = Some(64))
+    l1InFlight = Some(16), l1MSHRs = Some(64))
 )
 
 /** The L0d takes L1 responses in any order (L0dUnorderedKey; needs equal L0d and L1 lines). */
