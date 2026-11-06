@@ -317,6 +317,10 @@ class MuonTile(
         flushAddr = Some(muonParams.peripheralAddr + 0x100),
         inFlightReqs = p(MemParallelismKey).l0dInFlight,
         nackBlocksSetOnly = true,
+        // the L0d is a TL-UL client (TLULNBDCache), so it may skip the victim metadata clear like the
+        // incoherent cluster L1; see radiance.memory.L0dFastMissKey
+        incoherent = p(radiance.memory.L0dFastMissKey),
+        refillForwardSlots = if (p(radiance.memory.L0dFastMissKey)) p(radiance.memory.L1RefillForwardKey) else 0,
       )))
       l0d.flushNode.get := dFlushMaster
       (l0d.outNode, l0d.inNode, l0d.flushRegNode)
@@ -348,11 +352,20 @@ class MuonTile(
       numCoalReqs = 1,
     )))
 
-    dcacheNode :=
-      ResponseFIFOFixer.bounded(p(MemParallelismKey).l0dReorderDepth) :=
-      TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
-      TLWidthWidget(coalescedReqWidth) :=
-      l0dOut
+    // The fragmenter splits an L0d line into L1 lines and needs in-order responses, which the
+    // ResponseFIFOFixer provides for the out-of-order L1. When the lines are equal nothing is split, and
+    // the L0d's MSHRs take refills by source in any order: with radiance.memory.L0dUnorderedKey both go,
+    // so an L1 hit no longer waits behind an older L1 miss (in memstress on RadianceHBMConfig the L0d's
+    // MSHRs waited ~96 cycles for refills the L1 returned in ~30).
+    if (p(radiance.memory.L0dUnorderedKey) && muonParams.l1CacheLineBytes == coalescedReqWidth) {
+      dcacheNode := TLWidthWidget(coalescedReqWidth) := l0dOut
+    } else {
+      dcacheNode :=
+        ResponseFIFOFixer.bounded(p(MemParallelismKey).l0dReorderDepth) :=
+        TLFragmenter(muonParams.l1CacheLineBytes, coalescedReqWidth, alwaysMin = true) :=
+        TLWidthWidget(coalescedReqWidth) :=
+        l0dOut
+    }
     val coalXbar = LazyModule(new TLXbar).suggestName("coal_out_agg_xbar").node
     val nonCoalXbar = LazyModule(new TLXbar).suggestName("coal_out_nc_xbar").node
     l0dIn := coalXbar

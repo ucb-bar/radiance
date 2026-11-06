@@ -340,8 +340,15 @@ class Coalescer(config: CoalescerConfig) extends Module {
     val sel = (io.requests zip chosenMatches.asBools).map { case (req, m) =>
       m && ((req.bits.address(config.maxCoalLogSize - 1, config.wordSizeWidth)) === i.U)
     }
-    data(i) := MuxCase(DontCare, (io.requests zip sel).map { case (req, s) => s -> req.bits.data })
-    mask(i) := MuxCase(0.U, (io.requests zip sel).map { case (req, s) => s -> req.bits.mask })
+    // Merge per byte: several lanes of one store can write different bytes of the same word (byte / halfword
+    // stores).  Taking the first matching lane's data and mask for the whole word dropped the other lanes'
+    // bytes while `consumed` still retired them.  Each byte comes from the lowest lane whose mask covers it.
+    mask(i) := (io.requests zip sel).map { case (req, s) => Mux(s, req.bits.mask, 0.U) }.reduce(_ | _)
+    data(i) := VecInit((0 until config.wordSizeInBytes).map { b =>
+      PriorityMux((io.requests zip sel).map { case (req, s) =>
+        (s && req.bits.mask(b)) -> req.bits.data(8 * b + 7, 8 * b)
+      } :+ (true.B -> 0.U(8.W)))
+    }).asUInt
   }
 
   val shouldCoalesce = chosenMatchCount > 1.U && config.enable.B && io.requests.map(_.valid).reduce(_ || _)

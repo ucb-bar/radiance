@@ -21,18 +21,37 @@ import freechips.rocketchip.tilelink._
   * fold(o). The map is a bijection on the range and its inverse is v = (o << s) | (c ^ fold(o)).
   * Addresses outside the range are unchanged.
   *
+  * With channelsPerSlice > 1 the nSlices parts are DRAM channels, channelsPerSlice of them per L2
+  * slice, and the physical part of c is (c mod S) * channelsPerSlice + c / S (S = nSlices /
+  * channelsPerSlice): the low bits of c pick the L2 slice, so consecutive units still round-robin
+  * over the slices, and the high bits pick the channel within it. The slice's channels stay
+  * adjacent, so each slice still owns one contiguous region.
+  * chanSetStride (units, a power of two) XORs channel j's in-part index o with j * chanSetStride.
+  * Without it, the units v and v + S of a stream (same o, different channel) reach one slice back to
+  * back with the same L2 set index, and the L2 serializes requests to one set. Set it to the
+  * slice's L2 set count divided by channelsPerSlice; 0 disables it.
+  *
   * Every agent that addresses this range through the coherent fabric must apply the same map
   * (AddressHashNode at its master port), and any loader that writes DRAM directly must too.
   */
-case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices: Int) {
+case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices: Int, channelsPerSlice: Int = 1,
+                             chanSetStride: Int = 0) {
   require(isPow2(size) && (base & (size - 1)) == 0, f"hash range must be a power of two aligned to its size: $base%x/$size%x")
   require(isPow2(unitBytes) && isPow2(nSlices) && nSlices >= 2, s"unitBytes ($unitBytes) and nSlices ($nSlices) must be powers of two, nSlices >= 2")
   require(BigInt(unitBytes) * nSlices <= size, "range smaller than one unit per slice")
+  require(isPow2(channelsPerSlice) && channelsPerSlice <= nSlices,
+    s"channelsPerSlice ($channelsPerSlice) must be a power of two no larger than nSlices ($nSlices)")
 
   val rangeBits: Int = log2Ceil(size)
   val unitBits: Int = log2Ceil(unitBytes)
   val sliceBits: Int = log2Ceil(nSlices)
   val unitIndexBits: Int = rangeBits - unitBits - sliceBits // width of o
+  val chanBits: Int = log2Ceil(channelsPerSlice)
+  private val l2Slices: Int = nSlices / channelsPerSlice
+  require(chanSetStride == 0 || (isPow2(chanSetStride) &&
+    BigInt(chanSetStride) * channelsPerSlice <= (BigInt(1) << unitIndexBits)),
+    s"chanSetStride ($chanSetStride) must be 0 or a power of two with chanSetStride * channelsPerSlice <= 2^$unitIndexBits")
+  private val strideBits: Int = if (chanSetStride == 0) 0 else log2Ceil(chanSetStride)
   def range: AddressSet = AddressSet(base, size - 1)
 
   // ---- reference model (also the specification for loaders that write DRAM directly) ----
@@ -41,6 +60,9 @@ case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices
     while (x != 0) { acc ^= x & (nSlices - 1); x >>= sliceBits }
     acc
   }
+  private def placeModel(c: BigInt): BigInt = (c % l2Slices) * channelsPerSlice + c / l2Slices
+  private def unplaceModel(p: BigInt): BigInt = (p % channelsPerSlice) * l2Slices + p / channelsPerSlice
+  private def flipModel(c: BigInt): BigInt = (c / l2Slices) * chanSetStride  // channel j -> j * stride
   def inRange(a: BigInt): Boolean = a >= base && a < base + size
   def forward(a: BigInt): BigInt = if (!inRange(a)) a else {
     val off = a - base
@@ -48,13 +70,13 @@ case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices
     val v = off >> unitBits
     val o = v >> sliceBits
     val c = (v & (nSlices - 1)) ^ foldModel(o)
-    base + (c << (rangeBits - sliceBits)) + (o << unitBits) + byte
+    base + (placeModel(c) << (rangeBits - sliceBits)) + ((o ^ flipModel(c)) << unitBits) + byte
   }
   def inverse(a: BigInt): BigInt = if (!inRange(a)) a else {
     val off = a - base
     val byte = off & (unitBytes - 1)
-    val c = off >> (rangeBits - sliceBits)
-    val o = (off >> unitBits) & ((BigInt(1) << unitIndexBits) - 1)
+    val c = unplaceModel(off >> (rangeBits - sliceBits))
+    val o = ((off >> unitBits) & ((BigInt(1) << unitIndexBits) - 1)) ^ flipModel(c)
     val k = c ^ foldModel(o)
     base + (((o << sliceBits) | k) << unitBits) + byte
   }
@@ -78,6 +100,18 @@ case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices
 
   private def hit(a: UInt): Bool = (a >> rangeBits) === (base >> rangeBits).U
 
+  // part c -> physical part and back: a rotation of the sliceBits-wide part number by chanBits
+  private def place(c: UInt): UInt =
+    if (chanBits == 0 || chanBits == sliceBits) c
+    else Cat(c(sliceBits - chanBits - 1, 0), c(sliceBits - 1, sliceBits - chanBits))
+  private def unplace(p: UInt): UInt =
+    if (chanBits == 0 || chanBits == sliceBits) p
+    else Cat(p(chanBits - 1, 0), p(sliceBits - 1, chanBits))
+  // XOR channel j (the top chanBits of c) into o at bit strideBits
+  private def flip(c: UInt): UInt =
+    if (chanSetStride == 0 || chanBits == 0) 0.U(unitIndexBits.W)
+    else (c(sliceBits - 1, sliceBits - chanBits) << strideBits).pad(unitIndexBits)
+
   /** Hash a client (virtual) address into the address the fabric routes on. */
   def forwardHW(a: UInt): UInt = {
     require(a.getWidth > rangeBits, s"address width ${a.getWidth} too small for the hash range")
@@ -85,15 +119,15 @@ case class AddressHashParams(base: BigInt, size: BigInt, unitBytes: Int, nSlices
     val k = a(unitBits + sliceBits - 1, unitBits)
     val o = a(rangeBits - 1, unitBits + sliceBits)
     val c = k ^ fold(o)
-    Mux(hit(a), Cat(a(a.getWidth - 1, rangeBits), c, o, byte), a)
+    Mux(hit(a), Cat(a(a.getWidth - 1, rangeBits), place(c), o ^ flip(c), byte), a)
   }
 
   /** Map a fabric address (e.g. in a probe) back to the client address. */
   def inverseHW(a: UInt): UInt = {
     require(a.getWidth > rangeBits, s"address width ${a.getWidth} too small for the hash range")
     val byte = a(unitBits - 1, 0)
-    val o = a(rangeBits - sliceBits - 1, unitBits)
-    val c = a(rangeBits - 1, rangeBits - sliceBits)
+    val c = unplace(a(rangeBits - 1, rangeBits - sliceBits))
+    val o = a(rangeBits - sliceBits - 1, unitBits) ^ flip(c)
     val k = c ^ fold(o)
     Mux(hit(a), Cat(a(a.getWidth - 1, rangeBits), o, k, byte), a)
   }

@@ -51,6 +51,11 @@ EXTRA_SIM_PREPROC_DEFINES += \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpnew_pkg.sv \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv \
 
+# cvfpu pipeline arrays assign element [0] continuously and [i+1] in a flop (FFL); Verilator 5 rejects
+# that by default, and chipyard adds the waiver only for CVA6/NVDLA/Ara. This list reaches the
+# Verilator command line through SIM_PREPROC_DEFINES.
+EXTRA_SIM_PREPROC_DEFINES += -Wno-BLKANDNBLK
+
 EXT_INCDIRS += \
 	$(base_dir)/generators/radiance/src/main/resources/vsrc/cvfpu/src/common_cells \
 	$(GEN_COLLATERAL_DIR) \

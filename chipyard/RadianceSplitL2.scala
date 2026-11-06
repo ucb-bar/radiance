@@ -67,9 +67,11 @@ object RadianceInclusiveCacheFactory {
 
 /** Two independent L2 caches on the unchanged memory map: a host cache with one slice over the
   * host part of ExtMem, and a GPU cache with `gpuSlices` contiguous slices over GPU memory. Each
-  * cache has its own capacity. Combine with WithRadianceRegionMem for one DRAM channel per slice.
+  * cache has its own capacity. Combine with WithRadianceRegionMem for the DRAM channels: one for the
+  * host slice and gpuChannelsPerSlice for each GPU slice, each channel a contiguous part of its slice.
   * The host cache keeps rocket's L2 control address; the GPU cache's control block is 4 KiB above. */
-class WithRadianceSplitL2(hostKB: Int, gpuSlices: Int, gpuKBPerSlice: Int, ways: Int = 8) extends Config(
+class WithRadianceSplitL2(hostKB: Int, gpuSlices: Int, gpuKBPerSlice: Int, ways: Int = 8,
+                          gpuChannelsPerSlice: Int = 1) extends Config(
   new WithSplitL2Topology(RadianceInclusiveCacheFactory.make) ++
   new Config((site, here, up) => {
     case SplitL2Key => {
@@ -84,7 +86,8 @@ class WithRadianceSplitL2(hostKB: Int, gpuSlices: Int, gpuKBPerSlice: Int, ways:
         L2CacheSpec("host", Seq(AddressSet(ext.master.base, gpu.address - ext.master.base - 1)),
           kBPerSlice = hostKB, ways = ways, ctrlAddr = Some(ctrl)),
         L2CacheSpec("gpu", Seq.tabulate(gpuSlices)(i => AddressSet(gpu.address + i * stripe, stripe - 1)),
-          kBPerSlice = gpuKBPerSlice, ways = ways, ctrlAddr = Some(ctrl + 0x1000)))))
+          kBPerSlice = gpuKBPerSlice, ways = ways, ctrlAddr = Some(ctrl + 0x1000),
+          channelsPerSlice = gpuChannelsPerSlice))))
     }
   })
 )

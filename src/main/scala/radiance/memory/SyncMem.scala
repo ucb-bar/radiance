@@ -3,6 +3,18 @@ import chisel3._
 import chisel3.util._
 
 // modified from gemmini's two port sync mem
+
+// Read-during-write to one address: FPGA block RAM and SRAM macros may return the old word whatever SyncReadMem's
+// ruw says (VCS honours WriteFirst, FireSim does not), so forward the written bytes into the read data explicitly.
+object ReadDuringWriteForward {
+  def apply(rdata: Vec[UInt], ren: Bool, raddr: UInt, wen: Bool, waddr: UInt, wdata: Vec[UInt], mask: UInt): Vec[UInt] = {
+    val hit = ren && wen && raddr === waddr
+    val hitD = RegNext(hit, false.B)
+    val fwdData = RegEnable(wdata, hit)
+    val fwdMask = RegEnable(mask, hit)
+    VecInit(rdata.indices.map(i => Mux(hitD && fwdMask(i), fwdData(i), rdata(i))))
+  }
+}
 class TwoPortSyncMem[T <: Data](
   n: Int, t: T,
   maskedUnitWidth: Int = 8,
@@ -25,9 +37,10 @@ class TwoPortSyncMem[T <: Data](
 
   val maskElem = UInt(maskedUnitWidth.W)
   val memT = Vec(maskWidth, maskElem)
-  val mem = SyncReadMem(n, memT, SyncReadMem.WriteFirst).suggestName(name)
+  val mem = SyncReadMem(n, memT).suggestName(name)
 
-  io.rdata := mem.read(io.raddr, io.ren).asTypeOf(t)
+  io.rdata := ReadDuringWriteForward(mem.read(io.raddr, io.ren), io.ren, io.raddr,
+    io.wen, io.waddr, io.wdata.asTypeOf(memT), io.mask).asTypeOf(t)
 
   when (io.wen) {
     mem.write(io.waddr, io.wdata.asTypeOf(memT), io.mask.asBools)
@@ -58,11 +71,13 @@ class TwoReadOneWriteSyncMem[T <: Data](n: Int, t: T, maskedUnitWidth: Int = 8) 
 
   val maskElem = UInt(maskedUnitWidth.W)
   val memT = Vec(maskWidth, maskElem)
-  val mem0 = SyncReadMem(n, memT, SyncReadMem.WriteFirst)
-  val mem1 = SyncReadMem(n, memT, SyncReadMem.WriteFirst)
+  val mem0 = SyncReadMem(n, memT)
+  val mem1 = SyncReadMem(n, memT)
 
-  io.rdata0 := mem0.read(io.raddr0, io.ren0).asTypeOf(t)
-  io.rdata1 := mem1.read(io.raddr1, io.ren1).asTypeOf(t)
+  io.rdata0 := ReadDuringWriteForward(mem0.read(io.raddr0, io.ren0), io.ren0, io.raddr0,
+    io.wen, io.waddr, io.wdata.asTypeOf(memT), io.mask).asTypeOf(t)
+  io.rdata1 := ReadDuringWriteForward(mem1.read(io.raddr1, io.ren1), io.ren1, io.raddr1,
+    io.wen, io.waddr, io.wdata.asTypeOf(memT), io.mask).asTypeOf(t)
 
   when (io.wen) {
     mem0.write(io.waddr, io.wdata.asTypeOf(memT), io.mask.asBools)

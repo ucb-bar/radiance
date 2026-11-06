@@ -198,12 +198,20 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     val (node, edge) = scalingFacNode.out.head
     val out = outer.gemmini.module.mx_io.get.scale_factor_out
 
-    require(node.params.dataBits == out.bits.data.getWidth, "scale Put: one bus beat per scale word")
-    val lgSize = log2Ceil(node.params.dataBits / 8).U
+    // One Put per scale-memory bank row (the size the client declares). The bus may be wider than a bank
+    // (a 512-bit system bus with 64 B lines): the data is replicated over the beat so the bytes the
+    // address selects carry it. Sizing the Put by the bus width put 64 B Puts on a client that declares
+    // 32 B (TLMonitor at the cluster crossing on RadianceHBMConfig).
+    val bankBytes = outer.gemminiParams.scalingFactorMem.get.bankWidthBytes
+    require(out.bits.data.getWidth == bankBytes * 8 && node.params.dataBits % (bankBytes * 8) == 0)
+    val bankReps = node.params.dataBits / (bankBytes * 8)
+    val lgSize = log2Ceil(bankBytes).U
+    val data = Fill(bankReps, out.bits.data)
     // a full scale word is a PutFull; a [GN][M] column-end word is a PutPartial of its valid bytes
-    node.a.bits := Mux(out.bits.mask.andR,
-      edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = out.bits.data)._2,   // source overridden
-      edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = out.bits.data, mask = out.bits.mask)._2)
+    val putFull = edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = data)._2 // source overridden
+    val putPartial = edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = data,
+      mask = putFull.mask & Fill(bankReps, out.bits.mask))._2
+    node.a.bits := Mux(out.bits.mask.andR, putFull, putPartial)
 
     val (sourceReady, _) = SourceGenerator(node)
     out.ready := node.a.ready && sourceReady

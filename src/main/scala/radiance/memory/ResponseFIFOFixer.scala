@@ -87,11 +87,13 @@ class ResponseFIFOFixer(throwAwayPrefix: Int = 0, maxInFlight: Option[Int] = Non
       require(n >= 1, s"ResponseFIFOFixer: maxInFlight must be at least 1, got $n")
       // One slot per transaction and one D beat per slot: both directions must be single-beat.  The
       // largest request the client emits bounds the largest response.
+      // A client may only send what the manager supports, so the larger of the two bounds does not
+      // matter (a pass-through TLFragmenter, minSize == maxSize, leaves the client's emits at 4 KiB).
       val maxEmitted = edgeIn.client.masters.map { m =>
         val e = m.emits
         Seq(e.acquireT, e.acquireB, e.arithmetic, e.logical, e.get, e.putFull, e.putPartial, e.hint)
           .map(_.max).max
-      }.max
+      }.max min edgeIn.manager.maxTransfer
       require(maxEmitted <= edgeIn.manager.beatBytes,
         s"ResponseFIFOFixer: maxInFlight needs single-beat transfers, but the client emits up to " +
         s"$maxEmitted B on a ${edgeIn.manager.beatBytes} B channel")
