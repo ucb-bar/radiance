@@ -431,17 +431,7 @@ class WithRadianceMxGemmini(location: HierarchicalLocation, crossing: RocketCros
         // sramLineSizeInBytes = 256 / 8,
         // numBanks = 8,
       )),
-      requantizer = site(SIMTCoreKey).map(simt => GemminiRequantizerConfig(
-        baseAddr = clusterParams.baseAddr + smKey.size * 2, // must be aligned
-        numGPUInputLanes = simt.numLanes,
-        // numOutputLanes = 32,
-        // gpuMaxFactor = 2,
-        // gpuWordSize = 4,
-        // inputBits = 16,
-        // minOutputBits = 4,
-        // maxOutputBits = 8,
-        // outputIdBits = 3,
-      )),
+      requantizer = site(SIMTCoreKey).map(_ => GemminiRequantizerConfig()),
       lookupTable = lookupTable,
     )
     Seq(GemminiTileAttachParams(
@@ -476,7 +466,7 @@ object WithRadianceMxGemmini {
 // besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 32.
 // has_spad_requant: SPAD_REQUANT (funct 34) -- the requantizer reads a BF16 tile straight from the scratchpad (= cluster
 // SMEM) and writes the MX-FP8 codes back (flat or PV-operand tiled) plus its E8M0 scales (DRAM, and resident in act-scale
-// buffer 0), ordered by the reservation station, instead of a Muon warp pushing the tile through the requantizer window.
+// buffer 0), ordered by the reservation station. On by default for every MX Gemmini with a requantizer.
 // has_loop_retire_counter: MMIO 0x38 counts fully retired LOOP_WS, so a kernel can wait for one loop instead of a fence.
 class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSizeInKB: Int,
                                 tileSize: (Int, Int, Int))

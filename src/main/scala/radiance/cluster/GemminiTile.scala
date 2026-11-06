@@ -170,46 +170,9 @@ class GemminiTile private (
         name = "gemmini-scaling-fac-client",
         sourceId = IdRange(0, 1 << 4), // TODO: magic number
         emits = TLMasterToSlaveTransferSizes(
-          putFull = TransferSizes(sfm.bankWidthBytes, sfm.bankWidthBytes)
-        )
-      ))
-    )))
-  }
-
-  val requantizerMuonManager = gemminiParams.requantizer.map { q =>
-    val gemminiSpadSizeBytes = gemminiParams.gemminiConfig.sp_capacity
-      .asInstanceOf[CapacityInKilobytes].kilobytes * 1024
-    require(isPow2(gemminiSpadSizeBytes))
-    val reqSize = q.numGPUInputLanes * q.inputBits / 8
-
-    println("quant manager address set")
-    println(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1))
-    TLManagerNode(Seq(TLSlavePortParameters.v1(
-      managers = Seq(TLSlaveParameters.v2(
-        address = Seq(AddressSet(q.baseAddr, gemminiSpadSizeBytes * q.gpuMaxFactor - 1)),
-        fifoId = Some(0),
-        // also real no get support
-        supports = TLMasterToSlaveTransferSizes(
-          get = TransferSizes(reqSize, reqSize),
-          putFull = TransferSizes(reqSize, reqSize),
-          putPartial = TransferSizes(reqSize, reqSize),
-        )
-      )),
-      beatBytes = reqSize,
-    )))
-  }
-
-  // width is max output width & num output lanes
-  val requantizerSmemClient = gemminiParams.requantizer.map { q =>
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v2(
-        name = "requantizer_out",
-        sourceId = IdRange(0, 1 << q.outputIdBits),
-        emits = TLMasterToSlaveTransferSizes(
-          putFull = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
-            q.numOutputLanes * q.maxOutputBits / 8),
-          putPartial = TransferSizes(q.numOutputLanes * q.minOutputBits / 8,
-            q.numOutputLanes * q.maxOutputBits / 8)
+          putFull = TransferSizes(sfm.bankWidthBytes, sfm.bankWidthBytes),
+          // the requantizer's [GN][M] scale stream writes a block column's unaligned end word byte-masked
+          putPartial = TransferSizes(sfm.bankWidthBytes, sfm.bankWidthBytes)
         )
       ))
     )))
@@ -235,81 +198,17 @@ class GemminiTileModuleImp(outer: GemminiTile) extends BaseTileModuleImp(outer) 
     val (node, edge) = scalingFacNode.out.head
     val out = outer.gemmini.module.mx_io.get.scale_factor_out
 
-    node.a.bits := edge.Put(
-      fromSource = 0.U, // overridden
-      toAddress = out.bits.addr,
-      lgSize = log2Ceil(node.params.dataBits / 8).U,
-      data = out.bits.data,
-    )._2
+    require(node.params.dataBits == out.bits.data.getWidth, "scale Put: one bus beat per scale word")
+    val lgSize = log2Ceil(node.params.dataBits / 8).U
+    // a full scale word is a PutFull; a [GN][M] column-end word is a PutPartial of its valid bytes
+    node.a.bits := Mux(out.bits.mask.andR,
+      edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = out.bits.data)._2,   // source overridden
+      edge.Put(fromSource = 0.U, toAddress = out.bits.addr, lgSize = lgSize, data = out.bits.data, mask = out.bits.mask)._2)
 
     val (sourceReady, _) = SourceGenerator(node)
     out.ready := node.a.ready && sourceReady
     node.a.valid := out.valid && sourceReady
     node.d.ready := true.B
-  }
-
-  // requantizer
-  outer.gemminiParams.requantizer.foreach { q =>
-    val in = Wire(Decoupled(new RequantizerInBundle(q.numGPUInputLanes, q.inputBits)))
-    val out = Wire(Decoupled(new RequantizerOutBundle(q.numOutputLanes, q.maxOutputBits)))
-
-    { // input
-      val (node, edge) = outer.requantizerMuonManager.get.in.head
-
-      node.d.valid := node.a.valid && in.ready // ensures a.fire <=> d.fire
-      node.d.bits := edge.AccessAck(node.a.bits)
-      node.a.ready := node.d.ready && in.ready
-
-      assert(node.a.fire === node.d.fire)
-
-      // The requantizer must consume a beat only in the cycle its A fires.  With `in.valid :=
-      // node.a.valid` alone, a cycle with in.ready && !node.d.ready (the upstream collector still
-      // acknowledging its lanes) let the requantizer take the beat while the A stayed pending, so the
-      // same beat entered twice: the requantizer's half-beat toggle slipped and the next block went
-      // out with the previous beat's address (misaligned 32 B Put into SMEM, TLMonitor assert).
-      in.valid := node.a.valid && node.d.ready
-      in.bits.dataType := RequantizerDataType.FP8
-      in.bits.address := ((node.a.bits.address - q.baseAddr.U) >> 1).asTypeOf(in.bits.address) // hardcoded 16->8
-      in.bits.data := node.a.bits.data.asTypeOf(in.bits.data)
-
-      require(in.bits.data.asUInt.getWidth == node.a.bits.data.getWidth)
-      assert(!node.a.valid || ((node.a.bits.address & q.baseAddr.U) === q.baseAddr.U))
-    }
-
-    { // output
-      val (node, edge) = outer.requantizerSmemClient.get.out.head
-
-      // data
-      val isFP4 = out.bits.dataType === RequantizerDataType.FP4
-      val fullWidth = q.numOutputLanes
-      val halfWidth = q.numOutputLanes / 2
-      node.a.bits := edge.Put(
-        fromSource = 0.U, // gets overridden
-        toAddress = out.bits.address,
-        lgSize = Mux(isFP4,
-          log2Ceil(halfWidth).U, // half byte per lane
-          log2Ceil(q.numOutputLanes).U // fp6, fp8: 1 byte per lane
-        ),
-        data = Mux(isFP4,
-          Mux(
-            out.bits.address(log2Ceil(halfWidth)), // not aligned to full line
-            (out.bits.data(halfWidth - 1, 0) << halfWidth).asTypeOf(UInt(fullWidth.W)),
-            out.bits.data
-          ),
-          out.bits.data
-        )
-      )._2
-
-      // source
-      val (sourceReady, _) = SourceGenerator(node)
-      out.ready := node.a.ready && sourceReady
-      node.a.valid := out.valid && sourceReady
-      assert(out.fire === node.a.fire)
-      node.d.ready := true.B
-    }
-
-    outer.gemmini.module.mx_io.get.requant_in_gpu <> in
-    outer.gemmini.module.mx_io.get.requant_out <> out
   }
 
   // cisc

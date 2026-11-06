@@ -188,30 +188,6 @@ class RadianceSharedMemComponents(
     r
   }
 
-  val quantOutputWidth = gemminiTiles.flatMap(_.gemminiParams.requantizer
-    .map(q => q.numOutputLanes * q.maxOutputBits / 8))
-  val quantOutputNodesSingleBank = distAndDuplicate(
-    gemminiTiles.flatMap(_.requantizerSmemClient).map(x =>
-      (connectOne(x, () => AddressOrNode(clusterParams.baseAddr)), quantOutputWidth.head)
-    ), "quant_w")
-  val quantOutputNodes = Seq.fill(smemBanks)(quantOutputNodesSingleBank)
-
-  // connect requantizer managers directly here TODO: move outside, make smemNodes xbars
-  gemminiTiles.flatMap(_.requantizerMuonManager).foreach { qm =>
-    val destBytes = qm.portParams.head.beatBytes
-    require(2 * numLanes == destBytes, "requantizer input width mismatch: not lanes * 2B")
-    // pack lanes into a single wide request per core
-    val collectors = muonSmemFanout.map { lanesInCore =>
-      val quantCollector = CollectorNode(2, destBytes)
-      lanesInCore.foreach(quantCollector := TLWidthWidget(4) := _)
-      quantCollector
-    }
-    // multiple cores, but only one requantizer
-    val collectedXbar = LazyModule(new TLXbar()).suggestName("collected_xbar").node
-    collectors.foreach(collectedXbar := _)
-    qm := collectedXbar
-  }
-
   val smemBusSplitterNodes = unalignedClients.map(connectOne(_, () => RWSplitterNode(f"smem_splitter")))
 
   // these nodes access an entire line simultaneously
@@ -220,9 +196,9 @@ class RadianceSharedMemComponents(
     (grb zip muonAlignedReads).map { case (grw, mrw) => grw ++ Seq(mrw) }
   })
   override val uniformWNodes: Seq[Seq[Seq[TLNode]]] =
-    (spadWriteNodes lazyZip spadSpWriteNodes lazyZip quantOutputNodes).map { case (gwb, gwsb, qb) =>
-      (gwb lazyZip gwsb lazyZip muonAlignedWrites lazyZip qb).map { case (gww, gwsw, mww, qw) =>
-        gww ++ gwsw ++ qw ++ Seq(mww)
+    (spadWriteNodes lazyZip spadSpWriteNodes).map { case (gwb, gwsb) =>
+      (gwb lazyZip gwsb lazyZip muonAlignedWrites).map { case (gww, gwsw, mww) =>
+        gww ++ gwsw ++ Seq(mww)
       }
     }
 

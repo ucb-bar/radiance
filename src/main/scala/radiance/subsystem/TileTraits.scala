@@ -18,8 +18,6 @@ trait GemminiTileLike {
   // TODO: remove `gemmini` from the trait, replace with the
   // TODO: TL nodes that it exposes
   val gemmini: Gemmini[gemminiParams.T, gemminiParams.U, gemminiParams.V]
-  val requantizerMuonManager: Option[TLManagerNode]
-  val requantizerSmemClient: Option[TLClientNode]
   val scalingFacClient: Option[TLClientNode]
   val slaveNode: TLNode
 }
