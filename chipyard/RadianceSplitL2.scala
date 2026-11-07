@@ -81,7 +81,7 @@ class WithRadianceSplitL2(hostKB: Int, gpuSlices: Int, gpuKBPerSlice: Int, ways:
       require(gpu.address + gpu.size == ext.master.base + ext.master.size,
         "WithRadianceSplitL2 expects GPU memory at the top of ExtMem (WithExtGPUMem)")
       val stripe = gpu.size / gpuSlices
-      val ctrl = BigInt(InclusiveCacheParameters.L2ControlAddress)
+      val ctrl = InclusiveCacheParameters.L2ControlAddress
       Some(SplitL2Params(Seq(
         L2CacheSpec("host", Seq(AddressSet(ext.master.base, gpu.address - ext.master.base - 1)),
           kBPerSlice = hostKB, ways = ways, ctrlAddr = Some(ctrl)),
