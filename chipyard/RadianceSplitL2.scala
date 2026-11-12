@@ -35,9 +35,12 @@ object RadianceInclusiveCacheFactory {
       InclusiveCacheMicroParameters(
         writeBytes = key.writeBytes,
         portFactor = key.portFactor,
-        memCycles = key.memCycles,
+        // InclusiveCache provisions memCycles / blockBeats outer MSHRs per slice
+        memCycles = spec.outerMSHRs.map(_ * (sbus.blockBytes / sbus.beatBytes)).getOrElse(key.memCycles),
         innerBuf = key.bufInnerInterior,
-        outerBuf = key.bufOuterInterior),
+        outerBuf = key.bufOuterInterior,
+        silentCleanEvict = spec.silentCleanEvict,
+        dirDualPort = spec.dirDualPort),
       spec.ctrlAddr.map(a => InclusiveCacheControlParameters(
         address = a, beatBytes = cbus.beatBytes, bankedControl = false))))
     l2.suggestName(s"l2_${spec.name}")
@@ -50,7 +53,7 @@ object RadianceInclusiveCacheFactory {
     val filter = LazyModule(new TLFilter(cfilter = skipMMIO))
     val innerBuffer = key.bufInnerExterior()
     val outerBuffer = key.bufOuterExterior()
-    val cork = LazyModule(new TLCacheCork)
+    val cork = LazyModule(new TLCacheCork(spec.cork))
 
     innerBuffer.node :*= filter.node
     l2.node :*= innerBuffer.node

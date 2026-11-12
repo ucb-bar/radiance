@@ -465,7 +465,7 @@ object WithRadianceMxGemmini {
 // Radiance MxGemmini with an E4M3 single-throughput-only mesh (mode8) and no QuantLut: the Gemmini of
 // chipyard.MxE4M3SingleGemminiRocketConfig (GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig), with the
 // radiance fields of WithRadianceMxGemmini applied on top. What carries over from the rocket build
-// besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 32.
+// besides the mesh: acc_banks = 2 and max_in_flight_mem_reqs = 64.
 // has_spad_requant: SPAD_REQUANT (funct 34) -- the requantizer reads a BF16 tile straight from the scratchpad (= cluster
 // SMEM) and writes the MX-FP8 codes back (flat or PV-operand tiled) plus its E8M0 scales (DRAM, and resident in act-scale
 // buffer 0), ordered by the reservation station. On by default for every MX Gemmini with a requantizer.
@@ -475,6 +475,17 @@ class WithRadianceE4M3MxGemmini(location: HierarchicalLocation, dim: Int, accSiz
   extends WithRadianceMxGemmini(location, dim, accSizeInKB, tileSize,
     GemminiMxFPConfigs.e4m3SingleNoLutMxFPConfig.copy(has_spad_requant = true, has_loop_retire_counter = true),
     None)
+
+// Dual-lane Gemmini load DMA for every cluster Gemmini (GemminiArrayConfig.dma_dual_lane): two responses turn into
+// scratchpad rows at once, and each scratchpad bank writes the cluster SMEM a row pair per Put. A 64 B line is 4 rows at
+// dim 16, one per cycle per lane.
+class WithRadianceGemminiDualLaneDMA extends Config((site, here, up) => {
+  case TilesLocated(loc @ InCluster(_)) => up(TilesLocated(loc)).map {
+    case a @ radiance.cluster.GemminiTileAttachParams(t: radiance.cluster.MxGemminiTileParams, _) =>
+      a.copy(tileParams = t.copy(mxGemminiConfig = t.mxGemminiConfig.copy(dma_dual_lane = true)))
+    case other => other
+  }
+})
 
 // Radiance MxGemmini with an MXFP4-only mesh: Gemmini's single-format preset GemminiMxFPConfigs.fp4OnlyMxFPConfig
 // (operand lanes MxFloat(2, 2, 2) with MxConfig.fp4Only: the PE elaborates only the FP4 decode and mode0), with the

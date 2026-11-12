@@ -157,7 +157,8 @@ class RadianceSharedMemComponents(
   }
   // TODO: these nodes probably dont do anything, eliminate?
   val spadWriteNodes = Seq.tabulate(smemBanks) { b =>
-    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8)),
+    // a dual-lane Gemmini (dma_dual_lane) writes two rows per Put
+    distAndDuplicate(gemminis.map(g => (g.spad_write_nodes, g.config.sp_width_projected / 8 * (if (g.config.dma_dual_lane) 2 else 1))),
       s"gemmini_w_b${b}_")
   }
   val spadSpWriteNodesSingleBank = distAndDuplicate(

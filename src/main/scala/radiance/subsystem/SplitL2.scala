@@ -20,6 +20,15 @@ case class L2CacheSpec(
   ways: Int = 8,
   ctrlAddr: Option[BigInt] = None,
   channelsPerSlice: Int = 1,
+  // outer (memory-side) MSHRs per slice; None takes InclusiveCacheKey's memCycles (one per cycle of memory latency)
+  outerMSHRs: Option[Int] = None,
+  // the TLCacheCork behind this cache (turns its victim Releases into ReleaseAcks)
+  cork: freechips.rocketchip.tilelink.TLCacheCorkParams = freechips.rocketchip.tilelink.TLCacheCorkParams(),
+  // drop clean victims with no inner copies without a Release (InclusiveCacheMicroParameters.silentCleanEvict);
+  // safe because the cork below keeps no directory
+  silentCleanEvict: Boolean = false,
+  // directory with separate read and write ports, one write per cycle (InclusiveCacheMicroParameters.dirDualPort)
+  dirDualPort: Boolean = false,
 ) {
   require(regions.nonEmpty, s"L2 cache $name has no regions")
   require(channelsPerSlice >= 1 && (channelsPerSlice & (channelsPerSlice - 1)) == 0,

@@ -19,6 +19,12 @@ class WithDRAMChannelBeatBytes(beatBytes: Int) extends Config((site, here, up) =
   case RadianceMemRegionsKey => up(RadianceMemRegionsKey).map(_.copy(beatBytes = beatBytes))
 })
 
+/** AXI ID bits of every DRAM channel port (AXI4IdIndexer width). WithRadianceRegionMem takes them from the ExtMem
+  * below it, so an ExtMem override above it does not reach these ports; set them here. */
+class WithDRAMChannelIdBits(idBits: Int) extends Config((site, here, up) => {
+  case RadianceMemRegionsKey => up(RadianceMemRegionsKey).map(_.copy(idBits = idBits))
+})
+
 /** L0d geometry for every Muon tile in a cluster. The L0d MSHR file allows one outstanding miss per set
   * (rocket's rule), so streams that collide modulo the L0d size are nacked; more sets dilute that. */
 class WithL0dGeometry(nSets: Int, nWays: Int) extends Config((site, here, up) => {
