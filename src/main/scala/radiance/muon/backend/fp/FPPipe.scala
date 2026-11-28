@@ -199,6 +199,15 @@ class FP32Pipe(isDivSqrt: Boolean)(implicit p: Parameters)
   require(tagPadBits > 0, "FP32Pipe needs a spare tag bit for the fp16-conversion flag")
   sendCvtFlag := (cvFPUReq.op === FPUOp.UI2F || cvFPUReq.op === FPUOp.SI2F || cvFPUReq.op === FPUOp.F2F) &&
                  cvFPUReq.dstFmt === FPFormat.BF16
+  // BF16-source conversions: CVFPU reads the source of a conversion from a 16-bit format as packed
+  // elements (lane L at operand bits [16L+15:16L], fpnew_opgroup_multifmt_slice), but each lane holds
+  // its value in its own 32-bit slot: an 8-lane fcvt.s.h / fcvt.w.h gave [in0, 0, in1, 0] per packet.
+  // Pack the low halves.
+  val bf16SrcCvt = (cvFPUReq.op === FPUOp.F2F || cvFPUReq.op === FPUOp.F2SI || cvFPUReq.op === FPUOp.F2UI) &&
+                   cvFPUReq.srcFmt === FPFormat.BF16
+  when (bf16SrcCvt) {
+    cvFPUIF.req.bits.operands(0) := Cat(operands(0).map(_(15, 0)).reverse)
+  }
   // M1: this used cvFPUReq (the op accepted LAST), so an fmul.s still in CVFPU when an fcvt.h.s was
   // accepted came back boxed as a half (garbage / NaN in the high bf16 of FA's O stores)
   val respIsFP16Cvt = respCvtFlag
